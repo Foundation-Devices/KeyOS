@@ -5,7 +5,10 @@ use {
     crate::settings_permissions::SettingsPermissions,
     foundation_ur::{bytewords, Decoder as UrDecoder},
     log::debug,
-    quircs::Quirc,
+    rxing::{
+        common::HybridBinarizer, BarcodeFormat, BinaryBitmap, DecodeHints, Luma8LuminanceSource,
+        MultiFormatReader,
+    },
     slint_keyos_platform::{
         app,
         gui_server_api::{
@@ -16,6 +19,7 @@ use {
         slint::{ComponentHandle, Timer, TimerMode},
         spawn_local, subscribe_scalar, StoredValue,
     },
+    std::collections::HashSet,
     std::{rc::Rc, thread, time::Duration},
 };
 
@@ -41,100 +45,92 @@ enum ScanQrProgress {
 
 struct AppState {
     status: ScanStatus,
-    scanner: Quirc,
-    frame_luma8: [u8; CAMERA_WIDTH * CAMERA_HEIGHT],
+    scanner: MultiFormatReader,
+    luma_source: Luma8LuminanceSource,
     ur_decoder: UrDecoder,
 }
 
 impl AppState {
     fn scan_qr(&mut self) -> ScanQrProgress {
-        for code in self.scanner.identify(CAMERA_WIDTH, CAMERA_HEIGHT, &mut self.frame_luma8) {
-            let has_code = match code {
-                Ok(c) => c,
-                Err(e) => {
-                    log::warn!("Extract error: {:?}", e);
-                    return ScanQrProgress::Unchanged;
+        let Ok(has_code) = self
+            .scanner
+            .decode_with_state(&mut BinaryBitmap::new(HybridBinarizer::new(self.luma_source.clone())))
+            .inspect_err(|e| {
+                if !matches!(e, rxing::Exceptions::NotFoundException(_)) {
+                    log::warn!("Extract error: {:?}", e)
+                }
+            })
+        else {
+            return ScanQrProgress::Unchanged;
+        };
+
+        let data = has_code.getRawBytes().iter().as_slice();
+
+        if let Ok(data_str) = std::str::from_utf8(data) {
+            match (self.ur_decoder.is_empty(), foundation_ur::UR::parse(data_str.to_lowercase().as_str())) {
+                (true, Ok(part)) => {
+                    let bw = match part.as_bytewords() {
+                        Some(v) => v,
+                        None => return ScanQrProgress::Unchanged,
+                    };
+
+                    if let Err(e) = bytewords::validate(bw, bytewords::Style::Minimal) {
+                        log::warn!("Bytewords error: {:?}", e);
+                        return ScanQrProgress::Unchanged;
+                    };
+
+                    if let Err(e) = self.ur_decoder.receive(part) {
+                        log::warn!("Could not receive UR part: {}", e);
+                        return ScanQrProgress::Unchanged;
+                    }
+                }
+                (false, Ok(part)) => {
+                    if let Err(e) = self.ur_decoder.receive(part) {
+                        log::warn!("Could not receive UR part: {}", e);
+                        return ScanQrProgress::Unchanged;
+                    }
+                }
+                (true, Err(_)) => (),
+                (false, Err(_)) => return ScanQrProgress::Unchanged,
+            }
+        }
+
+        if self.ur_decoder.is_complete() {
+            let ur_type = match self.ur_decoder.ur_type() {
+                Some(t) => t,
+                None => {
+                    log::warn!("UR has no type");
+                    self.ur_decoder.clear();
+                    return ScanQrProgress::Progress(0.0);
                 }
             };
 
-            let data = match has_code.decode() {
-                Ok(d) => d,
+            let message_opt = match self.ur_decoder.message() {
+                Ok(m) => m,
                 Err(e) => {
-                    log::warn!("Decode error: {:?}", e);
-                    return ScanQrProgress::Unchanged;
+                    log::warn!("UR Decoder state error: {}", e);
+                    self.ur_decoder.clear();
+                    return ScanQrProgress::Progress(0.0);
+                }
+            };
+            let message = match message_opt {
+                Some(m) => m,
+                None => {
+                    log::warn!("No message in UR code");
+                    self.ur_decoder.clear();
+                    return ScanQrProgress::Progress(0.0);
                 }
             };
 
-            let data = data.payload.as_slice();
+            let res = ScanQrResult::new_ur2(String::from(ur_type), message);
+            self.ur_decoder.clear();
+            return ScanQrProgress::Complete(res);
+        }
 
-            if let Ok(data_str) = std::str::from_utf8(data) {
-                match (self.ur_decoder.is_empty(), foundation_ur::UR::parse(data_str.to_lowercase().as_str()))
-                {
-                    (true, Ok(part)) => {
-                        let bw = match part.as_bytewords() {
-                            Some(v) => v,
-                            None => return ScanQrProgress::Unchanged,
-                        };
-
-                        if let Err(e) = bytewords::validate(bw, bytewords::Style::Minimal) {
-                            log::warn!("Bytewords error: {:?}", e);
-                            return ScanQrProgress::Unchanged;
-                        };
-
-                        if let Err(e) = self.ur_decoder.receive(part) {
-                            log::warn!("Could not receive UR part: {}", e);
-                            return ScanQrProgress::Unchanged;
-                        }
-                    }
-                    (false, Ok(part)) => {
-                        if let Err(e) = self.ur_decoder.receive(part) {
-                            log::warn!("Could not receive UR part: {}", e);
-                            return ScanQrProgress::Unchanged;
-                        }
-                    }
-                    (true, Err(_)) => (),
-                    (false, Err(_)) => return ScanQrProgress::Unchanged,
-                }
-            }
-
-            if self.ur_decoder.is_complete() {
-                let ur_type = match self.ur_decoder.ur_type() {
-                    Some(t) => t,
-                    None => {
-                        log::warn!("UR has no type");
-                        self.ur_decoder.clear();
-                        return ScanQrProgress::Progress(0.0);
-                    }
-                };
-
-                let message_opt = match self.ur_decoder.message() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::warn!("UR Decoder state error: {}", e);
-                        self.ur_decoder.clear();
-                        return ScanQrProgress::Progress(0.0);
-                    }
-                };
-
-                let message = match message_opt {
-                    Some(m) => m,
-                    None => {
-                        log::warn!("No message in UR code");
-                        self.ur_decoder.clear();
-                        return ScanQrProgress::Progress(0.0);
-                    }
-                };
-
-                let res = ScanQrResult::new_ur2(String::from(ur_type), message);
-                self.ur_decoder.clear();
-                return ScanQrProgress::Complete(res);
-            }
-
-            // Only reachable if the ur_decoder is empty
-            // and the data wasn't a valid UR frame
-            if self.ur_decoder.is_empty() {
-                return ScanQrProgress::Complete(ScanQrResult::new_qr(data));
-            }
+        // Only reachable if the ur_decoder is empty
+        // and the data wasn't a valid UR frame
+        if self.ur_decoder.is_empty() {
+            return ScanQrProgress::Complete(ScanQrResult::new_qr(data));
         }
 
         // All frames have been processed, UR decoder is not complete or empty,
@@ -162,11 +158,17 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     let haptics = Rc::new(HapticsApi::default());
 
     let state = {
-        let mut scanner = Quirc::new();
-        scanner.resize(CAMERA_WIDTH, CAMERA_HEIGHT);
-        let frame_luma8 = [0u8; CAMERA_WIDTH * CAMERA_HEIGHT];
+        let hints = DecodeHints {
+            PossibleFormats: Some(HashSet::from([BarcodeFormat::QR_CODE])),
+            TryHarder: Some(true),
+            ..Default::default()
+        };
+        let mut scanner = MultiFormatReader::default();
+        scanner.set_hints(&hints);
+        let luma_source =
+            Luma8LuminanceSource::with_empty_image(CAMERA_WIDTH as usize, CAMERA_HEIGHT as usize);
         let state =
-            AppState { status: ScanStatus::Idle, scanner, frame_luma8, ur_decoder: UrDecoder::default() };
+            AppState { status: ScanStatus::Idle, scanner, luma_source, ur_decoder: UrDecoder::default() };
         StoredValue::new(state)
     };
 
@@ -233,7 +235,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 debug!("Fetching frame for QR detection");
 
                 {
-                    let luma8 = &mut state.frame_luma8;
+                    let luma8 = &mut state.luma_source.get_matrix_mut();
                     #[cfg(keyos)]
                     {
                         let Ok(frame) = camera_api.get_frame_mirror() else {
