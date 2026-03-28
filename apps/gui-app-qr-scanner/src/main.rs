@@ -19,8 +19,7 @@ use {
         slint::{ComponentHandle, Timer, TimerMode},
         spawn_local, subscribe_scalar, StoredValue,
     },
-    std::collections::HashSet,
-    std::{rc::Rc, thread, time::Duration},
+    std::{rc::Rc, thread, time::Duration, collections::HashSet},
 };
 
 camera::use_api!();
