@@ -161,6 +161,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let hints = DecodeHints {
             PossibleFormats: Some(HashSet::from([BarcodeFormat::QR_CODE])),
             TryHarder: Some(true),
+            AlsoInverted: Some(true),
             ..Default::default()
         };
         let mut scanner = MultiFormatReader::default();
