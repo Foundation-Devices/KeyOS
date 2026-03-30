@@ -14,8 +14,8 @@ haptics = { workspace = true }
 i18n = { path = "../../i18n" }
 log = { workspace = true }
 log-server = { workspace = true }
-quircs = "0.10.2"
 rgb565 = "0.1.3"
+rxing = { version = "0.8.5", default-features = false, features = ["encoding_rs"] }
 server = { workspace = true }
 settings = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
