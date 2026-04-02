@@ -192,7 +192,6 @@ pub fn get_timestamp_in_seconds() -> u64 {
 }
 
 pub fn make_import_label(label: &str, existing_labels: &mut HashMap<String, usize>) -> String {
-    log::info!("make_import_label: {label} {:?}", existing_labels);
     let count = *existing_labels.entry(label.to_string()).or_insert(0);
 
     if count > 0 {
