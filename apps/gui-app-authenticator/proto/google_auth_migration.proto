@@ -1,0 +1,30 @@
+syntax = "proto3";
+package google_auth_migration;
+
+message MigrationPayload {
+  enum Algorithm {
+    ALGORITHM_UNSPECIFIED = 0;
+    ALGORITHM_SHA1 = 1;
+    ALGORITHM_SHA256 = 2;
+    ALGORITHM_SHA512 = 3;
+  }
+  enum OtpType {
+    OTP_TYPE_UNSPECIFIED = 0;
+    OTP_TYPE_HOTP = 1;
+    OTP_TYPE_TOTP = 2;
+  }
+  repeated OtpParameters otp_parameters = 1;
+  int32 version = 2;
+  int32 batch_size = 3;
+  int32 batch_index = 4;
+  int32 batch_id = 5;
+}
+message OtpParameters {
+  bytes secret = 1;
+  string name = 2;
+  string issuer = 3;
+  MigrationPayload.Algorithm algorithm = 4;
+  int64 digits = 5;
+  MigrationPayload.OtpType type = 6;
+  int64 counter = 7;
+}
