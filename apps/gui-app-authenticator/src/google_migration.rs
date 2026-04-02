@@ -68,15 +68,19 @@ pub fn parse_migration_uri(uri: &str) -> Result<Vec<Auth>, MigrationError> {
             _ => "SHA1",
         };
 
-        let secret = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &otp.secret);
+        let secret = base32::encode(base32::Alphabet::RFC4648 { padding: false }, &otp.secret);
 
-        let (issuer, account) = (otp.issuer.to_string(), otp.name.to_string());
-
-        let label = if !issuer.is_empty() { issuer.clone() } else { "No Label".to_string() };
+        let label = if !otp.issuer.is_empty() { otp.issuer.clone() } else { "No Label".to_string() };
 
         let url = format!(
+            // 6 digits fow now are hardcoded since otp.digits contains nonsense data
+            // Example: it returns 1 for code with 6 digits
             "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm={}&digits=6&period=30",
-            label, account, secret, label, algo_str,
+            urlencoding::encode(&label),
+            urlencoding::encode(&otp.name),
+            urlencoding::encode(&secret),
+            urlencoding::encode(&label),
+            urlencoding::encode(algo_str),
         );
 
         let auth = Auth::new(url, get_timestamp_in_seconds())?;

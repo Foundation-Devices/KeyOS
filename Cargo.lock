@@ -721,12 +721,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23ce669cd6c8588f79e15cf450314f9638f967fc5770ff1c7c1deb0925ea7cfa"
 
 [[package]]
-name = "base32"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
-
-[[package]]
 name = "base58ck"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4449,7 +4443,7 @@ dependencies = [
 name = "gui-app-authenticator"
 version = "0.1.0"
 dependencies = [
- "base32 0.5.1",
+ "base32",
  "base64 0.22.1",
  "fs",
  "fuzzy-filter",
@@ -11823,7 +11817,7 @@ version = "5.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17b2f27dad992486c26b4e7455f38aa487e838d6d61b57e72906ee2b8c287a90"
 dependencies = [
- "base32 0.4.0",
+ "base32",
  "constant_time_eq 0.2.6",
  "hmac",
  "serde",

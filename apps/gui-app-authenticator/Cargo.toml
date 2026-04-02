@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-base32 = "0.5"
+base32 = "0.4"
 base64 = "0.22.1"
 fs = { workspace = true }
 fuzzy-filter = "0.1.0"

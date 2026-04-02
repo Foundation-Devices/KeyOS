@@ -470,13 +470,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 match google_migration::parse_migration_uri(&url) {
                     Ok(entries) => {
                         let count = entries.len();
-                        if count == 0 {
-                            CallbackResult::from(AuthError::MigrationParseError(
-                                "No accounts found".to_string(),
-                            ))
-                            .navigate_from_scan_qr(from_edit, ui_nav);
-                            return;
-                        }
 
                         log::info!("Parsed {} accounts from Google Authenticator migration", count);
                         app_state.pending_imports = Some(entries);
@@ -543,9 +536,12 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.global::<AuthenticatorCallbacks>().on_cancel_import_multiple({
+        let ui = ui.clone_strong();
         move || {
             let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
             app_state.pending_imports = None;
+            ui_state.set_pending_import_count(0);
         }
     });
 
