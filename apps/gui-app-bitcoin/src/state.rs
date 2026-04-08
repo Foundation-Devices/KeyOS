@@ -331,6 +331,36 @@ impl AppState {
         Ok(())
     }
 
+    /// On reconnect, re-send the current passphrase fingerprint to Envoy (overwriting the
+    /// archived one) and then re-publish all active accounts. This prevents stale archived
+    /// fingerprints from hiding accounts that belong to a different passphrase mode.
+    pub fn resync_with_envoy(state: StoredValue<Self>) {
+        let (fingerprint, bt_state) = {
+            let state = state.borrow();
+            (state.store.fingerprint, state.ql_status.clone())
+        };
+
+        let all_ids = state.borrow().store.all_account_ids().cloned().collect::<Vec<_>>();
+
+        spawn_local(async move {
+            let fingerprint_str = fingerprint.to_string();
+            let message = SendApplyPassphrase {
+                fingerprint: if fingerprint == Fingerprint::default() { None } else { Some(fingerprint_str) },
+            };
+
+            bt_state
+                .send_ql_archive_retry(message, |e| {
+                    log::error!("failed to send apply passphrase on reconnect {e:?}, retrying...");
+                })
+                .await;
+
+            for id in all_ids {
+                Self::publish_account_config(state, id);
+            }
+        })
+        .detach();
+    }
+
     pub fn publish_accounts(state: StoredValue<AppState>) {
         let account_ids =
             state.borrow().store.active_accounts().map(|(id, _)| id.clone()).collect::<Vec<_>>();

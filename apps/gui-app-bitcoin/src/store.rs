@@ -405,6 +405,8 @@ impl AccountStore {
         next_index
     }
 
+    pub fn all_account_ids(&self) -> impl Iterator<Item = &AccountId> { self.accounts.keys() }
+
     pub fn active_accounts(&self) -> impl Iterator<Item = (&AccountId, ConfigBorrow<'_>)> {
         self.accounts
             .iter()

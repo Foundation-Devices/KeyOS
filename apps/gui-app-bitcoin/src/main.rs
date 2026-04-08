@@ -81,9 +81,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             quantum_link::messages::SubscribePairingEvent,
         );
         while let Some(pairing_event) = pairing_events.next().await {
-            if let PairingEvent::PairingComplete { new: true, .. } = pairing_event {
-                log::info!("Quantum link re-paired, re-publishing all accounts");
-                AppState::publish_accounts(state);
+            if let PairingEvent::PairingComplete { .. } = pairing_event {
+                log::info!("Quantum link re-paired, re-syncing passphrase state and accounts");
+                AppState::resync_with_envoy(state);
             }
         }
     })
