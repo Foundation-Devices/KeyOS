@@ -70,7 +70,7 @@ pub fn parse_migration_uri(uri: &str) -> Result<Vec<Auth>, MigrationError> {
 
         let secret = base32::encode(base32::Alphabet::RFC4648 { padding: false }, &otp.secret);
 
-        let label = if !otp.issuer.is_empty() { otp.issuer.clone() } else { "No Label".to_string() };
+        let label = if !otp.issuer.is_empty() { otp.issuer.clone() } else { otp.name.clone() };
 
         let url = format!(
             // 6 digits fow now are hardcoded since otp.digits contains nonsense data
