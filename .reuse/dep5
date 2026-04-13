@@ -298,3 +298,9 @@ Copyright:
     2017 The Tokio Authors
     2025 Foundation Devices, Inc. <hello@foundation.xyz>
 License: MIT OR Apache-2.0
+
+Files:
+  apps/gui-app-authenticator/proto/*
+Copyright:
+    2026 Foundation Devices, Inc. <hello@foundation.xyz>
+License: MIT OR Apache-2.0

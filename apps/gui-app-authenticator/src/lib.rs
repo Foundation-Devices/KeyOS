@@ -4,8 +4,12 @@
 use {
     ordered_table::{SortableCard, TableEntry},
     serde::{Deserialize, Serialize},
+    std::collections::HashMap,
+    std::time::Duration,
     totp_rs::TOTP,
 };
+
+pub mod google_migration;
 
 pub const DATABASE_FILE: &str = "authenticator_database_v3.json";
 
@@ -173,6 +177,30 @@ impl AuthEditField {
         Ok(())
     }
 }
+
+pub fn get_timestamp_in_seconds() -> u64 {
+    #[cfg(not(test))]
+    return std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|e| {
+            log::error!("Could not get time: {:?}", e);
+            Duration::ZERO
+        })
+        .as_secs();
+    #[cfg(test)]
+    return 0;
+}
+
+pub fn make_import_label(label: &str, existing_labels: &mut HashMap<String, usize>) -> String {
+    let count = *existing_labels.entry(label.to_string()).or_insert(0);
+
+    if count > 0 {
+        format!("[IMPORT {}] {}", count, label)
+    } else {
+        format!("[IMPORT] {}", label)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

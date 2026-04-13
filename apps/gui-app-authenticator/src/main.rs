@@ -6,7 +6,11 @@ use slint_keyos_platform::file_backed::JsonBacked;
 use {
     crate::gui_permissions::GuiPermissions,
     fuzzy_filter::FuzzyFilter,
-    gui_app_authenticator::{Auth, AuthDuplicateReason, AuthEditField, AuthValidationError, DATABASE_FILE},
+    gui_app_authenticator::{
+        get_timestamp_in_seconds,
+        google_migration::{self, MigrationError},
+        make_import_label, Auth, AuthDuplicateReason, AuthEditField, AuthValidationError, DATABASE_FILE,
+    },
     i18n::replace_placeholders,
     ordered_table::{CardSortMode, FilePersistence, OrderedTable, OrderedTableError, SortableCard},
     slint_keyos_platform::{
@@ -19,7 +23,7 @@ use {
         slint::{Model, ModelRc, SharedString, Timer, TimerMode, VecModel},
         StoredValue,
     },
-    std::{rc::Rc, time::Duration},
+    std::{collections::HashMap, rc::Rc, time::Duration},
 };
 
 use crate::fs_permissions::FileSystemPermissions;
@@ -53,6 +57,10 @@ pub enum AuthError {
     MovePositionError(usize, usize),
     #[error("Code {0:?} is already archived")]
     RedundantArchivalError(usize),
+    #[error("Migration parse error: {0}")]
+    MigrationParseError(String),
+    #[error("No pending imports")]
+    NoPendingImportsError,
 }
 
 impl From<OrderedTableError<Auth>> for AuthError {
@@ -65,6 +73,10 @@ impl From<AuthValidationError> for AuthError {
 
 impl From<AuthDuplicateReason> for AuthError {
     fn from(value: AuthDuplicateReason) -> Self { AuthError::DuplicateError(value) }
+}
+
+impl From<MigrationError> for AuthError {
+    fn from(value: MigrationError) -> Self { AuthError::MigrationParseError(value.to_string()) }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -80,6 +92,7 @@ struct AppState {
     auth_table: OrderedTable<Auth, FilePersistence<FileSystemPermissions>>,
     search_text: String,
     new_code: Option<Auth>,
+    pending_imports: Option<Vec<Auth>>,
     archive_mode: bool,
     model: Rc<VecModel<AuthView>>,
     #[cfg(not(test))]
@@ -105,19 +118,6 @@ impl AuthView {
         self.index = index;
         self
     }
-}
-
-fn get_timestamp_in_seconds() -> u64 {
-    #[cfg(not(test))]
-    return std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_else(|e| {
-            log::error!("Could not get time: {:?}", e);
-            Duration::ZERO
-        })
-        .as_secs();
-    #[cfg(test)]
-    return 0;
 }
 
 impl AppState {
@@ -412,6 +412,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             .expect("failed to create authenticator database"),
         search_text: String::new(),
         new_code: None,
+        pending_imports: None,
         archive_mode: false,
         model: Rc::new(VecModel::default()),
         #[cfg(not(test))]
@@ -454,6 +455,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         move |caller| {
             let mut app_state = app_state.borrow_mut();
             let ui_nav = ui.global::<Navigate>();
+            let ui_callbacks = ui.global::<AuthenticatorCallbacks>();
             let from_edit = caller == ScanQrCaller::Edit;
 
             let url = match scan_qr_request() {
@@ -463,6 +465,29 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                     return;
                 }
             };
+
+            if google_migration::is_migration_uri(&url) {
+                match google_migration::parse_migration_uri(&url) {
+                    Ok(entries) => {
+                        let count = entries.len();
+
+                        log::info!("Parsed {} accounts from Google Authenticator migration", count);
+                        app_state.pending_imports = Some(entries);
+                        ui_callbacks.set_pending_import_count(count as i32);
+
+                        ui_nav.invoke_main(
+                            MainParams { version: CardPageVersion::Main },
+                            NavigateOptions { replace: true, animate: Animate::None },
+                        );
+                        return;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse migration URI: {}", e);
+                        CallbackResult::from(AuthError::from(e)).navigate_from_scan_qr(from_edit, ui_nav);
+                        return;
+                    }
+                }
+            }
 
             match adapt_scan_qr(url, &mut app_state) {
                 Ok((auth, label_validation)) => {
@@ -491,6 +516,32 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             let ui_state = ui.global::<AuthenticatorCallbacks>();
             app_state.search_text = text.to_string().to_lowercase();
             ui_state.set_entries(app_state.get_auth_entries());
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_import_multiple({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
+
+            if let Err(e) = adapt_import_multiple(&mut app_state) {
+                log::warn!("Import multiple failed: {}", e);
+            }
+
+            ui_state.set_entries(app_state.get_auth_entries());
+            ui_state.set_pending_import_count(0);
+            CallbackResult::success()
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_cancel_import_multiple({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
+            app_state.pending_imports = None;
+            ui_state.set_pending_import_count(0);
         }
     });
 
@@ -756,6 +807,51 @@ fn adapt_move_position(index: i32, up: bool, app_state: &mut AppState) -> Result
     Ok(())
 }
 
+fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
+    let entries = app_state.pending_imports.take().ok_or(AuthError::NoPendingImportsError)?;
+
+    let mut existing_label_counts: HashMap<String, usize> = HashMap::new();
+
+    for auth in app_state.auth_table.iter() {
+        let label = auth.get_label().to_string();
+        *existing_label_counts.entry(label).or_insert(0) += 1;
+    }
+
+    for entry in &entries {
+        *existing_label_counts.entry(entry.get_label().clone()).or_insert(0) += 1;
+    }
+
+    let mut import_label_counts: HashMap<String, usize> = HashMap::new();
+
+    for entry in entries {
+        let original_label = entry.get_label().to_string();
+
+        let needs_import_prefix =
+            existing_label_counts.get(&original_label).map(|count| *count > 1).unwrap_or_default();
+
+        let label = if needs_import_prefix {
+            make_import_label(&original_label, &mut import_label_counts)
+        } else {
+            original_label.clone()
+        };
+
+        log::info!("Importing label {}", label);
+
+        let mut import_auth = entry;
+        import_auth.edit(AuthEditField::Label(label))?;
+        import_auth.color = 0;
+
+        app_state.auth_table.separate_categories(|a| a.get_category());
+        if let Err(e) = app_state.auth_table.push_categorized(|a| a.get_category(), import_auth) {
+            log::warn!("Failed to import entry: {:?}", e);
+        } else if needs_import_prefix {
+            *import_label_counts.entry(original_label).or_insert(0) += 1;
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_qr_request() -> Result<String, AuthError> {
     log::debug!("Scanning a TOTP QR code");
     let opt = open_qr_scanner::<GuiPermissions>(ScanQrOptions::default())
@@ -804,6 +900,7 @@ mod tests {
             auth_table: OrderedTable::new(),
             search_text: String::new(),
             new_code: None,
+            pending_imports: None,
             archive_mode: false,
             model: Rc::new(VecModel::default()),
             sort_mode: CardSortMode::Label,
