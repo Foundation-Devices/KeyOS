@@ -825,10 +825,7 @@ pub fn state_style_mut<'a>(variant: &'a mut VariantTheme, state_key: &str) -> &'
 }
 
 fn is_known_state_key(key: &str) -> bool {
-    matches!(
-        key,
-        "default" | "focused" | "loading" | "pressed" | "disabled" | "confirmed" | "visited"
-    )
+    matches!(key, "default" | "focused" | "loading" | "pressed" | "disabled" | "confirmed" | "visited")
 }
 
 fn split_token_path(path: &str) -> (&str, &str) {

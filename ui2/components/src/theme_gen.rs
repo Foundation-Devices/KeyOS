@@ -373,7 +373,9 @@ pub fn component_theme_slint(
                 if *state == "normal" {
                     continue;
                 }
-                s.push_str(&format!("{ind}if st == {senum}.{state} {{ return self.{variant}-{state}; }}\n"));
+                s.push_str(&format!("{ind}if st == {senum}.{state} {{\n"));
+                s.push_str(&format!("{ind}    return self.{variant}-{state};\n"));
+                s.push_str(&format!("{ind}}}\n"));
             }
             s.push_str(&format!("{ind}return self.{variant}-normal;\n"));
             if !last {

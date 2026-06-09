@@ -114,10 +114,11 @@ mod tests {
 
     struct ButtonTestComponent;
     impl ThemedComponent for ButtonTestComponent {
-        const NAME: &'static str = "button";
-        type Variant = TestVariant;
         type Size = TestSize;
         type State = ComponentState;
+        type Variant = TestVariant;
+
+        const NAME: &'static str = "button";
     }
 
     #[test]
