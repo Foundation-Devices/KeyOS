@@ -13,6 +13,10 @@
 //!   cargo run --bin slintthemegen -- --out-dir <dir>        # write every file
 //!   cargo run --bin slintthemegen -- --check                # CI staleness guard
 
+// This helper only needs the repo-default plugin loader, but it shares the
+// theme editor's runtime plugin module so both paths normalize schemas the same
+// way.
+#[allow(dead_code, unused_imports)]
 #[path = "../plugin/mod.rs"]
 mod plugin;
 

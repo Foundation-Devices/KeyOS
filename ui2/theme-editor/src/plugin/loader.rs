@@ -72,6 +72,7 @@ pub fn builtin_component_specs() -> &'static [BuiltinComponentSpec] { BUILTIN_CO
 // Pulled in by build.rs from defaults/plugins/*.json. Used by the parity test
 // below so a new plugin JSON dropped into defaults/plugins/ without a matching
 // BUILTIN_COMPONENTS entry fails the build instead of being silently ignored.
+#[cfg(test)]
 include!(concat!(env!("OUT_DIR"), "/components_generated.rs"));
 
 #[cfg(test)]
