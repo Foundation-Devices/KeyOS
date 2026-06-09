@@ -537,10 +537,10 @@ fn apply_relocations(
 
         let relocation_offset = rel.r_offset as usize;
 
-        // Must be 4-byte aligned and entirely inside the loaded image span (original addresses)
-        if (relocation_offset & 3) != 0 {
-            return Err(Error::ParseError);
-        }
+        // Must be inside the loaded image span (original addresses).
+        // Note: we allow unaligned offsets because packed C structs (e.g. the SDK's
+        // nbgl_icon_details_t) place pointers at non-4-byte-aligned offsets.
+        // The read/write below uses read_unaligned/write_unaligned so this is safe.
         let dst_end = relocation_offset.checked_add(4).ok_or(Error::ParseError)?;
         if relocation_offset < image_original.start || dst_end > image_original.end {
             return Err(Error::ParseError);

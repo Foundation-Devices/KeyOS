@@ -121,7 +121,7 @@ pub fn verify_firmware_files_push() -> Result<FirmwarePaths, Error> {
     let bootloader_cip = PathBuf::from("target/armv7a-unknown-xous-elf/release/images/boot.cip");
     let recovery_bin = PathBuf::from("target/armv7a-unknown-xous-elf/release/images/recovery.bin");
     let app_bin = PathBuf::from("target/armv7a-unknown-xous-elf/release/images/app.bin");
-    let apps_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/apps");
+    let apps_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/keyos/apps");
     let blassets_dir = PathBuf::from("boot/keyos-boot/assets");
     let common_assets_boot_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/common-boot");
     let common_assets_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/common");

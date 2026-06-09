@@ -239,8 +239,9 @@ impl Process {
 
             klog!("setting thread return value to {} bytes", response.len());
             let conn = process.conn.as_mut().unwrap();
-            conn.write_all(&response).expect("Disconnection");
-            conn.flush().expect("Disconnection");
+            if let Err(e) = conn.write_all(&response).and_then(|_| conn.flush()) {
+                eprintln!("KERNEL({}): could not send response to process: {}", process_table.current, e);
+            }
         });
     }
 

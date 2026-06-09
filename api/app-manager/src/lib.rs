@@ -72,6 +72,25 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.send_blocking_archive(GetQrMatchRules)
     }
 
+    /// List installed apps, optionally filtered. Pass `AppFilter::default()`
+    /// (or `AppFilter { is_flux: None }`) for "everything", `AppFilter::flux_only()`
+    /// for Flux child apps, etc.
+    pub fn list_apps(&self, locale: &str, filter: AppFilter) -> Vec<AppEntry>
+    where
+        P: MessageAllowed<ListApps>,
+    {
+        self.0.send_blocking_archive(ListApps { locale: locale.to_string(), filter })
+    }
+
+    /// Convenience wrapper around [`Self::list_apps`] for callers that only
+    /// want Flux-child apps (the original `list_flux_apps` use case).
+    pub fn list_flux_apps(&self, locale: &str) -> Vec<AppEntry>
+    where
+        P: MessageAllowed<ListApps>,
+    {
+        self.list_apps(locale, AppFilter::flux_only())
+    }
+
     pub fn get_installed_apps(&self, locale: &str) -> Vec<InstalledAppInfo>
     where
         P: MessageAllowed<GetInstalledApps>,
@@ -192,6 +211,18 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
             public_key: public_key.into(),
             locale: locale.to_string(),
         })
+    }
+
+    /// Subscribe the calling server to app lifecycle events (launch/crash).
+    ///
+    /// The subscriber must implement `server::ArchiveEventHandler<AppEvent>`.
+    pub fn server_subscribe_app_events<S>(&self, context: &mut server::ServerContext<S>)
+    where
+        P: 'static,
+        P: MessageAllowed<SubscribeAppEvents>,
+        S: server::Server + server::ArchiveEventHandler<AppEvent>,
+    {
+        self.0.subscribe_archive_infallible(SubscribeAppEvents, context)
     }
 }
 

@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "@ui/theme.slint";
+import { Button, NavHeader, Icon, HeadingLg, TextMd, JumboIconPageBody, WrappedIcon, ButtonSection, ContentSection } from "@ui/widgets.slint";
+import { Navigate, Animate } from "../../gen/navigate.slint";
+import { Callbacks } from "../../globals.slint";
+import { SeedDeriveProps } from "./props.slint";
+
+export component SeedDerivePage inherits JumboIconPageBody {
+    in property <SeedDeriveProps> props;
+
+    ContentSection {
+        HorizontalLayout {
+            alignment: center;
+
+            WrappedIcon {
+                name: "jumbo-circle";
+                inner-icon: "check";
+            }
+        }
+
+        HeadingLg {
+            text: "New Seed Created"; // TODO: i18n
+            horizontal-alignment: center;
+        }
+
+        TextMd {
+            text: "This seed was derived from your Passport Prime Master Key, so it's automatically protected by your existing backup. Manual backup is optional.\n\nThe new seed can be retrieved at any time in the Legacy Mode settings.";
+            horizontal-alignment: center;
+            color: Palette.content-tertiary;
+            wrap: word-wrap;
+        }
+    }
+
+    ButtonSection {
+        Button {
+            label: "Continue";
+            importance: primary;
+            clicked => {
+                Callbacks.confirm-seed-derive();
+                Navigate.main({ replace: true });
+            }
+        }
+    }
+}

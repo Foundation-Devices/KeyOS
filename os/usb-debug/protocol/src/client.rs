@@ -88,9 +88,10 @@ impl UsbDebugClient {
         let ep_out = ep_out.context("Debug bulk OUT endpoint not found")?;
         let ep_in = ep_in.context("Debug bulk IN endpoint not found")?;
 
-        if handle.kernel_driver_active(debug_iface).unwrap_or(false) {
-            handle.detach_kernel_driver(debug_iface).context("detaching kernel driver")?;
-        }
+        // Detach any kernel driver from the debug interface before claiming.
+        // Some Linux setups report `kernel_driver_active()` unreliably across
+        // the Legacy HID identity transition, so detach on a best-effort basis.
+        let _ = handle.detach_kernel_driver(debug_iface);
         handle.claim_interface(debug_iface).context("claiming debug interface")?;
 
         let handle = Arc::new(handle);

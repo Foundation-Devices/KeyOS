@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "app-flux-monero"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+app-flux-runtime = { workspace = true }
+gui-app-emu-flux = { workspace = true }
+log = { workspace = true }
+log-server = { workspace = true }
+server = { workspace = true }
+
+[build-dependencies]
+app-flux-build-support = { workspace = true }
+cc = "1"

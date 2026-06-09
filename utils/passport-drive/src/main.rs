@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use rusb::UsbContext;
 use serde::Deserialize;
 use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, TouchKind, UsbDebugClient};
 
@@ -85,6 +86,8 @@ enum CliCommand {
         /// Path to JSON actions file
         file: PathBuf,
     },
+    /// List connected Passport Prime USB devices
+    ListPorts,
     /// Stream device logs to stdout (uses USB vendor interface)
     Logs {
         /// Maximum number of lines to print (0 = unlimited)
@@ -116,8 +119,18 @@ enum CliCommand {
     RebootSamba,
     /// Print the KeyOS version string (same as Settings → About → KeyOS)
     GetVersion,
+    /// Print the compact kernel process list
+    GetProcessList,
     /// Start MCP server mode (JSON-RPC over stdio for AI integration)
     Mcp,
+    /// Send one ISO 7816 APDU over HID and print the RAPDU
+    SendApdu {
+        /// Hex-encoded APDU bytes, without Ledger HID framing
+        apdu_hex: String,
+        /// HID read timeout in milliseconds
+        #[arg(long, default_value = "10000")]
+        timeout_ms: i32,
+    },
     /// SAM-BA bootloader commands (device must be in SAM-BA mode)
     #[command(subcommand)]
     Samba(SambaCommand),
@@ -165,6 +178,20 @@ enum SambaCommand {
 fn parse_hex_u32(s: &str) -> std::result::Result<u32, String> {
     let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
     u32::from_str_radix(s, 16).map_err(|e| format!("Invalid hex value: {e}"))
+}
+
+fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
+    let hex_clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if hex_clean.len() % 2 != 0 {
+        bail!("hex input must have an even number of characters");
+    }
+
+    let bytes = (0..hex_clean.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex_clean[i..i + 2], 16))
+        .collect::<std::result::Result<Vec<u8>, _>>()
+        .context("invalid hex input")?;
+    Ok(bytes)
 }
 
 // USB transport helpers
@@ -229,6 +256,12 @@ fn do_get_version(client: &UsbDebugClient) -> Result<()> {
     Ok(())
 }
 
+fn do_get_process_list(client: &UsbDebugClient) -> Result<()> {
+    let payload = client.send(Command::KernelCmd { cmd_byte: b't' }, Duration::from_secs(5))?;
+    print!("{}", String::from_utf8_lossy(&payload));
+    Ok(())
+}
+
 fn do_power(client: &UsbDebugClient) -> Result<()> {
     eprintln!("Power button press...");
     client.send(Command::PowerButton { pressed: true }, Duration::from_secs(5))?;
@@ -236,6 +269,59 @@ fn do_power(client: &UsbDebugClient) -> Result<()> {
     eprintln!("Power button release...");
     client.send(Command::PowerButton { pressed: false }, Duration::from_secs(5))?;
     eprintln!("Power OK");
+    Ok(())
+}
+
+fn do_send_apdu(apdu_hex: &str, timeout_ms: i32) -> Result<()> {
+    let apdu = parse_hex_bytes(apdu_hex)?;
+    if apdu.len() < 4 {
+        bail!("APDU must be at least 4 bytes (CLA INS P1 P2)");
+    }
+
+    let (device, mode) = hid::open_hid()?;
+    let mode_str = match mode {
+        hid::HidMode::Ledger => "Ledger",
+        hid::HidMode::Fido => "CTAP/FIDO",
+    };
+    eprintln!("Opened HID device in {mode_str} mode");
+
+    let rapdu = hid::exchange_apdu(&device, &apdu, timeout_ms)?;
+    let hex: String = rapdu.iter().map(|b| format!("{b:02x}")).collect();
+    let sw = if rapdu.len() >= 2 {
+        format!("{:02x}{:02x}", rapdu[rapdu.len() - 2], rapdu[rapdu.len() - 1])
+    } else {
+        "(no SW)".to_string()
+    };
+    println!("RAPDU ({} bytes, SW={}): {}", rapdu.len(), sw, hex);
+    Ok(())
+}
+
+fn do_list_ports() -> Result<()> {
+    let context = rusb::Context::new().context("Failed to initialize USB context")?;
+    let devices = context.devices().context("Failed to enumerate USB devices")?;
+
+    let mut found = false;
+    for dev in devices.iter() {
+        let desc = dev.device_descriptor().context("Failed to read USB device descriptor")?;
+        let vid = desc.vendor_id();
+        let pid = desc.product_id();
+        let label = match (vid, pid) {
+            (0x1307, 0x0165) => "Passport Prime",
+            (0x2c97, 0x0007) => "Passport Prime (Flux/legacy)",
+            (0x03eb, 0x6124) => "SAM-BA bootloader",
+            _ => continue,
+        };
+        found = true;
+        println!(
+            "Bus {:03} Device {:03} — {label} (VID:{vid:04x} PID:{pid:04x})",
+            dev.bus_number(),
+            dev.address()
+        );
+    }
+
+    if !found {
+        println!("No Passport Prime USB devices found.");
+    }
     Ok(())
 }
 
@@ -465,6 +551,12 @@ fn main() -> Result<()> {
         CliCommand::Mcp => {
             return mcp::run();
         }
+        CliCommand::SendApdu { apdu_hex, timeout_ms } => {
+            return do_send_apdu(apdu_hex, *timeout_ms);
+        }
+        CliCommand::ListPorts => {
+            return do_list_ports();
+        }
         _ => {}
     }
 
@@ -524,6 +616,7 @@ fn main() -> Result<()> {
             eprintln!("Device rebooting into SAM-BA mode.");
         }
         CliCommand::GetVersion => do_get_version(&client)?,
+        CliCommand::GetProcessList => do_get_process_list(&client)?,
         CliCommand::Logs { max_lines, filter, include_stale } => {
             if !include_stale {
                 std::thread::sleep(Duration::from_millis(500));
@@ -532,7 +625,9 @@ fn main() -> Result<()> {
             eprintln!("Streaming logs (Ctrl+C to stop)...");
             do_logs_usb(&client, max_lines, filter.as_deref())?;
         }
-        CliCommand::Mcp | CliCommand::Samba(_) => unreachable!(),
+        CliCommand::Mcp | CliCommand::SendApdu { .. } | CliCommand::ListPorts | CliCommand::Samba(_) => {
+            unreachable!()
+        }
     }
 
     Ok(())

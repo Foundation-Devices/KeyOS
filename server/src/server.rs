@@ -122,6 +122,8 @@ pub fn create_sid(name: &str) -> xous::SID {
         // Register the server with the xous names server.
         let names = xous_names::XousNames::new().unwrap();
         names.register_name(sid, name).unwrap();
+        // Keep this connection open so xous-names keeps the registration alive.
+        std::mem::forget(names);
     }
     sid
 }

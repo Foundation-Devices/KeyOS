@@ -1,0 +1,293 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size, Importance } from "@ui/theme.slint";
+import { Button, NavHeader, BasePage, PageBody, ButtonSection, ContentSection, HeadingLg, TextMd, HeadingSm, HeadingMd, WrappedIcon } from "@ui/widgets.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Callbacks, SeedWordChallenge } from "../../globals.slint";
+import { SeedDeleteQuizProps } from "./props.slint";
+
+enum Phase {
+    Confirm,
+    Quiz,
+}
+
+enum WordState {
+    Pending,
+    Success,
+    Failure,
+}
+
+// Minimal pagination-dots indicator.
+component QuizDots inherits HorizontalLayout {
+    in property <int> total-pages;
+    in property <int> current-page;
+
+    spacing: 8px;
+    alignment: center;
+
+    for i in total-pages: Rectangle {
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: i == current-page ? Palette.content-primary : Palette.content-disabled;
+    }
+}
+
+export component SeedDeleteQuizPage inherits BasePage {
+    in property <SeedDeleteQuizProps> props;
+
+    // Phase state
+    private property <Phase> phase: Phase.Confirm;
+
+    // Quiz state
+    // Challenges are generated once when the page is first shown.
+    property <[SeedWordChallenge]> challenges: Callbacks.generate-seed-word-challenges(4);
+
+    property <WordState> word-state: WordState.Pending;
+    property <int> quiz-page: 0;
+    property <SeedWordChallenge> current-challenge: challenges[quiz-page];
+    // -1 = nothing selected yet; otherwise the index the user tapped.
+    property <int> selected-option-index: -1;
+
+    // Derive each option button's importance from state so resets are just
+    // setting selected-option-index = -1 rather than touching named elements.
+    pure function option-importance(idx: int) -> Importance {
+        if (selected-option-index == -1) {
+            return Importance.secondary;
+        }
+        if (idx == current-challenge.correct-option-index) {
+            return Importance.primary;
+        }
+        if (idx == selected-option-index) {
+            return Importance.notice;
+        }
+        return Importance.secondary;
+    }
+
+    function subheader() -> string {
+        if (word-state == WordState.Pending) {
+            return "Choose the correct word below"; // TODO: i18n
+        } else if (word-state == WordState.Failure) {
+            return "Incorrect — please restart"; // TODO: i18n
+        } else {
+            return "Correct!"; // TODO: i18n
+        }
+    }
+
+    function subheader-color() -> brush {
+        if (word-state == WordState.Failure) {
+            return Palette.content-copper-brand;
+        } else if (word-state == WordState.Success) {
+            return Palette.content-brand;
+        } else {
+            return Palette.content-tertiary;
+        }
+    }
+
+    function verify-selection(idx: int) {
+        selected-option-index = idx;
+        if (idx == current-challenge.correct-option-index) {
+            word-state = WordState.Success;
+            advance-timer.running = true;
+        } else {
+            word-state = WordState.Failure;
+        }
+    }
+
+    // Auto-advance 1 s after a correct selection.
+    advance-timer := Timer {
+        interval: 1s;
+        running: false;
+        triggered => {
+            self.running = false;
+            if (quiz-page >= challenges.length - 1) {
+                Callbacks.remove-seed();
+                Navigate.seed-delete({ replace: true });
+            } else {
+                quiz-page += 1;
+            }
+            selected-option-index = -1;
+            word-state = WordState.Pending;
+        }
+    }
+
+    // Confirmation phase
+    if (phase == Phase.Confirm): VerticalLayout {
+        NavHeader {
+            title: "Remove Seed"; // TODO: i18n
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        PageBody {
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        outer-icon: "jumbo-circle";
+                        inner-icon: "alert";
+                    }
+                }
+
+                HeadingLg {
+                    text: "Are you sure?"; // TODO: i18n
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    text: "Removing your seed will delete it from this device. Make sure you have a written backup of your seed words before continuing."; // TODO: i18n
+                    horizontal-alignment: center;
+                    color: Palette.content-tertiary;
+                    wrap: word-wrap;
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: "Cancel"; // TODO: i18n
+                    importance: secondary;
+                    clicked => {
+                        Navigate.backward();
+                    }
+                }
+
+                Button {
+                    label: "Yes, I have a backup"; // TODO: i18n
+                    importance: primary;
+                    clicked => {
+                        // Reset quiz state before entering
+                        quiz-page = 0;
+                        selected-option-index = -1;
+                        word-state = WordState.Pending;
+                        phase = Phase.Quiz;
+                    }
+                }
+            }
+        }
+    }
+
+    // Quiz phase
+    if (phase == Phase.Quiz): VerticalLayout {
+        NavHeader {
+            title: "Verify Backup"; // TODO: i18n
+            clicked => {
+                phase = Phase.Confirm;
+            }
+        }
+
+        VerticalLayout {
+            padding-bottom: Size.sz4;
+            padding-left: Size.sz4;
+            padding-right: Size.sz4;
+
+            VerticalLayout {
+                spacing: Size.sz16;
+                padding-top: Size.sz12;
+
+                alignment: start;
+
+                VerticalLayout {
+                    alignment: start;
+                    spacing: Size.sz3;
+
+                    HeadingSm {
+                        text: "Tap on the correct word"; // TODO: i18n
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                    }
+
+                    HeadingLg {
+                        text: "#\{current-challenge.word-index + 1}";
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: start;
+                    spacing: Size.sz6;
+
+                    TextMd {
+                        text: subheader();
+                        color: subheader-color();
+                        horizontal-alignment: center;
+                    }
+
+                    HorizontalLayout {
+                        spacing: Size.sz6;
+
+                        Button {
+                            importance: option-importance(0);
+                            label: current-challenge.options[0];
+                            width: 212px;
+                            clicked => {
+                                if (word-state == WordState.Pending) {
+                                    verify-selection(0);
+                                }
+                            }
+                        }
+
+                        Button {
+                            importance: option-importance(1);
+                            label: current-challenge.options[1];
+                            width: 212px;
+                            clicked => {
+                                if (word-state == WordState.Pending) {
+                                    verify-selection(1);
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: Size.sz6;
+
+                        Button {
+                            importance: option-importance(2);
+                            label: current-challenge.options[2];
+                            width: 212px;
+                            clicked => {
+                                if (word-state == WordState.Pending) {
+                                    verify-selection(2);
+                                }
+                            }
+                        }
+
+                        Button {
+                            importance: option-importance(3);
+                            label: current-challenge.options[3];
+                            width: 212px;
+                            clicked => {
+                                if (word-state == WordState.Pending) {
+                                    verify-selection(3);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ButtonSection {
+                HorizontalLayout {
+                    alignment: center;
+                    QuizDots {
+                        current-page: quiz-page;
+                        total-pages: 4;
+                    }
+                }
+
+                if (word-state == WordState.Failure): Button {
+                    label: "Restart Verification"; // TODO: i18n
+                    importance: primary;
+                    clicked => {
+                        quiz-page = 0;
+                        selected-option-index = -1;
+                        word-state = WordState.Pending;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "flux-crypto-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+app-flux-runtime = { workspace = true }
+crc32fast = "1.4"
+log = { workspace = true }
+log-server = { workspace = true }
+server = { workspace = true }

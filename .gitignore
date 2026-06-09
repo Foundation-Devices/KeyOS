@@ -126,3 +126,5 @@ flash_dump.bin
 # generated files
 DEPENDENCIES.png
 DEPENDENCIES.md
+
+# MCP config

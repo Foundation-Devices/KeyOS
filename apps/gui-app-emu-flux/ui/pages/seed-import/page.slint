@@ -1,0 +1,420 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "@ui/theme.slint";
+import { Button, NavHeader, TextSm, BasePage } from "@ui/widgets.slint";
+import { Input } from "@ui/widgets/input.slint";
+import { Navigate, Animate } from "../../gen/navigate.slint";
+import { Callbacks } from "../../globals.slint";
+import { SeedImportProps } from "./props.slint";
+
+global SeedImportState {
+    in-out property <[string]> words: [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+    ];
+
+    // Explicit property — updated imperatively in set-word to work around Slint not
+    // tracking array element mutations (words[i] = x) as reactive invalidations.
+    in-out property <bool> is-valid: false;
+
+    public function set-word(index: int, word: string) {
+        words[index] = word;
+        is-valid = Callbacks.validate-full-seed(words);
+    }
+
+    public function reset() {
+        is-valid = false;
+        words = [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+        ];
+    }
+}
+
+component SeedWordInput inherits VerticalLayout {
+    in property <int> index;
+    out property <bool> is-last: index == SeedImportState.words.length - 1;
+    out property <bool> word-valid: SeedImportState.words[index] == "" || Callbacks.validate-seed-word(SeedImportState.words[index]);
+    callback focus-next();
+    callback focused(int); // fires with `index` when this input is tapped/focused
+
+    alignment: start;
+    visible: index < SeedImportState.words.length;
+    forward-focus: input;
+
+    input := Input {
+        show-clear-btn: false;
+        text: SeedImportState.words[index];
+        prefix: "\{index + 1}.";
+        placeholder: "Word \{index + 1}";
+        height: root.visible ? Size.sz14 : 0px;
+        has-error: !word-valid;
+
+        changed has-focus => {
+            if (self.has-focus) {
+                root.focused(root.index);
+            }
+        }
+        edited(new-text) => {
+            SeedImportState.set-word(index, new-text);
+        }
+        accepted(text) => {
+            if (text != "") {
+                focus-next();
+            }
+        }
+    }
+
+    Rectangle {
+        height: root.visible && !root.is-last ? Size.sz4 : 0px;
+    }
+}
+
+export component SeedImportPage inherits BasePage {
+    in property <SeedImportProps> props;
+
+    // Scroll to bring the word at `index` into view only if it would be hidden
+    // behind the on-screen keyboard (DEFAULT_KEYBOARD_HEIGHT, matching the bottom padding).
+    function maybe-scroll-to(index: int) {
+        // Item bottom in Flickable content coords: padding-top (sz6) + index rows + input height.
+        // Visible area above keyboard: page height − NavHeader (sz16) − keyboard (396px).
+        // Only scroll when hidden; place it just above keyboard with a small gap (sz2 = 8px).
+        if (Size.sz6 + index * (Size.sz14 + Size.sz4) + Size.sz14 > -flickable.viewport-y + root.height - Size.sz16 - 396px) {
+            flickable.viewport-y = -(Size.sz6 + index * (Size.sz14 + Size.sz4) + Size.sz14 - (root.height - Size.sz16 - 396px) + Size.sz2);
+        }
+    }
+
+    init => {
+        SeedImportState.reset();
+    }
+
+    VerticalLayout {
+        alignment: stretch;
+
+        NavHeader {
+            title: "Seed Words"; // TODO: i18n
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        flickable := Flickable {
+            animate viewport-y {
+                duration: 150ms;
+                easing: ease-in-out;
+            }
+
+            VerticalLayout {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-top: Size.sz6;
+                padding-bottom: Size.sz6;
+                spacing: Size.sz4;
+                VerticalLayout {
+                    i1 := SeedWordInput {
+                        index: 0;
+                        focus-next => {
+                            i2.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i2 := SeedWordInput {
+                        index: 1;
+                        focus-next => {
+                            i3.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i3 := SeedWordInput {
+                        index: 2;
+                        focus-next => {
+                            i4.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i4 := SeedWordInput {
+                        index: 3;
+                        focus-next => {
+                            i5.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i5 := SeedWordInput {
+                        index: 4;
+                        focus-next => {
+                            i6.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i6 := SeedWordInput {
+                        index: 5;
+                        focus-next => {
+                            i7.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i7 := SeedWordInput {
+                        index: 6;
+                        focus-next => {
+                            i8.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i8 := SeedWordInput {
+                        index: 7;
+                        focus-next => {
+                            i9.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i9 := SeedWordInput {
+                        index: 8;
+                        focus-next => {
+                            i10.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i10 := SeedWordInput {
+                        index: 9;
+                        focus-next => {
+                            i11.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i11 := SeedWordInput {
+                        index: 10;
+                        focus-next => {
+                            i12.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i12 := SeedWordInput {
+                        index: 11;
+                        focus-next => {
+                            i13.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i13 := SeedWordInput {
+                        index: 12;
+                        focus-next => {
+                            i14.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i14 := SeedWordInput {
+                        index: 13;
+                        focus-next => {
+                            i15.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i15 := SeedWordInput {
+                        index: 14;
+                        focus-next => {
+                            i16.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i16 := SeedWordInput {
+                        index: 15;
+                        focus-next => {
+                            i17.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i17 := SeedWordInput {
+                        index: 16;
+                        focus-next => {
+                            i18.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i18 := SeedWordInput {
+                        index: 17;
+                        focus-next => {
+                            i19.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i19 := SeedWordInput {
+                        index: 18;
+                        focus-next => {
+                            i20.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i20 := SeedWordInput {
+                        index: 19;
+                        focus-next => {
+                            i21.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i21 := SeedWordInput {
+                        index: 20;
+                        focus-next => {
+                            i22.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i22 := SeedWordInput {
+                        index: 21;
+                        focus-next => {
+                            i23.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i23 := SeedWordInput {
+                        index: 22;
+                        focus-next => {
+                            i24.focus();
+                        }
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+
+                    i24 := SeedWordInput {
+                        index: 23;
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                    }
+                }
+
+                if (!SeedImportState.is-valid && SeedImportState.words[23] != ""): TextSm {
+                    text: @tr("Incorrect seed phrase, please try again.");
+                    color: Palette.content-lightcopper-brand;
+                    horizontal-alignment: center;
+                }
+
+                Button {
+                    label: @tr("Confirm");
+                    importance: primary;
+                    enabled: SeedImportState.is-valid;
+                    clicked => {
+                        Callbacks.confirm-seed-import(SeedImportState.words);
+                        Navigate.main({ replace: true });
+                    }
+                }
+
+                // Bottom padding so last word isn't hidden behind keyboard (396px = DEFAULT_KEYBOARD_HEIGHT)
+                Rectangle {
+                    height: 396px;
+                }
+            }
+        }
+    }
+}

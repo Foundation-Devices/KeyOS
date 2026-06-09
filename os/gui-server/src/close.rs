@@ -53,6 +53,10 @@ impl Gui {
 
             // If the app we're closing is active, switch to the launcher immediately
             if self.active_app_pid() == Some(pid) {
+                #[cfg(not(keyos))]
+                if let Some(name) = self.windows.get(&pid).map(|w| w.name.clone()) {
+                    self.pending_restore_name = Some(name);
+                }
                 self.change_state_single_window(
                     self.app_registry
                         .launcher_app_pid()

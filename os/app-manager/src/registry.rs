@@ -86,12 +86,17 @@ pub(crate) fn prune_qr_match_rules(rules: &mut Vec<app_manifest::QrMatchRule>, a
     });
 }
 
+#[cfg(keyos)]
+const FLUX_APPS_DIR: &str = "/keyos/apps/gui-app-emu-flux/apps";
+
 #[derive(Debug, Clone)]
 pub(crate) struct AppInfo {
     id: AppId,
     elf_path: Option<String>,
     manifest: Manifest,
     source: AppSource,
+    #[cfg_attr(not(keyos), allow(dead_code))]
+    is_flux: bool,
 }
 
 #[cfg(any(keyos, test))]
@@ -122,8 +127,9 @@ impl AppRegistry {
             // App location is the source of truth for trust classification:
             // firmware-shipped apps live under /keyos/apps, while sideloaded
             // apps live under /keyos/sideloaded-apps.
-            Self::scan_apps_dir(&mut installed_apps, BUILT_IN_APPS_DIR, AppSource::BuiltIn)?;
-            Self::scan_apps_dir(&mut installed_apps, SIDELOADED_APPS_DIR, AppSource::ThirdParty)?;
+            Self::scan_apps_dir(&mut installed_apps, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false)?;
+            Self::scan_apps_dir(&mut installed_apps, FLUX_APPS_DIR, AppSource::BuiltIn, true)?;
+            Self::scan_apps_dir(&mut installed_apps, SIDELOADED_APPS_DIR, AppSource::ThirdParty, false)?;
         }
 
         #[cfg(not(keyos))]
@@ -142,12 +148,13 @@ impl AppRegistry {
         installed_apps: &mut HashMap<AppId, AppInfo>,
         apps_dir: &str,
         source: AppSource,
+        is_flux: bool,
     ) -> anyhow::Result<()> {
         match list_apps(apps_dir) {
             Ok(apps_list) => {
                 for app in apps_list {
                     let app_label = app.elf_path.as_deref().unwrap_or(apps_dir).to_string();
-                    if Self::insert_app(installed_apps, app.elf_path, app.manifest, source) {
+                    if Self::insert_app(installed_apps, app.elf_path, app.manifest, source, is_flux) {
                         register_manifest_with_names(&app.manifest_bytes, &app_label);
                     }
                 }
@@ -181,7 +188,7 @@ impl AppRegistry {
                 .unwrap_or_else(|| "system manifest".to_string());
             let elf_path = app.elf_path.map(|p| p.to_string_lossy().to_string());
             let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
-            if Self::insert_app(installed_apps, elf_path, app.manifest, source) {
+            if Self::insert_app(installed_apps, elf_path, app.manifest, source, false) {
                 register_manifest_with_names(&app.manifest_bytes, &app_label);
             }
         }
@@ -194,6 +201,7 @@ impl AppRegistry {
         elf_path: Option<String>,
         mut manifest: Manifest,
         source: AppSource,
+        is_flux: bool,
     ) -> bool {
         let app_id = AppId(manifest.app_id);
 
@@ -212,7 +220,7 @@ impl AppRegistry {
 
         prune_qr_match_rules(&mut manifest.qr_match_rules, &app_id);
 
-        installed_apps.insert(app_id, AppInfo { id: app_id, elf_path, manifest, source });
+        installed_apps.insert(app_id, AppInfo { id: app_id, elf_path, manifest, source, is_flux });
         true
     }
 
@@ -293,6 +301,30 @@ impl AppRegistry {
             .filter(|app_info| app_info.is_third_party())
             .find(|app_info| app_info.has_verified_third_party_signature(public_key))
             .map(|app_info| app_info.localized_name(locale))
+    }
+
+    pub(crate) fn list_apps(
+        &self,
+        locale: &str,
+        filter: &app_manager::AppFilter,
+    ) -> Vec<app_manager::AppEntry> {
+        self.installed_apps
+            .values()
+            .filter(|info| filter.is_flux.map_or(true, |want| info.is_flux == want))
+            .map(|info| {
+                let name = info
+                    .manifest
+                    .app_name
+                    .get(&locale.to_string().into())
+                    .cloned()
+                    .unwrap_or_else(|| info.manifest.app_name_en());
+                app_manager::AppEntry {
+                    app_id: format!("0x{}", hex::encode(info.id.0)),
+                    name,
+                    is_flux: info.is_flux,
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn elf_path(&self, app_id: AppId) -> Option<String> {
@@ -680,6 +712,7 @@ mod tests {
                 qr_match_rules: Vec::new(),
             },
             source,
+            is_flux: false,
         }
     }
 
@@ -705,13 +738,15 @@ mod tests {
             &mut installed_apps,
             built_in.elf_path,
             built_in.manifest,
-            AppSource::BuiltIn
+            AppSource::BuiltIn,
+            false
         ));
         assert!(!AppRegistry::insert_app(
             &mut installed_apps,
             sideloaded.elf_path,
             sideloaded.manifest,
-            AppSource::ThirdParty
+            AppSource::ThirdParty,
+            false
         ));
 
         let app = installed_apps.get(&decode_app_id_str(app_id).unwrap()).unwrap();
@@ -728,7 +763,8 @@ mod tests {
             &mut installed_apps,
             app.elf_path,
             app.manifest,
-            AppSource::ThirdParty
+            AppSource::ThirdParty,
+            false
         ));
         assert!(installed_apps.contains_key(&decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()));
     }
@@ -742,7 +778,8 @@ mod tests {
             &mut installed_apps,
             app.elf_path,
             app.manifest,
-            AppSource::ThirdParty
+            AppSource::ThirdParty,
+            false
         ));
         assert!(installed_apps.is_empty());
     }

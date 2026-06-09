@@ -18,7 +18,6 @@ en = "Mass storage emulation server"
 "os/usbdev" = [
     "ReadEndpoint",
     "WriteEndpoint",
-    "NumInterfaces",
     "RegisterSetupResponder",
     "RegisterInterface",
     "WaitForConnection",

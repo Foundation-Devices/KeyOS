@@ -190,18 +190,6 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<ListedApp<String>>, LaunchError> 
 #[cfg(not(keyos))]
 pub fn list_apps(apps_dir: &str) -> Result<Vec<ListedApp<PathBuf>>, LaunchError> {
     let mut apps = vec![];
-    for manifest_json in system_manifests::SYSTEM_MANIFESTS {
-        let manifest_bytes = manifest_json.as_bytes().to_vec();
-        match app_manifest::try_from_bytes(&manifest_bytes) {
-            Ok(manifest) => {
-                apps.push(ListedApp { elf_path: None, manifest_bytes, manifest });
-            }
-            Err(e) => {
-                log::error!("Failed to parse hosted SYSTEM_MANIFEST entry: {:?}", e);
-            }
-        }
-    }
-
     if let Some(hosted_apps_dir) = hosted_apps_dir(apps_dir) {
         apps.extend(list_hosted_apps(&hosted_apps_dir));
     }
@@ -213,6 +201,15 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<ListedApp<PathBuf>>, LaunchError>
 fn hosted_apps_dir(apps_dir: &str) -> Option<PathBuf> {
     if let Some(path) = env::var_os(HOSTED_APPS_DIR_ENV).filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
+    }
+
+    let staged_apps_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("target")
+        .join("hosted")
+        .join(apps_dir.trim_start_matches('/'));
+    if staged_apps_dir.is_dir() {
+        return Some(staged_apps_dir);
     }
 
     let apps_dir = PathBuf::from(apps_dir);

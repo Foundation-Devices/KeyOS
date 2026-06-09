@@ -202,6 +202,5 @@ graph TD
 - **SEPH bridge:** APDUs enter the Flux app as `CapduEvent` (tag `0x16`) TLV packets
   via the SEPH FIFO, exactly as they would on a real Ledger device. Responses exit
   as `Rapdu` (tag `0x53`) packets.
-- **Promote to IF 0:** `usb_api.promote_interface()` reorders the USB configuration
-  descriptor so the Legacy HID appears as interface 0, matching the Ledger Flex
-  layout that host wallets expect.
+- **Fixed IF 0:** Legacy HID registers with interface number 0 so host wallets see
+  the Ledger-compatible layout they expect.

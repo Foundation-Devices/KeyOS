@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x05a7b38cd1e94f2a8b6c3d0e7f12a459"
+
+[appName]
+en = "Solana"
+
+[appDescription]
+en = "Solana app running on Flux."
+
+[permissions]
+"os/gui-app-emu-flux" = ["SvcCall", "SendSeph", "RecvSeph", "SyscallBuffer"]

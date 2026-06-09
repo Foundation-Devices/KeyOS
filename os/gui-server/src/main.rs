@@ -164,6 +164,8 @@ pub struct Gui {
 
     waiting_for_pid: Option<(PID, Option<ArchiveRequest<NavigateTo>>)>,
     notified_nav_request: Option<(PID, Vec<u8>)>,
+    #[cfg(not(keyos))]
+    pending_restore_name: Option<String>,
 
     control_center_window: Option<ControlCenterWindow>,
     keyboard_window: Option<KeyboardWindow>,
@@ -281,6 +283,8 @@ impl Gui {
             camera_window: Default::default(),
             waiting_for_pid: None,
             notified_nav_request: None,
+            #[cfg(not(keyos))]
+            pending_restore_name: None,
             animation_fb,
 
             display,
@@ -352,6 +356,14 @@ impl Gui {
         self.notify_switcher_app_started(pid, &name);
         self.update_window_visibility();
         self.update_navigation_request_state();
+
+        // If this app was the active window before it disconnected (e.g. hot-reload),
+        // switch back to it once it submits its first frame.
+        #[cfg(not(keyos))]
+        if self.pending_restore_name.as_deref() == Some(&name) && self.waiting_for_pid.is_none() {
+            self.pending_restore_name = None;
+            self.waiting_for_pid = Some((pid, None));
+        }
 
         debug!("Returning success");
         Ok(())

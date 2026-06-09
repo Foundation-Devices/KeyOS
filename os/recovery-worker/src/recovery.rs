@@ -958,12 +958,6 @@ impl RecoveryWorkerServer {
         }
 
         for (i, tar_app_path) in apps.iter().enumerate() {
-            let file_path_parts = tar_app_path.split('/').collect::<Vec<_>>();
-
-            let Some(app_name) = file_path_parts.last() else {
-                continue;
-            };
-
             let tar_elf_path = format!("{tar_app_path}/app.elf");
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, &tar_elf_path, |_| ())?;
@@ -979,7 +973,7 @@ impl RecoveryWorkerServer {
                 bail!("App {tar_app_path} is invalid");
             }
 
-            let fs_app_dir = format!("keyos/apps/{app_name}");
+            let fs_app_dir = app_tar_path_to_fs_dir(tar_app_path)?;
             self.create_dir_all(&fs_app_dir, Location::System);
 
             let fs_elf_path = &format!("{fs_app_dir}/app.elf");
@@ -1381,6 +1375,20 @@ fn asset_fs_path_to_wipe_root(fs_path: &str, asset_location: Location) -> Option
 
     let root = path_parts.into_iter().take(root_depth).collect::<Vec<_>>().join("/");
     (!root.is_empty()).then_some(root)
+}
+
+fn app_tar_path_to_fs_dir(tar_app_path: &str) -> anyhow::Result<String> {
+    let mut path_parts = tar_app_path.split('/').skip(1).collect::<Vec<_>>();
+    if path_parts.get(0) != Some(&"keyos") || path_parts.get(1) != Some(&"apps") {
+        bail!("Invalid app archive path: {tar_app_path}");
+    }
+
+    path_parts.drain(..2);
+    if path_parts.is_empty() {
+        bail!("Invalid app archive path: {tar_app_path}");
+    }
+
+    Ok(format!("keyos/apps/{}", path_parts.join("/")))
 }
 
 fn verify_manifest_hash(manifest: &RecoveryManifest, path: &str, hash: [u8; 32]) -> bool {

@@ -40,6 +40,8 @@ const USB_U2F_IFCE_SUBCLASS: u8 = 0x00; // No Subclass
 #[cfg(all(keyos, not(feature = "test-app")))]
 const USB_U2F_IFCE_PROTOCOL: u8 = 0x00; // No Protocol
 #[cfg(all(keyos, not(feature = "test-app")))]
+const USB_U2F_IFCE_NUMBER: u8 = usb::device::interface_numbers::CTAP_HID;
+#[cfg(all(keyos, not(feature = "test-app")))]
 const USB_U2F_ENDPOINTS: [EndpointProperties; 2] = [
     EndpointProperties {
         ep_type: EndpointType::Interrupt,
@@ -370,9 +372,9 @@ impl CtapHidServer {
         #[cfg(all(keyos, not(feature = "test-app")))]
         let usb_ep_sender = {
             let mut usb_api = UsbDeviceEmulation::default();
-            let interface_num = usb_api.registered_interfaces() as u16;
-            usb_api.register_setup_responder(SetupResponder { interface_num })?;
+            usb_api.register_setup_responder(SetupResponder { interface_num: USB_U2F_IFCE_NUMBER as u16 })?;
             let [ep_out, ep_in] = usb_api.register_interface(
+                USB_U2F_IFCE_NUMBER,
                 USB_U2F_IFCE_CLASS,
                 USB_U2F_IFCE_SUBCLASS,
                 USB_U2F_IFCE_PROTOCOL,

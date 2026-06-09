@@ -1,0 +1,7 @@
+appId = "0x666c75782d63727970746f2d74657374"
+
+[appName]
+en = "Flux Crypto Test"
+
+[permissions]
+"os/gui-app-emu-flux" = ["SvcCall", "SendSeph", "RecvSeph", "SyscallBuffer"]

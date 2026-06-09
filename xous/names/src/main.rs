@@ -7,7 +7,7 @@ use system_manifests::SYSTEM_MANIFESTS;
 use xous::{AppId, MessageEnvelope, MessageId};
 use xous_api_names::*;
 
-const SERVER_DISCONNECTED_MESSAGE_ID: MessageId = 8;
+const PROCESS_DISCONNECTED_MESSAGE_ID: MessageId = 8;
 
 #[derive(PartialEq)]
 #[repr(C)]
@@ -22,19 +22,12 @@ enum ConnectSuccess {
 #[derive(Default)]
 struct NameServer {
     waiting_connections: Vec<MessageEnvelope>,
-    name_table: HashMap<String, RegisteredName>,
+    name_table: HashMap<String, xous::SID>,
+    registered_names_by_pid: HashMap<xous::PID, HashSet<String>>,
     message_name_to_id: HashMap<(String, String), Vec<MessageId>>,
     server_owners: HashMap<String, AppId>,
     register_permissions: HashMap<AppId, HashSet<String>>,
     connect_permissions: HashMap<AppId, HashMap<String, Vec<MessageId>>>,
-}
-
-#[derive(Clone)]
-struct RegisteredName {
-    sid: xous::SID,
-    // fixed manifest SIDs are preloaded and not lifecycle-monitored
-    // only dynamic registrations get a CID
-    cid: Option<xous::CID>,
 }
 
 fn manifest_server_names(manifest: &Manifest) -> HashSet<String> {
@@ -74,7 +67,7 @@ impl NameServer {
         }
         for (server_name, sid_str) in &manifest.fixed_sids {
             if let Some(sid) = xous::SID::from_bytes(sid_str.as_bytes()) {
-                self.name_table.insert(server_name.clone(), RegisteredName { sid, cid: None });
+                self.name_table.insert(server_name.clone(), sid);
             } else {
                 log::error!("Invalid SID string: {sid_str}");
             }
@@ -140,6 +133,7 @@ impl NameServer {
         let mut staged = NameServer {
             waiting_connections: Vec::new(),
             name_table: self.name_table.clone(),
+            registered_names_by_pid: self.registered_names_by_pid.clone(),
             message_name_to_id: self.message_name_to_id.clone(),
             server_owners: self.server_owners.clone(),
             register_permissions: self.register_permissions.clone(),
@@ -172,10 +166,10 @@ impl NameServer {
         let app_permissions = self.connect_permissions.get(&app_id).unwrap_or(&default_permissions);
         // If the server already exists, attempt to make the connection. The connection can
         // only succeed if the server is in the name_table.
-        if let Some(name_entry) = self.name_table.get(server_name) {
+        if let Some(server_sid) = self.name_table.get(server_name) {
             log::trace!(
                 "Found entry in the table (sid: {:?}) -- attempting to call connect_for_process()",
-                name_entry.sid,
+                server_sid,
             );
             let no_perms = Vec::new();
             let Some(connection_permissions) = app_permissions
@@ -185,7 +179,7 @@ impl NameServer {
                 log::warn!("App {app_id:02x?} tried to connect to {server_name} without permissions.");
                 return Err(xous::Error::AccessDenied);
             };
-            let result = xous::connect_for_process(sender_pid, name_entry.sid);
+            let result = xous::connect_for_process(sender_pid, *server_sid);
             match result {
                 Ok(connection_id) => {
                     for permission in connection_permissions {
@@ -218,12 +212,10 @@ impl NameServer {
     }
 
     fn register_impl(&mut self, msg: &MessageEnvelope) -> Result<String, xous::Error> {
-        // Verify permissions before proceeding
-        let app_id = xous::get_app_id(msg.sender.pid().ok_or(xous::Error::ProcessNotFound)?)?
-            .ok_or(xous::Error::ProcessNotFound)?;
-
         let sid = sid_from_msg(msg)?;
         let server_name = name_from_msg(msg, 16)?.to_string();
+        let pid = msg.sender.pid().ok_or(xous::Error::ProcessNotFound)?;
+        let app_id = xous::get_app_id(pid)?.ok_or(xous::Error::ProcessNotFound)?;
         log::trace!("registration request for '{}'", server_name);
 
         // Borrow register_permissions only long enough to produce a `bool`; the
@@ -234,17 +226,19 @@ impl NameServer {
         if self.name_table.contains_key(&server_name) {
             return Err(xous::Error::MemoryInUse);
         }
-        let cid = xous::try_connect(sid)?;
-        self.name_table.insert(server_name.clone(), RegisteredName { sid, cid: Some(cid) });
+        self.name_table.insert(server_name.clone(), sid);
+        self.registered_names_by_pid.entry(pid).or_default().insert(server_name.clone());
         log::trace!("request successful, SID is {:?}", sid);
         Ok(server_name)
     }
 
-    fn unregister_cid(&mut self, cid: xous::CID) {
-        for (server_name, _) in self.name_table.extract_if(|_, registration| registration.cid == Some(cid)) {
-            info!("unregistered '{}' because server disconnected", server_name);
+    fn unregister_pid(&mut self, pid: xous::PID) {
+        if let Some(server_names) = self.registered_names_by_pid.remove(&pid) {
+            for server_name in server_names {
+                self.name_table.remove(&server_name);
+                info!("unregistered '{}' because process {} disconnected", server_name, pid);
+            }
         }
-        while xous::disconnect(cid).is_ok() {}
     }
 
     fn wake_waiting_connections(&mut self, server_name: &str) {
@@ -348,12 +342,12 @@ impl NameServer {
         let name_server =
             xous::create_server_with_sid(xous::SID::from_bytes(b"xous-name-server").unwrap(), 0..8)
                 .expect("Couldn't create xous-name-server");
-        xous::register_system_event_handler(
-            xous::SystemEvent::Disconnected,
+        xous::register_server_event_handler(
+            xous::ServerEvent::Disconnected,
             name_server,
-            SERVER_DISCONNECTED_MESSAGE_ID,
+            PROCESS_DISCONNECTED_MESSAGE_ID,
         )
-        .unwrap();
+        .expect("Couldn't register xous-name-server disconnect handler");
 
         info!("Starting");
         self.process_system_manifests();
@@ -361,11 +355,11 @@ impl NameServer {
         loop {
             let msg = xous::receive_message(name_server).unwrap();
             log::trace!("received message: {:?}", msg);
-            if msg.body.id() == SERVER_DISCONNECTED_MESSAGE_ID {
-                if let Some(scalar) = msg.body.scalar_message() {
-                    self.unregister_cid(scalar.arg1 as xous::CID);
+            if msg.body.id() == PROCESS_DISCONNECTED_MESSAGE_ID {
+                if let Some(pid) = msg.sender.pid() {
+                    self.unregister_pid(pid);
                 } else {
-                    error!("disconnect event was not a scalar message");
+                    error!("disconnect event did not include a sender PID");
                 }
                 continue;
             }

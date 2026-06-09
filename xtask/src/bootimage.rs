@@ -16,7 +16,7 @@ use mbrs::{AddrScheme, Mbr, PartInfo, PartType};
 use sha2::Digest;
 
 use crate::bootloader::{build_at91bootstrap, encrypt_bootloader, BootloaderBuildArgs, SambaCryptArgs};
-use crate::builder::{project_root, Builder};
+use crate::builder::{project_root, Builder, FLUX_APPS_DIR, FLUX_PARENT_APP_DIR, KEYOS_APPS_DIR};
 use crate::{
     APP_IMAGE, BOOTLOADER_IMAGE, BOOTLOADER_IMAGE_CIPHER, BOOT_ASSETS_DIR, RECOVERY_IMAGE,
     TARGET_TRIPLE_KEYOS,
@@ -80,6 +80,12 @@ const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
     ("device-detailed", &[96]),
     ("laptop", &[192]),
     ("usb-cable", &[172]),
+    // Legacy mode icons
+    ("legacy", &[96]),
+    ("monero", &[56]),
+    ("ethereum", &[56]),
+    ("solana", &[56]),
+    ("chain", &[56]),
 ];
 
 const RECOVERY_IMAGES: [&str; 8] = [
@@ -256,39 +262,31 @@ fn create_boot_partition(file: &mut File, samba_crypt_args: SambaCryptArgs) -> a
     Ok(())
 }
 
-fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
-    let images_path = Builder::images_path();
-
-    let fs = format_partition(
-        file,
-        false,
-        1,
-        SYSTEM_VOLUME_NAME,
-        SYSTEM_PARTITION_START_SECTOR,
-        SYSTEM_PARTITION_SIZE_SECTORS,
-    )?;
-
-    let keyos_dir = fs.root_dir().create_dir("keyos").context("system: creating `keyos` directory")?;
-    keyos_dir.create_file(APP_IMAGE)?.write_all(&fs::read(images_path.join(APP_IMAGE))?)?;
-
-    println!("Bundling FS apps");
-    let apps_dir_keyos = keyos_dir.create_dir("apps")?;
-    let apps_dir_local = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join("apps");
+fn bundle_apps(
+    apps_dir_disk: &Dir<'_, StreamSlice<&mut File>>,
+    apps_dir_local: &Path,
+    apps_dir_disk_path: &str,
+    app_files: &[&str],
+) -> anyhow::Result<()> {
     if apps_dir_local.exists() {
         for app_dir in fs::read_dir(apps_dir_local)? {
             let app_dir_local = app_dir?;
             let app_name = app_dir_local.file_name().into_string().unwrap();
+            if !app_files.iter().all(|app_file| app_dir_local.path().join(app_file).is_file()) {
+                println!("- Skipping `{}` directory without app bundle files", app_name);
+                continue;
+            }
 
             println!("- Bundling `{}` app", app_name);
-            let app_dir_disk = apps_dir_keyos.create_dir(&app_name)?;
+            let app_dir_disk = apps_dir_disk.create_dir(&app_name)?;
 
-            const APP_FILES: &[&str] = &["app.elf", "manifest.json"];
-            for app_file in APP_FILES {
+            for app_file in app_files {
                 let app_file_local = app_dir_local.path().join(app_file);
                 let mut app_file_disk = app_dir_disk.create_file(app_file)?;
                 println!(
-                    "  - Copying: {} -> /apps/{}/{}",
+                    "  - Copying: {} -> /{}/{}/{}",
                     app_file_local.file_name().unwrap().to_str().unwrap(),
+                    apps_dir_disk_path,
                     app_name,
                     app_file
                 );
@@ -305,6 +303,46 @@ fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
     } else {
         println!("* no apps directory found");
     }
+    Ok(())
+}
+
+fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
+    let images_path = Builder::images_path();
+
+    let fs = format_partition(
+        file,
+        false,
+        1,
+        SYSTEM_VOLUME_NAME,
+        SYSTEM_PARTITION_START_SECTOR,
+        SYSTEM_PARTITION_SIZE_SECTORS,
+    )?;
+
+    let keyos_dir = fs.root_dir().create_dir("keyos").context("system: creating `keyos` directory")?;
+    keyos_dir.create_file(APP_IMAGE)?.write_all(&fs::read(images_path.join(APP_IMAGE))?)?;
+
+    let target_root = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release");
+    let keyos_apps_dir = keyos_dir.create_dir("apps")?;
+    println!("Bundling FS apps");
+    bundle_apps(
+        &keyos_apps_dir,
+        &target_root.join(KEYOS_APPS_DIR),
+        KEYOS_APPS_DIR,
+        &["app.elf", "manifest.json"],
+    )?;
+
+    let flux_parent_dir = match keyos_apps_dir.open_dir(FLUX_PARENT_APP_DIR) {
+        Ok(dir) => dir,
+        Err(_) => keyos_apps_dir.create_dir(FLUX_PARENT_APP_DIR)?,
+    };
+    let flux_apps_dir = flux_parent_dir.create_dir("apps")?;
+    println!("Bundling FS flux apps");
+    bundle_apps(
+        &flux_apps_dir,
+        &target_root.join(FLUX_APPS_DIR),
+        FLUX_APPS_DIR,
+        &["app.elf", "manifest.json"],
+    )?;
 
     let ui_dir_local = project_root().join("ui").join("ui");
 
@@ -520,6 +558,28 @@ fn print_digest_of_cosigned_file(name: &str, path: &Path) {
     println!("{name:<30} - {digest}");
 }
 
+fn print_app_hashes(apps_dir: &Path, base_dir: &Path) {
+    if !apps_dir.exists() {
+        return;
+    }
+
+    let mut app_dirs: Vec<_> = fs::read_dir(apps_dir).unwrap().collect::<Result<_, _>>().unwrap();
+    app_dirs.sort_by_key(|entry| entry.file_name());
+    for app_dir in app_dirs {
+        let app_path = app_dir.path();
+        if !app_path.is_dir() {
+            continue;
+        }
+
+        let app_elf = app_path.join("app.elf");
+        if app_elf.is_file() {
+            let app_name = app_path.strip_prefix(base_dir).unwrap().display().to_string();
+            print_digest_of_cosigned_file(&app_name, &app_elf);
+        }
+        print_app_hashes(&app_path, base_dir);
+    }
+}
+
 pub(crate) fn print_hashes() {
     check_images_exist();
     println!("The SHA256 hashes of all binaries (without the cosign2 header)");
@@ -529,13 +589,7 @@ pub(crate) fn print_hashes() {
     println!("bootloader                     - {bootloader_digest}");
     print_digest_of_cosigned_file("app image", &images_path.join(APP_IMAGE));
     print_digest_of_cosigned_file("recovery image", &images_path.join(RECOVERY_IMAGE));
-    let apps_dir_local = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join("apps");
-    if apps_dir_local.exists() {
-        let mut app_dirs: Vec<_> = fs::read_dir(apps_dir_local).unwrap().collect::<Result<_, _>>().unwrap();
-        app_dirs.sort_by_key(|entry| entry.file_name());
-        for app_dir_local in app_dirs {
-            let app_name = app_dir_local.file_name().into_string().unwrap();
-            print_digest_of_cosigned_file(&app_name, &app_dir_local.path().join("app.elf"));
-        }
-    }
+    let apps_dir_local =
+        project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join(KEYOS_APPS_DIR);
+    print_app_hashes(&apps_dir_local, &apps_dir_local);
 }

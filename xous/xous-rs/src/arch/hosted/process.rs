@@ -97,6 +97,10 @@ impl From<&ProcessStartup> for [usize; 7] {
 #[derive(Debug)]
 pub struct ProcessHandle(std::process::Child);
 
+impl ProcessHandle {
+    pub fn kill(&mut self) -> std::io::Result<()> { self.0.kill() }
+}
+
 /// If no connection exists, create a new connection to the server. This means
 /// our parent PID will be PID1. Otherwise, reuse the same connection.
 pub fn create_process_pre(args: &ProcessArgs) -> core::result::Result<ProcessInit, crate::Error> {

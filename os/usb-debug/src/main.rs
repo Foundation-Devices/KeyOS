@@ -125,7 +125,7 @@ fn main() -> ! {
 
     // Advertise WinUSB binding for the debug interface via MS OS 2.0
     // descriptors so Windows hosts auto-bind winusb.sys without Zadig.
-    let debug_interface_num = usb_api.registered_interfaces() as u8;
+    let debug_interface_num = usb::device::interface_numbers::USB_DEBUG;
     usb_api
         .register_setup_responder(msos20::SetupResponder {
             descriptor_set: msos20::descriptor_set(debug_interface_num),
@@ -142,6 +142,7 @@ fn main() -> ! {
 
     let [debug_ep_out, mut ep_in] = usb_api
         .register_interface(
+            usb::device::interface_numbers::USB_DEBUG,
             0xFF, // Class: Vendor Specific
             0x00,
             0x00,

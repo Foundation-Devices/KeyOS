@@ -447,7 +447,7 @@ fn handle_list_ports() -> Value {
             let pid = desc.product_id();
             let label = match (vid, pid) {
                 (0x1307, 0x0165) => "Passport Prime",
-                (0x2c97, 0x7000) => "Passport Prime (Flux/legacy)",
+                (0x2c97, 0x0007) => "Passport Prime (Flux/legacy)",
                 (0x03eb, 0x6124) => "SAM-BA bootloader",
                 _ => continue,
             };

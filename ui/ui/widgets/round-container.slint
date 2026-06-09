@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {Palette, Size} from "@ui/theme.slint";
+import {Images, Palette, Size} from "@ui/theme.slint";
+import { TextMd } from "./txt.slint";
 
-export component RoundContainer inherits Rectangle {
+ export component RoundContainer inherits Rectangle {
     // Override inherited properties
     border-radius: Size.sz6;
     background: Palette.background-primary;
@@ -11,5 +12,23 @@ export component RoundContainer inherits Rectangle {
     drop-shadow-color: Palette.black.transparentize(0.9);
     clip: true;
 
-    @children
+    property <bool> at-top: flickable.viewport-y == 0;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
+
+    // Scrollable container
+    flickable := Flickable {
+        @children
+    }
+
+    // Top alpha mask
+    if !at-top: Image {
+        y: 0px;
+        source: Images.common("images/round-container-top-alpha-mask");
+    }
+
+    // Bottom alpha mask
+    if !at-bottom: Image {
+        y: parent.height - 40px;
+        source: Images.common("images/round-container-bottom-alpha-mask");
+    }
 }

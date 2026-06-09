@@ -10,7 +10,7 @@ use atsama5d27::{
     },
 };
 use server::{
-    send_blocking_archive, BlockingArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler,
+    try_send_blocking_archive, BlockingArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler,
     BlockingScalarRequest, DeferredLendMut, DeferredLendMutHandler, MoveHandler, ScalarHandler,
 };
 use usb::{
@@ -35,7 +35,7 @@ pub struct UsbDeviceServer {
     is_configured: bool,
     should_be_enabled: bool,
     enabled: bool,
-    interfaces: Vec<RegisteredInterface>,
+    interfaces: BTreeMap<u8, RegisteredInterface>,
     capabilities: Vec<RegisteredCapability>,
     setup_responders: Vec<xous::CID>,
     config_descriptor: Vec<u8>,
@@ -329,7 +329,7 @@ impl UsbDeviceServer {
                                           * the device will be rejected with "insufficient available bus
                                           * power" */
         ];
-        for interface in &self.interfaces {
+        for interface in self.interfaces.values() {
             self.config_descriptor.extend_from_slice(&interface.descriptors);
         }
         self.config_descriptor[2] = self.config_descriptor.len() as u8;
@@ -337,14 +337,18 @@ impl UsbDeviceServer {
     }
 
     // Returns the registered endpoint numbers.
-    fn register_interface(&mut self, msg: RegisterInterface) -> Vec<u8> {
+    fn register_interface(&mut self, msg: RegisterInterface) -> Result<Vec<u8>, UsbError> {
+        if self.interfaces.contains_key(&msg.interface_number) {
+            return Err(UsbError::AlreadyRegistered);
+        }
+
         let mut descriptors = Vec::new();
 
         if msg.associated_interface_count > 0 {
             descriptors.extend_from_slice(&[
                 0x08,                           // bLength
                 0x0b,                           // bDescriptorType: Interface Association
-                self.interfaces.len() as u8,    // bFirstInterface: First iface
+                msg.interface_number,           // bFirstInterface: First iface
                 msg.associated_interface_count, // Two ifaces
                 msg.if_class,                   // bInterfaceClass
                 msg.if_subclass,                // bInterfaceSubClass
@@ -355,15 +359,15 @@ impl UsbDeviceServer {
 
         descriptors.extend_from_slice(&[
             // Interface Descriptor
-            0x09,                        // bLength
-            0x04,                        // bDescriptorType: Interface
-            self.interfaces.len() as u8, // bInterfaceNumber
-            0x00,                        // bAlternateSetting
-            msg.endpoints.len() as u8,   // bNumEndpoints
-            msg.if_class,                // bInterfaceClass
-            msg.if_subclass,             // bInterfaceSubClass
-            msg.if_protocol,             // bInterfaceProtocol
-            2,                           // iInterface: index to iProduct
+            0x09,                      // bLength
+            0x04,                      // bDescriptorType: Interface
+            msg.interface_number,      // bInterfaceNumber
+            0x00,                      // bAlternateSetting
+            msg.endpoints.len() as u8, // bNumEndpoints
+            msg.if_class,              // bInterfaceClass
+            msg.if_subclass,           // bInterfaceSubClass
+            msg.if_protocol,           // bInterfaceProtocol
+            2,                         // iInterface: index to iProduct
         ]);
         descriptors.extend_from_slice(&msg.interface_functional_descriptors);
         let mut result = Vec::new();
@@ -396,8 +400,8 @@ impl UsbDeviceServer {
             );
             result.push(ep_number);
         }
-        self.interfaces.push(RegisteredInterface { descriptors });
-        result
+        self.interfaces.insert(msg.interface_number, RegisteredInterface { descriptors });
+        Ok(result)
     }
 
     fn recalculate_bos_descriptor(&mut self) {
@@ -462,7 +466,7 @@ impl BlockingArchiveHandler<RegisterInterface> for UsbDeviceServer {
         _context: &mut server::ServerContext<Self>,
     ) -> Result<Vec<u8>, UsbError> {
         log::info!("Registering interface class {} with {} endpoints", msg.if_class, msg.endpoints.len());
-        let result = self.register_interface(msg);
+        let result = self.register_interface(msg)?;
         self.recalculate_config_descriptor();
         self.recalculate_bos_descriptor();
         self.update_hw_enabled_state();
@@ -629,14 +633,18 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
     fn default_response() -> <WriteEndpoint as server::LendMut>::Response { Err(UsbError::HostDisconnected) }
 }
 
-impl BlockingScalarHandler<NumInterfaces> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        _msg: NumInterfaces,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> usize {
-        self.interfaces.len()
+impl UsbDeviceServer {
+    /// Disconnect the device from the USB bus, hold DETACH, then reattach.
+    /// Forces the host to re-enumerate so descriptor changes (e.g. a new
+    /// VID:PID) take effect. The 100ms hold is required for Windows to
+    /// register the disconnect.
+    fn reattach_bus(&mut self) {
+        if self.enabled {
+            self.hw.set_enabled(false);
+            self.send_disconnected();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            self.hw.set_enabled(true);
+        }
     }
 }
 
@@ -647,21 +655,22 @@ impl BlockingScalarHandler<ResetController> for UsbDeviceServer {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <ResetController as server::BlockingScalar>::Response {
-        if self.enabled {
-            self.hw.set_enabled(false);
-            self.send_disconnected();
-            // XXX: Without this sleep, Windows doesn't handle the reset well.
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            self.hw.set_enabled(true);
-        }
+        self.reattach_bus();
         Ok(())
     }
 }
 
-impl ScalarHandler<SetVidPid> for UsbDeviceServer {
-    fn handle(&mut self, msg: SetVidPid, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+impl BlockingScalarHandler<SetVidPid> for UsbDeviceServer {
+    fn handle(
+        &mut self,
+        msg: SetVidPid,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> <SetVidPid as server::BlockingScalar>::Response {
         self.custom_vid = msg.vid;
         self.custom_pid = msg.pid;
+        self.reattach_bus();
+        Ok(())
     }
 }
 
@@ -769,7 +778,17 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
                 Some(Vec::new())
             }
             _ => self.setup_responders.iter().find_map(|setup_responder| {
-                send_blocking_archive(*setup_responder, SetupPacketCallback(msg.clone()))
+                // A responder app may exit while the host is still issuing SETUP
+                // packets (e.g. during shutdown or right after a reset_controller
+                // re-enum). Treat a dead CID as "didn't handle this packet" so
+                // we move on to the next responder instead of panicking.
+                match try_send_blocking_archive(*setup_responder, SetupPacketCallback(msg.clone())) {
+                    Ok(response) => response,
+                    Err(e) => {
+                        log::warn!("setup responder {setup_responder:?} unreachable: {e:?}");
+                        None
+                    }
+                }
             }),
         };
         match response {

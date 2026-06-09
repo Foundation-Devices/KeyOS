@@ -13,6 +13,9 @@ hosted = []
 debugprint = []
 default = []    # "debugprint"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }
+
 # Dependency versions enforced by Cargo.lock.
 [dependencies]
 app-manifest = { path = "../../os/app-manifest" }

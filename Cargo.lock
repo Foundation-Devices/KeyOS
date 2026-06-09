@@ -65,6 +65,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cipher",
+ "cpufeatures",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -237,6 +248,83 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "app-flux-build-support"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "app-flux-ethereum"
+version = "0.1.0"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "cc",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-monero"
+version = "0.1.0"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "cc",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-runtime"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "crc32fast",
+ "curve25519-dalek",
+ "getrandom 0.2.10",
+ "gui-app-emu-flux",
+ "hmac",
+ "log 0.4.27",
+ "num-bigint",
+ "num-traits",
+ "server",
+ "sha2",
+ "sha3",
+]
+
+[[package]]
+name = "app-flux-solana"
+version = "0.1.0"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "cc",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-zcash"
+version = "0.1.0"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "cc",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
 name = "app-manager"
 version = "0.1.0"
 dependencies = [
@@ -282,7 +370,6 @@ dependencies = [
  "serde_json",
  "server",
  "sha2",
- "system-manifests",
  "tar",
  "thiserror 1.0.64",
  "x509-cert",
@@ -3703,6 +3790,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "flux-crypto-test"
+version = "0.1.0"
+dependencies = [
+ "app-flux-runtime",
+ "crc32fast",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4508,6 +4606,62 @@ dependencies = [
  "slint-keyos-platform",
  "slint-keyos-platform-build",
  "xous-api-log",
+]
+
+[[package]]
+name = "gui-app-emu-flux"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "hmac",
+ "log 0.4.27",
+ "ngwallet",
+ "nom",
+ "rkyv",
+ "secp256k1 0.29.1",
+ "server",
+ "sha2",
+ "thiserror 2.0.11",
+ "xous",
+]
+
+[[package]]
+name = "gui-app-emu-flux-server"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "app-manager",
+ "app-manifest",
+ "armv7",
+ "atsama5d27",
+ "bip39",
+ "crc32fast",
+ "fs",
+ "fw-utils",
+ "getrandom 0.2.10",
+ "gui-app-emu-flux",
+ "gui-server-api",
+ "haptics",
+ "hex",
+ "legacy-hid",
+ "log 0.4.27",
+ "miniz_oxide 0.8.0",
+ "rkyv",
+ "security",
+ "serde",
+ "serde_json",
+ "server",
+ "settings",
+ "slint-keyos-platform",
+ "slint-keyos-platform-build",
+ "thiserror 2.0.11",
+ "usb",
+ "utralib",
+ "uuid",
+ "xous",
+ "xous-api-log",
+ "xous-ipc",
 ]
 
 [[package]]
@@ -6477,6 +6631,19 @@ name = "lebe"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
+
+[[package]]
+name = "legacy-hid"
+version = "0.1.0"
+dependencies = [
+ "log 0.4.27",
+ "rkyv",
+ "server",
+ "thiserror 2.0.11",
+ "usb",
+ "xous",
+ "xous-api-log",
+]
 
 [[package]]
 name = "libblur"

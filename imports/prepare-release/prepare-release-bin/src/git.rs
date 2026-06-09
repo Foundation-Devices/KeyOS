@@ -250,7 +250,7 @@ fn copy_firmware_files(
         writeln!(
             stdout,
             "Warning: Apps directory not found at {}",
-            keyos_dir.join("target/armv7a-unknown-xous-elf/release/apps").display()
+            keyos_dir.join("target/armv7a-unknown-xous-elf/release/keyos/apps").display()
         )
         .map_err(Error::Stdout)?;
     }

@@ -38,7 +38,6 @@ xous = { path = "../../xous/xous-rs" }
 [target.'cfg(not(keyos))'.dependencies]
 secp256k1 = "0.29"
 sha2 = { workspace = true }
-system-manifests = { path = "../system-manifests/" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

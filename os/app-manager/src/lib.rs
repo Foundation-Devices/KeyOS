@@ -20,7 +20,7 @@ use app_manager::{
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, InstalledAppsPage,
-    LaunchApp, LaunchAppBlocking, SubscribeAppEvents,
+    LaunchApp, LaunchAppBlocking, ListApps, SubscribeAppEvents,
 };
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
@@ -261,6 +261,17 @@ impl BlockingArchiveHandler<GetAppName> for AppManagerServer {
             GetAppName::ByAppId { id, locale } => self.app_registry.app_name_by_id(&id.into(), &locale),
             GetAppName::ByPid { pid, locale } => self.app_registry.app_name_by_pid(pid, &locale),
         }
+    }
+}
+
+impl BlockingArchiveHandler<ListApps> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: ListApps,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> Vec<app_manager::AppEntry> {
+        self.app_registry.list_apps(&msg.locale, &msg.filter)
     }
 }
 

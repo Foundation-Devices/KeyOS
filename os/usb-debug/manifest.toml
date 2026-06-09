@@ -10,7 +10,6 @@ en = "USB Debug Protocol"
 "os/usbdev" = [
     "ReadEndpoint",
     "WriteEndpoint",
-    "NumInterfaces",
     "RegisterSetupResponder",
     "RegisterInterface",
     "RegisterCapability",

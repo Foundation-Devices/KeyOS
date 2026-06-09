@@ -42,6 +42,7 @@ impl server::MessageId for SetupPacketCallback {
 #[derive(Debug, server::Message, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Vec<u8>, UsbError>)]
 pub struct RegisterInterface {
+    pub interface_number: u8,
     pub if_class: u8,
     pub if_subclass: u8,
     pub if_protocol: u8,
@@ -133,10 +134,6 @@ impl From<WriteEndpoint> for server::SimpleMemoryMessage {
 }
 
 #[derive(Debug, server::Message, Clone)]
-#[response(usize)]
-pub struct NumInterfaces;
-
-#[derive(Debug, server::Message, Clone)]
 #[response(Result<(), UsbError>)]
 pub struct RegisterSetupResponder(pub xous::CID);
 
@@ -166,13 +163,14 @@ pub struct RegisterCapability {
 }
 
 #[derive(Debug, server::Message, Clone)]
+#[response(Result<(), UsbError>)]
 pub struct SetVidPid {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
 }
 
-impl FromScalar<2> for SetVidPid {
-    fn from_scalar(value: [u32; 2]) -> Self {
+impl FromScalar<4> for SetVidPid {
+    fn from_scalar(value: [u32; 4]) -> Self {
         Self {
             vid: if value[0] == 0 { None } else { Some(value[0] as u16) },
             pid: if value[1] == 0 { None } else { Some(value[1] as u16) },
@@ -180,8 +178,8 @@ impl FromScalar<2> for SetVidPid {
     }
 }
 
-impl AsScalar<2> for SetVidPid {
-    fn as_scalar(&self) -> [u32; 2] { [self.vid.unwrap_or(0) as u32, self.pid.unwrap_or(0) as u32] }
+impl AsScalar<4> for SetVidPid {
+    fn as_scalar(&self) -> [u32; 4] { [self.vid.unwrap_or(0) as u32, self.pid.unwrap_or(0) as u32, 0, 0] }
 }
 
 #[derive(Debug, server::Message, Clone)]

@@ -93,6 +93,8 @@ check-workspace:
       --exclude log-usb-serial \
       --exclude usb-debug \
       --exclude libblur \
+      --exclude app-flux-monero \
+      --exclude app-flux-zcash \
       --exclude tar-rs \
       --exclude recovery-worker \
       --exclude gui-app-recovery
@@ -124,6 +126,12 @@ gen-icu-data:
 
 sim: gen-themes
     cargo xtask run --hosted
+
+sim-reload crate:
+    cargo xtask reload {{crate}}
+
+sim-watch crate:
+    cargo xtask watch {{crate}}
 
 update-preview:
     cargo run --bin update-slint-preview -- --images-folder ui/ui/images --icons-folder ui/ui/icons --template-file ui/ui/images.slint-template --output-file ui/ui/images.slint
@@ -335,8 +343,13 @@ one-int-test +args:
     cargo xtask run --hosted --integration-test {{args}}
     -rm -f xous/kernel/disk.dat
 
-integration-test:
+integration-test *args:
     #!/usr/bin/env bash
+    if [ -n "{{args}}" ]; then
+        cargo xtask test {{args}}
+        exit 0
+    fi
+
     had_disk=0
     if [ -f xous/kernel/disk.dat ]; then
         mv xous/kernel/disk.dat xous/kernel/disk-test-temp.dat

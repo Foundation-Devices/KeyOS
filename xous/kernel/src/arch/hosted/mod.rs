@@ -23,6 +23,7 @@ use crate::services::SystemServices;
 enum ThreadMessage {
     SysCall(PID, TID, SysCall),
     NewConnection(TcpStream, AppId),
+    ReloadApp(String),
 }
 
 #[derive(Debug)]
@@ -322,6 +323,14 @@ pub fn idle() -> bool {
     let (new_pid_sender, new_pid_receiver) = unbounded();
     let (exit_sender, exit_receiver) = unbounded();
 
+    let mut process_registry: std::collections::HashMap<PID, (AppId, String, xous::arch::ProcessHandle)> =
+        Default::default();
+    // Permanent record of every spawnable process: binary_name -> (app_id, binary_path).
+    // Unlike process_registry, entries here survive crashes so a crashed process can be
+    // re-spawned by a hot-reload request even when it is no longer running.
+    let mut process_specs: std::collections::HashMap<String, (AppId, String)> = Default::default();
+    let mut pending_reloads: std::collections::HashSet<PID> = Default::default();
+
     // Allocate PID1 with the key we were passed.
     let pid1_key = PID1_KEY.with(|p1k| *p1k.borrow());
     let pid1_init = ProcessInit { app_id: AppId(pid1_key) };
@@ -345,6 +354,7 @@ pub fn idle() -> bool {
         receiver
     };
 
+    let reload_sender = sender.clone();
     let listen_thread_handle = SEND_ADDR.with(|sa| {
         let sa = sa.borrow_mut().take();
         std::thread::Builder::new()
@@ -385,12 +395,47 @@ pub fn idle() -> bool {
             let new_process = SystemServices::with_mut(|ss| ss.create_process(init)).unwrap();
             println!(" {new_process:2} |  {app_id}  |  {0}", service.path);
             let process_args = xous::ProcessArgs::new(app_id, "program", &service.path);
-            let (pid, _) =
+            let (pid, handle) =
                 xous::arch::create_process_post(process_args, init, new_process).expect("couldn't spawn");
+            if let Some(name) = std::path::Path::new(&service.path).file_name() {
+                process_specs.insert(name.to_string_lossy().into_owned(), (app_id, service.path.clone()));
+            }
+            process_registry.insert(pid, (app_id, service.path.clone(), handle));
             if service.syscalls != 0 {
                 SystemServices::with_mut(|ss| {
                     ss.process_mut(pid).unwrap().set_syscall_permissions(service.syscalls)
                 });
+            }
+        }
+
+        // Hot-reload socket: accepts crate names and triggers kill+relaunch
+        #[cfg(unix)]
+        {
+            let socket_path = "/tmp/keyos-sim-reload.sock";
+            let _ = std::fs::remove_file(socket_path);
+            match std::os::unix::net::UnixListener::bind(socket_path) {
+                Ok(listener) => {
+                    eprintln!("KERNEL: Hot-reload socket at {}", socket_path);
+                    std::thread::Builder::new()
+                        .name("hot-reload listener".to_owned())
+                        .spawn(move || {
+                            use std::io::BufRead;
+                            for stream in listener.incoming() {
+                                if let Ok(stream) = stream {
+                                    let mut reader = std::io::BufReader::new(stream);
+                                    let mut line = String::new();
+                                    if reader.read_line(&mut line).is_ok() {
+                                        let name = line.trim().to_owned();
+                                        if !name.is_empty() {
+                                            reload_sender.send(ThreadMessage::ReloadApp(name)).ok();
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                        .unwrap();
+                }
+                Err(e) => eprintln!("KERNEL: Could not bind reload socket: {}", e),
             }
         }
     }
@@ -412,7 +457,7 @@ pub fn idle() -> bool {
 
                 // If the call being made is to terminate the current process, we need to know
                 // because we won't be able to send a response.
-                let is_terminate = call == SysCall::TerminateProcess(0);
+                let is_terminate = matches!(call, SysCall::TerminateProcess(_));
                 let is_shutdown = match call {
                     #[allow(unused_variables)]
                     SysCall::Shutdown(code) => {
@@ -466,6 +511,67 @@ pub fn idle() -> bool {
                 if is_shutdown {
                     exit_sender.send(ExitMessage::Exit).expect("couldn't send shutdown signal");
                     break;
+                }
+
+                // Hot-reload: clean up registry entry; re-spawn if reload was requested
+                if is_terminate {
+                    if let Some((app_id, binary_path, _)) = process_registry.remove(&pid) {
+                        if pending_reloads.remove(&pid) {
+                            let init = xous::ProcessInit { app_id };
+                            match SystemServices::with_mut(|ss| ss.create_process(init)) {
+                                Ok(new_process) => {
+                                    let new_args = xous::ProcessArgs::new(app_id, "program", &binary_path);
+                                    match xous::arch::create_process_post(new_args, init, new_process) {
+                                        Ok((new_pid, new_handle)) => {
+                                            eprintln!(
+                                                "KERNEL: Hot-reloaded {} as PID {}",
+                                                binary_path, new_pid
+                                            );
+                                            process_registry
+                                                .insert(new_pid, (app_id, binary_path, new_handle));
+                                        }
+                                        Err(e) => {
+                                            eprintln!("KERNEL: Failed to re-spawn process: {:?}", e)
+                                        }
+                                    }
+                                }
+                                Err(e) => eprintln!("KERNEL: Failed to allocate process slot: {:?}", e),
+                            }
+                        }
+                    }
+                }
+            }
+            ThreadMessage::ReloadApp(crate_name) => {
+                let entry = process_registry.iter_mut().find(|(_, (_, path, _))| {
+                    std::path::Path::new(path).file_name().map_or(false, |n| n == crate_name.as_str())
+                });
+                if let Some((&pid, (_, _, handle))) = entry {
+                    eprintln!(
+                        "KERNEL: Hot-reload requested for '{}' (PID {}), sending SIGKILL",
+                        crate_name, pid
+                    );
+                    pending_reloads.insert(pid);
+                    handle.kill().ok();
+                } else if let Some(&(app_id, ref binary_path)) = process_specs.get(&crate_name) {
+                    // Process is not running (crashed). Spawn it directly.
+                    let binary_path = binary_path.clone();
+                    eprintln!("KERNEL: '{}' not running (crashed?), re-spawning directly", crate_name);
+                    let init = xous::ProcessInit { app_id };
+                    match SystemServices::with_mut(|ss| ss.create_process(init)) {
+                        Ok(new_process) => {
+                            let new_args = xous::ProcessArgs::new(app_id, "program", &binary_path);
+                            match xous::arch::create_process_post(new_args, init, new_process) {
+                                Ok((new_pid, new_handle)) => {
+                                    eprintln!("KERNEL: Re-spawned {} as PID {}", binary_path, new_pid);
+                                    process_registry.insert(new_pid, (app_id, binary_path, new_handle));
+                                }
+                                Err(e) => eprintln!("KERNEL: Failed to re-spawn process: {:?}", e),
+                            }
+                        }
+                        Err(e) => eprintln!("KERNEL: Failed to allocate process slot: {:?}", e),
+                    }
+                } else {
+                    eprintln!("KERNEL: No spec found for '{}', was it started by the kernel?", crate_name);
                 }
             }
         }

@@ -15,6 +15,7 @@ members = [
     "api/dma",
     "api/fs",
     "api/gpio",
+    "api/gui-app-emu-flux",
     "api/gui-server",
     "api/haptics",
     "api/i2c",
@@ -28,9 +29,14 @@ members = [
     "api/spi",
     "api/update",
     "api/usb",
+    "apps/app-flux-ethereum",
+    "apps/app-flux-monero",
+    "apps/app-flux-solana",
+    "apps/app-flux-zcash",
     "apps/gui-app-authenticator",
     "apps/gui-app-bitcoin",
     "apps/gui-app-crypto-perf",
+    "apps/gui-app-emu-flux",
     "apps/gui-app-file-browser",
     "apps/gui-app-image-viewer",
     "apps/gui-app-playground",
@@ -82,6 +88,7 @@ members = [
     "os/haptics",
     "os/i2c",
     "os/keycard",
+    "os/legacy-hid",
     "os/logging/file",
     "os/logging/hosted",
     "os/logging/serial",
@@ -117,6 +124,7 @@ members = [
     "test-apps/emmc-test-client",
     "test-apps/fido-test",
     "test-apps/fpu-test",
+    "test-apps/flux-crypto-test",
     "test-apps/fs-benchmark",
     "test-apps/fs-test",
     "test-apps/gui-app-file-picker-test",
@@ -146,6 +154,8 @@ members = [
     "ui/slintbook",
     "utils/fiat-symbols",
     "utils/fuse",
+    "utils/app-flux-build-support",
+    "utils/app-flux-runtime",
     "utils/fw-utils",
     "utils/keycard-auth-tool",
     "utils/keycard-scan",
@@ -179,6 +189,8 @@ exclude = ["apps/simulator", "apps/simulator-cli"]
 
 [workspace.dependencies]
 # workspace members
+app-flux-build-support = { path = "utils/app-flux-build-support" }
+app-flux-runtime = { path = "utils/app-flux-runtime" }
 app-manager = { path = "api/app-manager" }
 backup = { path = "api/backup" }
 bt = { path = "api/bt" }
@@ -193,6 +205,7 @@ fs = { path = "api/fs" }
 fw-utils = { path = "utils/fw-utils" }
 getrandom = { path = "imports/getrandom" }
 gpio = { path = "api/gpio" }
+gui-app-emu-flux = { path = "api/gui-app-emu-flux" }
 gui-server-api = { path = "api/gui-server" }
 haptics = { path = "api/haptics" }
 i2c = { path = "api/i2c" }
@@ -250,6 +263,7 @@ bitflags = "2.6.0"
 bzip2 = "0.6.0"
 cargo_metadata = "0.18.1"
 crc = "3.2.1"
+curve25519-dalek = { version = "4", default-features = false }
 embedded-hal = "1.0"
 event-listener = { version = "5.3" }
 foundation-ur = { version = "0.4.0" }
@@ -259,6 +273,7 @@ hex = { version = "0.4.3" }
 jiff = { version = "0.2.5", default-features = false, features = ["std"] }
 log = "0.4.14"
 ndef = { version = "0.5.0", features = ["alloc", "cbor"] }
+num-bigint = "0.4"
 num-derive = "0.4.2"
 num-traits = "0.2.18"
 oneshot = { version = "0.1" }

@@ -56,6 +56,8 @@ jobs:
                       --exclude log-usb-serial \
                       --exclude usb-debug \
                       --exclude libblur \
+                      --exclude app-flux-monero \
+                      --exclude app-flux-zcash \
                       --exclude keycard-auth-tool \
                       --exclude gui-app-recovery \
                       --exclude recovery-worker \

@@ -93,12 +93,14 @@ fn main() -> ! {
     let log_reader = log_server::reader::LogReader::default();
 
     let mut usb_api = UsbDeviceEmulation::default();
-    let interface_num = usb_api.registered_interfaces() as u16;
+    let interface_num = usb::device::interface_numbers::LOG_USB_SERIAL_CONTROL;
+    let data_interface_num = usb::device::interface_numbers::LOG_USB_SERIAL_DATA;
     usb_api
-        .register_setup_responder(SetupResponder { interface_num })
+        .register_setup_responder(SetupResponder { interface_num: interface_num as u16 })
         .expect("Could not register setup responder");
     let [_ep_ctrl] = usb_api
         .register_interface(
+            interface_num,
             0x02, // Class: CDC
             0x02, // Subclass: ACM
             0x00, // Protocol: Nothing special
@@ -117,28 +119,29 @@ fn main() -> ! {
                 0x10, // CDC release number minor version
                 0x01, // CDC release number major version
                 // -----
-                0x05,                    // Len
-                0x24,                    // Type: Interface functional
-                0x01,                    // Subtype: Call Management
-                0x00,                    // Capabilities: no additional capabilities
-                interface_num as u8 + 1, // Data interface
+                0x05,               // Len
+                0x24,               // Type: Interface functional
+                0x01,               // Subtype: Call Management
+                0x00,               // Capabilities: no additional capabilities
+                data_interface_num, // Data interface
                 // -----
                 0x04, // Len
                 0x24, // Type: Interface functional
                 0x02, // Subtype: ACM
                 0x00, // Capabilities: no additional capabilities
                 // -----
-                0x05,                    // Len
-                0x24,                    // Type: Interface functional
-                0x06,                    // Subtype: Union
-                interface_num as u8,     // Control interface
-                interface_num as u8 + 1, // Data interface
+                0x05,               // Len
+                0x24,               // Type: Interface functional
+                0x06,               // Subtype: Union
+                interface_num,      // Control interface
+                data_interface_num, // Data interface
             ],
             2,
         )
         .expect("Error registering USB interface");
     let [ep_out, mut ep_in] = usb_api
         .register_interface(
+            data_interface_num,
             0x0A, // Class: CDC Data
             0x00, // Subclass: unused
             0x00, // Protocol: unused

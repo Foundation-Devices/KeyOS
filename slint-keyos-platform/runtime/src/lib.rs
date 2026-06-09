@@ -238,7 +238,8 @@ macro_rules! _internal_init_ui_utils {
             },
         );
 
-        // length, length, color, [GradientStop], length, length, [GradientStop], string) -> image;
+        // length, length, color, [GradientStop], length, length, [GradientStop], length, [GradientStop],
+        // string) -> image;
         $app.global::<$utils>().on_line_card(
             |width: f32,
              height: f32,

@@ -46,7 +46,7 @@ export global Utils {
     // width, height, border-radius, gradient-start, gradient-end, border-width, border-color
     pure callback panel(length, length, length, color, color, length, color) -> image;
 
-    // width, height, background-color, background-gradient, border-radius, border-width, border-gradient, template
+    // width, height, background-color, background-gradient, border-radius, border-width, border-gradient, outer-border-width, outer-border-gradient, template
     pure callback line-card(length, length, color, [GradientStop], length, length, [GradientStop], length, [GradientStop], string) -> image;
 
     // params:  radius, stroke-width, stroke-color, fill, border-dash

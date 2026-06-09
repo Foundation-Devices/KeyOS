@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gui-app-emu-flux"
+version = "0.1.0"
+edition = "2021"
+description = "Flux Emulator Server API crate"
+publish = false
+
+[[bin]]
+name = "update_syscall_ids"
+path = "bin/update_syscall_ids.rs"
+
+[dependencies]
+ed25519-dalek = { version = "2", default-features = false }
+hmac = "0.12"
+log = { workspace = true }
+ngwallet = { workspace = true }
+nom = "7.1"
+rkyv = { workspace = true }
+secp256k1 = { version = "0.29", features = ["recovery"] }
+server = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+xous = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

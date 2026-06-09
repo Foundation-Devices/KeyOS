@@ -4,6 +4,15 @@
 pub mod api;
 pub mod messages;
 
+pub mod interface_numbers {
+    pub const LEGACY_HID: u8 = 0;
+    pub const MASS_STORAGE: u8 = 1;
+    pub const CTAP_HID: u8 = 2;
+    pub const USB_DEBUG: u8 = 3;
+    pub const LOG_USB_SERIAL_CONTROL: u8 = 4;
+    pub const LOG_USB_SERIAL_DATA: u8 = 5;
+}
+
 pub const MAJ_DEV_VERSION: u8 = 1;
 pub const MIN_DEV_VERSION: u8 = 0;
 pub const BLD_DEV_VERSION: u8 = 1;

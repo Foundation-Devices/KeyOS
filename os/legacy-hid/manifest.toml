@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x4c656761637948494400000000000000"
+
+[appName]
+en = "Legacy HID Server"
+
+[servers."os/legacy-hid"]
+WriteHidApdu = { id = 0, type = "archive" }
+SetLegacyMode = { id = 1, type = "blockingScalar" }
+SubscribeIncomingApdu = { id = 2, type = "archiveEvent" }
+DeliverHidApdu = { id = 3, type = "archive" }
+
+[permissions]
+"os/usbdev" = [
+    "RegisterSetupResponder",
+    "RegisterInterface",
+    "WaitForConnection",
+    "ReadEndpoint",
+    "WriteEndpoint",
+    "IsDeviceEmulationEnabled",
+    "IsDeviceEmulationConnected",
+    "SetVidPid",
+]

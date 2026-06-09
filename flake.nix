@@ -81,6 +81,8 @@
           llvmPackages.libclang
           llvmPackages.libcxxClang
           llvmPackages.llvm
+          # For Ledger SDK icon2glyph.py
+          (python3.withPackages (ps: [ps.pillow]))
         ]
         ++ (with customPackages; [
           cosign2

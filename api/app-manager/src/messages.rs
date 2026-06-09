@@ -112,6 +112,43 @@ impl GetAppName {
 #[response(Vec<AppQrMatchRules>)]
 pub struct GetQrMatchRules;
 
+/// Catalogue entry for a single installed app, returned by [`ListApps`].
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AppEntry {
+    pub app_id: String,
+    pub name: String,
+    /// `true` when the app lives under `/keyos/apps/gui-app-emu-flux/apps`.
+    pub is_flux: bool,
+}
+
+impl AppEntry {
+    pub fn new(app_id: &str, name: &str, is_flux: bool) -> Self {
+        AppEntry { app_id: app_id.to_string(), name: name.to_string(), is_flux }
+    }
+}
+
+/// Filter applied by [`ListApps`]. `None` on a field means "either"; `Some(v)`
+/// restricts the result to entries matching `v`.
+#[derive(Debug, Clone, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AppFilter {
+    pub is_flux: Option<bool>,
+}
+
+impl AppFilter {
+    /// Convenience: filter to Flux apps only.
+    pub fn flux_only() -> Self { Self { is_flux: Some(true) } }
+
+    /// Convenience: filter to non-Flux apps only.
+    pub fn standard_only() -> Self { Self { is_flux: Some(false) } }
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Vec<AppEntry>)]
+pub struct ListApps {
+    pub locale: String,
+    pub filter: AppFilter,
+}
+
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(InstalledAppsPage)]
 pub struct GetInstalledApps {

@@ -17,9 +17,11 @@ mod bootloader;
 mod builder;
 mod elf;
 mod flash;
+mod hot_reload;
 mod release_generator;
 mod symbolicate;
 mod tags;
+mod tests;
 mod utils;
 mod xous_arguments;
 
@@ -89,6 +91,7 @@ const DEFAULT_SERVICES_NORMAL: &[&str] = &[
     "backup-server",
     "fido",
     "ctap-hid",
+    "legacy-hid",
     "keycard-server",
     "app-manager-server",
     "camera-server",
@@ -104,6 +107,7 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
     "gui-app-alerts",
     "gui-app-authenticator",
     "gui-app-bitcoin",
+    "gui-app-emu-flux-server",
     "gui-app-file-browser",
     "gui-app-onboarding",
     "gui-app-qr-scanner",
@@ -121,6 +125,10 @@ const DEV_APPS: &[&str] = &[
     "gui-app-system-actions",
     "gui-app-update-test",
 ];
+
+const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &["app-flux-ethereum", "app-flux-solana"];
+
+const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[/*"app-flux-ethereum"*/];
 
 const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "gpio-server",
@@ -141,6 +149,7 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "log-file",
     "nfc-server",
     "fido",
+    "legacy-hid",
     "keycard-server",
     "settings-server",
     "usb-server",
@@ -167,6 +176,7 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     // "gui-app-recovery",
     "gui-app-file-picker-test",
     "gui-app-switcher",
+    "gui-app-emu-flux-server",
     // "recovery-worker",
     "simulator",
     "simulator-cli",
@@ -232,6 +242,8 @@ enum Commands {
         #[arg(value_name = "CRATE")]
         crates: Vec<String>,
     },
+    /// Run hardware-backed test helpers
+    Test(tests::TestArgs),
     /// Flash (parts of) the boot.bin file to the device using sam-ba
     Flash(FlashArgs),
     /// Dump flash contents to a file using sam-ba
@@ -240,6 +252,20 @@ enum Commands {
     PrintHashes,
     /// Symbolicate a KeyOS backtrace using `addr2line` tool
     Symbolicate(SymbolicateArgs),
+    /// Hot-reload a single service in the running simulator without restarting it.
+    /// Rebuilds the crate with the hosted profile and signals the kernel to kill and relaunch it.
+    #[cfg_attr(not(unix), doc = "Not supported on this platform.")]
+    Reload {
+        /// Name of the crate to rebuild and reload (e.g. gui-app-emu-flux)
+        crate_name: String,
+    },
+    /// Watch a crate's source directory and hot-reload it in the simulator on every change.
+    /// Requires `cargo watch` to be installed (`cargo install cargo-watch`).
+    #[cfg_attr(not(unix), doc = "Not supported on this platform.")]
+    Watch {
+        /// Name of the crate to watch and reload (e.g. gui-app-emu-flux)
+        crate_name: String,
+    },
 }
 
 #[derive(Args, Clone)]
@@ -260,6 +286,11 @@ struct BuildArgs {
     /// Can be specified multiple times.
     #[arg(long = "app", verbatim_doc_comment, value_name = "APP")]
     apps: Vec<String>,
+    /// Flux App to build and include in the firmware image.
+    /// These are not run by default, but launched by gui-app-emu-flux instead.
+    /// Can be specified multiple times.
+    #[arg(long = "flux", verbatim_doc_comment, value_name = "FLUX")]
+    flux_apps: Vec<String>,
     /// Build or run in hosted mode, i.e. on the PC. Also known as running the simulator.
     #[arg(long)]
     hosted: bool,
@@ -345,12 +376,20 @@ fn main() {
         Commands::Check { crates } => {
             check_crates(crates);
         }
+        Commands::Test(args) => {
+            if let Err(err) = tests::run(args) {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+        }
         Commands::Flash(flash_args) => flash_firmware(flash_args).unwrap(),
         Commands::DumpFlash(dump_flash_args) => dump_flash(dump_flash_args).unwrap(),
         Commands::PrintHashes => print_hashes(),
         Commands::Symbolicate(args) => {
             symbolicate::run_symbolicate(args).unwrap();
         }
+        Commands::Reload { crate_name } => hot_reload::reload_service(crate_name),
+        Commands::Watch { crate_name } => hot_reload::watch_service(crate_name),
     }
 }
 
@@ -403,6 +442,9 @@ fn process_services(build_args: &mut BuildArgs) {
     }
     if build_args.services.is_empty() {
         let additional_crates = if build_args.hosted {
+            if build_args.flux_apps.is_empty() {
+                build_args.flux_apps = DEFAULT_FLUX_APPS_HOSTED.iter().map(|s| s.to_string()).collect();
+            }
             DEFAULT_SERVICES_HOSTED
         } else if build_args.is_recovery {
             DEFAULT_SERVICES_RECOVERY
@@ -412,6 +454,9 @@ fn process_services(build_args: &mut BuildArgs) {
                 if !build_args.production_firmware {
                     build_args.apps.extend(DEV_APPS.iter().map(|s| s.to_string()));
                 }
+            };
+            if build_args.flux_apps.is_empty() {
+                build_args.flux_apps = DEFAULT_FLUX_APPS_NORMAL.iter().map(|s| s.to_string()).collect()
             };
             DEFAULT_SERVICES_NORMAL
         };

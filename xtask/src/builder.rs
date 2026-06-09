@@ -22,9 +22,19 @@ use crate::{tags, BuildArgs};
 
 /// An override to `.cargo/config.toml`-provided `RUSTFLAGS` for when PIC/PIE is enabled for the compilation.
 const RUSTFLAGS_OVERRIDE_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie";
+pub(crate) const KEYOS_APPS_DIR: &str = "keyos/apps";
+pub(crate) const FLUX_PARENT_APP_DIR: &str = "gui-app-emu-flux";
+pub(crate) const FLUX_APPS_DIR: &str = "keyos/apps/gui-app-emu-flux/apps";
 
 static METADATA: LazyLock<cargo_metadata::Metadata> =
     LazyLock::new(|| cargo_metadata::MetadataCommand::new().exec().unwrap());
+
+fn filesystem_app_dir_name(crate_name: &str) -> &str {
+    match crate_name {
+        "gui-app-emu-flux-server" => FLUX_PARENT_APP_DIR,
+        _ => crate_name,
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum SigningMode {
@@ -89,10 +99,16 @@ pub(crate) struct Builder {
     kernel_features: Vec<String>,
     /// crates that are installed in the xous.img, each one running in its own separate process space
     services: Vec<CrateSpec>,
-    /// Apps aren't present in the OS image, instead they reside in an `apps` folder on the filesystem.
-    /// The `gui-app-launcher` service is responsible for locating the apps and running them on user's
-    /// demand. Aside from that, the KeyOS kernel treats apps and services identically.
+    /// Apps aren't present in the OS image, instead they reside in the `keyos/apps` folder on the
+    /// filesystem. The `gui-app-launcher` service is responsible for locating the apps and running them
+    /// on user's demand. Aside from that, the KeyOS kernel treats apps and services identically.
     apps: Vec<CrateSpec>,
+    /// Flux apps aren't present in the OS image, instead they reside under
+    /// `keyos/apps/gui-app-emu-flux/apps` on the filesystem. App-manager locates and runs them on
+    /// demand. The `gui-app-emu-flux` app provides the UI launcher and API server that Flux child apps
+    /// use while running. Aside from that, the keyOS kernel treats flux apps, regular apps, and services
+    /// identically.
+    flux_apps: Vec<CrateSpec>,
     features: Vec<String>,
     target: Option<String>,
     profile: Profile,
@@ -179,6 +195,7 @@ impl Builder {
             kernel_features,
             services: args.services.iter().map(CrateSpec::from).collect(),
             apps: args.apps.iter().map(CrateSpec::from).collect(),
+            flux_apps: args.flux_apps.iter().map(CrateSpec::from).collect(),
             features,
             target,
             profile: if args.hosted { Profile::Hosted } else { Profile::Release },
@@ -186,6 +203,26 @@ impl Builder {
             // production_firmware implies reproducible
             reproducible: args.reproducible || args.production_firmware,
         }
+    }
+
+    pub fn hosted() -> Builder {
+        Builder::new(BuildArgs {
+            services: Vec::new(),
+            apps: Vec::new(),
+            flux_apps: Vec::new(),
+            hosted: true,
+            verbose_loader: false,
+            verbose_kernel: false,
+            log_serial: false,
+            log_usb_debug: false,
+            log_usb_file: false,
+            with_systemview: false,
+            integration_test: false,
+            is_recovery: false,
+            ci: false,
+            reproducible: false,
+            production_firmware: false,
+        })
     }
 
     pub fn images_path() -> PathBuf {
@@ -203,7 +240,9 @@ impl Builder {
         root.join(self.profile.as_str())
     }
 
-    fn get_apps_path(&self) -> PathBuf { self.get_target_root().join("apps") }
+    fn get_apps_path(&self) -> PathBuf { self.get_target_root().join(KEYOS_APPS_DIR) }
+
+    fn get_flux_apps_path(&self) -> PathBuf { self.get_target_root().join(FLUX_APPS_DIR) }
 
     /// Create base cargo command with environment variables
     fn base_cargo_command(&self) -> Command {
@@ -451,10 +490,16 @@ impl Builder {
         artifacts
     }
 
+    pub fn build_local_crate(&self, crate_name: &str) -> String {
+        let target = self.target.as_deref();
+        self.build_crates(&[CrateSpec::Local(crate_name.to_string())], &self.features, &target, true)
+            .remove(0)
+    }
+
     /// Execute the configured build task. This handles dispatching all configurations,
     /// including renode, hosted, and hardware targets.
     pub fn build(self, signing_mode: SigningMode) -> BuildResult {
-        if self.apps.is_empty() && self.services.is_empty() {
+        if self.services.is_empty() && self.apps.is_empty() && self.flux_apps.is_empty() {
             panic!("No services were specified. Nothing was built");
         }
 
@@ -479,7 +524,11 @@ impl Builder {
 
         // ------ build and bundle the filesystem apps ------
         let apps_path = self.get_apps_path();
-        self.build_and_bundle_apps(&apps_path, !self.ci, signing_mode);
+        self.build_and_bundle_apps(&apps_path, &self.apps, !self.ci, signing_mode);
+
+        // ------ build and bundle the filesystem flux ------
+        let flux_apps_path = self.get_flux_apps_path();
+        self.build_and_bundle_apps(&flux_apps_path, &self.flux_apps, !self.ci, signing_mode);
 
         // ------ build the kernel ------
         let built_kernel = self
@@ -604,14 +653,20 @@ impl Builder {
         output_filename
     }
 
-    pub fn build_and_bundle_apps(&self, apps_dir: &Path, sign_apps: bool, signing_mode: SigningMode) {
+    pub fn build_and_bundle_apps(
+        &self,
+        apps_dir: &Path,
+        apps: &Vec<CrateSpec>,
+        sign_apps: bool,
+        signing_mode: SigningMode,
+    ) {
         let apps_dir_str = apps_dir.to_str().unwrap();
         println!("Cleaning `{apps_dir_str:}` directory");
         fs::remove_dir_all(apps_dir).ok();
 
         println!("Bundling apps to `{apps_dir_str:}`");
         let target = self.target.as_deref();
-        let app_bins = self.build_crates(&self.apps, &self.features, &target, true);
+        let app_bins = self.build_crates(apps, &self.features, &target, true);
 
         println!("App names: {:#?}", app_bins);
 
@@ -620,12 +675,12 @@ impl Builder {
             elf_path: PathBuf,
         }
         let mut app_data = vec![];
-        for (app_src, app_bin) in self.apps.iter().zip(app_bins) {
+        for (app_src, app_bin) in apps.iter().zip(app_bins) {
             let app_name = app_src.name().to_string();
 
             println!("Bundling app {}", app_name);
 
-            let out_elf_dir = apps_dir.join(&app_name);
+            let out_elf_dir = apps_dir.join(filesystem_app_dir_name(&app_name));
             fs::create_dir_all(&out_elf_dir).unwrap();
 
             // Copy the application manifest to the app directory, and convert it to json

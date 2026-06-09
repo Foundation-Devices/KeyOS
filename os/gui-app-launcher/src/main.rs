@@ -174,6 +174,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             HiddenApp { label: "Reg. Testing".into(), app_id: "0xc677731d8ee7380a38faa7cd97cbd3a5".into() },
             HiddenApp { label: "Playground".into(), app_id: "0x7c9f81f9bcee31425062fb0d8fbf3001".into() },
             HiddenApp { label: "Crypto Perf".into(), app_id: "0xc781da2a8f5f4a68b2ee0e6ad83d41b7".into() },
+            HiddenApp { label: "Flux Emu".into(), app_id: "0x6775692d6170702d656d752d666c7578".into() },
             HiddenApp { label: "Update".into(), app_id: "0x6b713041faef901f23743263a45dcb83".into() },
         ];
 

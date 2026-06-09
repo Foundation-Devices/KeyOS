@@ -45,6 +45,7 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
     /// Returns the allocated endpoints
     pub fn register_interface<const N: usize>(
         &mut self,
+        interface_number: u8,
         if_class: u8,
         if_subclass: u8,
         if_protocol: u8,
@@ -56,6 +57,7 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
         P: MessageAllowed<RegisterInterface>,
     {
         let endpoint_numbers = self.0.send_blocking_archive(RegisterInterface {
+            interface_number,
             if_class,
             if_subclass,
             if_protocol,
@@ -97,13 +99,6 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
         Ok(())
     }
 
-    pub fn registered_interfaces(&self) -> usize
-    where
-        P: MessageAllowed<NumInterfaces>,
-    {
-        self.0.try_send_blocking_scalar(NumInterfaces).unwrap()
-    }
-
     pub fn is_enabled(&self) -> Result<bool, UsbError>
     where
         P: MessageAllowed<IsDeviceEmulationEnabled>,
@@ -138,7 +133,7 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
     where
         P: MessageAllowed<SetVidPid>,
     {
-        self.0.try_send_scalar(SetVidPid { vid, pid }).unwrap();
+        self.0.try_send_blocking_scalar(SetVidPid { vid, pid }).unwrap().unwrap();
     }
 
     pub fn reset_controller(&mut self)
