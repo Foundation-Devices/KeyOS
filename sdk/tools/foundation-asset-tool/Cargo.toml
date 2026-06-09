@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "foundation-asset-tool"
+version = "0.1.0"
+edition = "2021"
+authors = ["Foundation Devices <team@foundation.xyz>"]
+license = "MIT"
+description = "Internal Foundation SDK asset conversion helper"
+
+[[bin]]
+name = "foundation-asset-tool"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+slint-keyos-platform-build = { path = "../../../slint-keyos-platform/build" }
+
+[workspace]

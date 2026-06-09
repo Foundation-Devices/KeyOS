@@ -26,6 +26,7 @@ macros::settings_registry!(
         BluetoothEnabled: scalar,
         CameraEnabled: scalar,
         UsbEnabled: scalar,
+        DeveloperMode: scalar,
     ],
     encrypted: [
         OnboardingStatus: archive,
@@ -116,6 +117,10 @@ impl LoadDefault for settings::global::CameraEnabled {
 
 impl LoadDefault for settings::global::UsbEnabled {
     fn load_default() -> Self { Self(true) }
+}
+
+impl LoadDefault for settings::global::DeveloperMode {
+    fn load_default() -> Self { Self(false) }
 }
 
 pub(crate) fn load_prime_color() -> settings::global::SystemTheme {

@@ -48,19 +48,13 @@ We are investigating ways to make the bootloader verifiable in the future.
 
    This sets up the reproducible build environment with all required dependencies.
 
-3. Build the production firmware:
+3. Build the production firmware and print the hashes:
 
    ```
-   cargo xtask build-all --production-bootloader --production-firmware
+   just build-repro
    ```
 
-   This builds all production components (bootloader, recovery, and main firmware) in a deterministic way.
-
-4. Print the hashes of built binaries:
-   ```
-   cargo xtask print-hashes
-   ```
-   This command outputs the SHA256 hashes of the built binaries. For signed binaries (`app.bin`, `recovery.bin`, app ELF files), the hash is computed **without** the cosign2 signature header (first 0x800 bytes), since signatures are non-deterministic.
+   This builds all production components (bootloader, recovery, and main firmware) in a deterministic way, then outputs the SHA256 hashes of the built binaries. For signed binaries (`app.bin`, `recovery.bin`, app ELF files), the hash is computed **without** the cosign2 signature header (first 0x800 bytes), since signatures are non-deterministic.
 
 ## Verifying Reproducibility
 
@@ -84,7 +78,7 @@ To verify that your local build produces the same binaries as the official relea
    ```
 
 3. Compare hashes:
-   - Compare the output of your local `cargo xtask print-hashes` with the hashes computed from the release binaries.
+   - Compare the hash output from your local `just build-repro` run with the hashes computed from the release binaries.
    - The hashes for `app.bin`, `recovery.bin`, and all app ELF files should match.
    - The `boot.bin` hash will differ due to the secret `EXTRA_ENTROPY` value.
 
@@ -92,10 +86,10 @@ To verify that your local build produces the same binaries as the official relea
    - Ensure you're on the exact tag/commit corresponding to the release.
    - Verify your Nix installation and configuration.
    - Check that you're on an aarch64 architecture.
-   - Make sure you used the `--production-bootloader --production-firmware` flags.
+   - Make sure you used `just build-repro`, which passes the production build flags.
 
 ## Notes
 
 - Reproducibility guarantees that identical inputs produce identical outputs on the same CPU architecture.
-- The `--production-firmware` flag implies `--reproducible`, which disables incremental compilation for deterministic builds.
+- The `just build-repro` recipe passes `--production-firmware`, which implies `--reproducible` and disables incremental compilation for deterministic builds.
 - You do not need to use `--dont-sign` for verification, as the hash comparison ignores the signature header anyway.

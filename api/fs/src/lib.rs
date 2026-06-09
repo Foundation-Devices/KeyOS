@@ -1,6 +1,23 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Filesystem server API.
+//!
+//! The primary client handle is [`FileSystem`]. Use [`use_api!`] in app code to
+//! define local aliases for [`FileSystem`], [`File`], and [`Dir`] with the
+//! app's generated permissions type:
+//!
+//! ```rust,ignore
+//! fs::use_api!();
+//!
+//! let fs = FileSystem::default();
+//! let file = fs.open_file("state.json", fs::Location::AppData, fs::OpenFlags::read_only())?;
+//! ```
+//!
+//! The types in [`messages`] describe the wire protocol between the API handle
+//! and the filesystem server. Most app code should use [`FileSystem`] and the
+//! returned [`File`] / [`Dir`] handles directly.
+
 use std::io::{Read, Seek, Write};
 
 use num_derive::{FromPrimitive, ToPrimitive};
@@ -21,6 +38,15 @@ pub const FILE_BUFFER_SIZE: usize = 64 * 512;
 pub const BLOCK_SIZE: u64 = 512;
 pub const SYSTEM_STATE_ROOT: &str = "state";
 
+/// Defines local filesystem API aliases with generated permissions.
+///
+/// The zero-argument form expands to:
+///
+/// - `FileSystem = fs::FileSystem<FileSystemPermissions>`
+/// - `File = fs::File<FileSystemPermissions>`
+/// - `Dir = fs::Dir<FileSystemPermissions>`
+///
+/// Use this from an app crate before constructing a [`FileSystem`] handle.
 #[macro_export]
 macro_rules! use_api {
     ($fs:path, $server:path) => {
@@ -41,6 +67,11 @@ macro_rules! use_api {
     };
 }
 
+/// Client handle for the filesystem server.
+///
+/// This is the filesystem crate's high-level API surface. It owns a checked
+/// connection to `os/fs`, enforces location access checks, and creates [`File`]
+/// and [`Dir`] handles for file and directory operations.
 #[derive(Debug, Default, Clone)]
 pub struct FileSystem<P: CheckedPermissions> {
     conn: CheckedConn<P>,
@@ -211,12 +242,28 @@ impl<P: CheckedPermissions> FileSystem<P> {
         Ok(unsafe { xous::MemoryRange::new(result.addr, result.size).unwrap() })
     }
 
+    pub fn register_app_resources(
+        &self,
+        app_id: xous::AppId,
+        root: AppResourcesRoot,
+        app_dir: impl Into<String>,
+    ) -> Result<(), Error>
+    where
+        P: MessageAllowed<RegisterAppResources>,
+    {
+        self.conn.send_blocking_archive(RegisterAppResources {
+            app_id: app_id.0,
+            root,
+            app_dir: app_dir.into(),
+        })
+    }
+
     fn ensure_read_access(&self, location: Location) -> Result<(), Error> {
         if self.read_access_granted.contains(location) {
             return Ok(());
         }
         match location {
-            Location::CommonAssets | Location::AppData => return Ok(()),
+            Location::CommonAssets | Location::AppData | Location::AppResources => return Ok(()),
             Location::System => self.conn.unchecked().try_send_blocking_scalar(GetSystemReadAccess)?,
             Location::SystemAppData => {
                 self.conn.unchecked().try_send_blocking_scalar(GetSystemAppDataReadAccess)?
@@ -238,7 +285,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
             return Ok(());
         }
         match location {
-            Location::CommonAssets => return Err(Error::AccessDenied)?,
+            Location::CommonAssets | Location::AppResources => return Err(Error::AccessDenied)?,
             Location::AppData => return Ok(()),
             Location::System => self.conn.unchecked().try_send_blocking_scalar(GetSystemWriteAccess)?,
             Location::SystemAppData => {
@@ -673,20 +720,20 @@ impl DirHandle {
 pub enum Location {
     /// KeyOS common assets directory root.
     /// Read-only. Available to all apps.
-    /// <system-volume>/common
+    /// `<system-volume>/common`
     CommonAssets = 1,
 
     /// Currently running KeyOS app's RW data directory.
     /// Available to all apps.
-    /// <encrypted>/appdata/<app-id>/
+    /// `<encrypted>/appdata/<app-id>/`
     AppData,
 
     /// Privileged access to System Volume.
-    /// <system-volume>/
+    /// `<system-volume>/`
     System,
 
     /// Privileged access to the whole encrypted partition
-    /// <encrypted>/
+    /// `<encrypted>/`
     EncryptedRoot,
 
     /// Privileged access to the Boot Volume. Should only be used by firmware upgrade/recovery
@@ -696,15 +743,21 @@ pub enum Location {
     Usb,
 
     /// Encrypted user files
-    /// <encrypted>/user
+    /// `<encrypted>/user`
     User,
 
     /// Virtual partition used to share files on USB.
     Airlock,
 
     /// Per-app unencrypted state directory on System Volume.
-    /// <system-volume>/state/<app-id>/
+    /// `<system-volume>/state/<app-id>/`
     SystemAppData,
+
+    /// Currently running KeyOS app's read-only bundle resources directory.
+    /// Registered by app-manager before launch.
+    /// `<system-volume>/keyos/apps/<app-name>/resources/` for built-in apps, or
+    /// `<system-volume>/keyos/sideloaded-apps/<app-id>/resources/` for sideloaded apps.
+    AppResources,
 }
 
 impl server::AsScalar<1> for Location {

@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from slider.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct SliderSizeProps {
+    track-height: length,
+    track-radius: length,
+    thumb-size: length,
+    thumb-radius: length,
+    row-height: length,
+    track-touch-expansion: length,
+    thumb-touch-expansion: length,
+}
+
+export global SliderTheme {
+    in-out property <SliderSizeProps> size-sm: {
+        track-height: 12px,
+        track-radius: Theme.radius-full,
+        thumb-size: Theme.control-size-sm,
+        thumb-radius: Theme.radius-full,
+        row-height: Theme.control-size-sm,
+        track-touch-expansion: 0px,
+        thumb-touch-expansion: 0px,
+    };
+    in-out property <SliderSizeProps> size-md: {
+        track-height: 16px,
+        track-radius: Theme.radius-full,
+        thumb-size: Theme.control-size-md,
+        thumb-radius: Theme.radius-full,
+        row-height: Theme.control-size-md,
+        track-touch-expansion: 0px,
+        thumb-touch-expansion: 0px,
+    };
+    in-out property <SliderSizeProps> size-lg: {
+        track-height: 20px,
+        track-radius: Theme.radius-full,
+        thumb-size: Theme.control-size-lg,
+        thumb-radius: Theme.radius-full,
+        row-height: Theme.control-size-lg,
+        track-touch-expansion: 0px,
+        thumb-touch-expansion: 0px,
+    };
+
+    public pure function size(s: ControlSize) -> SliderSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

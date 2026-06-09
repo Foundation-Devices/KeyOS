@@ -8,11 +8,10 @@ use {
         gui_permissions::GuiPermissions,
         seed::SeedType,
         state::{AppState, PendingImport},
-        tr, CallbackResult, Callbacks, ImportedSeedInfo, SeedCallbacks, SeedStatus, SeedView, SeedViewType,
-        TrId,
+        tr, CallbackResult, Callbacks, ImportedSeedInfo, SeedView, SeedViewType, TrId,
     },
     anyhow::Context,
-    bip85_extended::bip39::Mnemonic,
+    bip85_extended::bip39::{Language, Mnemonic},
     nostr::{FromBech32, ToBech32},
     ordered_table::CardSortMode,
     slint_keyos_platform::{
@@ -306,7 +305,14 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
         }
     });
 
-    seed_quiz::init_seed_callbacks!(ui);
+    callbacks.on_validate_seed_word({
+        move |word: SharedString| {
+            let word = word.as_str();
+            Language::English.word_list().contains(&word)
+        }
+    });
+
+    callbacks.on_validate_full_seed(move |words| words_to_mnemonic(words).is_ok());
 
     callbacks.on_get_seed_fingerprint({
         move |words| {
@@ -388,7 +394,6 @@ fn words_to_mnemonic(words: ModelRc<SharedString>) -> Result<Mnemonic, VaultErro
     let mnemonic_str = words.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" ");
     Ok(Mnemonic::parse_normalized(&mnemonic_str).context("Could not parse seed words")?)
 }
-
 fn words_to_entropy(words: ModelRc<SharedString>) -> Result<SharedString, VaultError> {
     let mnemonic = words_to_mnemonic(words)?;
     Ok(hex::encode_upper(mnemonic.to_entropy()).into())

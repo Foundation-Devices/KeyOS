@@ -113,7 +113,7 @@ impl<R: ScalarCodec> BlockingScalarResponse<R> {
     }
 
     /// set response
-    /// will be sent on drop if [`Self::response`] is not called
+    /// will be sent on drop if [`Self::respond`] is not called
     pub fn set_response(&mut self, response: R) { self.response = Some(response) }
 }
 

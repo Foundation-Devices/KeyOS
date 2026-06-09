@@ -1,11 +1,28 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(keyos)]
 use atsama5d27::udphs::{EndpointDirection, EndpointType};
 use server::{AsScalar, FromScalar};
 
 use super::SetupPacket;
 use crate::error::UsbError;
+
+#[cfg(all(doc, not(keyos)))]
+#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum EndpointType {
+    Control = 0,
+    Isochronous = 1,
+    Bulk = 2,
+    Interrupt = 3,
+}
+
+#[cfg(all(doc, not(keyos)))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum EndpointDirection {
+    Out = 0,
+    In = 1,
+}
 
 // === Messages used by higher level drivers ===
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

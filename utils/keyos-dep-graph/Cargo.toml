@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "keyos-dep-graph"
+version = "0.1.0"
+edition = "2021"
+description = "CLI tool to generate dependency graphs for KeyOS crates"
+
+[dependencies]
+anyhow = "1.0"
+app-manifest = { path = "../../os/app-manifest" }
+clap = { version = "4.0", features = ["derive"] }

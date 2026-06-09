@@ -43,7 +43,7 @@ impl KeycardVerifyFlow {
 enum VerifyKeycardError {
     #[error(transparent)]
     Keycard(#[from] keycard::error::KeycardError),
-    #[error("failed to send quantum link message")]
+    #[error("failed to send QuantumLink message")]
     SendMessage(#[from] quantum_link::SendMessageError),
     #[error("failed to retrieve seed fingerprint")]
     Security(#[from] security::AccessDenied),

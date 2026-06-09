@@ -1,0 +1,120 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+_host_os := if os() == "macos" { "apple-darwin" } else { "unknown-linux-gnu" }
+
+build targets="native":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    host_os="{{_host_os}}"
+
+    case "{{targets}}" in
+        native)
+            arch="$(uname -m)"
+            case "$arch" in
+                arm64|aarch64) xtask_targets=("aarch64-${host_os}") ;;
+                x86_64|amd64)  xtask_targets=("x86_64-${host_os}") ;;
+                *) echo "ERROR: unsupported architecture: $arch" >&2; exit 1 ;;
+            esac
+            ;;
+        arm)
+            xtask_targets=("aarch64-${host_os}")
+            ;;
+        x86)
+            xtask_targets=("x86_64-${host_os}")
+            ;;
+        all)
+            xtask_targets=("aarch64-${host_os}" "x86_64-${host_os}")
+            ;;
+        *)
+            echo "ERROR: targets must be one of: native, arm, x86, all" >&2
+            exit 1
+            ;;
+    esac
+
+    if ! tar --version 2>/dev/null | head -n 1 | grep -q 'GNU tar'; then
+        if [[ -d /opt/homebrew/opt/gnu-tar/libexec/gnubin ]]; then
+            export PATH="/opt/homebrew/opt/gnu-tar/libexec/gnubin:$PATH"
+        else
+            echo "ERROR: GNU tar is required. Install it with your package manager." >&2
+            exit 1
+        fi
+    fi
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
+    cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{justfile_directory()}}"
+
+    xtask_args=()
+    for target in "${xtask_targets[@]}"; do
+        xtask_args+=(--target "$target")
+    done
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask build "${xtask_args[@]}" --release --package
+
+finalize sign_key="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
+    cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{justfile_directory()}}"
+
+    xtask_args=()
+    if [[ -n "{{sign_key}}" ]]; then
+        xtask_args+=(--sign-key "{{sign_key}}")
+    fi
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask finalize "${xtask_args[@]}"
+
+upload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    cd "{{justfile_directory()}}"
+
+    if [[ ! -x dist/upload.sh ]]; then
+        echo "ERROR: dist/upload.sh not found. Run 'just finalize' first." >&2
+        exit 1
+    fi
+
+    ./dist/upload.sh
+
+reinstall targets="native":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    cd "{{justfile_directory()}}"
+
+    just build "{{targets}}"
+
+    cat "{{justfile_directory()}}/dist/install.sh" | \
+        FOUNDATION_SDK_BASE_URL="file://{{justfile_directory()}}/dist" \
+        bash

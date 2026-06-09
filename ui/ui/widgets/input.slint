@@ -3,7 +3,6 @@
 import {Size, Palette, Font, UISize, Images, Utils} from "@ui/theme.slint";
 import {Icon} from "./icon.slint";
 import {IconButton} from "./icon-button.slint";
-import {Button} from "./button.slint";
 import {TextMd, TextXs} from "./txt.slint";
 import {Circle} from "./circle.slint";
 
@@ -38,16 +37,9 @@ export component Input inherits Rectangle {
     in property <bool> locked: false;
     in property <string> accept-button-text;
     in property <bool> accept-button-enabled: !has-error && !has-notice;
-    /// Optional trailing action rendered inside the input.
-    in property <string> action-label;
-    in property <string> action-icon;
-    // Fits the current trailing actions while preserving at least 144px for the
-    // text field on the standard screen; narrower hosts can override it.
-    in property <length> action-max-width: UISize.screen-width / 2 - Size.sz6;
 
     callback accepted(string);
     callback edited(string);
-    callback action-clicked();
     callback confirm-show-passsword() -> bool;
     callback key-pressed(KeyEvent) -> EventResult;
 
@@ -255,23 +247,6 @@ export component Input inherits Rectangle {
                 size: Size.sz6;
                 name: root.right-icon;
                 color: has-error ? Palette.content-copper-brand : Palette.content-brand;
-            }
-        }
-
-        if (root.action-label != "" && input-type != InputType.number): VerticalLayout {
-            horizontal-stretch: 0;
-            alignment: center;
-            padding-right: Size.sz2;
-
-            Button {
-                compact: true;
-                max-width: root.action-max-width;
-                label: root.action-label;
-                icon: root.action-icon;
-                enabled: root.enabled && !root.has-disabled && !root.locked;
-                clicked => {
-                    root.action-clicked();
-                }
             }
         }
     }

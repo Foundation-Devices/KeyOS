@@ -1,0 +1,41 @@
+[mcp_servers.passport-drive]
+args = [
+    "develop",
+    "--command",
+    "cargo",
+    "run",
+    "-p",
+    "passport-drive",
+    "--release",
+    "--",
+    "mcp",
+]
+command = "nix"
+cwd = "."
+
+[mcp_servers.passport-drive.tools.list_ports]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.connect]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.screenshot]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.disconnect]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.tap]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.input_text]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.get_logs]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.get_process_list]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.send_kernel_command]
+approval_mode = "approve"

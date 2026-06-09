@@ -1,0 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Minimal local theme for the simulator control-panel components. These are
+// not generic SDK components, so they carry their own small config rather than
+// depending on the ui2 Theme global.
+export global Theme {
+    in-out property <string> font-primary: "Montserrat";
+
+    // Foundation brand colors (from ui/ui/palettes/ui-colors.slint). The active
+    // teal gradient runs blue-500 (0%) -> teal-400 (100%).
+    in-out property <color> blue-500: #009db9;
+    in-out property <color> teal-400: #33b7c1;
+}

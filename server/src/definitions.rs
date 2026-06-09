@@ -5,8 +5,8 @@ use whence::WhenceExt;
 
 use crate::ServerContext;
 
-/// A message that is known to be handled by the server [`S`]. This is the type of
-/// the [`scalar_message`], [`archive_message`], and other functions.
+/// A message that is known to be handled by a server. This is the type returned
+/// by the server message registration helpers.
 pub type MessageDef<S> = (xous::MessageId, MessageHandler<S>);
 
 pub(crate) type MessageHandler<S> = fn(&mut S, xous::MessageEnvelope, &mut ServerContext<S>);

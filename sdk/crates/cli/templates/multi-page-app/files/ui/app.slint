@@ -1,0 +1,17 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT
+
+import { Theme, Images, ButtonVariant, ButtonState, ControlSize } from "@ui/theme.slint";
+import { Router } from "gen/router.slint";
+
+export { Theme, Images, ButtonVariant, ButtonState, ControlSize }
+export * from "gen/exports.slint";
+
+export component AppWindow inherits Window {
+    title: "{{friendly_app_name}}";
+    preferred-width: 480px;
+    preferred-height: 800px;
+    background: Theme.palette-background;
+
+    Router { }
+}

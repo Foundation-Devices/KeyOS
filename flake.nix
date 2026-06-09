@@ -97,7 +97,11 @@
         ])
         ++ (
           with pkgs;
-            lib.optionals stdenv.isLinux [
+            [
+              mdcat
+              mermaid-cli
+            ]
+            ++ lib.optionals stdenv.isLinux [
               segger-jlink
             ]
         );
@@ -120,8 +124,10 @@
             hardeningDisable = ["all"];
             buildInputs = with pkgs;
               [
+                fontconfig
                 pcsclite
                 libusb1
+                zlib
               ]
               ++ darwinPkgs
               ++ lib.optionals stdenv.isLinux [udev];
@@ -132,6 +138,7 @@
                   fontconfig
                   pcsclite
                   libusb1
+                  zlib
                   # slint sim
                   libxkbcommon
                   llvmPackages.libclang.lib

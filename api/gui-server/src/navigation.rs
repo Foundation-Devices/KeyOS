@@ -7,7 +7,8 @@ use xous::AppId;
 
 use crate::error::NavigationError;
 use crate::msg::{
-    FinishResponse, GetPendingNavRequest, NavigateTo, NavigationCancel, NavigationResult, ShowModal,
+    FinishResponse, GetPendingNavRequest, NavigateTo, NavigationCancel, NavigationResult, RunApp,
+    RunAppResponse, ShowModal,
 };
 use crate::navigation::securitykeys::{SecurityKeysNavRequest, UserPresenceOptions, UserPresenceResult};
 use crate::{GuiApi, GuiApiLight, GuiServerError, ModalStyle};
@@ -25,7 +26,6 @@ pub const LOCK_SCREEN_APP_ID: AppId = AppId(hex!("0a0000000000000000000000000000
 pub const ONBOARDING_APP_ID: AppId = AppId(hex!("dac5321775d449c11bc9c90f38067f8f"));
 pub const ALERTS_APP_ID: AppId = AppId(hex!("32defc0867555fe8002759667000b22a"));
 pub const BITCOIN_APP_ID: AppId = AppId(hex!("426974636f696e2057616c6c65740000"));
-pub const SETTINGS_APP_ID: AppId = AppId(hex!("c192b79230473875f159d4423d74d00f"));
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
     /// Shows a modal of the app, giving it a navigation object
@@ -51,6 +51,13 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         let nav_req = NavigateTo { app_id: app_id.0, args: args.to_vec() };
         let response = self.conn.try_send_blocking_archive(nav_req)?;
         Ok(response.or_else(|_| Err(NavigationError::RequestBufferTooSmall)))
+    }
+
+    pub fn run_app(&self, app_id: AppId) -> Result<RunAppResponse, GuiServerError>
+    where
+        P: MessageAllowed<RunApp>,
+    {
+        Ok(self.conn.try_send_blocking_archive(RunApp { app_id: app_id.0 })?)
     }
 
     pub fn check_user_presence(

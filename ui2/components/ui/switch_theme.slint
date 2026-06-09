@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from switch.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct SwitchSizeProps {
+    font-family: string,
+    font-size: length,
+    track-width: length,
+    track-height: length,
+    knob-size: length,
+    row-height: length,
+}
+
+export global SwitchTheme {
+    in-out property <SwitchSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        track-width: Theme.control-size-sm,
+        track-height: 20px,
+        knob-size: 20px,
+        row-height: Theme.control-size-sm,
+    };
+    in-out property <SwitchSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        track-width: Theme.control-size-md,
+        track-height: 24px,
+        knob-size: 24px,
+        row-height: Theme.control-size-md,
+    };
+    in-out property <SwitchSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        track-width: Theme.control-size-lg,
+        track-height: 28px,
+        knob-size: 28px,
+        row-height: Theme.control-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> SwitchSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

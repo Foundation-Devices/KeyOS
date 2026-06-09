@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Tabs, TabsColor, TabsOrientation, TabsVariant } from "tabs.slint";
+
+export component SegmentedControl inherits Tabs {
+    variant: TabsVariant.solid;
+    color: TabsColor.primary;
+    orientation: TabsOrientation.horizontal;
+    full-width: true;
+    show-panel: false;
+}

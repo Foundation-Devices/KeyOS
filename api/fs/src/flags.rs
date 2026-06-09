@@ -16,6 +16,7 @@ bitflags::bitflags! {
         const USER = 1 << 6;
         const AIRLOCK = 1 << 7;
         const SYSTEM_APP_DATA = 1 << 8;
+        const APP_RESOURCES = 1 << 9;
     }
 }
 
@@ -52,5 +53,6 @@ fn flag_for(location: Location) -> LocationFlags {
         Location::User => LocationFlags::USER,
         Location::Airlock => LocationFlags::AIRLOCK,
         Location::SystemAppData => LocationFlags::SYSTEM_APP_DATA,
+        Location::AppResources => LocationFlags::APP_RESOURCES,
     }
 }

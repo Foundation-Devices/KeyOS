@@ -91,7 +91,7 @@ impl Testing {
     pub fn qbspatch(&self, s: &[u8], p: &[u8]) -> io::Result<Vec<u8>> {
         let patcher = Bspatch::new(p)?;
         let mut t = Vec::with_capacity(patcher.hint_target_size() as usize);
-        patcher.apply(io::Cursor::new(s), &mut [0; 65536], io::Cursor::new(&mut t))?;
+        patcher.apply(io::Cursor::new(s), io::Cursor::new(&mut t))?;
         Ok(t)
     }
 
@@ -102,7 +102,7 @@ impl Testing {
         patcher
             .buffer_size(opts.buffer_size)
             .delta_min(opts.delta_min)
-            .apply(io::Cursor::new(s), &mut [0; 65536], io::Cursor::new(&mut t))?;
+            .apply(io::Cursor::new(s), io::Cursor::new(&mut t))?;
         Ok(t)
     }
 
@@ -168,7 +168,7 @@ impl Benchmarking {
 
     /// Perform qbspatch via internal library calls.
     pub fn qbspatch(&self, s: &[u8], p: &[u8]) -> io::Result<()> {
-        Bspatch::new(p)?.apply(io::Cursor::new(s), &mut [0; 65536], io::sink())?;
+        Bspatch::new(p)?.apply(io::Cursor::new(s), io::sink())?;
         Ok(())
     }
 
@@ -177,7 +177,7 @@ impl Benchmarking {
         Bspatch::new(p)?
             .buffer_size(opts.buffer_size)
             .delta_min(opts.delta_min)
-            .apply(io::Cursor::new(s), &mut [0; 65536], io::sink())?;
+            .apply(io::Cursor::new(s), io::sink())?;
         Ok(())
     }
 

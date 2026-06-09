@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from card.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct CardSizeProps {
+    font-family: string,
+    font-size: length,
+    card-padding: length,
+    icon-size: length,
+    border-radius: length,
+}
+
+export global CardTheme {
+    in-out property <CardSizeProps> size-default: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        card-padding: 20px,
+        icon-size: 24px,
+        border-radius: 24px,
+    };
+}

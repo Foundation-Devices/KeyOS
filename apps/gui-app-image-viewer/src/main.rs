@@ -55,32 +55,6 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     ui.run().expect("UI running");
 }
 
-fn split_selected_path(file_path: &str) -> Option<(&str, &str)> {
-    let file_path = file_path.trim_matches('/');
-    if file_path.is_empty() {
-        return None;
-    }
-    match file_path.rsplit_once('/') {
-        Some((dir_path, filename)) if !filename.is_empty() => Some((dir_path, filename)),
-        Some(_) => None,
-        None => Some(("", file_path)),
-    }
-}
-
-fn has_allowed_image_extension(name: &str) -> bool {
-    let Some((_, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    ALLOWED_EXTENSIONS.iter().any(|allowed| extension.eq_ignore_ascii_case(allowed))
-}
-
-fn image_path(location_prefix: &str, dir_path: &str, name: &str) -> String {
-    match dir_path {
-        "" => format!("{location_prefix}:/{name}"),
-        _ => format!("{location_prefix}:/{dir_path}/{name}"),
-    }
-}
-
 fn file_selection_popup() -> Option<(Vec<String>, usize)> {
     log::debug!("Opening file selection popup");
     let options = SelectFileOptions::default()
@@ -102,26 +76,29 @@ fn file_selection_popup() -> Option<(Vec<String>, usize)> {
         Location::External => (fs::Location::Usb, "usb"),
     };
 
-    let (dir_path, filename) = split_selected_path(&file_path)?;
+    let (dir_path, filename) = file_path.rsplit_once("/")?;
 
     let fs = FileSystem::default();
     let dir = fs.open_dir(dir_path, location).ok()?;
     let mut entries = vec![];
+    let mut selected_index = 0;
     while let Some(entry) = dir.next_entry().ok()? {
         let name = entry.name.as_str();
-        if !entry.is_file || name.starts_with('.') || !has_allowed_image_extension(name) {
+        if !entry.is_file || name.starts_with('.') {
             continue;
         }
-        entries.push((image_path(location_prefix, dir_path, name), name == filename));
+        let Some((_, extension)) = name.rsplit_once('.') else { continue };
+        if !ALLOWED_EXTENSIONS.contains(&extension) {
+            continue;
+        }
+        if name == filename {
+            selected_index = entries.len();
+        }
+        entries.push(format!("{location_prefix}:/{dir_path}/{name}"));
     }
-    entries.sort_unstable_by(|(path_a, _), (path_b, _)| path_a.cmp(path_b));
-    let selected_index = entries.iter().position(|(_, selected)| *selected).unwrap_or(0);
-    let entries = entries.into_iter().map(|(path, _)| path).collect::<Vec<_>>();
-    if entries.is_empty() {
-        return None;
-    }
+    entries.sort_unstable();
     log::debug!("Entries returned: {entries:?}");
-    log::info!("File selected: {}", entries.get(selected_index)?);
+    log::info!("File selected: {}", entries[selected_index]);
     Some((entries, selected_index))
 }
 
@@ -183,25 +160,4 @@ fn load_image(path: &str) -> Option<Image> {
         ))
     };
     Some(image)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_selected_path_accepts_file_in_root() {
-        assert_eq!(split_selected_path("screen.png"), Some(("", "screen.png")));
-    }
-
-    #[test]
-    fn split_selected_path_accepts_nested_file() {
-        assert_eq!(split_selected_path("designs/screen.png"), Some(("designs", "screen.png")));
-    }
-
-    #[test]
-    fn allowed_image_extension_is_case_insensitive() {
-        assert!(has_allowed_image_extension("screen.PNG"));
-        assert!(has_allowed_image_extension("screen.Jpg"));
-    }
 }

@@ -98,6 +98,70 @@ macro_rules! app {
     };
 }
 
+/// Minimal app bootstrap for SDK/template apps.
+///
+/// Unlike `app!`, this does not include generated translations or initialize the
+/// standard in-tree globals (`Utils`, `Images`, `Theme`, `TR`). Those apps own
+/// their generated UI surface and initialize any globals they export explicitly.
+#[macro_export]
+macro_rules! app_minimal {
+    ($name:expr,kind = $kind:ident,height = $height:expr) => {
+        use $crate::slint;
+        slint::include_modules!();
+        include!(concat!(env!("OUT_DIR"), "/router_init.rs"));
+
+        $crate::fs::use_api!($crate::fs, $crate::server);
+        $crate::gui_server_api::use_api!($crate::gui_server_api, $crate::server);
+        $crate::_internal_not_recovery!(
+            $crate::settings::use_api!($crate::settings, $crate::server);
+        );
+        type AppContext = $crate::AppContext<gui_permissions::GuiPermissions, fs_permissions::FileSystemPermissions>;
+
+        fn main() {
+            const WIDTH: usize = $crate::gui_server_api::consts::SCREEN_WIDTH;
+            const HEIGHT: usize = $height;
+            const NAME: &str = $name;
+
+            let gui_api = GuiApi::register(
+                $crate::gui_server_api::AppKind::$kind,
+                NAME,
+                HEIGHT,
+            )
+            .expect("can't register app UI");
+            let gui_api = std::sync::Arc::new(gui_api);
+
+            $crate::Runtime::unsafe_init({
+                let gui_api = gui_api.clone();
+                move || {
+                    gui_api.wake_event_loop()
+                }
+            });
+
+            let fs = Default::default();
+            let app_context = $crate::AppContext::new(gui_api.clone(), fs);
+            let platform = $crate::KeyOsPlatform::<WIDTH, HEIGHT, _>::new(NAME, app_context.clone());
+            $crate::slint::platform::set_platform(Box::new(platform)).expect("set platform");
+
+            let ui = AppWindow::new().expect("create app window");
+            create_router!(ui, app_context);
+
+            app_main(app_context, ui);
+        }
+    };
+
+    ($name:expr,kind = $kind:ident) => {
+        $crate::app_minimal!(
+            $name,
+            kind = $kind,
+            height = $crate::gui_server_api::consts::SCREEN_HEIGHT
+        );
+    };
+
+    ($name:expr) => {
+        $crate::app_minimal!($name, kind = App);
+    };
+}
+
 #[macro_export]
 macro_rules! _internal_init_ui_utils {
     ($utils:ty, $app:ident) => {{
@@ -246,8 +310,8 @@ macro_rules! _internal_init_ui_utils {
 }
 
 #[macro_export]
-macro_rules! _internal_init_images {
-    ($images:ty, $app:ident, $cx:ident) => {{
+macro_rules! _internal_init_images_with_theme {
+    ($images:ty, $theme:ty, $app:ident, $cx:ident) => {{
         // #IF PREVIEW
 
         // #ELSE
@@ -258,8 +322,7 @@ macro_rules! _internal_init_images {
         $app.global::<$images>().on_common({
             let ui = $app.as_weak();
             move |path| {
-                let is_dark =
-                    ui.upgrade().map(|ui| ui.global::<CurrentTheme>().get_is_dark()).unwrap_or(false);
+                let is_dark = ui.upgrade().map(|ui| ui.global::<$theme>().get_is_dark()).unwrap_or(false);
                 $crate::raw_image::load_raw_image(&fs, &common_image_cache, path, false, is_dark)
             }
         });
@@ -269,10 +332,8 @@ macro_rules! _internal_init_images {
         $app.global::<$images>().on_nine_slice({
             let ui_nine_slice = $app.as_weak();
             move |path| {
-                let is_dark = ui_nine_slice
-                    .upgrade()
-                    .map(|ui| ui.global::<CurrentTheme>().get_is_dark())
-                    .unwrap_or(false);
+                let is_dark =
+                    ui_nine_slice.upgrade().map(|ui| ui.global::<$theme>().get_is_dark()).unwrap_or(false);
                 $crate::raw_image::load_raw_image(&fs, &common_image_cache, path, true, is_dark)
             }
         });
@@ -283,6 +344,13 @@ macro_rules! _internal_init_images {
             .on_icon(move |path, size| $crate::raw_image::load_icon(&fs, &icon_cache, path, size));
 
         // #ENDIF
+    }};
+}
+
+#[macro_export]
+macro_rules! _internal_init_images {
+    ($images:ty, $app:ident, $cx:ident) => {{
+        $crate::_internal_init_images_with_theme!($images, CurrentTheme, $app, $cx);
     }};
 }
 

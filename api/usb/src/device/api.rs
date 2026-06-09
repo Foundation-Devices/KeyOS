@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(keyos)]
 pub use atsama5d27::udphs::{EndpointDirection, EndpointType};
 use server::{CheckedConn, CheckedPermissions, MessageAllowed, MessageId as _};
 
 use super::messages::*;
+#[cfg(all(doc, not(keyos)))]
+pub use super::messages::{EndpointDirection, EndpointType};
 use crate::error::UsbError;
 
 #[macro_export]

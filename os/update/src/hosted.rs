@@ -40,25 +40,39 @@ impl server::ArchiveHandler<StartUpdate> for Server {
         _context: &mut server::ServerContext<Self>,
     ) {
         let Ok(msg) = msg.deserialize() else { return };
-        self.notify(ProgressUpdate::InstallProgress(InstallProgress {
-            completion_percentage: 0,
-            estimated_seconds_remaining: 5,
-        }));
+        let mut patches = vec![];
+        for _ in &msg.release_paths {
+            patches.push(PatchProgress {
+                file_size: 1024 * 1024, // 1MB simulated
+                total_actions: 10,
+                completed_actions: 0,
+                requires_reboot: false,
+            });
+        }
+
+        let mut progress = InstallProgress {
+            patches,
+            firmware_copy: FirmwareCopyProgress { copied_bytes: 0, total_bytes: 100 },
+        };
+
+        self.notify(ProgressUpdate::InstallProgress(progress.clone()));
 
         for release in msg.release_paths {
             log::info!("Hosted update: simulating update from path: {release}");
 
+            progress.set_firmware_copy(FirmwareCopyProgress { copied_bytes: 100, total_bytes: 100 });
+            self.notify(ProgressUpdate::InstallProgress(progress.clone()));
+
             let steps_total = 10;
             for ii in 0..steps_total {
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                self.notify(ProgressUpdate::InstallProgress(InstallProgress {
-                    completion_percentage: (ii + 1) * 10,
-                    estimated_seconds_remaining: (steps_total - ii - 1) as u64 / 2,
-                }));
+                progress.action_completed();
+                self.notify(ProgressUpdate::InstallProgress(progress.clone()));
 
                 log::info!("Hosted update: step {}/{} completed", ii + 1, steps_total);
             }
 
+            self.notify(ProgressUpdate::InstallProgress(progress.clone()));
             log::info!("Hosted update: release applied successfully");
         }
 
@@ -128,12 +142,7 @@ impl server::BlockingArchiveHandler<GetUpdateStatus> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <GetUpdateStatus as server::BlockingArchive>::Response {
-        UpdateStatus {
-            downloaded_update: false,
-            needs_continue: false,
-            installing: false,
-            sufficient_battery: true,
-        }
+        UpdateStatus { downloaded_update: false, needs_continue: false, sufficient_battery: true }
     }
 }
 

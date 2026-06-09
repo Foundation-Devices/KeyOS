@@ -26,6 +26,8 @@ impl AppRegistry {
 
     pub fn pre_lock_app_id(&self) -> Option<PID> { self.pre_lock_app }
 
+    pub fn alerts_app_pid(&self) -> Option<PID> { self.map.get(&AppKind::Alerts).copied() }
+
     pub fn set_lock_screen_pid(&mut self, pid: PID) { self.set_app(pid, AppKind::LockScreen); }
 
     pub fn set_launcher_app_pid(&mut self, pid: PID) { self.set_app(pid, AppKind::Launcher); }

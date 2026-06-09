@@ -1,0 +1,88 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT
+
+import { Theme, UISize, Images, ControlSize } from "@ui/theme.slint";
+import { Button } from "@ui/button.slint";
+import { Card } from "@ui/card.slint";
+import { Navigate } from "../gen/navigate.slint";
+
+component PageAction inherits Button {
+    size: ControlSize.md;
+}
+
+export component MainPagePage inherits Rectangle {
+    background: Theme.palette-background;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 24px + UISize.control-center-status-bar-height;
+        padding-bottom: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "{{friendly_app_name}}";
+            color: Theme.palette-foreground;
+            font-family: "Montserrat";
+            font-size: 24px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "A simple routed demo app for the KeyOS SDK.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 17px;
+            font-weight: 500;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 148px;
+            background: Theme.palette-card;
+            border-radius: 20px;
+            clip: true;
+
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: Images.common("images/sample");
+                image-fit: cover;
+            }
+        }
+
+        Text {
+            text: "ROUTE /MAIN";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 15px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+
+        Card {
+            width: 100%;
+            size: lg;
+            title: "Main page";
+            body: "This multi-page starter follows the current KeyOS app routing layout and is sized to feel closer to a real device screen.";
+            footer: "The default route lives at ui/pages/page.slint with its props in ui/pages/props.slint.";
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        PageAction {
+            width: 100%;
+            text: "Go to second page";
+            clicked => {
+                Navigate.second-page({ });
+            }
+        }
+    }
+}

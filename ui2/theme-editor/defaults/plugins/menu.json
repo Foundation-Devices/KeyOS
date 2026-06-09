@@ -1,0 +1,94 @@
+{
+  "component": "Menu",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "menu-background",
+      "displayName": "Menu Background",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.surface"
+        }
+      }
+    },
+    {
+      "name": "menu-border-color",
+      "displayName": "Menu Border Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.border"
+        }
+      }
+    },
+    {
+      "name": "menu-border-width",
+      "displayName": "Menu Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": 1.0
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "menu-height",
+      "displayName": "Menu Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 512.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 172.0,
+        "sm": 148.0,
+        "lg": 196.0
+      }
+    },
+    {
+      "name": "menu-border-radius",
+      "displayName": "Menu Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlRadius.md",
+        "sm": "controlRadius.sm",
+        "lg": "controlRadius.lg"
+      }
+    },
+    {
+      "name": "menu-padding",
+      "displayName": "Menu Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 0.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+# Template metadata
+name = "kitchen-sink"
+description = "Kitchen Sink component gallery for the shared ui2 system"
+version = "1.0.0"
+
+# Template variables and their defaults
+[variables]
+app_name = ""
+friendly_app_name = "Kitchen Sink"
+launcher_app_name = "Kitchen Sink"
+description = "ui2 component gallery and theme test app"
+icon = "resources/icon.svg"
+app_id = ""
+version = "0.1.0"
+min_keyos_version = "1.0.0"

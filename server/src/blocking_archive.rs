@@ -130,7 +130,7 @@ impl<R: ArchiveCodec> ArchiveResponse<R> {
     }
 
     /// override default response function
-    /// will be sent on drop if [`Self::response`] is not called
+    /// will be sent on drop if [`Self::respond`] is not called
     pub fn set_response(&mut self, f: fn() -> R) { self.default = f; }
 }
 

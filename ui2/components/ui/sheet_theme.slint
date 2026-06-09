@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from sheet.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct SheetSizeProps {
+    font-family: string,
+    font-size: length,
+    panel-padding: length,
+    content-padding: length,
+    border-radius: length,
+    handle-width: length,
+}
+
+export global SheetTheme {
+    in-out property <SheetSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        panel-padding: Theme.control-radius-sm,
+        content-padding: 16px,
+        border-radius: 20px,
+        handle-width: Theme.control-size-sm,
+    };
+    in-out property <SheetSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        panel-padding: Theme.control-radius-md,
+        content-padding: 20px,
+        border-radius: 24px,
+        handle-width: Theme.control-size-md,
+    };
+    in-out property <SheetSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        panel-padding: Theme.control-radius-lg,
+        content-padding: 24px,
+        border-radius: 28px,
+        handle-width: Theme.control-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> SheetSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

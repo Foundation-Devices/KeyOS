@@ -41,7 +41,16 @@ impl Default for TextRenderer {
             unsafe { core::mem::transmute::<&[u8], &'static [u8]>(font_mem_range.as_slice::<u8>()) };
 
         #[cfg(not(keyos))]
-        let font_data = std::fs::read(&"../../ui/ui/fonts/Montserrat-Light.ttf").unwrap().leak();
+        let font_data =
+            ["../../resources/fonts/Montserrat-Light.ttf", "../../ui/ui/fonts/Montserrat-Light.ttf"]
+                .into_iter()
+                .find_map(|path| std::fs::read(path).ok())
+                .unwrap_or_else(|| {
+                    panic!(
+                "Could not find Montserrat-Light.ttf. Tried ../../resources/fonts and ../../ui/ui/fonts"
+            )
+                })
+                .leak();
 
         let font = FontRef::try_from_slice(font_data).expect("Could not parse font");
 

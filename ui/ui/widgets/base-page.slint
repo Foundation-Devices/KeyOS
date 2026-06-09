@@ -8,7 +8,7 @@ import { TextSm, HeadingMd } from "./txt.slint";
 import { Icon } from "./icon.slint";
 import { PopupMenu } from "./popup-menu.slint";
 import { Shield } from "./shield.slint";
-import { Images, CurrentTheme, CallbackResult, ModalTextLine, ResultLevel } from "@ui/theme.slint";
+import { Images, CurrentTheme, CallbackResult, ResultLevel } from "@ui/theme.slint";
 
 export component BaseWindow inherits Window {
     width: UISize.screen-width;
@@ -97,16 +97,11 @@ export component Modal inherits Rectangle {
     in property <brush> icon-color: Palette.content-brand;
     in property <string> title;
     in property <string> text;
-    in property <[ModalTextLine]> lines: [{ text: root.text }];
+    in property <string> extra-warning: "";
+    in property <brush> extra-warning-color: Palette.content-secondary;
     in property <length> button-spacing: Size.sz4;
 
     background: Palette.overlay;
-
-    if root.visible: FocusScope {
-        init => {
-            self.focus();
-        }
-    }
 
     // Don't allow touching items behind this
     TouchArea { }
@@ -136,10 +131,16 @@ export component Modal inherits Rectangle {
                     horizontal-alignment: center;
                 }
 
-                for line in root.lines: TextSm {
-                    text: line.text;
-                    color: line.color == Colors.transparent ? Palette.content-secondary : line.color;
-                    bold: line.bold;
+                TextSm {
+                    text: text;
+                    color: Palette.content-secondary;
+                    horizontal-alignment: center;
+                }
+
+                if extra-warning != "": TextSm {
+                    text: extra-warning;
+                    color: extra-warning-color;
+                    bold: true;
                     horizontal-alignment: center;
                 }
             }

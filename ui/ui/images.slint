@@ -7,9 +7,6 @@ import {UIColors} from "./palettes/ui-colors.slint";
 export global Images {
     // #IF PREVIEW
     // pure public function common(name: string) -> image {
-    //     if (name == "images/Montserrat-28") {
-    //         return @image-url("@ui/images/Montserrat-28.png");
-    //     }
     //     if (name == "images/background-dark") {
     //         return @image-url("@ui/images/background-dark.png");
     //     }
@@ -31,17 +28,17 @@ export global Images {
     //     if (name == "images/bitcoin-graph") {
     //         return @image-url("@ui/images/bitcoin-graph.png");
     //     }
+    //     if (name == "images/brand-foundation-dark") {
+    //         return @image-url("@ui/images/brand-foundation-dark.png");
+    //     }
+    //     if (name == "images/brand-foundation") {
+    //         return @image-url("@ui/images/brand-foundation.png");
+    //     }
     //     if (name == "images/card-circle-shadow-64") {
     //         return @image-url("@ui/images/card-circle-shadow-64.png");
     //     }
     //     if (name == "images/card-circle-shadow") {
     //         return @image-url("@ui/images/card-circle-shadow.png");
-    //     }
-    //     if (name == "images/charging-bolt-bg") {
-    //         return @image-url("@ui/images/charging-bolt-bg.png");
-    //     }
-    //     if (name == "images/charging-bolt") {
-    //         return @image-url("@ui/images/charging-bolt.png");
     //     }
     //     if (name == "images/diagonal-lines") {
     //         return @image-url("@ui/images/diagonal-lines.svg");
@@ -49,23 +46,35 @@ export global Images {
     //     if (name == "images/glow") {
     //         return @image-url("@ui/images/glow.png");
     //     }
+    //     if (name == "images/jumbo-circle-dark") {
+    //         return @image-url("@ui/images/jumbo-circle-dark.png");
+    //     }
+    //     if (name == "images/jumbo-circle-xl-dark") {
+    //         return @image-url("@ui/images/jumbo-circle-xl-dark.png");
+    //     }
+    //     if (name == "images/jumbo-circle-xl") {
+    //         return @image-url("@ui/images/jumbo-circle-xl.png");
+    //     }
     //     if (name == "images/jumbo-circle") {
     //         return @image-url("@ui/images/jumbo-circle.png");
+    //     }
+    //     if (name == "images/jumbo-download-dark") {
+    //         return @image-url("@ui/images/jumbo-download-dark.png");
     //     }
     //     if (name == "images/jumbo-download") {
     //         return @image-url("@ui/images/jumbo-download.png");
     //     }
+    //     if (name == "images/jumbo-shield-dark") {
+    //         return @image-url("@ui/images/jumbo-shield-dark.png");
+    //     }
     //     if (name == "images/jumbo-shield") {
     //         return @image-url("@ui/images/jumbo-shield.png");
     //     }
-    //     if (name == "images/keyboard_bg") {
-    //         return @image-url("@ui/images/keyboard_bg.png");
+    //     if (name == "images/logo-dark") {
+    //         return @image-url("@ui/images/logo-dark.png");
     //     }
-    //     if (name == "images/keyboard_bg_overlay") {
-    //         return @image-url("@ui/images/keyboard_bg_overlay.png");
-    //     }
-    //     if (name == "images/keyboard_bg_with_top_bar") {
-    //         return @image-url("@ui/images/keyboard_bg_with_top_bar.png");
+    //     if (name == "images/logo-light") {
+    //         return @image-url("@ui/images/logo-light.png");
     //     }
     //     if (name == "images/logo") {
     //         return @image-url("@ui/images/logo.png");
@@ -85,11 +94,17 @@ export global Images {
     //     if (name == "images/scan-qr-btn") {
     //         return @image-url("@ui/images/scan-qr-btn.png");
     //     }
-    //     if (name == "images/screen_heading_shield") {
-    //         return @image-url("@ui/images/screen_heading_shield.png");
+    //     if (name == "images/screen-heading-shield") {
+    //         return @image-url("@ui/images/screen-heading-shield.svg");
+    //     }
+    //     if (name == "images/shield-bottom-alpha-mask-dark") {
+    //         return @image-url("@ui/images/shield-bottom-alpha-mask-dark.png");
     //     }
     //     if (name == "images/shield-bottom-alpha-mask") {
     //         return @image-url("@ui/images/shield-bottom-alpha-mask.png");
+    //     }
+    //     if (name == "images/shield-top-alpha-mask-dark") {
+    //         return @image-url("@ui/images/shield-top-alpha-mask-dark.png");
     //     }
     //     if (name == "images/shield-top-alpha-mask") {
     //         return @image-url("@ui/images/shield-top-alpha-mask.png");
@@ -97,15 +112,12 @@ export global Images {
     //     if (name == "images/tap-keycard") {
     //         return @image-url("@ui/images/tap-keycard.svg");
     //     }
-    
-       // Default case if no match is found
+    //
+    //    // Default case if no match is found
     //    return @image-url("@ui/images/logo.png");
     // }
-    
+    //
     // pure public function nine-slice(name: string) -> image {
-    //     if (name == "images/developers-tile") {
-    //         return @image-url("@ui/images/developers-tile__40-40-48-40.png", nine-slice(40 40 48 40));
-    //     }
     //     if (name == "images/shadow-l1") {
     //         return @image-url("@ui/images/shadow-l1__2-4-6-4.png", nine-slice(2 4 6 4));
     //     }
@@ -124,6 +136,9 @@ export global Images {
     //     if (name == "images/shadow-l6") {
     //         return @image-url("@ui/images/shadow-l6__15-32-48-32.png", nine-slice(15 32 48 32));
     //     }
+    //     if (name == "images/shield-bg-dark") {
+    //         return @image-url("@ui/images/shield-bg-dark__64-64-96-64.png", nine-slice(64 64 96 64));
+    //     }
     //     if (name == "images/shield-bg") {
     //         return @image-url("@ui/images/shield-bg__64-64-96-64.png", nine-slice(64 64 96 64));
     //     }
@@ -139,10 +154,10 @@ export global Images {
     //     if (name == "images/slide-to-target-light") {
     //         return @image-url("@ui/images/slide-to-target-light__24-24-24-24.png", nine-slice(24 24 24 24));
     //     }
-    
+    //
     //     return @image-url("@ui/images/logo.png");
     // }
-    
+    //
     // pure public function icon(name: string, size: length) -> image {
     //     if (name == "acorn") {
     //         return @image-url("@ui/icons/acorn.svg");
@@ -204,6 +219,9 @@ export global Images {
     //     if (name == "biometrics") {
     //         return @image-url("@ui/icons/biometrics.svg");
     //     }
+    //     if (name == "bitcoin-b") {
+    //         return @image-url("@ui/icons/bitcoin-b.svg");
+    //     }
     //     if (name == "bitcoin-testnet-1") {
     //         return @image-url("@ui/icons/bitcoin-testnet-1.svg");
     //     }
@@ -237,17 +255,26 @@ export global Images {
     //     if (name == "bullet") {
     //         return @image-url("@ui/icons/bullet.svg");
     //     }
+    //     if (name == "cake-wallet") {
+    //         return @image-url("@ui/icons/cake-wallet.svg");
+    //     }
     //     if (name == "camera-off") {
     //         return @image-url("@ui/icons/camera-off.svg");
     //     }
     //     if (name == "camera") {
     //         return @image-url("@ui/icons/camera.svg");
     //     }
+    //     if (name == "caps") {
+    //         return @image-url("@ui/icons/caps.svg");
+    //     }
     //     if (name == "card-view") {
     //         return @image-url("@ui/icons/card-view.svg");
     //     }
     //     if (name == "chain") {
     //         return @image-url("@ui/icons/chain.svg");
+    //     }
+    //     if (name == "charging") {
+    //         return @image-url("@ui/icons/charging.svg");
     //     }
     //     if (name == "check-circle") {
     //         return @image-url("@ui/icons/check-circle.svg");
@@ -291,6 +318,12 @@ export global Images {
     //     if (name == "delete") {
     //         return @image-url("@ui/icons/delete.svg");
     //     }
+    //     if (name == "device-detailed") {
+    //         return @image-url("@ui/icons/device-detailed.svg");
+    //     }
+    //     if (name == "device-nfc") {
+    //         return @image-url("@ui/icons/device-nfc.svg");
+    //     }
     //     if (name == "device") {
     //         return @image-url("@ui/icons/device.svg");
     //     }
@@ -311,6 +344,12 @@ export global Images {
     //     }
     //     if (name == "email") {
     //         return @image-url("@ui/icons/email.svg");
+    //     }
+    //     if (name == "empty") {
+    //         return @image-url("@ui/icons/empty.svg");
+    //     }
+    //     if (name == "envelope") {
+    //         return @image-url("@ui/icons/envelope.svg");
     //     }
     //     if (name == "erase") {
     //         return @image-url("@ui/icons/erase.svg");
@@ -348,6 +387,12 @@ export global Images {
     //     if (name == "history") {
     //         return @image-url("@ui/icons/history.svg");
     //     }
+    //     if (name == "hourglass") {
+    //         return @image-url("@ui/icons/hourglass.svg");
+    //     }
+    //     if (name == "import") {
+    //         return @image-url("@ui/icons/import.svg");
+    //     }
     //     if (name == "info") {
     //         return @image-url("@ui/icons/info.svg");
     //     }
@@ -359,6 +404,9 @@ export global Images {
     //     }
     //     if (name == "keys") {
     //         return @image-url("@ui/icons/keys.svg");
+    //     }
+    //     if (name == "laptop") {
+    //         return @image-url("@ui/icons/laptop.svg");
     //     }
     //     if (name == "learn") {
     //         return @image-url("@ui/icons/learn.svg");
@@ -375,11 +423,17 @@ export global Images {
     //     if (name == "loader") {
     //         return @image-url("@ui/icons/loader.svg");
     //     }
+    //     if (name == "lock") {
+    //         return @image-url("@ui/icons/lock.svg");
+    //     }
     //     if (name == "locked") {
     //         return @image-url("@ui/icons/locked.svg");
     //     }
     //     if (name == "logs") {
     //         return @image-url("@ui/icons/logs.svg");
+    //     }
+    //     if (name == "master-key") {
+    //         return @image-url("@ui/icons/master-key.svg");
     //     }
     //     if (name == "menu-down") {
     //         return @image-url("@ui/icons/menu-down.svg");
@@ -389,6 +443,9 @@ export global Images {
     //     }
     //     if (name == "menu") {
     //         return @image-url("@ui/icons/menu.svg");
+    //     }
+    //     if (name == "minus") {
+    //         return @image-url("@ui/icons/minus.svg");
     //     }
     //     if (name == "moon") {
     //         return @image-url("@ui/icons/moon.svg");
@@ -420,6 +477,9 @@ export global Images {
     //     if (name == "nostr") {
     //         return @image-url("@ui/icons/nostr.svg");
     //     }
+    //     if (name == "off") {
+    //         return @image-url("@ui/icons/off.svg");
+    //     }
     //     if (name == "passport-prime") {
     //         return @image-url("@ui/icons/passport-prime.svg");
     //     }
@@ -428,6 +488,9 @@ export global Images {
     //     }
     //     if (name == "performance") {
     //         return @image-url("@ui/icons/performance.svg");
+    //     }
+    //     if (name == "phantom-wallet") {
+    //         return @image-url("@ui/icons/phantom-wallet.svg");
     //     }
     //     if (name == "pin-dot-copper") {
     //         return @image-url("@ui/icons/pin-dot-copper.svg");
@@ -465,6 +528,9 @@ export global Images {
     //     if (name == "question") {
     //         return @image-url("@ui/icons/question.svg");
     //     }
+    //     if (name == "reload") {
+    //         return @image-url("@ui/icons/reload.svg");
+    //     }
     //     if (name == "remove") {
     //         return @image-url("@ui/icons/remove.svg");
     //     }
@@ -489,11 +555,26 @@ export global Images {
     //     if (name == "sats") {
     //         return @image-url("@ui/icons/sats.svg");
     //     }
+    //     if (name == "save") {
+    //         return @image-url("@ui/icons/save.svg");
+    //     }
     //     if (name == "scan-qr") {
     //         return @image-url("@ui/icons/scan-qr.svg");
     //     }
+    //     if (name == "sd") {
+    //         return @image-url("@ui/icons/sd.svg");
+    //     }
     //     if (name == "search") {
     //         return @image-url("@ui/icons/search.svg");
+    //     }
+    //     if (name == "shield-passphrase") {
+    //         return @image-url("@ui/icons/shield-passphrase.svg");
+    //     }
+    //     if (name == "shield-plus") {
+    //         return @image-url("@ui/icons/shield-plus.svg");
+    //     }
+    //     if (name == "shield-x") {
+    //         return @image-url("@ui/icons/shield-x.svg");
     //     }
     //     if (name == "shield") {
     //         return @image-url("@ui/icons/shield.svg");
@@ -513,11 +594,11 @@ export global Images {
     //     if (name == "skip-fwd") {
     //         return @image-url("@ui/icons/skip-fwd.svg");
     //     }
+    //     if (name == "smartphone-2") {
+    //         return @image-url("@ui/icons/smartphone-2.svg");
+    //     }
     //     if (name == "smartphone") {
     //         return @image-url("@ui/icons/smartphone.svg");
-    //     }
-    //     if (name == "sort") {
-    //         return @image-url("@ui/icons/sort.svg");
     //     }
     //     if (name == "sort-ascending") {
     //         return @image-url("@ui/icons/sort-ascending.svg");
@@ -525,8 +606,14 @@ export global Images {
     //     if (name == "sort-descending") {
     //         return @image-url("@ui/icons/sort-descending.svg");
     //     }
+    //     if (name == "sort") {
+    //         return @image-url("@ui/icons/sort.svg");
+    //     }
     //     if (name == "spinner") {
     //         return @image-url("@ui/icons/spinner.svg");
+    //     }
+    //     if (name == "status") {
+    //         return @image-url("@ui/icons/status.svg");
     //     }
     //     if (name == "sun") {
     //         return @image-url("@ui/icons/sun.svg");
@@ -549,11 +636,17 @@ export global Images {
     //     if (name == "two-coins") {
     //         return @image-url("@ui/icons/two-coins.svg");
     //     }
+    //     if (name == "unlock") {
+    //         return @image-url("@ui/icons/unlock.svg");
+    //     }
     //     if (name == "unlocked") {
     //         return @image-url("@ui/icons/unlocked.svg");
     //     }
     //     if (name == "unshifted") {
     //         return @image-url("@ui/icons/unshifted.svg");
+    //     }
+    //     if (name == "usb-cable") {
+    //         return @image-url("@ui/icons/usb-cable.svg");
     //     }
     //     if (name == "usb-off") {
     //         return @image-url("@ui/icons/usb-off.svg");
@@ -564,7 +657,7 @@ export global Images {
     //     if (name == "x-corp") {
     //         return @image-url("@ui/icons/x-corp.svg");
     //     }
-    
+    //
     //     return @image-url("@ui/icons/bullet.svg");
     // }
     // #ELSE

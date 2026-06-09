@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from dropdown.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct DropdownSizeProps {
+    border-width: length,
+    border-radius: length,
+    padding-horizontal: length,
+    padding-vertical: length,
+    field-height: length,
+    font-size: length,
+    font-family: string,
+    control-height: length,
+    option-height: length,
+    icon-size: length,
+}
+
+export global DropdownTheme {
+    in-out property <DropdownSizeProps> size-sm: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-sm,
+        padding-horizontal: Theme.control-padding-inline-sm,
+        padding-vertical: Theme.spacing-sm,
+        field-height: Theme.control-size-sm,
+        font-size: Theme.font-size-sm,
+        font-family: Theme.font-primary,
+        control-height: Theme.control-size-sm,
+        option-height: 56px,
+        icon-size: 20px,
+    };
+    in-out property <DropdownSizeProps> size-md: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-md,
+        padding-horizontal: Theme.control-padding-inline-md,
+        padding-vertical: 10px,
+        field-height: Theme.control-size-md,
+        font-size: Theme.font-size-md,
+        font-family: Theme.font-primary,
+        control-height: Theme.control-size-md,
+        option-height: 64px,
+        icon-size: 22px,
+    };
+    in-out property <DropdownSizeProps> size-lg: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-lg,
+        padding-horizontal: Theme.control-padding-inline-lg,
+        padding-vertical: Theme.spacing-md,
+        field-height: Theme.control-size-lg,
+        font-size: Theme.font-size-lg,
+        font-family: Theme.font-primary,
+        control-height: Theme.control-size-lg,
+        option-height: 72px,
+        icon-size: 24px,
+    };
+
+    public pure function size(s: ControlSize) -> DropdownSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

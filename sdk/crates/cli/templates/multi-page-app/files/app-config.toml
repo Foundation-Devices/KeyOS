@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+# Foundation application configuration
+app-name = "{{app_name}}"
+friendly-app-name = "{{friendly_app_name}}"
+launcher-app-name = "{{launcher_app_name}}"
+description = "{{description}}"
+icon = "{{icon}}"
+theme = "resources/theme.json"
+app-id = "{{app_id}}"
+version = "{{version}}"
+min-keyos-version = "{{min_keyos_version}}"
+
+[publisher]
+name = "{{publisher_name}}"
+contact-email = "{{contact_email}}"
+support-url = "{{support_url}}"
+
+[permissions]
+template = ["gui-app"]
+"os/settings" = ["GetDeviceName", "GetLocale", "GetPrimeColor"]

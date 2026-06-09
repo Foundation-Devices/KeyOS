@@ -5,37 +5,159 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # KeyOS
 
-## Code Structure
+KeyOS is Foundation's operating system and app platform for Passport Prime. This
+repo contains the source needed to reproduce KeyOS release builds, plus the SDK
+source used to publish the app developer tools.
 
-- [`apps`](apps): Built-in KeyOS apps that are started on demand from the launcher. Each is a Rust binary crate, including a `src` directory, and a `ui` directory that defines the Slint UI. Each app also includes localization dictionaries under `i18n`.
-  - [`bitcoin`](apps/gui-app-bitcoin)
-    - [`src`](apps/gui-app-bitcoin/src)
-    - [`ui`](apps/gui-app-bitcoin/ui)
-    - [`i18n`](apps/gui-app-bitcoin/i18n)
-- [`os`](os): KeyOS system services that run persistently. These typically include a binary and a library crate, and the latter provides a simple interface for sending KeyOS messages to the service. Most typical cross-app interactions are coordinated through [gui navigation](os/gui-server-api/src/navigation), including file selection and QR scanning.
-  - [Filesystem](os/fs)
-  - [GUI](os/gui-server-api)
-  - [Camera](os/camera)
-- [`xtask`](xtask): The image builder for the KeyOS system and apps. All options can be viewed with `cargo xtask help`, but most commonly used options are found in the [`Justfile`](Justfile).
-- [`xous`](xous): The kernel KeyOS is built on.
-  - [Timers](xous/api/ticktimer)
-  - [Logging](xous/api/log)
-  - [Server Names](xous/api/names)
-- [`server`](server): The interface definitions for KeyOS server messages. These can be synchronous or asynchronous requests, or subscriptions. Servers will typically define a Message, implement one of the message traits for it, and a handler, then include the message in the array returned by its `messages` method.
-  - [Archive](server/src/archive.rs): Allows processes to send allocated memory sized as multiples of 4096 to other processes. This is useful from sending small structs with various parameters to sending large pieces of data for processing.
-  - [Scalar](server/src/scalar.rs): Allows processes to send up to 4 usize values.
-  - [LendMut](server/src/lend_mut.rs): Allows processes to lend others allocated memory in multiples of 4096 to other processes for processing and modification.
-  - [Event](server/src/event): Allows processes to subscribe to event messages from other processes.
+Most people arrive here for one of two reasons:
 
-## `cosign2` tool
+- They want to rebuild KeyOS and compare hashes against an official release.
+- They want to build a KeyOS app with the Foundation SDK.
 
-The [`cosign2`] tool is required to be installed in order to sign the OS image.
-Refer to the [`cosign2`](imports/cosign2) folder for information on how to install the tool and prepare the keys.
+<img src="media/passport-prime-device.png" width="800" alt="Passport Prime running KeyOS"/>
+
+## Reproduce A KeyOS Release
+
+See [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) for the full release verification
+procedure, including prerequisites, build commands, exact release-artifact
+layout, and caveats.
+
+## Build KeyOS Apps
+
+Use this path if you want to create an app for Passport Prime. App developers
+should install the Foundation SDK rather than building the whole OS tree.
+
+### Install The SDK
+
+The SDK installer downloads the current SDK bundle, verifies checksums, installs
+it under `~/.foundation/sdk`, and tries to add the `foundation` launcher to your
+shell path.
 
 ```bash
-cargo install --path imports/cosign2/cosign2-bin
+curl -fsSL https://sdk.foundation.xyz/install.sh | sh
+source ~/.zshrc # or ~/.bashrc
+foundation doctor
 ```
 
-## Simulator
+On NixOS or systems where shell rc files are managed or read-only, disable the
+rc-file update and add the launcher to your shell configuration yourself:
 
-Run the simulator from the root of the repo with `just sim`. See [DEVELOPMENT.md](DEVELOPMENT.md) for info about dependencies.
+```bash
+curl -fsSL https://sdk.foundation.xyz/install.sh | FOUNDATION_SDK_UPDATE_RC=0 sh
+export PATH="$HOME/.foundation/sdk/bin:$PATH"
+foundation doctor
+```
+
+The SDK uses Nix for the app build environment. If `foundation doctor` reports
+that Nix is missing, install Nix first:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+### Enter The Development Shell
+
+Start the SDK shell before creating or building apps:
+
+```bash
+foundation develop
+```
+
+This starts the Nix environment that provides the Rust toolchain, KeyOS target,
+Slint viewer, simulator, signing tools, and SDK paths needed by app projects.
+Type `exit` or press `Ctrl+D` to leave the shell.
+
+### Create An App
+
+Scaffold a new app from the SDK templates:
+
+```bash
+foundation new my-app
+cd my-app
+```
+
+The generated project includes:
+
+- `app-config.toml` - App name, app ID, publisher info, icon, permissions, and
+  signing configuration.
+- `Cargo.toml` - Rust package configuration with SDK path dependencies.
+- `build.rs` - Slint and KeyOS code generation.
+- `src/main.rs` - App entrypoint and callback wiring.
+- `ui/` - Slint UI files.
+- `i18n/` - Translation files.
+- `resources/` - App icon and local assets.
+
+### Run In The Simulator
+
+From inside the app project:
+
+```bash
+foundation sim
+```
+
+This builds the app for hosted execution, stages it into the SDK simulator app
+directory, and starts the KeyOS simulator.
+
+You can also preview only the UI:
+
+```bash
+foundation preview ui/app.slint
+```
+
+### Sideload To Passport Prime
+
+Connect Passport Prime over USB-C with USB enabled, and enable Developer Mode in
+Settings > Apps. Then run:
+
+```bash
+foundation sideload
+```
+
+This builds and signs the app, copies `app.elf` and `manifest.json` to the
+mounted `PRIME` volume, and launches the app over the USB control channel. Use
+`foundation sideload --no-run` if you only want to copy the app bundle.
+
+For deeper SDK details, see:
+
+- [`sdk/SDK-README.md`](sdk/SDK-README.md) - SDK maintainer and release notes.
+- [`sdk/crates/cli/SPEC.md`](sdk/crates/cli/SPEC.md) - Current `foundation` CLI
+  behavior.
+- [`sdk/crates/cli/templates`](sdk/crates/cli/templates) - Shipped app
+  templates.
+
+## Repository Structure
+
+Most app developers should not need this source tree day to day, but these are
+the important directories:
+
+- [`sdk`](sdk) - Source for the Foundation SDK, `foundation` CLI, simulator
+  packaging, templates, examples, and release installer.
+- [`apps`](apps) - Foundation-authored in-tree KeyOS apps.
+- [`api`](api) - Client crates used by apps to talk to KeyOS services.
+- [`server`](server) - Typed IPC helpers for KeyOS servers and clients.
+- [`slint-keyos-platform`](slint-keyos-platform) - KeyOS Slint runtime and build
+  integration, including routing and translation codegen.
+- [`ui`](ui) - Shared UI assets used by Foundation-authored in-tree apps.
+- [`ui2`](ui2) - Internal source for the SDK-facing shared UI surface.
+- [`os`](os), [`xous`](xous), [`boot`](boot), [`loader`](loader), and
+  [`xtask`](xtask) - OS internals, kernel, boot flow, loader, image builder, and
+  release tooling.
+
+Foundation engineers working on KeyOS internals should use
+[`DEVELOPMENT.md`](DEVELOPMENT.md).
+
+## Security Vulnerability Disclosure
+
+Please report suspected security vulnerabilities in private to
+security@foundationdevices.com. Please do not create publicly viewable issues for
+suspected security vulnerabilities.
+
+## Licensing
+
+KeyOS uses [REUSE](https://reuse.software/) metadata. License information is
+declared in file headers where possible and in [`.reuse/dep5`](.reuse/dep5) for
+generated files, assets, imported code, and other exceptions. See the
+[`LICENSES`](LICENSES) folder for the license texts used in this repository.
+
+Because KeyOS includes GPL-licensed components, KeyOS firmware should be treated
+in a copyleft manner.

@@ -1,0 +1,213 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Button Component
+// A standard button for user actions with multiple variants and sizes
+
+import { Theme, ButtonVariant, ButtonState, ControlSize } from "theme.slint";
+import { ButtonTheme, ButtonVariantProps, ButtonSizeProps } from "@theme/button_theme.slint";
+
+component Button {
+    // ===== VARIANT & SIZE (user-facing) =====
+    in property <ButtonVariant> variant: ButtonVariant.primary;
+    in property <ControlSize> size: ControlSize.md;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> background: theme-style.background;
+    in property <color> foreground: theme-style.foreground;
+    in property <color> border-color: theme-style.border-color;
+    in property <length> border-width: theme-style.border-width;
+    in property <int> font-weight: theme-style.font-weight;
+    in property <string> font-family: theme-size.font-family;
+    in property <float> button-opacity: theme-style.opacity;
+    in property <length> touch-expansion: theme-style.touch-expansion;
+
+    // Size overrides
+    in property <length> font-size: theme-size.font-size;
+    in property <length> padding-horizontal: theme-size.padding-h;
+    in property <length> padding-vertical: theme-size.padding-v;
+    in property <length> icon-size: theme-size.icon-size;
+    in property <length> border-radius: theme-size.border-radius;
+    in property <length> min-button-height: theme-size.min-height;
+
+    // ===== COMPONENT PROPS =====
+    in property <string> text: "";
+    in property <image> start-icon;
+    in property <image> end-icon;
+    in property <bool> disabled: false;
+    in property <bool> loading: false;
+    in property <bool> full-width: false;
+
+    // Internal state for forcing states in the theme editor
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+    out property <bool> has-focus: focus-scope.has-focus;
+
+    // Callbacks
+    callback clicked();
+
+    forward-focus: focus-scope;
+    accessible-role: button;
+    accessible-enabled: !root.disabled && !root.loading;
+    accessible-label: root.text;
+    accessible-action-default => {
+        if !root.disabled && !root.loading {
+            focus-scope.focus();
+            root.clicked();
+        }
+    }
+
+    // ===== INTERNAL: COMPUTE CURRENT STATE =====
+    property <bool> is-focused: (focus-scope.has-focus || force-focused) && !disabled && !loading;
+    property <bool> is-pressed: (touch.pressed || force-pressed) && !disabled && !loading;
+
+    property <ButtonState> current-state:
+        root.disabled ? ButtonState.disabled : root.loading ? ButtonState.loading : is-pressed ? ButtonState.pressed : is-focused ? ButtonState.focused : ButtonState.normal;
+
+    // ===== INTERNAL: GET THEME DATA (from the generated ButtonTheme) =====
+    property <ButtonVariantProps> theme-style: ButtonTheme.style(root.variant, current-state);
+    property <ButtonSizeProps> theme-size: ButtonTheme.size(root.size);
+
+    // ===== INTERNAL: RESOLVE FINAL VALUES =====
+    // Style props: public properties already resolve to theme defaults or caller overrides.
+    property <color> actual-background: root.background;
+    property <color> actual-foreground: root.foreground;
+    property <color> actual-border-color: root.border-color;
+    property <length> actual-border-width: root.border-width;
+    property <int> actual-font-weight: root.font-weight;
+    property <string> actual-font-family: root.font-family;
+    property <float> actual-opacity: root.button-opacity;
+    property <length> actual-touch-expansion: root.touch-expansion;
+
+    // Size props: public properties already resolve to theme defaults or caller overrides.
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-padding-h: root.padding-horizontal;
+    property <length> actual-padding-v: root.padding-vertical;
+    property <length> actual-icon-size: root.icon-size;
+    // Clamp the requested radius to half the button height so a "radius-full"
+    // token (often 9999px) renders as a pill, not an ellipse.
+    property <length> actual-border-radius:
+        min(root.border-radius, actual-min-height / 2);
+    property <length> actual-min-height: root.min-button-height;
+    // Cap radius at height / Theme.capsule-radius-divisor so "full" radius renders as a capsule.
+    property <length> effective-border-radius: min(actual-border-radius, root.height / Theme.capsule-radius-divisor);
+
+    // Text line height = font-size * Theme.line-height-ratio (default 1.2).
+    property <length> text-line-height: actual-font-size * Theme.line-height-ratio;
+
+    // Height is fixed based on font + padding, NOT icon size
+    preferred-width: container.preferred-width;
+    preferred-height: max(actual-min-height, text-line-height + actual-padding-v * 2);
+
+    // Visual container Rectangle
+    container := Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: effective-border-radius;
+        border-width: actual-border-width;
+        border-color: actual-border-color;
+        background: actual-background;
+        opacity: actual-opacity;
+
+        preferred-width: content-layout.preferred-width;
+        preferred-height: root.preferred-height;
+
+        // Content layout
+        content-layout := HorizontalLayout {
+            padding-left: actual-padding-h;
+            padding-right: actual-padding-h;
+            padding-top: actual-padding-v;
+            padding-bottom: actual-padding-v;
+            spacing: 8px;
+            alignment: center;
+
+            // Start icon - height capped to text line height
+            if root.start-icon.width > 0 && !root.loading: Rectangle {
+                width: min(actual-icon-size, text-line-height);
+                height: min(actual-icon-size, text-line-height);
+                vertical-stretch: 0;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.start-icon;
+                    colorize: actual-foreground;
+                }
+            }
+
+            // Loading spinner placeholder
+            if root.loading: Rectangle {
+                width: min(actual-icon-size, text-line-height);
+                height: min(actual-icon-size, text-line-height);
+                vertical-stretch: 0;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("../../resources/icons/loader.svg");
+                    colorize: actual-foreground;
+                }
+            }
+
+            // Text label
+            if root.text != "": Text {
+                text: root.text;
+                color: actual-foreground;
+                font-family: actual-font-family;
+                font-size: actual-font-size;
+                font-weight: actual-font-weight;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
+            // End icon - height capped to text line height
+            if root.end-icon.width > 0 && !root.loading: Rectangle {
+                width: min(actual-icon-size, text-line-height);
+                height: min(actual-icon-size, text-line-height);
+                vertical-stretch: 0;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.end-icon;
+                    colorize: actual-foreground;
+                }
+            }
+        }
+    }
+
+    // Touch area extends beyond visual bounds but doesn't affect layout
+    touch := TouchArea {
+        x: -actual-touch-expansion;
+        y: -actual-touch-expansion;
+        width: root.width + 2 * actual-touch-expansion;
+        height: root.height + 2 * actual-touch-expansion;
+
+        enabled: !root.disabled && !root.loading;
+
+        clicked => {
+            focus-scope.focus();
+            root.clicked();
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled && !root.loading;
+
+        key-pressed(event) => {
+            if (!root.disabled && !root.loading && (event.text == " " || event.text == "\n")) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export { Button }

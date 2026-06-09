@@ -38,7 +38,7 @@ jobs:
         with:
           use-cache: 'false'
            
-      - run: nix shell .#slint-lsp-upstream --command ./scripts/check-slint.sh
+      - run: nix shell .#slint-lsp-upstream --command ./scripts/format-slint.sh --check
 
   format-toml:
     name: Check TOML formatting
@@ -59,4 +59,3 @@ jobs:
         with:
           use-cache: 'false'
       - run: nix fmt -- . --check
-

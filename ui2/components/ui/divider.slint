@@ -1,0 +1,128 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme } from "theme.slint";
+import { DividerTheme } from "divider_theme.slint";
+
+export enum DividerOrientation {
+    horizontal,
+    vertical,
+}
+
+export enum DividerLabelAlignment {
+    start,
+    middle,
+    end,
+}
+
+export component Divider {
+    in property <DividerOrientation> orientation: DividerOrientation.horizontal;
+    in property <string> label: "";
+    in property <DividerLabelAlignment> label-alignment: DividerLabelAlignment.middle;
+    in property <bool> full-width: false;
+    in property <color> divider-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.92 : 1.0);
+    in property <color> label-color: Theme.palette-muted;
+    in property <string> font-family: DividerTheme.size-default.font-family;
+    in property <length> thickness: DividerTheme.size-default.thickness;
+    in property <length> font-size: DividerTheme.size-default.font-size;
+    in property <length> label-gap: DividerTheme.size-default.label-gap;
+    in property <length> label-start-margin: DividerTheme.size-default.label-start-margin;
+    in property <length> label-end-margin: DividerTheme.size-default.label-end-margin;
+
+    // ===== THEMEABLE PROPS =====
+    in property <int> label-font-weight: 500;
+
+    property <length> actual-thickness: root.thickness;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-label-gap: root.label-gap;
+    property <length> actual-label-start-margin: root.label-start-margin;
+    property <length> actual-label-end-margin: root.label-end-margin;
+    property <string> actual-font-family: root.font-family;
+    property <color> actual-divider-color: root.divider-color;
+    property <color> actual-label-color: root.label-color;
+    property <length> actual-radius: max(1px, root.actual-thickness / 2);
+    property <bool> show-label:
+        root.orientation == DividerOrientation.horizontal && root.label != "";
+    property <length> actual-label-height:
+        max(root.actual-thickness, root.actual-font-size + 6px);
+
+    preferred-width: root.orientation == DividerOrientation.horizontal ? 240px : root.actual-thickness;
+    preferred-height: root.orientation == DividerOrientation.horizontal ? root.actual-label-height : 120px;
+    horizontal-stretch: root.orientation == DividerOrientation.horizontal && root.full-width ? 1 : 0;
+
+    body := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        label-measurer := Text {
+            visible: false;
+            text: root.label;
+            font-family: root.actual-font-family;
+            font-size: root.actual-font-size;
+            font-weight: root.label-font-weight;
+        }
+
+        property <length> label-width:
+            root.show-label ? min(
+                    label-measurer.preferred-width,
+                    max(0px, root.width - root.actual-label-start-margin - root.actual-label-end-margin)) : 0px;
+        property <length> label-max-x:
+            max(root.actual-label-start-margin, root.width - root.actual-label-end-margin - body.label-width);
+        property <length> label-middle-x:
+            min(
+                max((root.width - body.label-width) / 2, root.actual-label-start-margin),
+                body.label-max-x);
+        property <length> label-x:
+            root.label-alignment == DividerLabelAlignment.start ? root.actual-label-start-margin : root.label-alignment == DividerLabelAlignment.end ? body.label-max-x : body.label-middle-x;
+        property <length> right-line-x:
+            body.label-x + body.label-width + root.actual-label-gap;
+
+        if root.orientation == DividerOrientation.vertical: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: 0px;
+            width: root.actual-thickness;
+            height: parent.height;
+            border-radius: root.actual-radius;
+            background: root.actual-divider-color;
+        }
+
+        if root.orientation == DividerOrientation.horizontal: Rectangle {
+            x: 0px;
+            y: (parent.height - self.height) / 2;
+            width: root.show-label ? max(0px, body.label-x - root.actual-label-gap) : parent.width;
+            height: root.actual-thickness;
+            border-radius: root.actual-radius;
+            background: root.actual-divider-color;
+        }
+
+        if root.show-label: Rectangle {
+            x: body.right-line-x;
+            y: (parent.height - self.height) / 2;
+            width: max(0px, parent.width - self.x);
+            height: root.actual-thickness;
+            border-radius: root.actual-radius;
+            background: root.actual-divider-color;
+        }
+
+        if root.show-label: Rectangle {
+            x: body.label-x;
+            y: (parent.height - self.height) / 2;
+            width: body.label-width;
+            height: root.actual-label-height;
+            background: transparent;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.label;
+                color: root.actual-label-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.label-font-weight;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

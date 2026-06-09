@@ -291,6 +291,39 @@ impl Builder {
         artifacts
     }
 
+    /// Build a host-only crate that lives in its own workspace (stock crates.io
+    /// Slint + the femtovg GPU renderer rather than the device's software-
+    /// renderer fork) and stage its binary at `<target>/<pkg>`, the path the
+    /// kernel and hosted services manifest expect.
+    fn build_excluded_host_crate(&self, pkg: &str, manifest_rel: &str) -> String {
+        let manifest = project_root().join(manifest_rel);
+        let mut command = self.base_cargo_command();
+        // Build into the crate's OWN workspace target dir, not the hosted
+        // CARGO_TARGET_DIR the kernel/services share (the SDK packager redirects
+        // CARGO_TARGET_DIR; inheriting it would scatter the binary).
+        command.env_remove("CARGO_TARGET_DIR");
+        command.arg("build").arg("--manifest-path").arg(&manifest);
+        println!("    Command: cargo ({pkg} / own workspace): {command:?}");
+        if !command.status().expect("Running Cargo for excluded host crate failed").success() {
+            panic!("{pkg} build failed");
+        }
+
+        let built = manifest.parent().unwrap().join("target/debug").join(pkg);
+        // Stage where hosted consumers look: the firmware kernel reads
+        // `<root>/target/hosted/<pkg>`, but the SDK packager redirects
+        // CARGO_TARGET_DIR and reads `$CARGO_TARGET_DIR/hosted/<pkg>`. Honor it.
+        let hosted_root = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| project_root().join("target"))
+            .join(self.profile.as_str());
+        std::fs::create_dir_all(&hosted_root).ok();
+        let dest = hosted_root.join(pkg);
+        std::fs::copy(&built, &dest).unwrap_or_else(|e| {
+            panic!("staging {pkg} binary {} -> {}: {e}", built.display(), dest.display())
+        });
+        dest.to_string_lossy().into_owned()
+    }
+
     /// apply custom configurations for gui-app packages
     fn apply_gui_app_config(&self, command: &mut Command, pkg: &str) {
         if !pkg.starts_with("gui-app") {
@@ -375,13 +408,27 @@ impl Builder {
         let target_path = self.get_target_root().to_string_lossy().into_owned();
         let mut artifacts = Vec::<String>::new();
 
-        let local_pkgs: Vec<&str> = packages
+        let mut local_pkgs: Vec<&str> = packages
             .iter()
             .filter_map(|pkg| match pkg {
                 CrateSpec::Local(name) => Some(name.as_str()),
                 _ => None,
             })
             .collect();
+
+        // The simulator control panel and its CLI live in their own workspaces
+        // (stock crates.io Slint + the femtovg GPU renderer, not the device's
+        // software-renderer fork), so they can't be built with `-p` from this
+        // workspace. Build each from its own manifest and stage the binary where
+        // the kernel expects.
+        for (pkg, manifest) in
+            [("simulator", "apps/simulator/Cargo.toml"), ("simulator-cli", "apps/simulator-cli/Cargo.toml")]
+        {
+            if let Some(pos) = local_pkgs.iter().position(|p| *p == pkg) {
+                local_pkgs.remove(pos);
+                artifacts.push(self.build_excluded_host_crate(pkg, manifest));
+            }
+        }
 
         // Build local packages
         if !local_pkgs.is_empty() {
@@ -484,7 +531,7 @@ impl Builder {
             built_loader_bin = Some(loader_bin);
             built_xous_img = Some(output_bundle);
         }
-        BuildResult {
+        let result = BuildResult {
             target: self.target,
             services: self.services,
             built_services,
@@ -492,7 +539,13 @@ impl Builder {
             built_loader,
             built_loader_bin,
             built_xous_img,
+        };
+        // Emit the hosted-mode services manifest so the SDK packager (and any
+        // other `build --hosted` consumer) can stage it for the simulator kernel.
+        if result.target.is_none() {
+            result.write_hosted_services_manifest();
         }
+        result
     }
 
     fn create_image(&self, kernel: &str, built_services: &[String]) -> PathBuf {
@@ -709,8 +762,54 @@ impl Builder {
 }
 
 impl BuildResult {
+    /// Write the hosted-mode `services.json` manifest next to the built kernel
+    /// and return its path. Shared by `run()` (which then execs the kernel) and
+    /// by the hosted `build` path, so the SDK packager can stage the identical
+    /// manifest instead of re-deriving syscall masks.
+    pub fn write_hosted_services_manifest(&self) -> PathBuf {
+        let mut services: Vec<app_manifest::HostedService> = vec![];
+        for service in self.built_services.iter() {
+            let manifest = load_manifest(Path::new(service).file_name().unwrap().to_str().unwrap());
+            // Built binaries carry a `.exe` suffix on Windows.
+            let service_path = if cfg!(windows) && !service.ends_with(".exe") {
+                format!("{service}.exe")
+            } else {
+                service.clone()
+            };
+            if let Some(existing) = services.iter().find(|s| s.app_id == manifest.app_id) {
+                let service_a =
+                    existing.path.rsplit_once('/').map(|(_, name)| name).unwrap_or(existing.path.as_str());
+                let service_b =
+                    service_path.rsplit_once('/').map(|(_, name)| name).unwrap_or(service_path.as_str());
+                panic!(
+                    "Error: Both {} and {} have app ID 0x{}",
+                    service_a,
+                    service_b,
+                    hex::encode(manifest.app_id)
+                );
+            }
+            services.push(app_manifest::HostedService {
+                path: service_path,
+                app_id: manifest.app_id,
+                syscalls: tags::permission::syscall_mask(&manifest.syscall),
+            });
+        }
+
+        // Write the manifest next to where cargo actually emits the hosted
+        // binaries. A packager (the SDK) overrides CARGO_TARGET_DIR, so the
+        // kernel + services land there rather than next to `built_kernel` (which
+        // is computed relative to the repo's own target dir).
+        let services_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(|dir| PathBuf::from(dir).join("hosted"))
+            .unwrap_or_else(|| Path::new(&self.built_kernel).parent().unwrap().to_path_buf());
+        std::fs::create_dir_all(&services_dir).ok();
+        let services_path = services_dir.join("services.json");
+        serde_json::to_writer_pretty(File::create(&services_path).unwrap(), &services).unwrap();
+        services_path
+    }
+
     /// Run the built kernel. Can only be called after calling build().
-    pub fn run(mut self, gdb: &str) {
+    pub fn run(self, gdb: &str) {
         if self.target.is_none() {
             // hosted mode doesn't specify a cross-compilation target!
             // throw a warning if prebuilts are specified for hosted mode
@@ -719,34 +818,7 @@ impl BuildResult {
                     println!("Warning! Pre-built binaries not supported for hosted mode ({})", name)
                 }
             }
-            // fixup windows paths
-            if cfg!(windows) {
-                for service in self.built_services.iter_mut() {
-                    service.push_str(".exe")
-                }
-            }
-            let mut services: Vec<app_manifest::HostedService> = vec![];
-            for service in self.built_services.iter() {
-                let manifest = load_manifest(Path::new(service).file_name().unwrap().to_str().unwrap());
-                if let Some(existing) = services.iter().find(|s| s.app_id == manifest.app_id) {
-                    let service_a = existing.path.rsplit_once('/').map(|(_, name)| name).unwrap();
-                    let service_b = service.rsplit_once('/').map(|(_, name)| name).unwrap();
-                    panic!(
-                        "Error: Both {} and {} have app ID 0x{}",
-                        service_a,
-                        service_b,
-                        hex::encode(manifest.app_id)
-                    );
-                }
-                services.push(app_manifest::HostedService {
-                    path: service.to_owned(),
-                    app_id: manifest.app_id,
-                    syscalls: tags::permission::syscall_mask(&manifest.syscall),
-                });
-            }
-
-            let services_path = Path::new(&self.built_kernel).parent().unwrap().join("services.json");
-            serde_json::to_writer_pretty(File::create(&services_path).unwrap(), &services).unwrap();
+            let services_path = self.write_hosted_services_manifest();
 
             println!("Starting hosted mode...");
             println!("    Command: {} {}", self.built_kernel, services_path.display());
@@ -943,6 +1015,13 @@ pub fn is_binary_crate(crate_name: &str) -> bool {
 }
 
 pub fn get_crate_dir(crate_name: &str) -> PathBuf {
+    // simulator / simulator-cli are excluded from this workspace (they have
+    // their own, stock-Slint workspaces), so they aren't in cargo metadata.
+    match crate_name {
+        "simulator" => return project_root().join("apps/simulator"),
+        "simulator-cli" => return project_root().join("apps/simulator-cli"),
+        _ => {}
+    }
     get_package_metadata(crate_name).manifest_path.parent().unwrap().to_path_buf().into_std_path_buf()
 }
 

@@ -1,0 +1,109 @@
+{
+  "component": "Spinner",
+  "variants": [
+    "primary",
+    "neutral",
+    "success",
+    "warning",
+    "danger"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "track-color",
+      "displayName": "Track Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "primary": {
+          "normal": "color.secondary"
+        },
+        "neutral": {
+          "normal": "color.secondary"
+        },
+        "success": {
+          "normal": "color.secondary"
+        },
+        "warning": {
+          "normal": "color.secondary"
+        },
+        "danger": {
+          "normal": "color.secondary"
+        }
+      }
+    },
+    {
+      "name": "accent-color-override",
+      "displayName": "Accent Color Override",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "primary": {
+          "normal": "color.primary"
+        },
+        "neutral": {
+          "normal": "color.foreground"
+        },
+        "success": {
+          "normal": "color.success"
+        },
+        "warning": {
+          "normal": "color.warning"
+        },
+        "danger": {
+          "normal": "color.danger"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "spinner-size",
+      "displayName": "Spinner Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 26.0,
+        "sm": 18.0,
+        "lg": 36.0
+      }
+    },
+    {
+      "name": "stroke-width",
+      "displayName": "Stroke Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 0.5,
+      "defaults": {
+        "default": 3.0,
+        "sm": 2.0,
+        "lg": 4.0
+      }
+    },
+    {
+      "name": "animation-speed",
+      "displayName": "Speed",
+      "type": "float",
+      "min": 1.0,
+      "max": 240.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 60.0
+      }
+    }
+  ]
+}

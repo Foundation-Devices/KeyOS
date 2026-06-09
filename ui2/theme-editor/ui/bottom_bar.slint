@@ -1,0 +1,268 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Internal components must be defined before use
+
+component ViewportPreset inherits Rectangle {
+    in property <string> label;
+    in property <length> width-value;
+    in property <bool> selected;
+    in property <bool> dark-mode;
+
+    callback clicked();
+
+    width: self.preferred-width;
+    preferred-width: label-text.preferred-width + 16px;
+    height: 28px;
+    border-radius: 4px;
+    background: selected ? (dark-mode ? #1a9a9a : #1a9a9a) : touch.has-hover ? (dark-mode ? #3a3a3a : #e8e8e8) : transparent;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    label-text := Text {
+        text: label;
+        color: selected ? #ffffff : (dark-mode ? #cccccc : #444444);
+        font-size: 12px;
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> dark-mode;
+
+    callback clicked();
+
+    width: self.preferred-width;
+    preferred-width: label.preferred-width + 16px;
+    height: 28px;
+    border-radius: 4px;
+    background: touch.has-hover ? (dark-mode ? #3a3a3a : #e8e8e8) : transparent;
+    border-width: 1px;
+    border-color: dark-mode ? #3a3a3a : #e0e0e0;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    label := Text {
+        text: root.text;
+        color: dark-mode ? #cccccc : #444444;
+        font-size: 12px;
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component BottomBar inherits Rectangle {
+    in property <bool> dark-mode;
+    in-out property <length> viewport-width;
+    in-out property <length> viewport-height;
+
+    // Internal state for responsive mode
+    in-out property <bool> is-responsive: false;
+
+    background: dark-mode ? #2a2a2a : #ffffff;
+    border-width: 1px;
+    border-color: dark-mode ? #3a3a3a : #e0e0e0;
+
+    // Main horizontal layout with vertical centering
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        alignment: space-between;
+
+        // Viewport presets - left side
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+
+            Text {
+                text: "Viewport:";
+                color: dark-mode ? #888888 : #666666;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            ViewportPreset {
+                label: "375";
+                width-value: 375px;
+                selected: !is-responsive && viewport-width == 375px;
+                dark-mode: root.dark-mode;
+                clicked => {
+                    is-responsive = false;
+                    viewport-width = 375px;
+                }
+            }
+
+            ViewportPreset {
+                label: "390";
+                width-value: 390px;
+                selected: !is-responsive && viewport-width == 390px;
+                dark-mode: root.dark-mode;
+                clicked => {
+                    is-responsive = false;
+                    viewport-width = 390px;
+                }
+            }
+
+            ViewportPreset {
+                label: "430";
+                width-value: 430px;
+                selected: !is-responsive && viewport-width == 430px;
+                dark-mode: root.dark-mode;
+                clicked => {
+                    is-responsive = false;
+                    viewport-width = 430px;
+                }
+            }
+
+            // Responsive toggle
+            Rectangle {
+                width: responsive-text.preferred-width + 24px;
+                height: 28px;
+                border-radius: 4px;
+                background: is-responsive ? (dark-mode ? #1a9a9a : #1a9a9a) : responsive-touch.has-hover ? (dark-mode ? #3a3a3a : #e8e8e8) : transparent;
+
+                responsive-touch := TouchArea {
+                    clicked => {
+                        is-responsive = !is-responsive;
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    alignment: center;
+
+                    responsive-text := Text {
+                        text: "Responsive";
+                        color: is-responsive ? #ffffff : (dark-mode ? #cccccc : #444444);
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Width slider when in responsive mode
+            if is-responsive: slider-container := Rectangle {
+                width: 150px;
+                height: 28px;
+                background: dark-mode ? #1a1a1a : #f0f0f0;
+                border-radius: 4px;
+
+                property <length> track-width: 134px;
+                property <length> track-start: 8px;
+                property <length> min-viewport: 200px;
+                property <length> max-viewport: 600px;
+                property <float> progress: clamp((viewport-width - min-viewport) / (max-viewport - min-viewport), 0, 1);
+
+                // Track background - this receives click/drag events
+                Rectangle {
+                    x: slider-container.track-start;
+                    y: (parent.height - 4px) / 2;
+                    width: slider-container.track-width;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: dark-mode ? #3a3a3a : #d0d0d0;
+
+                    // Filled portion - explicitly left-aligned
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: slider-container.progress * parent.width;
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: #1a9a9a;
+                    }
+                }
+
+                // Invisible touch area covering whole slider for easier dragging
+                slider-touch := TouchArea {
+                    x: slider-container.track-start;
+                    y: 0;
+                    width: slider-container.track-width;
+                    height: parent.height;
+                    mouse-cursor: pointer;
+
+                    moved => {
+                        if (self.pressed) {
+                            // Direct position mapping - mouse-x relative to track width
+                            viewport-width = clamp(
+                                slider-container.min-viewport + (self.mouse-x / slider-container.track-width) * (slider-container.max-viewport - slider-container.min-viewport),
+                                slider-container.min-viewport,
+                                slider-container.max-viewport);
+                        }
+                    }
+
+                    clicked => {
+                        // Click to position
+                        viewport-width = clamp(
+                            slider-container.min-viewport + (self.mouse-x / slider-container.track-width) * (slider-container.max-viewport - slider-container.min-viewport),
+                            slider-container.min-viewport,
+                            slider-container.max-viewport);
+                    }
+                }
+
+                // Visual drag handle (no touch handling, just visual)
+                Rectangle {
+                    x: slider-container.track-start + slider-container.progress * slider-container.track-width - 8px;
+                    y: (parent.height - 16px) / 2;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 8px;
+                    background: slider-touch.has-hover || slider-touch.pressed ? #ffffff : (dark-mode ? #cccccc : #ffffff);
+                    border-width: 2px;
+                    border-color: #1a9a9a;
+                }
+            }
+
+            // Current width display
+            Rectangle {
+                width: 60px;
+                height: 28px;
+                background: dark-mode ? #3a3a3a : #f0f0f0;
+                border-radius: 4px;
+
+                Text {
+                    text: Math.round(viewport-width / 1px) + "px";
+                    color: dark-mode ? #cccccc : #444444;
+                    font-size: 12px;
+                    width: 100%;
+                    height: 100%;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Actions - right side
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+
+            ActionButton {
+                text: "Copy Slint";
+                dark-mode: root.dark-mode;
+            }
+
+            ActionButton {
+                text: "Copy Rust";
+                dark-mode: root.dark-mode;
+            }
+        }
+    }
+}

@@ -23,7 +23,6 @@ pub fn decode_int(b: &[u8]) -> i64 {
 
 /// Encodes integer.
 #[inline]
-#[cfg(feature = "encode")]
 pub fn encode_int(x: i64, b: &mut [u8]) {
     if x < 0 {
         LE::write_u64(b, x.wrapping_neg() as u64 | (1 << 63));

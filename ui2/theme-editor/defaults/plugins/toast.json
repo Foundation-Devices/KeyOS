@@ -1,0 +1,93 @@
+{
+  "component": "Toast",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "card-width",
+      "displayName": "Card Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 512.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 360.0,
+        "sm": 300.0,
+        "lg": 420.0
+      }
+    },
+    {
+      "name": "toast-padding",
+      "displayName": "Toast Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 14.0,
+        "sm": 12.0,
+        "lg": 16.0
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 18.0,
+        "sm": 16.0,
+        "lg": 20.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 16.0,
+        "sm": 14.0,
+        "lg": 18.0
+      }
+    }
+  ]
+}

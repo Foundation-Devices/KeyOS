@@ -5,8 +5,6 @@ import { CurrentTheme } from "@ui/theme.slint";
 import { StepModel } from "@ui/widgets/step-list.slint";
 import { FwUpdateState, FwUpdateError } from "@ui/pages/fw-update-page.slint";
 import { KeycardBackupError } from "@ui/pages/keycard-backup/keycard-backup-error.slint";
-import { SeedStatus } from "@ui/pages.slint";
-export { SeedStatus }
 
 export enum SecurityCheckState {
     Idle,
@@ -35,7 +33,7 @@ export global OnboardingCallbacks {
 
     // bluetooth pairing scan
     pure callback qr-data() -> string;
-    // animated qr code data for quantum link pairing
+    // animated qr code data for QuantumLink pairing
     pure callback animated-qr-data() -> [string];
 
     // ========== Security Status ==========
@@ -121,6 +119,10 @@ export global SeedGlobal {
     callback restore-from-seed-qr();
     callback restore-from-seed-words([string]);
     callback retry-restore-magic-backup();
+
+    // BIP39 seed word validation callbacks
+    pure callback validate-seed-word(string) -> bool;
+    pure callback validate-full-seed([string]) -> bool;
 
     // ========== Manual seed Backup ==========
     // Get the seed words for display

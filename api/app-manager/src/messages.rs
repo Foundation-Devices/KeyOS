@@ -31,7 +31,7 @@ pub enum AppEvent {
 
     AppCrashed { app_id: [u32; 4], pid: PID, launched_by: PID, exit_code: u32, panic_message: Option<String> },
 
-    LaunchError { app_id: [u32; 4], error: LaunchError },
+    LaunchError(LaunchError),
 }
 
 #[derive(Debug, server::Message)]
@@ -40,6 +40,56 @@ pub struct LaunchApp(pub AppId);
 pub struct AppQrMatchRules {
     pub id: [u32; 4],
     pub rules_json: Vec<u8>,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InstalledAppInfo {
+    pub app_id: String,
+    pub name: String,
+    /// On-disk path/reference for the app's bundled icon when it exists. Icon
+    /// bytes are fetched separately via [`GetAppIcon`] on device so a single
+    /// large icon (or many apps) cannot overflow the listing's IPC buffer.
+    pub bundled_icon_path: Option<String>,
+    pub publisher: String,
+    pub version: String,
+    pub size_bytes: u64,
+    pub description: String,
+    pub permissions: Vec<String>,
+}
+
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct ThirdPartyCertificateInfo {
+    pub name: String,
+    pub company: String,
+    pub contact_email: String,
+    pub support_url: String,
+    pub public_key: String,
+    #[serde(default)]
+    pub not_before_unix_seconds: Option<u64>,
+    #[serde(default)]
+    pub not_after_unix_seconds: Option<u64>,
+    pub serial_number: String,
+    pub issuer: String,
+    pub subject: String,
+    pub basic_constraints: String,
+    pub key_usage: String,
+    pub extended_key_usage: String,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ImportThirdPartyCertificateResult {
+    Imported(ThirdPartyCertificateInfo),
+    Invalid,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum RemoveThirdPartyCertificateResult {
+    Removed,
+    NotFound,
+    AppRequiresKey(String),
+    InternalError,
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -61,3 +111,52 @@ impl GetAppName {
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Vec<AppQrMatchRules>)]
 pub struct GetQrMatchRules;
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(InstalledAppsPage)]
+pub struct GetInstalledApps {
+    pub locale: String,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InstalledAppsPage {
+    pub apps: Vec<InstalledAppInfo>,
+    pub next_offset: Option<usize>,
+}
+
+/// Fetch the raw bytes of a single app's bundled icon, keyed by its hex app id
+/// (as returned in [`InstalledAppInfo::app_id`]). Returns `None` when the app
+/// is unknown, has no bundled icon, or the icon cannot be read.
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Option<Vec<u8>>)]
+pub struct GetAppIcon {
+    pub app_id: String,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(ThirdPartyCertificatesPage)]
+pub struct GetThirdPartyCertificates {
+    pub offset: usize,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ThirdPartyCertificatesPage {
+    pub certificates: Vec<ThirdPartyCertificateInfo>,
+    pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(ImportThirdPartyCertificateResult)]
+pub struct ImportThirdPartyCertificate {
+    pub certificate_pem: Vec<u8>,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(RemoveThirdPartyCertificateResult)]
+pub struct RemoveThirdPartyCertificate {
+    pub public_key: String,
+    pub locale: String,
+}

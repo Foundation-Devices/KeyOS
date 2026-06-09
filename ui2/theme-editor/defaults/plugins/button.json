@@ -1,0 +1,379 @@
+{
+  "component": "Button",
+  "variants": [
+    "primary",
+    "secondary",
+    "tertiary",
+    "ghost",
+    "danger"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "background",
+      "displayName": "Background",
+      "type": "color",
+      "defaults": {
+        "primary": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.primary"
+        },
+        "secondary": {
+          "normal": "color.secondary",
+          "focused": "color.secondary",
+          "pressed": "color.secondary.dark",
+          "disabled": "color.secondary"
+        },
+        "tertiary": {
+          "normal": "color.transparent",
+          "focused": "color.transparent",
+          "pressed": "color.primary.light",
+          "disabled": "color.transparent"
+        },
+        "ghost": {
+          "normal": "color.transparent",
+          "focused": "color.transparent",
+          "pressed": "color.foreground.light",
+          "disabled": "color.transparent"
+        },
+        "danger": {
+          "normal": "color.danger",
+          "focused": "color.danger",
+          "pressed": "color.danger.dark",
+          "disabled": "color.danger"
+        }
+      }
+    },
+    {
+      "name": "foreground",
+      "displayName": "Foreground",
+      "type": "color",
+      "defaults": {
+        "primary": {
+          "normal": "color.white",
+          "focused": "color.white",
+          "pressed": "color.white",
+          "disabled": "color.white"
+        },
+        "secondary": {
+          "normal": "color.foreground",
+          "focused": "color.foreground",
+          "pressed": "color.foreground",
+          "disabled": "color.foreground"
+        },
+        "tertiary": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary",
+          "disabled": "color.primary"
+        },
+        "ghost": {
+          "normal": "color.foreground",
+          "focused": "color.foreground",
+          "pressed": "color.foreground",
+          "disabled": "color.foreground"
+        },
+        "danger": {
+          "normal": "color.white",
+          "focused": "color.white",
+          "pressed": "color.white",
+          "disabled": "color.white"
+        }
+      }
+    },
+    {
+      "name": "borderColor",
+      "displayName": "Border Color",
+      "type": "color",
+      "defaults": {
+        "primary": {
+          "normal": "color.transparent",
+          "focused": "color.primary.light",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "secondary": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "tertiary": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary",
+          "disabled": "color.primary"
+        },
+        "ghost": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "danger": {
+          "normal": "color.transparent",
+          "focused": "color.danger.light",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        }
+      }
+    },
+    {
+      "name": "borderWidth",
+      "displayName": "Border Width",
+      "type": "float",
+      "min": 0,
+      "max": 10,
+      "step": 0.5,
+      "defaults": {
+        "primary": {
+          "normal": 0,
+          "focused": 2,
+          "pressed": 0,
+          "disabled": 0
+        },
+        "secondary": {
+          "normal": 0,
+          "focused": 2,
+          "pressed": 0,
+          "disabled": 0
+        },
+        "tertiary": {
+          "normal": 2,
+          "focused": 2,
+          "pressed": 2,
+          "disabled": 2
+        },
+        "ghost": {
+          "normal": 0,
+          "focused": 2,
+          "pressed": 0,
+          "disabled": 0
+        },
+        "danger": {
+          "normal": 0,
+          "focused": 2,
+          "pressed": 0,
+          "disabled": 0
+        }
+      }
+    },
+    {
+      "name": "fontWeight",
+      "displayName": "Font Weight",
+      "type": "int",
+      "min": 100,
+      "max": 900,
+      "defaults": {
+        "primary": {
+          "normal": 500,
+          "focused": 500,
+          "pressed": 500,
+          "disabled": 500
+        },
+        "secondary": {
+          "normal": 500,
+          "focused": 500,
+          "pressed": 500,
+          "disabled": 500
+        },
+        "tertiary": {
+          "normal": 500,
+          "focused": 500,
+          "pressed": 500,
+          "disabled": 500
+        },
+        "ghost": {
+          "normal": 500,
+          "focused": 500,
+          "pressed": 500,
+          "disabled": 500
+        },
+        "danger": {
+          "normal": 500,
+          "focused": 500,
+          "pressed": 500,
+          "disabled": 500
+        }
+      }
+    },
+    {
+      "name": "opacity",
+      "displayName": "Opacity",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.1,
+      "defaults": {
+        "primary": {
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
+          "disabled": 0.5
+        },
+        "secondary": {
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
+          "disabled": 0.5
+        },
+        "tertiary": {
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
+          "disabled": 0.5
+        },
+        "ghost": {
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
+          "disabled": 0.5
+        },
+        "danger": {
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
+          "disabled": 0.5
+        }
+      }
+    },
+    {
+      "name": "touchExpansion",
+      "displayName": "Touch Expansion",
+      "type": "float",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "defaults": {
+        "primary": {
+          "normal": 4,
+          "focused": 4,
+          "pressed": 4,
+          "disabled": 4
+        },
+        "secondary": {
+          "normal": 4,
+          "focused": 4,
+          "pressed": 4,
+          "disabled": 4
+        },
+        "tertiary": {
+          "normal": 4,
+          "focused": 4,
+          "pressed": 4,
+          "disabled": 4
+        },
+        "ghost": {
+          "normal": 4,
+          "focused": 4,
+          "pressed": 4,
+          "disabled": 4
+        },
+        "danger": {
+          "normal": 4,
+          "focused": 4,
+          "pressed": 4,
+          "disabled": 4
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "fontFamily",
+      "displayName": "Font Family",
+      "type": "string",
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "fontSize",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 8,
+      "max": 32,
+      "step": 1,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "paddingH",
+      "displayName": "Padding H",
+      "type": "float",
+      "min": 0,
+      "max": 48,
+      "step": 2,
+      "defaults": {
+        "default": "spacing.lg",
+        "sm": "spacing.md",
+        "lg": "spacing.xl"
+      }
+    },
+    {
+      "name": "paddingV",
+      "displayName": "Padding V",
+      "type": "float",
+      "min": 0,
+      "max": 24,
+      "step": 1,
+      "defaults": {
+        "default": "spacing.sm",
+        "sm": "spacing.xs",
+        "lg": "spacing.md"
+      }
+    },
+    {
+      "name": "iconSize",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 12,
+      "max": 48,
+      "step": 2,
+      "defaults": {
+        "default": 24,
+        "sm": 20,
+        "lg": 28
+      }
+    },
+    {
+      "name": "minHeight",
+      "displayName": "Min Height",
+      "type": "float",
+      "min": 24,
+      "max": 80,
+      "step": 2,
+      "defaults": {
+        "default": 60,
+        "sm": 52,
+        "lg": 68
+      }
+    },
+    {
+      "name": "borderRadius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0,
+      "max": 40,
+      "step": 1,
+      "defaults": {
+        "default": "radius.default"
+      }
+    }
+  ]
+}

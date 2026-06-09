@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+[fs-generic]
+"os/fs" = [
+    "OpenDirMessage",
+    "OpenFileMessage",
+    "CloseFile",
+    "CloseDir",
+    "CreateDirMessage",
+    "ReadFile",
+    "SeekFile",
+    "WriteFile",
+    "TruncateFile",
+    "SetLen",
+    "GetMetadata",
+    "NextEntry",
+    "Flush",
+    "FlushFs",
+    "Remove",
+    "Rename",
+    "AtomicCopy",
+    "AsyncRead",
+    "AsyncWrite",
+    "AsyncCopyBlock",
+    "SubscribeFilesystemEvent",
+]
+[i2c]
+"os/i2c" = [
+    "ClaimPeripheral",
+    "SingleTransfer",
+]
+[gpio]
+"os/gpio" = [
+    "ClaimPin",
+    "EnableIrq",
+    "SetPin",
+    "GetPin",
+]
+[gui-app]
+"os/fs" = [
+    "OpenDirMessage",
+    "OpenFileMessage",
+    "CloseFile",
+    "CloseDir",
+    "ReadFile",
+    "NextEntry",
+    "MapFileMessage",
+    "GetMetadata",
+]
+"os/gui-server" = [
+    "RegisterAppMessage",
+    "RequestRedraw",
+    "AnimateNextFrame",
+    "SubmitFrame",
+    "UpdateKeyboard",
+    "HideKeyboard",
+    "ShowModal",
+]
+"os/settings" = [
+    "GetSystemTheme",
+    "SubscribeSystemTheme",
+    "GetDebugTouch",
+    "SubscribeDebugTouch",
+]
+[navigable]
+"os/gui-server" = [
+    "GetPendingNavRequest",
+    "FinishResponse",
+    "NavigationCancel",
+]

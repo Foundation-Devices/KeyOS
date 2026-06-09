@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme } from "theme.slint";
+
+// Panel — the neumorphic section container (gradient surface + gradient
+// border + drop shadow). The inner layout is supplied by the caller via
+// `@children`, so panels can be a single inline row or a header + body.
+export component Panel inherits Rectangle {
+    in property <brush> surface-brush: @linear-gradient(180deg, #0a0a0b 0%, #0d0d0e 100%);
+    // Light warm-grey at the top fading to near-black at the bottom.
+    in property <brush> border-brush: @linear-gradient(180deg, #bfafa9 0%, #6e6460 18%, #34302d 55%, #141312 100%);
+    in property <length> stroke-width: 1px;
+    in property <length> corner-radius: 11.2px;
+
+    border-radius: root.corner-radius;
+    border-width: root.stroke-width;
+    border-color: root.border-brush;
+    background: root.surface-brush;
+    drop-shadow-blur: 8px;
+    drop-shadow-offset-y: 12px;
+    drop-shadow-color: #0000003d; // rgba(0,0,0,0.24)
+    clip: true;
+
+    @children
+}
+
+// PanelHeading — the section title text style (e.g. "Theme", "Scale").
+export component PanelHeading inherits Text {
+    color: #e3e2e2; // Content/Secondary
+    font-family: Theme.font-primary;
+    font-size: 20px;
+    font-weight: 500;
+    vertical-alignment: center;
+    horizontal-alignment: left;
+}
+
+// PanelDivider — engraved hairline: a dark line over a light one.
+export component PanelDivider inherits Rectangle {
+    height: 1.4px;
+
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 0.7px;
+            background: #231f20;
+        }
+
+        Rectangle {
+            height: 0.7px;
+            background: #747374;
+        }
+    }
+}

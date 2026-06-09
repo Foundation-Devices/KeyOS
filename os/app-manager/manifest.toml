@@ -7,11 +7,16 @@ extends = "../../api/app-manager"
 en = "App Manager"
 
 [servers."os/app-manager"]
-ChildCrashed = { id = 5, type = "scalar" }
-Disconnected = { id = 6, type = "scalar" }
+ChildCrashed = { id = 64, type = "scalar" }
+Disconnected = { id = 65, type = "scalar" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]
 "os/crypto" = ["ShaSetContext", "ShaUpdate", "ShaGetContext", "ShaDrop"]
-"os/fs" = ["GetSystemReadAccess"]
+"os/fs" = [
+    "GetSystemReadAccess",
+    "GetSystemAppDataReadAccess",
+    "GetSystemAppDataWriteAccess",
+    "RegisterAppResources",
+]
 "os/nameserver" = ["AddManifest"]

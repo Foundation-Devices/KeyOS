@@ -8,6 +8,7 @@
 # - Do not use just in CI. It increases CI times.
 
 docker_image := 'keyos'
+api_doc_packages := 'server app-manager backup camera crypto fs gui-server-api haptics keycard nfc power-manager quantum-link rgb-led security settings update usb fido'
 
 # Format the codebase.
 fmt:
@@ -62,9 +63,8 @@ test:
 
 # Lint the codebase.
 lint:
-    reuse lint
-    ./scripts/check-slint.sh
-    reuse --suppress-deprecation lint
+    ./scripts/check-reuse.sh
+    ./scripts/format-slint.sh --check
     cargo fmt --all --check
     just toml-fmt --check
     cargo check --target armv7a-unknown-xous-elf --package atsama5d27
@@ -122,7 +122,7 @@ gen-icu-data:
         icu4x-datagen --locales en fr it de es --keys datetime/gregory/datelengths@1 datetime/gregory/datesymbols@1 decimal/symbols@1 --format blob --out i18n/icu4x_data.postcard --overwrite; \
     fi
 
-sim:
+sim: gen-themes
     cargo xtask run --hosted
 
 update-preview:
@@ -204,7 +204,17 @@ preview file locale="en" i18n_dir="":
     # Run the streamlined preview script
     "{{justfile_directory()}}/scripts/slint-preview.sh" "${args[@]}"
 
-build args="":
+# Regenerate the per-component theme Slint files (ui2/components/ui/<c>_theme.slint)
+# from the plugin schemas (defaults/plugins/*.json). Idempotent; run by build/sim.
+gen-themes:
+    cargo run --quiet --manifest-path ui2/theme-editor/Cargo.toml --bin slintthemegen -- --out-dir ui2/components/ui
+
+# Verify the committed per-component theme files match the plugin schemas (CI guard;
+# fails if a plugin was edited without re-running gen-themes).
+check-themes:
+    cargo run --quiet --manifest-path ui2/theme-editor/Cargo.toml --bin slintthemegen -- --check
+
+build args="": gen-themes
     cargo xtask build {{args}}
     cargo xtask build-firmware-image
 
@@ -250,6 +260,30 @@ prepare-release VERSION SECRETS_DIR *args:
 clean:
     cargo clean
 
+# Build the local KeyOS API rustdoc site.
+docs-api:
+    python3 scripts/generate-api-docs.py {{api_doc_packages}}
+
+# Alias for the singular form.
+doc-api: docs-api
+
+# Package the generated KeyOS API rustdoc site for hosting.
+docs-api-package: docs-api
+    tar -czf target/keyos-api-rustdoc.tar.gz -C target/doc .
+    printf 'Packaged KeyOS API docs at %s\n' 'target/keyos-api-rustdoc.tar.gz'
+
+# Serve the generated KeyOS API rustdoc site locally.
+docs-api-serve port="8765":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just docs-api
+    selected_port="{{port}}"
+    while lsof -nP -iTCP:"$selected_port" -sTCP:LISTEN >/dev/null 2>&1; do
+        selected_port=$((selected_port + 1))
+    done
+    printf 'Serving KeyOS API docs at http://127.0.0.1:%s/\n' "$selected_port"
+    python3 -m http.server "$selected_port" --bind 127.0.0.1 --directory target/doc
+
 list-subtrees:
     git log | grep git-subtree-dir | tr -d ' ' | cut -d ":" -f2 | sort | uniq | xargs -I {} bash -c 'if [ -d $(git rev-parse --show-toplevel)/{} ] ; then echo {}; fi'
 
@@ -258,7 +292,7 @@ short-lint:
     #!/usr/bin/env bash
     failed=0
 
-    if ! reuse --suppress-deprecation lint; then
+    if ! ./scripts/check-reuse.sh; then
         echo -e "\nREUSE lint failed: one or more files are missing SPDX copyright/license headers." >&2
         failed=1
     fi
@@ -465,3 +499,13 @@ build-chromebook-cosign2:
         echo "ERROR: Build failed - output binary not found" >&2
         exit 1
     fi
+
+# Generate dependency graph for a given module
+# Usage: just generate-dep-graph os/fido
+generate-dep-graph module_path:
+    cargo run --quiet -p keyos-dep-graph -- generate {{module_path}}
+
+# Render and display dependency graph for a given module
+# Usage: just draw-dep-graph os/fido
+draw-dep-graph module_path:
+    cargo run --quiet -p keyos-dep-graph -- draw {{module_path}}

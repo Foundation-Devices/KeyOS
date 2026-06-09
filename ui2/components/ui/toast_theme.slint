@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from toast.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct ToastSizeProps {
+    font-family: string,
+    font-size: length,
+    card-width: length,
+    toast-padding: length,
+    icon-size: length,
+    border-radius: length,
+}
+
+export global ToastTheme {
+    in-out property <ToastSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        card-width: 300px,
+        toast-padding: 12px,
+        icon-size: 16px,
+        border-radius: 14px,
+    };
+    in-out property <ToastSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        card-width: 360px,
+        toast-padding: 14px,
+        icon-size: 18px,
+        border-radius: 16px,
+    };
+    in-out property <ToastSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        card-width: 420px,
+        toast-padding: 16px,
+        icon-size: 20px,
+        border-radius: 18px,
+    };
+
+    public pure function size(s: ControlSize) -> ToastSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

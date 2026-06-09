@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "foundation-plugins"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Plugin system for Foundation CLI"
+
+[dependencies]
+# Internal dependencies
+foundation-plugin-sdk = { workspace = true }
+foundation-core = { workspace = true }
+
+# External dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+once_cell = { workspace = true }

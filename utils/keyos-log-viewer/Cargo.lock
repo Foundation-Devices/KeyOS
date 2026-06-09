@@ -2192,6 +2192,7 @@ name = "xous"
 version = "0.11.0"
 dependencies = [
  "keyos",
+ "libc",
 ]
 
 [[package]]

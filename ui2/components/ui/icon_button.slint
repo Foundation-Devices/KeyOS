@@ -1,0 +1,186 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ButtonState, ControlSize } from "theme.slint";
+import { IconButtonTheme } from "icon_button_theme.slint";
+
+export enum IconButtonVariant {
+    default,
+    ghost,
+    outlined,
+}
+
+export enum IconButtonSize {
+    sm,
+    md,
+    lg,
+}
+
+export enum IconButtonShape {
+    circle,
+    square,
+}
+
+export component IconButton {
+    in property <image> icon;
+    in property <string> label: "";
+    in property <IconButtonVariant> variant: IconButtonVariant.default;
+    in property <IconButtonSize> size: IconButtonSize.md;
+    in property <IconButtonShape> shape: IconButtonShape.circle;
+    in property <bool> disabled: false;
+
+    in property <color> background: themed-background;
+    in property <color> icon-color: themed-icon-color;
+    in property <color> border-color: themed-border-color;
+    in property <length> border-width: themed-border-width;
+    in property <length> border-radius: root.shape == IconButtonShape.circle ? actual-control-size / 2 : 16px;
+    in property <length> control-size: themed-control-size;
+    in property <length> icon-size: themed-icon-size;
+    in property <float> button-opacity: themed-opacity;
+    in property <length> touch-expansion: themed-touch-expansion;
+
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+
+    out property <bool> has-focus: focus-scope.has-focus;
+
+    callback clicked();
+
+    forward-focus: focus-scope;
+    accessible-role: button;
+    accessible-enabled: !root.disabled;
+    accessible-label: root.label;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    pure function base-background() -> color {
+        if root.variant == IconButtonVariant.ghost {
+            return transparent;
+        }
+        if root.variant == IconButtonVariant.outlined {
+            return transparent;
+        }
+        return Theme.palette-secondary;
+    }
+
+    pure function pressed-background() -> color {
+        if root.variant == IconButtonVariant.ghost {
+            return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.18 : 0.12);
+        }
+        if root.variant == IconButtonVariant.outlined {
+            return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.14 : 0.08);
+        }
+        return Theme.palette-secondary-pressed;
+    }
+
+    pure function base-icon-color() -> color {
+        return Theme.palette-foreground;
+    }
+
+    pure function base-border-color() -> color {
+        if root.variant == IconButtonVariant.outlined {
+            return Theme.palette-border;
+        }
+        return transparent;
+    }
+
+    pure function focused-border-color() -> color {
+        return Theme.palette-primary;
+    }
+
+    pure function ctrl-size() -> ControlSize {
+        if root.size == IconButtonSize.sm {
+            return ControlSize.sm;
+        }
+        if root.size == IconButtonSize.lg {
+            return ControlSize.lg;
+        }
+        return ControlSize.md;
+    }
+
+    property <bool> is-focused: (focus-scope.has-focus || root.force-focused) && !root.disabled;
+    property <bool> is-pressed: (touch.pressed || root.force-pressed) && !root.disabled;
+
+    property <ButtonState> current-state:
+        root.disabled ? ButtonState.disabled : is-pressed ? ButtonState.pressed : is-focused ? ButtonState.focused : ButtonState.normal;
+
+    property <color> themed-background:
+        current-state == ButtonState.pressed ? pressed-background() : base-background();
+
+    property <color> themed-icon-color: base-icon-color();
+    property <color> themed-border-color:
+        current-state == ButtonState.focused ? focused-border-color() : base-border-color();
+    property <length> themed-border-width:
+        current-state == ButtonState.focused ? 2px : root.variant == IconButtonVariant.outlined ? 1px : 0px;
+    property <float> themed-opacity: root.disabled ? 0.5 : 1.0;
+    property <length> themed-control-size: IconButtonTheme.size(root.ctrl-size()).control-size;
+    property <length> themed-icon-size: IconButtonTheme.size(root.ctrl-size()).icon-size;
+    property <length> themed-touch-expansion: 4px;
+
+    property <color> actual-background: root.background;
+    property <color> actual-icon-color: root.icon-color;
+    property <color> actual-border-color: root.border-color;
+    property <length> actual-border-width: root.border-width;
+    property <length> actual-control-size: root.control-size;
+    property <length> actual-icon-size: root.icon-size;
+    property <float> actual-opacity: root.button-opacity;
+    property <length> actual-touch-expansion: root.touch-expansion;
+    property <length> actual-border-radius: root.border-radius;
+    property <length> effective-border-radius: min(actual-border-radius, actual-control-size / 2);
+
+    preferred-width: actual-control-size;
+    preferred-height: actual-control-size;
+
+    container := Rectangle {
+        width: root.actual-control-size;
+        height: root.actual-control-size;
+        background: root.actual-background;
+        border-color: root.actual-border-color;
+        border-width: root.actual-border-width;
+        border-radius: root.effective-border-radius;
+        opacity: root.actual-opacity;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.actual-icon-size;
+            height: root.actual-icon-size;
+
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.icon;
+                colorize: root.actual-icon-color;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        x: -root.actual-touch-expansion;
+        y: -root.actual-touch-expansion;
+        width: root.actual-control-size + 2 * root.actual-touch-expansion;
+        height: root.actual-control-size + 2 * root.actual-touch-expansion;
+        enabled: !root.disabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

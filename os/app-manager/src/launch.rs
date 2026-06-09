@@ -2,20 +2,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #[cfg(not(keyos))]
-use std::path::Path;
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use app_manifest::Manifest;
 use xous::{AppId, PID};
 
 use crate::LaunchError;
-
 #[cfg(keyos)]
-crypto::use_api!();
-#[cfg(keyos)]
-fs::use_api!();
+use crate::{CryptoApi, FileSystem};
 
 #[cfg(not(keyos))]
-pub fn launch_app(app_id: &AppId, elf_file: &Path) -> Result<PID, LaunchError> {
+const HOSTED_APPS_DIR_ENV: &str = "FOUNDATION_SIMULATOR_APPS_DIR";
+
+pub struct ListedApp<P> {
+    pub elf_path: Option<P>,
+    pub manifest_bytes: Vec<u8>,
+    pub manifest: Manifest,
+}
+
+#[cfg(not(keyos))]
+pub fn launch_app(
+    app_id: &AppId,
+    elf_file: &Path,
+    _trusted_third_party_pubkeys: &[[u8; 33]],
+    _check_trust: bool,
+) -> Result<PID, LaunchError> {
     if let Some(pid) = xous::app_id_to_pid(app_id)? {
         log::debug!("App {:02x?} already running with pid {}", app_id.0, pid);
 
@@ -44,17 +58,41 @@ fn app_name_from_path(path: &Path) -> anyhow::Result<String> {
 }
 
 #[cfg(keyos)]
-pub fn launch_app(app_id: &AppId, elf_path: &str) -> Result<PID, LaunchError> {
+pub struct VerifiedApp {
+    app_id: AppId,
+    process_name: String,
+    elf_bytes: xous::DropDeallocate,
+}
+
+#[cfg(keyos)]
+impl VerifiedApp {
+    pub fn launch(self) -> Result<PID, LaunchError> {
+        use xous::{create_process, ProcessArgs};
+
+        let Self { app_id, process_name, elf_bytes } = self;
+
+        log::trace!("Launching the elf file");
+        log::trace!("process name: {}", process_name);
+        log::trace!("app id: {:?}", app_id);
+        let new_pid = create_process(ProcessArgs::new(app_id, &process_name, *elf_bytes))?.0;
+        elf_bytes.leak();
+
+        Ok(new_pid)
+    }
+}
+
+#[cfg(keyos)]
+pub fn verify_app(
+    app_id: &AppId,
+    elf_path: &str,
+    trusted_third_party_pubkeys: &[[u8; 33]],
+    check_trust: bool,
+) -> Result<VerifiedApp, LaunchError> {
     use std::io::Read;
 
-    use xous::{create_process, DropDeallocate, ProcessArgs};
+    use xous::DropDeallocate;
 
-    if let Some(pid) = xous::app_id_to_pid(app_id)? {
-        log::debug!("App {:02x?} already running with pid {}", app_id, pid);
-        return Ok(pid);
-    }
-
-    log::trace!("Launching elf file: {}", elf_path);
+    log::trace!("Verifying elf file: {}", elf_path);
 
     let fs = FileSystem::default();
     let metadata = fs.metadata(elf_path, fs::Location::System).map_err(|_| LaunchError::InternalError)?;
@@ -75,10 +113,11 @@ pub fn launch_app(app_id: &AppId, elf_path: &str) -> Result<PID, LaunchError> {
     elf_file.read_exact(&mut elf_bytes.as_slice_mut()[..size]).map_err(|_| LaunchError::InternalError)?;
 
     // Verify the app integrity
-    fw_utils::hash::verify_cosign2_mem(
+    fw_utils::hash::verify_cosign2_mem_with_third_party_keys(
         &CryptoApi::default(),
         &elf_bytes.as_slice::<u8>()[..size],
-        cfg!(feature = "production"),
+        trusted_third_party_pubkeys,
+        check_trust,
     )
     .inspect_err(|e| log::error!("failed to verify app integrity {e:?}"))
     .map_err(|e| hash_error_to_launch_error(e))?;
@@ -86,21 +125,13 @@ pub fn launch_app(app_id: &AppId, elf_path: &str) -> Result<PID, LaunchError> {
     // Skip over the cosign2 header so that the memory begins with the ELF data
     elf_bytes.as_slice_mut::<u8>().copy_within(cosign2::Header::DEFAULT_SIZE.., 0);
 
-    log::trace!("Launching the elf file");
-    let dir_name = elf_path.split('/').rev().nth(1).ok_or(LaunchError::InternalError)?;
-    log::trace!("process name: {}", dir_name);
-    log::trace!("app id: {:?}", app_id);
-    let new_pid = create_process(ProcessArgs::new(*app_id, dir_name, *elf_bytes))?.0;
-    elf_bytes.leak();
-
-    Ok(new_pid)
+    let process_name = elf_path.split('/').rev().nth(1).ok_or(LaunchError::InternalError)?.to_string();
+    Ok(VerifiedApp { app_id: *app_id, process_name, elf_bytes })
 }
 
 #[cfg(keyos)]
-pub fn list_apps(apps_dir: &str) -> Result<Vec<(Option<String>, Manifest)>, LaunchError> {
+pub fn list_apps(apps_dir: &str) -> Result<Vec<ListedApp<String>>, LaunchError> {
     use std::io::Read;
-
-    let names = server::xous_names::XousNames::new().unwrap();
 
     let fs = FileSystem::default();
     let mut apps = vec![];
@@ -145,13 +176,8 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<(Option<String>, Manifest)>, Laun
                     if let Ok(manifest) = app_manifest::try_from_bytes(&manifest_bytes)
                         .map_err(|e| log::error!("Error parsing the app manifest: {:?}", e))
                     {
-                        if let Err(e) = names.add_manifest(&manifest_bytes) {
-                            log::error!(
-                                "Could not send the manifest of {app_dir_path} to the name server: {e:?}"
-                            );
-                        }
                         let elf_file = format!("{app_dir_path}/app.elf");
-                        apps.push((Some(elf_file), manifest));
+                        apps.push(ListedApp { elf_path: Some(elf_file), manifest_bytes, manifest });
                     }
                 }
             }
@@ -162,12 +188,13 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<(Option<String>, Manifest)>, Laun
 }
 
 #[cfg(not(keyos))]
-pub fn list_apps(_apps_dir: &str) -> Result<Vec<(Option<std::path::PathBuf>, Manifest)>, LaunchError> {
+pub fn list_apps(apps_dir: &str) -> Result<Vec<ListedApp<PathBuf>>, LaunchError> {
     let mut apps = vec![];
     for manifest_json in system_manifests::SYSTEM_MANIFESTS {
-        match app_manifest::try_from_bytes(manifest_json.as_bytes()) {
+        let manifest_bytes = manifest_json.as_bytes().to_vec();
+        match app_manifest::try_from_bytes(&manifest_bytes) {
             Ok(manifest) => {
-                apps.push((None, manifest));
+                apps.push(ListedApp { elf_path: None, manifest_bytes, manifest });
             }
             Err(e) => {
                 log::error!("Failed to parse hosted SYSTEM_MANIFEST entry: {:?}", e);
@@ -175,7 +202,128 @@ pub fn list_apps(_apps_dir: &str) -> Result<Vec<(Option<std::path::PathBuf>, Man
         }
     }
 
+    if let Some(hosted_apps_dir) = hosted_apps_dir(apps_dir) {
+        apps.extend(list_hosted_apps(&hosted_apps_dir));
+    }
+
     Ok(apps)
+}
+
+#[cfg(not(keyos))]
+fn hosted_apps_dir(apps_dir: &str) -> Option<PathBuf> {
+    if let Some(path) = env::var_os(HOSTED_APPS_DIR_ENV).filter(|path| !path.is_empty()) {
+        return Some(PathBuf::from(path));
+    }
+
+    let apps_dir = PathBuf::from(apps_dir);
+    apps_dir.is_dir().then_some(apps_dir)
+}
+
+#[cfg(not(keyos))]
+fn list_hosted_apps(apps_dir: &Path) -> Vec<ListedApp<PathBuf>> {
+    let Ok(entries) = fs::read_dir(apps_dir) else {
+        log::warn!("Failed to read hosted apps directory: {}", apps_dir.display());
+        return vec![];
+    };
+
+    entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                log::warn!("Failed to read hosted app directory entry: {error:?}");
+                None
+            }
+        })
+        .filter(|entry| entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false))
+        .filter_map(|entry| read_hosted_app(&entry.path()))
+        .collect()
+}
+
+#[cfg(not(keyos))]
+fn read_hosted_app(app_dir: &Path) -> Option<ListedApp<PathBuf>> {
+    let manifest_path = app_dir.join("manifest.json");
+    let elf_path = app_dir.join("app.elf");
+
+    let manifest_bytes = match fs::read(&manifest_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::error!("Error reading hosted app manifest {}: {error:?}", manifest_path.display());
+            return None;
+        }
+    };
+
+    let manifest = match app_manifest::try_from_bytes(&manifest_bytes) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            log::error!("Error parsing hosted app manifest {}: {error:?}", manifest_path.display());
+            return None;
+        }
+    };
+
+    if !elf_path.is_file() {
+        log::warn!("Skipping hosted app without app.elf: {}", app_dir.display());
+        return None;
+    }
+
+    Some(ListedApp { elf_path: Some(elf_path), manifest_bytes, manifest })
+}
+
+#[cfg(all(test, not(keyos)))]
+mod tests {
+    use std::{
+        sync::Mutex,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn list_apps_includes_hosted_apps_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let root = temp_dir("hosted-apps");
+        let apps_dir = root.join("apps");
+        let app_dir = apps_dir.join("Example");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(app_dir.join("app.elf"), b"hosted-app").unwrap();
+
+        let app_id = "0x00112233445566778899aabbccddeeff";
+        fs::write(
+            app_dir.join("manifest.json"),
+            format!(
+                r#"{{
+  "appName": {{"en": "Hosted Example"}},
+  "appId": "{app_id}",
+  "permissions": {{}}
+}}"#
+            ),
+        )
+        .unwrap();
+
+        env::set_var(HOSTED_APPS_DIR_ENV, &apps_dir);
+        env::remove_var("XOUS_PROCESS_KEY");
+
+        let apps = list_apps("/keyos/apps").unwrap();
+
+        env::remove_var(HOSTED_APPS_DIR_ENV);
+
+        let app_id_bytes = app_manifest::parse_app_id_bytes(app_id).unwrap();
+        let staged_app = apps.iter().find(|app| app.manifest.app_id == app_id_bytes).unwrap();
+        assert_eq!(staged_app.elf_path.as_ref().unwrap(), &app_dir.join("app.elf"));
+
+        cleanup(&root);
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = env::temp_dir().join(format!("foundation-app-manager-{label}-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }
 
 #[cfg(keyos)]

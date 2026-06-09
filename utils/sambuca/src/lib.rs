@@ -3,8 +3,9 @@
 
 pub mod flash;
 
-use std::ffi::CStr;
-use std::time::Duration;
+#[cfg(target_os = "macos")]
+use std::io::ErrorKind;
+use std::{ffi::CStr, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use serialport::SerialPort;
@@ -18,8 +19,13 @@ const SDMMC_APPLET: &[u8] = include_bytes!("../app/applet-sdmmc_sama5d2-generic_
 const SDMMC_APPLET_CODE_ADDR: u32 = 0x220000;
 const SDMMC_APPLET_MAILBOX_ADDR: u32 = 0x220004;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const SHORT_TIMEOUT: Duration = Duration::from_millis(100);
+const FLASH_TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
+#[cfg(target_os = "macos")]
+const MACOS_READ_CHUNK_SIZE: usize = 1024;
+#[cfg(target_os = "macos")]
+const SERIAL_READ_TIMEOUT_RETRIES: usize = 4;
 
 #[derive(Debug)]
 pub struct Sambuca {
@@ -128,12 +134,11 @@ impl Sambuca {
         // FIXME: On macOS, reading large chunks without chunking fails randomly (similar to write)
         #[cfg(target_os = "macos")]
         {
-            const CHUNK_SIZE: usize = 4096;
-            for (i, chunk) in data.chunks_mut(CHUNK_SIZE).enumerate() {
-                let addr = address + (i * CHUNK_SIZE) as u32;
+            for (i, chunk) in data.chunks_mut(MACOS_READ_CHUNK_SIZE).enumerate() {
+                let addr = address + (i * MACOS_READ_CHUNK_SIZE) as u32;
                 self.connection.write_all(format!("R{addr:x},{:x}#", chunk.len()).as_bytes())?;
                 self.connection.flush()?;
-                self.connection.read_exact(chunk)?;
+                self.read_exact_with_timeout_retries(chunk)?;
             }
         }
 
@@ -144,6 +149,34 @@ impl Sambuca {
             self.connection.read_exact(data)?;
         }
 
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn read_exact_with_timeout_retries(&mut self, data: &mut [u8]) -> Result<()> {
+        let mut offset = 0;
+        let mut timeout_retries = 0;
+        while offset < data.len() {
+            match self.connection.read(&mut data[offset..]) {
+                Ok(0) => {
+                    timeout_retries += 1;
+                }
+                Ok(read) => {
+                    offset += read;
+                    timeout_retries = 0;
+                    continue;
+                }
+                Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                    timeout_retries += 1;
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            }
+
+            if timeout_retries > SERIAL_READ_TIMEOUT_RETRIES {
+                bail!("Serial read timed out after receiving {offset}/{} bytes", data.len());
+            }
+        }
         Ok(())
     }
 
@@ -226,6 +259,12 @@ pub struct VerificationStats {
 }
 
 impl<'a> FlashApplet<'a> {
+    fn transfer_chunk_size(&self) -> usize {
+        let applet_pages = self.buffer_size / self.page_size;
+        let capped_pages = (FLASH_TRANSFER_CHUNK_SIZE as u32 / self.page_size).max(1);
+        applet_pages.min(capped_pages) as usize * self.page_size as usize
+    }
+
     pub fn write_flash(&mut self, offset: u64, data: &[u8], mut progress: impl FnMut(usize)) -> Result<()> {
         if offset & (self.page_size as u64 - 1) != 0 {
             bail!("Offset is not aligned");
@@ -234,8 +273,8 @@ impl<'a> FlashApplet<'a> {
             bail!("Data length is not aligned");
         }
         let mut page_offset = (offset / self.page_size as u64) as u32;
-        let buffer_pages = self.buffer_size / self.page_size;
-        for chunk in data.chunks((buffer_pages * self.page_size) as usize) {
+        let chunk_size = self.transfer_chunk_size();
+        for chunk in data.chunks(chunk_size) {
             self.outer.write(self.buffer_addr, chunk)?;
             let pages_to_write = (chunk.len() / self.page_size as usize) as u32;
             self.write_chunk(page_offset, chunk)?;
@@ -260,12 +299,12 @@ impl<'a> FlashApplet<'a> {
             bail!("Data length is not aligned");
         }
         let mut page_offset = (offset / self.page_size as u64) as u32;
-        let buffer_pages = self.buffer_size / self.page_size;
+        let chunk_size = self.transfer_chunk_size();
 
         let mut num_chunks_patched = 0;
         let mut num_attempts = 0;
 
-        for chunk in data.chunks((buffer_pages * self.page_size) as usize) {
+        for chunk in data.chunks(chunk_size) {
             let pages_to_read = (chunk.len() / self.page_size as usize) as u32;
             if !self.verify_chunk(page_offset, chunk)? {
                 if !auto_patch {
@@ -353,8 +392,7 @@ impl<'a> FlashApplet<'a> {
             bail!("Data length is not aligned");
         }
         let mut page_offset = (offset / self.page_size as u64) as u32;
-        let buffer_pages = self.buffer_size / self.page_size;
-        let chunk_size = (buffer_pages * self.page_size) as usize;
+        let chunk_size = self.transfer_chunk_size();
         let mut chunk = vec![0u8; chunk_size];
         let mut bytes_read = 0usize;
 

@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { SearchTheme } from "search_theme.slint";
+import { Input, InputVariant } from "input.slint";
+
+export component Search {
+    in-out property <string> value: "";
+    in property <string> placeholder: "Search";
+    in property <string> label: "";
+    in property <InputVariant> variant: InputVariant.filled;
+    in property <ControlSize> size: ControlSize.md;
+    in property <TextHorizontalAlignment> text-alignment: TextHorizontalAlignment.left;
+    in property <image> suffix-icon;
+    in property <bool> clearable: true;
+    in property <bool> disabled: false;
+    in property <bool> read-only: false;
+    in property <bool> force-focused: false;
+    in property <string> error: "";
+    in property <color> background: root.disabled ? Theme.palette-secondary : themed-background();
+    in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
+    in property <color> placeholder-color: Theme.palette-muted;
+    in property <color> border-color: themed-border-color();
+    in property <color> border-color-focus: Theme.palette-primary;
+    in property <color> border-color-error: Theme.palette-danger;
+    in property <length> border-width: root.has-focus ? 2px : 1px;
+    in property <length> border-radius: SearchTheme.size(root.size).border-radius;
+    in property <length> padding-horizontal: SearchTheme.size(root.size).padding-horizontal;
+    in property <length> padding-vertical: SearchTheme.size(root.size).padding-vertical;
+    in property <length> field-height: SearchTheme.size(root.size).field-height;
+    in property <length> font-size: SearchTheme.size(root.size).font-size;
+    in property <string> font-family: SearchTheme.size(root.size).font-family;
+
+    out property <bool> has-focus: field.has-focus;
+
+    callback changed(string);
+    callback submitted(string);
+    callback focused();
+    callback blurred();
+
+    pure function themed-background() -> color {
+        if root.variant == InputVariant.filled {
+            return Theme.palette-secondary;
+        }
+        if root.variant == InputVariant.outlined {
+            return transparent;
+        }
+        return Theme.palette-surface;
+    }
+
+    pure function themed-border-color() -> color {
+        if root.variant == InputVariant.filled {
+            return transparent;
+        }
+        return Theme.palette-border;
+    }
+
+    preferred-width: field.preferred-width;
+    preferred-height: field.preferred-height;
+    forward-focus: field;
+
+    field := Input {
+        width: parent.width;
+        value <=> root.value;
+        label: root.label;
+        placeholder: root.placeholder;
+        variant: root.variant;
+        size: root.size;
+        text-alignment: root.text-alignment;
+        prefix-icon: @image-url("../../resources/icons/search.svg");
+        suffix-icon: root.suffix-icon;
+        clearable: root.clearable;
+        disabled: root.disabled;
+        read-only: root.read-only;
+        force-focused: root.force-focused;
+        error: root.error;
+        background: root.background;
+        foreground: root.foreground;
+        placeholder-color: root.placeholder-color;
+        border-color: root.border-color;
+        border-color-focus: root.border-color-focus;
+        border-color-error: root.border-color-error;
+        border-width: root.border-width;
+        border-radius: root.border-radius;
+        padding-horizontal: root.padding-horizontal;
+        padding-vertical: root.padding-vertical;
+        field-height: root.field-height;
+        font-size: root.font-size;
+        font-family: root.font-family;
+
+        changed(text) => {
+            root.changed(text);
+        }
+        submitted(text) => {
+            root.submitted(text);
+        }
+        focused => {
+            root.focused();
+        }
+        blurred => {
+            root.blurred();
+        }
+    }
+}

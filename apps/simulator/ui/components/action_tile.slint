@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme } from "theme.slint";
+
+// ActionTile — the large metallic capture buttons from the Control Panel
+// "Capture" card (Figma "Wrapper" 12068:18645 / 12070:18007): a diagonal
+// metallic gradient tile with a 48px icon and a label beneath it. The icon
+// keeps its own gradient fill (not colorised).
+//
+// Pressed feedback (not in Figma — designed to match the neumorphic language):
+// the tile recesses on press — the metallic darkens and an inner shadow
+// appears, mirroring how the selected/recessed "1x" Scale segment reads.
+export component ActionTile {
+    in property <image> icon;
+    in property <string> text;
+    in property <length> tile-height: 164px;
+    // Teal "active" treatment (e.g. recording in progress) instead of metallic.
+    in property <bool> active: false;
+    // Lets the preview/storybook force the pressed look for inspection.
+    in property <bool> force-pressed: false;
+    callback clicked();
+
+    // flex: 1 1 0 — equal halves regardless of label width (so "Screenshot" and
+    // "Screen Recording" tiles match) rather than sizing to their text.
+    horizontal-stretch: 1;
+    min-width: 0px;
+    preferred-width: 0px;
+
+    tile := Rectangle {
+        property <bool> pressed: ta.pressed || root.force-pressed;
+        min-height: root.tile-height;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: root.active ? #7ad2dacc : (tile.pressed ? #cfcec5cc : #eae9e0cc); // rgba(234,233,224,0.8)
+        // Active = Foundation teal gradient (blue-500 0% -> teal-400 100%); the
+        // pressed darkening comes from the inner-shadow overlay below.
+        background: root.active ? @linear-gradient(138.75deg, Theme.blue-500 0%, Theme.teal-400 100%) : (tile.pressed ? @linear-gradient(138.75deg, #bcbbbc 0%, #8e8c8e 100%) : @linear-gradient(138.75deg, #d5d4d5 0%, #a2a0a2 100%));
+        clip: true;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            alignment: center;
+
+            HorizontalLayout {
+                alignment: center;
+                Image {
+                    width: 48px;
+                    height: 48px;
+                    source: root.icon;
+                }
+            }
+
+            Text {
+                text: root.text;
+                color: #231f20;
+                font-family: Theme.font-primary;
+                font-size: 14px;
+                font-weight: 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Inner shadow that appears on press — darkens toward all edges.
+        if tile.pressed: Rectangle {
+            background: @radial-gradient(circle, #00000000 0%, #00000000 46%, #0000006e 100%);
+        }
+
+        ta := TouchArea {
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+}

@@ -1,0 +1,70 @@
+{
+  "component": "Card",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "default"
+  ],
+  "variantProps": [],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md"
+      }
+    },
+    {
+      "name": "card-padding",
+      "displayName": "Card Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 24.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 24.0
+      }
+    }
+  ]
+}

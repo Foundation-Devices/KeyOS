@@ -65,7 +65,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             quantum_link::messages::SubscribeExchangeRate,
         );
         while let Some(exchange_rate) = exchange_rate.next().await {
-            log::info!("Received quantum link exchange rate: {:?}", exchange_rate);
+            log::info!("Received QuantumLink exchange rate: {:?}", exchange_rate);
             let mut state = state.borrow_mut();
             state.settings.guard().exchange_rate = exchange_rate.into();
         }

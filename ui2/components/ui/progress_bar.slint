@@ -1,0 +1,224 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { ProgressBarTheme } from "progress_bar_theme.slint";
+
+export enum ProgressBarTone {
+    default,
+    primary,
+    secondary,
+    success,
+    warning,
+    danger,
+}
+
+export enum ProgressValueFormat {
+    percent,
+    value,
+}
+
+export component ProgressBar {
+    in property <float> value: 64.0;
+    in property <float> min-value: 0.0;
+    in property <float> max-value: 100.0;
+    in property <bool> indeterminate: false;
+    in property <bool> disabled: false;
+    in property <bool> disable-animation: false;
+    in property <bool> show-value-label: true;
+    in property <string> label: "";
+    in property <string> value-label: "";
+    in property <ProgressValueFormat> value-format: ProgressValueFormat.percent;
+    in property <int> value-decimals: 0;
+    in property <ControlSize> size: ControlSize.md;
+    in property <ProgressBarTone> tone: ProgressBarTone.primary;
+    in property <string> font-family: ProgressBarTheme.size(root.size).font-family;
+    in property <color> track-color: root.disabled ? Theme.palette-border.with-alpha(Theme.is-dark ? 0.56 : 0.86) : Theme.palette-secondary;
+    in property <color> fill-color-override: root.disabled ? root.fill-color().with-alpha(0.42) : root.fill-color();
+    in property <color> label-color: root.disabled ? Theme.palette-muted.with-alpha(0.82) : Theme.palette-foreground;
+    in property <color> value-color: root.disabled ? Theme.palette-muted.with-alpha(0.82) : Theme.palette-muted;
+    in property <length> bar-height: ProgressBarTheme.size(root.size).bar-height;
+    in property <length> border-radius: root.actual-bar-height / Theme.capsule-radius-divisor;
+    in property <length> font-size: ProgressBarTheme.size(root.size).font-size;
+    in property <length> label-gap: ProgressBarTheme.size(root.size).label-gap;
+    // ===== THEMEABLE PROPS =====
+    in property <float> container-opacity: root.disabled ? 0.84 : 1.0;
+    in property <int> label-font-weight: 600;
+    in property <int> value-font-weight: 500;
+
+    pure function fill-color() -> color {
+        if root.tone == ProgressBarTone.default {
+            return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.78 : 0.72);
+        }
+        if root.tone == ProgressBarTone.secondary {
+            return Theme.palette-secondary-pressed;
+        }
+        if root.tone == ProgressBarTone.success {
+            return Theme.is-dark ? #4ade80 : #15803d;
+        }
+        if root.tone == ProgressBarTone.warning {
+            return Theme.is-dark ? #fbbf24 : #b45309;
+        }
+        if root.tone == ProgressBarTone.danger {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-primary;
+    }
+
+    pure function decimal-factor() -> float {
+        if root.value-decimals <= 0 {
+            return 1.0;
+        }
+        if root.value-decimals == 1 {
+            return 10.0;
+        }
+        if root.value-decimals == 2 {
+            return 100.0;
+        }
+        return 1000.0;
+    }
+
+    property <float> range-start: min(root.min-value, root.max-value);
+    property <float> range-end: max(root.min-value, root.max-value);
+    property <float> value-range: max(0.0001, root.range-end - root.range-start);
+    property <float> clamped-value: clamp(root.value, root.range-start, root.range-end);
+    property <float> normalized-value: (root.clamped-value - root.range-start) / root.value-range;
+    property <float> percentage-value: root.normalized-value * 100.0;
+    property <float> rounded-value:
+        Math.round(root.clamped-value * root.decimal-factor()) / root.decimal-factor();
+    property <float> rounded-percentage:
+        Math.round(root.percentage-value * root.decimal-factor()) / root.decimal-factor();
+    property <string> actual-font-family: root.font-family;
+    property <color> actual-track-color: root.track-color;
+    property <color> actual-fill-color: root.fill-color-override;
+    property <color> actual-label-color: root.label-color;
+    property <color> actual-value-color: root.value-color;
+    property <length> actual-bar-height: root.bar-height;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-label-gap: root.label-gap;
+    // Clamp the requested radius to half the bar height so a "radius-full"
+    // token (often 9999px) renders as a pill, not an ellipse.
+    property <length> actual-border-radius:
+        min(
+            root.border-radius,
+            root.actual-bar-height / 2);
+    property <length> label-row-height: max(root.actual-font-size + 4px, 18px);
+    property <bool> show-label-row:
+        root.label != "" || (root.show-value-label && root.resolved-value-label != "");
+    property <string> resolved-value-label:
+        root.value-label != "" ? root.value-label : root.indeterminate ? "" : root.value-format == ProgressValueFormat.value ? root.rounded-value + "" : root.rounded-percentage + "%";
+    property <length> track-y:
+        root.show-label-row ? root.label-row-height + root.actual-label-gap : 0px;
+    private property <float> sweep-left-ratio: -0.2;
+    private property <float> sweep-step: 0.01;
+    property <duration> sweep-interval: 16ms;
+    property <float> raw-indicator-left-ratio:
+        root.indeterminate ? (root.disable-animation ? 0.4 : root.sweep-left-ratio) : 0.0;
+    property <float> raw-indicator-right-ratio:
+        root.indeterminate ? (root.disable-animation ? 0.6 : root.raw-indicator-left-ratio + 0.2) : root.normalized-value;
+    property <float> visible-indicator-left-ratio:
+        clamp(root.raw-indicator-left-ratio, 0.0, 1.0);
+    property <float> visible-indicator-right-ratio:
+        clamp(root.raw-indicator-right-ratio, 0.0, 1.0);
+    property <length> indicator-x:
+        root.indeterminate ? root.width * root.visible-indicator-left-ratio : 0px;
+    property <length> indicator-width:
+        root.indeterminate ? max(0px, root.width * (root.visible-indicator-right-ratio - root.visible-indicator-left-ratio)) : max(0px, root.width * root.normalized-value);
+
+    preferred-width: 280px;
+    preferred-height: root.track-y + root.actual-bar-height;
+
+    changed indeterminate => {
+        root.sweep-left-ratio = -0.2;
+        root.sweep-step = 0.01;
+    }
+
+    changed disable-animation => {
+        root.sweep-left-ratio = -0.2;
+        root.sweep-step = 0.01;
+    }
+
+    sweep-timer := Timer {
+        interval: root.sweep-interval;
+        running: root.indeterminate && !root.disable-animation;
+
+        triggered() => {
+            if root.sweep-left-ratio + root.sweep-step >= 1.0 {
+                root.sweep-left-ratio = 1.0;
+                root.sweep-step = root.sweep-step < 0.0 ? root.sweep-step : -root.sweep-step;
+            } else if root.sweep-left-ratio + root.sweep-step <= -0.2 {
+                root.sweep-left-ratio = -0.2;
+                root.sweep-step = root.sweep-step < 0.0 ? -root.sweep-step : root.sweep-step;
+            } else {
+                root.sweep-left-ratio = root.sweep-left-ratio + root.sweep-step;
+            }
+        }
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        opacity: root.container-opacity;
+
+        if root.show-label-row: HorizontalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: root.label-row-height;
+            spacing: 8px;
+
+            if root.label != "": Text {
+                text: root.label;
+                color: root.actual-label-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.label-font-weight;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            if root.label == "": Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            if root.show-value-label && root.resolved-value-label != "": Text {
+                text: root.resolved-value-label;
+                color: root.actual-value-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.value-font-weight;
+                vertical-alignment: center;
+            }
+        }
+
+        track := Rectangle {
+            x: 0px;
+            y: root.track-y;
+            width: parent.width;
+            height: root.actual-bar-height;
+            property <length> effective-border-radius:
+                min(root.actual-border-radius, min(self.width / 2, self.height / 2));
+            background: root.actual-track-color;
+            border-radius: self.effective-border-radius;
+            clip: true;
+
+            indicator := Rectangle {
+                x: root.indicator-x;
+                y: 0px;
+                width: root.indicator-width;
+                height: parent.height;
+                property <length> effective-border-radius:
+                    min(root.actual-border-radius, min(self.width / 2, self.height / 2));
+                background: root.actual-fill-color;
+                border-radius: self.effective-border-radius;
+                clip: true;
+
+                animate width {
+                    duration: root.indeterminate ? 1ms : (root.disable-animation ? 1ms : 180ms);
+                    easing: ease;
+                }
+            }
+        }
+    }
+}

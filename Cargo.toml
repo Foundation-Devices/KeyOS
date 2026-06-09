@@ -40,8 +40,6 @@ members = [
     "apps/gui-app-seed-vault",
     "apps/gui-app-switcher",
     "apps/gui-app-system-actions",
-    "apps/simulator",
-    "apps/simulator-cli",
     "boot/charge-boot",
     "boot/common",
     "boot/keyos-boot",
@@ -104,6 +102,7 @@ members = [
     "os/system-manifests",
     "os/update",
     "os/usb",
+    "release-manifest",
     "server",
     "server/macro",
     "slint-keyos-platform/build",
@@ -145,17 +144,16 @@ members = [
     "test-apps/ticktimer-test-client",
     "test-apps/undef-test",
     "ui/slintbook",
-    "update-image",
     "utils/fiat-symbols",
     "utils/fuse",
     "utils/fw-utils",
     "utils/keycard-auth-tool",
     "utils/keycard-scan",
+    "utils/keyos-dep-graph",
     "utils/localizer",
     "utils/ordered-table",
     "utils/repo-sync",
     "utils/sambuca",
-    "utils/seed-quiz",
     "utils/shared-fut",
     "utils/update-slint-preview",
     "utils/ql-utils",
@@ -174,6 +172,10 @@ members = [
     "xtask",
     "utils/passport-drive",
 ]
+
+# The simulator control panel + its CLI are their own workspace (host-only,
+# stock Slint + GPU renderer). See apps/simulator/Cargo.toml.
+exclude = ["apps/simulator", "apps/simulator-cli"]
 
 [workspace.dependencies]
 # workspace members
@@ -235,7 +237,7 @@ libblur = { path = "imports/libblur", default-features = false }
 ltr303 = { path = "imports/ltr303" }
 mass-storage = { path = "imports/mass-storage", features = ["rkyv"] }
 ovm7690-rs = { path = "imports/ovm7690-rs" }
-qbsdiff = { path = "imports/qbsdiff", default-features = false }
+qbsdiff = { path = "imports/qbsdiff" }
 softbuffer = { path = "imports/softbuffer" }
 tar = { path = "imports/tar-rs" }
 tusb320 = { path = "imports/tusb320" }
@@ -274,11 +276,11 @@ thiserror = "2.0"
 rfal = { version = "4.0.0", git = "https://github.com/Foundation-Devices/rfal-sys", rev = "1a5ba4ee2fd47b41f1788ae2068d9f4a2602b892" }
 st25r95 = "0.4"
 
-backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0", features = [
+backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0", features = [
     "keyos",
 ] }
-btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0" }
-foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0", features = [
+btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0" }
+foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0", features = [
     "keyos",
 ] }
 ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.4.0", features = [

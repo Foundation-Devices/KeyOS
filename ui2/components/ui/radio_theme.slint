@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from radio.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct RadioSizeProps {
+    font-family: string,
+    font-size: length,
+    control-size: length,
+    row-height: length,
+}
+
+export global RadioTheme {
+    in-out property <RadioSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        control-size: 24px,
+        row-height: Theme.control-size-sm,
+    };
+    in-out property <RadioSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        control-size: 28px,
+        row-height: Theme.control-size-md,
+    };
+    in-out property <RadioSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        control-size: 32px,
+        row-height: Theme.control-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> RadioSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+# Template metadata
+name = "default-app"
+description = "Default KeyOS GUI application with a heading, message, and button"
+version = "1.0.0"
+
+# Template variables and their defaults
+[variables]
+app_name = ""
+friendly_app_name = ""
+launcher_app_name = ""
+description = ""
+icon = "resources/icon.svg"
+app_id = ""
+version = "0.1.0"
+min_keyos_version = "1.0.0"

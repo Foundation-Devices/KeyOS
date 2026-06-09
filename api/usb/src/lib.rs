@@ -3,8 +3,8 @@
 
 pub use error::{EhciError, UsbError};
 
-#[cfg(keyos)]
+#[cfg(any(keyos, doc))]
 pub mod device;
 pub mod error;
-#[cfg(keyos)]
+#[cfg(any(keyos, doc))]
 pub mod host;

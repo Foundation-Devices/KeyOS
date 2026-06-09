@@ -37,7 +37,10 @@
 [gui-app]
 "os/fs" = [
     "OpenDirMessage",
+    "OpenFileMessage",
+    "CloseFile",
     "CloseDir",
+    "ReadFile",
     "NextEntry",
     "MapFileMessage",
     "GetMetadata",

@@ -79,7 +79,7 @@ where
     type Error: super::SubscriptionError;
 }
 
-/// A [`ScalarEventSubscribe`] subscription handler
+/// A [`ScalarSubscription`] handler.
 pub trait ScalarEventSubscriptionHandler<M>
 where
     Self: Server,

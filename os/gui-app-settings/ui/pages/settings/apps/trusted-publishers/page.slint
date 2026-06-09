@@ -1,0 +1,231 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import {
+    BasePage,
+    Button,
+    ContentSection,
+    Dialog,
+    ErrorModal,
+    HLine,
+    Icon,
+    MenuSection,
+    MenuSectionLayout,
+    PageBody,
+    TextMd,
+    TextSm
+} from "@ui/widgets.slint";
+import { Palette, Size } from "@ui/theme.slint";
+
+import { Navigate } from "../../../../gen/navigate.slint";
+import { TR2, TrId } from "../../../../gen/tr.slint";
+import {
+    AppManagementGlobal,
+    TrustedPublisher,
+    TrustedPublisherImportResult
+} from "../../../../globals/app-management-global.slint";
+import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
+import { TrustedPublishersProps } from "props.slint";
+
+component TrustedPublisherRow inherits Rectangle {
+    in property <TrustedPublisher> publisher;
+
+    callback clicked();
+
+    property <duration> select-anim-duration: 100ms;
+    animate background { duration: select-anim-duration; }
+
+    height: 84px;
+
+    in property <bool> first;
+    in property <bool> last;
+    border-top-left-radius: first ? Size.sz6 : 0;
+    border-top-right-radius: first ? Size.sz6 : 0;
+    border-bottom-left-radius: last ? Size.sz6 : 0;
+    border-bottom-right-radius: last ? Size.sz6 : 0;
+
+    TouchArea {
+        clicked => {
+            root.background = Palette.background-pressed;
+            select-timer.running = true;
+        }
+    }
+
+    select-timer := Timer {
+        interval: root.select-anim-duration;
+        running: false;
+
+        triggered() => {
+            select-timer.running = false;
+            root.background = Palette.transparent;
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        width: parent.width;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        padding-top: Size.sz4;
+        padding-bottom: Size.sz4;
+        spacing: Size.sz4;
+
+        text-column := VerticalLayout {
+            alignment: center;
+            spacing: Size.sz1;
+            width: root.width - (Size.sz4 * 2) - chevron-column.width - parent.spacing;
+
+            TextMd {
+                width: parent.width;
+                text: root.publisher.name;
+                color: Palette.content-primary;
+                horizontal-alignment: left;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+
+            TextSm {
+                width: parent.width;
+                text: root.publisher.company;
+                color: Palette.content-tertiary;
+                horizontal-alignment: left;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+        }
+
+        chevron-column := Rectangle {
+            width: Size.sz8;
+            background: Palette.transparent;
+
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                name: "chevron-right";
+                color: Palette.content-tertiary;
+            }
+        }
+    }
+}
+
+export component TrustedPublishersPage inherits BasePage {
+    in property <TrustedPublishersProps> props;
+
+    private property <bool> invalid-certificate-visible: false;
+    private property <bool> certificate-installed-visible: false;
+    private property <TrustedPublisherImportResult> import-result: TrustedPublisherImportResult.canceled;
+
+    init => {
+        AppManagementGlobal.refresh-trusted-publishers();
+    }
+
+    VerticalLayout {
+        SettingsNavHeader {
+            title: TR2.lookup(TrId.AppsTrustedPublishers);
+        }
+
+        Flickable {
+            viewport-width: self.width;
+
+            PageBody {
+                width: parent.width;
+
+                ContentSection {
+                    TextSm {
+                        width: parent.width;
+                        text: TR2.lookup(TrId.AppsTrustedPublishersIntro);
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: left;
+                        wrap: word-wrap;
+                    }
+
+                    MenuSection {
+                        title: TR2.lookup(TrId.AppsTrustedPublisherCertificates);
+
+                        MenuSectionLayout {
+                            if AppManagementGlobal.trusted-publishers.length == 0: Rectangle {
+                                height: 64px;
+
+                                TextSm {
+                                    x: Size.sz4;
+                                    y: (parent.height - self.preferred-height) / 2;
+                                    width: parent.width - (Size.sz4 * 2);
+                                    text: TR2.lookup(TrId.AppsNoTrustedPublishers);
+                                    color: Palette.content-tertiary;
+                                }
+                            }
+
+                            for publisher[index] in AppManagementGlobal.trusted-publishers: VerticalLayout {
+                                TrustedPublisherRow {
+                                    publisher: publisher;
+                                    first: index == 0;
+                                    last: index == AppManagementGlobal.trusted-publishers.length - 1;
+
+                                    clicked => {
+                                        Navigate.trusted-publisher-details({
+                                            name: publisher.name,
+                                            company: publisher.company,
+                                            contact-email: publisher.contact_email,
+                                            support-url: publisher.support_url,
+                                            public-key: publisher.public_key,
+                                            serial-number: publisher.serial_number,
+                                            subject: publisher.subject,
+                                            basic-constraints: publisher.basic_constraints,
+                                            key-usage: publisher.key_usage,
+                                            extended-key-usage: publisher.extended_key_usage,
+                                        }, { });
+                                    }
+                                }
+
+                                if index < AppManagementGlobal.trusted-publishers.length - 1: HLine { }
+                            }
+                        }
+                    }
+
+                    Button {
+                        label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
+                        clicked => {
+                            root.import-result = AppManagementGlobal.import-trusted-publisher();
+                            if root.import-result == TrustedPublisherImportResult.failed {
+                                root.invalid-certificate-visible = true;
+                            }
+                            if root.import-result == TrustedPublisherImportResult.installed {
+                                root.certificate-installed-visible = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if invalid-certificate-visible: ErrorModal {
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsInvalidTrustedPublisherCertificate);
+        text: "";
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.invalid-certificate-visible = false;
+        }
+    }
+
+    if certificate-installed-visible: Rectangle {
+        background: Palette.overlay;
+
+        Dialog {
+            icon: "check-circle";
+            icon-color: Palette.content-positive;
+            title: TR2.lookup(TrId.AppsTrustedPublisherCertificateInstalled);
+            message: "";
+            ok-text: TR2.lookup(TrId.CommonButtonDone);
+            show-ok: true;
+            show-cancel: false;
+            width: 352px;
+
+            on-ok => {
+                root.certificate-installed-visible = false;
+            }
+        }
+    }
+}

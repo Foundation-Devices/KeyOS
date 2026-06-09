@@ -10,17 +10,21 @@ use std::sync::mpsc;
 
 use gui_server_api::touch::{Touch, TouchKind as GuiTouchKind};
 use gui_server_api::Key;
-use usb_debug_protocol::{Command, Payload, ProtocolError, Response, TouchKind};
+use usb_debug_protocol::{
+    Command, LaunchAppResult, LaunchAppStatus, Payload, ProtocolError, Response, TouchKind,
+};
 
 gui_server_api::use_api!();
 power_manager::use_api!();
 security::use_api!();
+settings::use_api!();
 
 /// Persistent debug protocol handler. Holds connections that are reused
 /// across commands, rather than creating one per request.
 pub struct DebugProtocol {
     gui: GuiApiLight,
     security: Security,
+    settings: SettingsApi,
     /// Set by the `RebootSamba` arm; `process` honors it once the Ack has
     /// been queued for the USB writer.
     reboot_after_answering: bool,
@@ -28,7 +32,12 @@ pub struct DebugProtocol {
 
 impl DebugProtocol {
     pub fn new() -> Self {
-        Self { gui: GuiApiLight::default(), security: Security::default(), reboot_after_answering: false }
+        Self {
+            gui: GuiApiLight::default(),
+            security: Security::default(),
+            settings: SettingsApi::default(),
+            reboot_after_answering: false,
+        }
     }
 
     /// Decode a USB OUT packet (`[CMD][PAYLOAD...]`), dispatch it, and forward
@@ -118,6 +127,41 @@ impl DebugProtocol {
                 }
                 Response::Ack
             }
+            Command::LaunchApp { app_id } => {
+                use gui_server_api::msg::RunAppResponse;
+
+                // Enforce the Developer Mode policy on the device, not only in
+                // `foundation sideload`'s host-side preflight. The vendor debug
+                // interface can be reachable while Developer Mode is off, so a
+                // host calling launch_app directly (over MCP or raw USB) would
+                // otherwise bypass the gate entirely.
+                if !self.settings.get_developer_mode().0 {
+                    log::warn!("debug: launch_app rejected: Developer Mode is disabled");
+                    return Response::Err;
+                }
+                match self.gui.run_app(xous::AppId(app_id)) {
+                    Ok(RunAppResponse::Launched { pid }) => {
+                        let pid_val = pid as u16;
+                        log::info!("debug: launch_app launched pid={pid_val}");
+                        Response::LaunchAck(LaunchAppResult::new(pid_val, LaunchAppStatus::Launched).encode())
+                    }
+                    Ok(RunAppResponse::AlreadyRunning { pid }) => {
+                        let pid_val = pid as u16;
+                        log::info!("debug: launch_app already running pid={pid_val}");
+                        Response::LaunchAck(
+                            LaunchAppResult::new(pid_val, LaunchAppStatus::AlreadyRunning).encode(),
+                        )
+                    }
+                    Ok(resp) => {
+                        log::error!("launch_app rejected: {resp:?}");
+                        Response::Err
+                    }
+                    Err(e) => {
+                        log::error!("launch_app failed: {e:?}");
+                        Response::Err
+                    }
+                }
+            }
             Command::GetVersion => match self.security.os_version_info() {
                 Ok(Some(info)) => {
                     let trimmed: Vec<u8> =
@@ -145,6 +189,15 @@ impl DebugProtocol {
                 let len = xous::debug_command(*buf, cmd_byte).unwrap_or(0);
                 log::debug!("debug: kernel cmd '{}'", cmd_byte as char);
                 Response::KernelOutput(payload_from_mapped(buf, len))
+            }
+            Command::GetDeveloperMode => {
+                // The manifest already declares `GetDeveloperMode` permission for
+                // this server — the previous host-side check just sent a kernel
+                // `h` command and asserted the transport responded, which proved
+                // nothing about the setting. Read it for real here.
+                let enabled = self.settings.get_developer_mode().0;
+                log::debug!("debug: get_developer_mode -> {enabled}");
+                Response::DeveloperMode(enabled)
             }
         }
     }

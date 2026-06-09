@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { RadioGroupTheme } from "radio_group_theme.slint";
+import { Radio } from "radio.slint";
+
+export component RadioGroup inherits Rectangle {
+    in property <[string]> options: ["Starter", "Pro", "Enterprise"];
+    in property <[string]> descriptions: [];
+    in property <[bool]> disabled-items: [];
+    in-out property <int> selected-index: 0;
+    in property <ControlSize> size: ControlSize.md;
+    in property <bool> disabled: false;
+    in property <string> font-family: RadioGroupTheme.size(root.size).font-family;
+    in property <length> font-size: RadioGroupTheme.size(root.size).font-size;
+    in property <length> control-size: RadioGroupTheme.size(root.size).control-size;
+    in property <length> row-height: RadioGroupTheme.size(root.size).row-height;
+    in property <length> item-gap: RadioGroupTheme.size(root.size).item-gap;
+
+    callback changed(int, string);
+
+    pure function item-description(index: int) -> string {
+        return index >= 0 && index < root.descriptions.length ? root.descriptions[index] : "";
+    }
+
+    pure function item-disabled(index: int) -> bool {
+        return root.disabled || (index >= 0 && index < root.disabled-items.length && root.disabled-items[index]);
+    }
+
+    property <length> actual-row-height: root.row-height;
+    property <length> actual-item-gap: root.item-gap;
+
+    preferred-width: 320px;
+    preferred-height: root.options.length > 0 ? root.options.length * root.actual-row-height + (root.options.length - 1) * root.actual-item-gap : root.actual-row-height;
+
+    group-column := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        spacing: root.actual-item-gap;
+
+        for option[index] in root.options: Radio {
+            width: parent.width;
+            label: option;
+            description: root.item-description(index);
+            size: root.size;
+            checked: root.selected-index == index;
+            manage-checked-state: false;
+            disabled: root.item-disabled(index);
+            font-family: root.font-family;
+            font-size: root.font-size;
+            control-size: root.control-size;
+            row-height: root.row-height;
+
+            changed(checked) => {
+                if (checked && !root.item-disabled(index) && root.selected-index != index) {
+                    root.selected-index = index;
+                    root.changed(index, option);
+                }
+            }
+        }
+    }
+}

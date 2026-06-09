@@ -1,0 +1,370 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ButtonState, ControlSize } from "theme.slint";
+import { ChipTheme } from "chip_theme.slint";
+
+export enum ChipVariant {
+    filled,
+    outlined,
+    soft,
+}
+
+export enum ChipSize {
+    sm,
+    md,
+    lg,
+}
+
+export enum ChipColor {
+    default,
+    primary,
+    secondary,
+    success,
+    warning,
+    danger,
+}
+
+export component Chip {
+    in property <string> text: "";
+    in property <image> icon;
+    in property <ChipVariant> variant: ChipVariant.filled;
+    in property <ChipColor> color: ChipColor.default;
+    in property <ChipSize> size: ChipSize.md;
+    in property <bool> closable: false;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+
+    in property <color> background: themed-background;
+    in property <color> foreground: themed-foreground;
+    in property <color> border-color: themed-border-color;
+    in property <length> border-width: themed-border-width;
+    in property <length> border-radius: actual-height / 2;
+    in property <length> padding-horizontal: themed-padding-horizontal;
+    in property <length> padding-vertical: themed-padding-vertical;
+    in property <length> font-size: themed-font-size;
+    in property <string> font-family: ChipTheme.size(root.ctrl-size()).font-family;
+    in property <length> icon-size: themed-icon-size;
+
+    // ===== THEMEABLE PROPS =====
+    in property <int> text-font-weight: root.selected ? 600 : 500;
+    in property <float> chip-opacity: root.disabled ? 0.5 : 1.0;
+
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+
+    out property <bool> has-focus: focus-scope.has-focus;
+
+    callback clicked();
+    callback closed();
+
+    forward-focus: focus-scope;
+
+    property <bool> is-focused: (focus-scope.has-focus || root.force-focused) && !root.disabled;
+    property <bool> is-pressed: (chip-touch.pressed || root.force-pressed) && !root.disabled;
+
+    property <ButtonState> current-state:
+        root.disabled ? ButtonState.disabled : is-pressed ? ButtonState.pressed : is-focused ? ButtonState.focused : ButtonState.normal;
+
+    pure function solid-color() -> color {
+        if root.color == ChipColor.primary {
+            return Theme.palette-primary;
+        }
+        if root.color == ChipColor.secondary {
+            return Theme.is-dark ? #818cf8 : #6366f1;
+        }
+        if root.color == ChipColor.success {
+            return Theme.is-dark ? #22c55e : #16a34a;
+        }
+        if root.color == ChipColor.warning {
+            return Theme.is-dark ? #f59e0b : #d97706;
+        }
+        if root.color == ChipColor.danger {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-primary;
+    }
+
+    pure function solid-color-pressed() -> color {
+        if root.color == ChipColor.primary {
+            return Theme.palette-primary-pressed;
+        }
+        if root.color == ChipColor.secondary {
+            return Theme.is-dark ? #6366f1 : #4338ca;
+        }
+        if root.color == ChipColor.success {
+            return Theme.is-dark ? #16a34a : #166534;
+        }
+        if root.color == ChipColor.warning {
+            return Theme.is-dark ? #d97706 : #92400e;
+        }
+        if root.color == ChipColor.danger {
+            return Theme.is-dark ? #fb7185 : #991b1b;
+        }
+        return Theme.palette-primary-pressed;
+    }
+
+    pure function soft-background-color() -> color {
+        if root.color == ChipColor.primary {
+            return Theme.palette-primary.with-alpha(root.selected ? (Theme.is-dark ? 0.35 : 0.22) : (Theme.is-dark ? 0.22 : 0.12));
+        }
+        if root.color == ChipColor.secondary {
+            return (Theme.is-dark ? #818cf8 : #6366f1).with-alpha(root.selected ? 0.25 : 0.14);
+        }
+        if root.color == ChipColor.success {
+            return (Theme.is-dark ? #22c55e : #16a34a).with-alpha(root.selected ? 0.28 : 0.14);
+        }
+        if root.color == ChipColor.warning {
+            return (Theme.is-dark ? #f59e0b : #d97706).with-alpha(root.selected ? 0.28 : 0.14);
+        }
+        if root.color == ChipColor.danger {
+            return Theme.palette-danger.with-alpha(root.selected ? (Theme.is-dark ? 0.3 : 0.22) : (Theme.is-dark ? 0.2 : 0.12));
+        }
+        return root.selected ? Theme.palette-secondary-pressed : Theme.palette-secondary;
+    }
+
+    pure function soft-background-pressed() -> color {
+        if root.color == ChipColor.primary {
+            return Theme.palette-primary.with-alpha(root.selected ? (Theme.is-dark ? 0.5 : 0.34) : (Theme.is-dark ? 0.34 : 0.2));
+        }
+        if root.color == ChipColor.secondary {
+            return (Theme.is-dark ? #818cf8 : #6366f1).with-alpha(root.selected ? 0.4 : 0.26);
+        }
+        if root.color == ChipColor.success {
+            return (Theme.is-dark ? #22c55e : #16a34a).with-alpha(root.selected ? 0.4 : 0.24);
+        }
+        if root.color == ChipColor.warning {
+            return (Theme.is-dark ? #f59e0b : #d97706).with-alpha(root.selected ? 0.4 : 0.24);
+        }
+        if root.color == ChipColor.danger {
+            return Theme.palette-danger.with-alpha(root.selected ? (Theme.is-dark ? 0.42 : 0.34) : (Theme.is-dark ? 0.3 : 0.2));
+        }
+        return root.selected ? Theme.palette-secondary-pressed : Theme.palette-secondary-pressed;
+    }
+
+    pure function outline-background-color() -> color {
+        if root.selected {
+            return soft-background-color();
+        }
+        return transparent;
+    }
+
+    pure function base-background() -> color {
+        if root.variant == ChipVariant.outlined {
+            return outline-background-color();
+        }
+        if root.variant == ChipVariant.soft {
+            return soft-background-color();
+        }
+        return solid-color();
+    }
+
+    pure function pressed-background() -> color {
+        if root.variant == ChipVariant.outlined {
+            if root.selected {
+                return soft-background-pressed();
+            }
+            if root.color == ChipColor.default {
+                return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.14 : 0.08);
+            }
+            return soft-background-color();
+        }
+        if root.variant == ChipVariant.soft {
+            return soft-background-pressed();
+        }
+        return solid-color-pressed();
+    }
+
+    pure function solid-foreground() -> color {
+        if root.color == ChipColor.default {
+            return #ffffff;
+        }
+        return #ffffff;
+    }
+
+    pure function accent-foreground() -> color {
+        if root.color == ChipColor.primary {
+            return Theme.palette-primary;
+        }
+        if root.color == ChipColor.secondary {
+            return Theme.is-dark ? #a5b4fc : #4338ca;
+        }
+        if root.color == ChipColor.success {
+            return Theme.is-dark ? #4ade80 : #15803d;
+        }
+        if root.color == ChipColor.warning {
+            return Theme.is-dark ? #fbbf24 : #b45309;
+        }
+        if root.color == ChipColor.danger {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-primary;
+    }
+
+    pure function base-foreground() -> color {
+        if root.variant == ChipVariant.filled {
+            return solid-foreground();
+        }
+        return accent-foreground();
+    }
+
+    pure function base-border-color() -> color {
+        if root.variant == ChipVariant.outlined {
+            if root.color == ChipColor.default {
+                return Theme.palette-primary;
+            }
+            return accent-foreground();
+        }
+        return transparent;
+    }
+
+    pure function focused-border-color() -> color {
+        return Theme.palette-primary;
+    }
+
+    pure function ctrl-size() -> ControlSize {
+        if root.size == ChipSize.sm {
+            return ControlSize.sm;
+        }
+        if root.size == ChipSize.lg {
+            return ControlSize.lg;
+        }
+        return ControlSize.md;
+    }
+
+    property <color> themed-background:
+        current-state == ButtonState.pressed ? pressed-background() : base-background();
+    property <color> themed-foreground: base-foreground();
+    property <color> themed-border-color:
+        current-state == ButtonState.focused ? focused-border-color() : base-border-color();
+    property <length> themed-border-width:
+        current-state == ButtonState.focused ? 2px : root.variant == ChipVariant.outlined ? 1px : 0px;
+    property <length> themed-padding-horizontal: ChipTheme.size(root.ctrl-size()).padding-horizontal;
+    property <length> themed-padding-vertical: ChipTheme.size(root.ctrl-size()).padding-vertical;
+    property <length> themed-font-size: ChipTheme.size(root.ctrl-size()).font-size;
+    property <length> themed-icon-size: ChipTheme.size(root.ctrl-size()).icon-size;
+
+    property <color> actual-background: root.background;
+    property <color> actual-foreground: root.foreground;
+    property <color> actual-border-color: root.border-color;
+    property <length> actual-border-width: root.border-width;
+    property <length> actual-padding-horizontal: root.padding-horizontal;
+    property <length> actual-padding-vertical: root.padding-vertical;
+    property <length> actual-font-size: root.font-size;
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> actual-content-height: root.actual-font-size;
+    property <length> actual-height: root.actual-content-height + root.actual-padding-vertical * 2;
+    property <length> actual-border-radius:
+        min(root.border-radius, actual-height / 2);
+    property <float> actual-opacity: root.chip-opacity;
+    property <length> close-button-size: actual-icon-size;
+    property <length> trailing-action-width: root.closable ? close-button-size : 0px;
+
+    preferred-width: container.preferred-width;
+    preferred-height: actual-height;
+    width: self.preferred-width;
+    height: self.preferred-height;
+
+    container := Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: 100%;
+        height: root.actual-height;
+        background: root.actual-background;
+        border-color: root.actual-border-color;
+        border-width: root.actual-border-width;
+        border-radius: root.actual-border-radius;
+        opacity: root.actual-opacity;
+        clip: true;
+        preferred-width: content-row.preferred-width;
+        preferred-height: root.actual-height;
+
+        content-row := HorizontalLayout {
+            height: parent.height;
+            padding-left: root.actual-padding-horizontal;
+            padding-right: root.actual-padding-horizontal;
+            spacing: 6px;
+            alignment: center;
+
+            if root.icon.width > 0: Rectangle {
+                width: root.actual-icon-size;
+                height: parent.height;
+
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: root.actual-icon-size;
+                    height: root.actual-icon-size;
+                    source: root.icon;
+                    colorize: root.actual-foreground;
+                }
+            }
+
+            if root.text != "": Text {
+                text: root.text;
+                color: root.actual-foreground;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.text-font-weight;
+                vertical-alignment: center;
+            }
+
+            if root.closable: Rectangle {
+                width: root.close-button-size;
+                height: parent.height;
+
+                bubble := Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: root.close-button-size;
+                    height: root.close-button-size;
+                    border-radius: self.width / 2;
+                    background: transparent;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: root.actual-icon-size;
+                        height: root.actual-icon-size;
+                        source: @image-url("../../resources/icons/x.svg");
+                        colorize: root.actual-foreground;
+                    }
+                }
+
+                close-touch := TouchArea {
+                    enabled: !root.disabled;
+                    clicked => {
+                        root.closed();
+                    }
+                }
+            }
+        }
+    }
+
+    chip-touch := TouchArea {
+        width: container.width - root.trailing-action-width;
+        height: root.height;
+        enabled: !root.disabled;
+
+        clicked => {
+            focus-scope.focus();
+            root.clicked();
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

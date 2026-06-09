@@ -1,62 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { VerticalToggle } from "./widgets/vertical-toggle.slint";
-import { TextXs } from "./widgets/txt.slint";
-import { Button } from "./widgets/button.slint";
-import { IconButton } from "./widgets/icon-button.slint";
-import { Palette, Importance, Size } from "@ui/theme.slint";
+import { ControlPanel } from "components/control_panel.slint";
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 struct Settings {
     scale: float,
 }
 
-global UISize {
-    out property <length> button-size: 70px;
-    out property <length> text-width: 75px;
-    out property <length> global-controls-height: 210px;
-    out property <length> button-text-size: 13px;
-    out property <length> scale-button-text-size: 16px;
-}
-
-global Constant {
-    out property <int> pin-retries: 5;
-}
-
-component TopButton inherits VerticalLayout {
-    in property <image> icon;
-    in property <string> label;
-    callback clicked;
-    alignment: center;
-
-    HorizontalLayout {
-        alignment: center;
-        IconButton {
-            icon: icon;
-            clicked => {
-                clicked();
-            }
-        }
-    }
-
-    TextXs {
-        horizontal-alignment: center;
-        width: 100px;
-        text: label;
-        color: Palette.content-primary;
-    }
-}
-
 export component MainWindow inherits Window {
-    title: "Passport Prime Simulator";
+    title: "Passport Simulator Control Panel";
 
     in-out property <Settings> settings: { scale: 1.0 };
     in-out property <bool> capture-entire-device: false;
     in-out property <bool> is-dark-theme: false;
-    private property <bool> recording: false;
-    private property <[float]> scale-options: [0.5, 1.0, 1.5, 2.0];
-    private property <[string]> scale-labels: ["0.5x", "1x", "1.5x", "2x"];
 
     callback screenshot(bool);
     callback record(bool);
@@ -64,87 +21,38 @@ export component MainWindow inherits Window {
     callback scale-set(float);
     callback theme-set(bool);
 
-    width: 460px;
-    height: 180px;
+    // The window sizes to the control panel's content (see ControlPanel's
+    // preferred-*), keeping the 24px padding symmetric on all sides.
+    width: 494px;
 
-    Rectangle {
-        background: Palette.background-brand.transparentize(90%);
-    }
+    cp := ControlPanel {
+        width: parent.width;
 
-    VerticalLayout {
-        alignment: space-around;
-        HorizontalLayout {
-            alignment: space-around;
+        // Map the simulator's state onto the panel's 0-based selections.
+        theme-index: root.is-dark-theme ? 1 : 0;
+        scale-index: root.settings.scale == 0.5 ? 0 : root.settings.scale == 1.5 ? 2 : root.settings.scale == 2.0 ? 3 : 1;
+        capture-index: root.capture-entire-device ? 1 : 0;
 
-            TopButton {
-                label: "Screenshot";
-                icon: @image-url("icons/camera.svg");
-                clicked => {
-                    screenshot(capture-entire-device);
-                }
-            }
-
-            TopButton {
-                label: recording ? "Stop" : "Record";
-                icon: recording ? @image-url("icons/check.svg") : @image-url("icons/play.svg");
-                clicked => {
-                    if (recording) {
-                        stop();
-                        recording = false;
-                    } else {
-                        record(capture-entire-device);
-                        recording = true;
-                    }
-                }
-            }
-
-            VerticalToggle {
-                top-option: "Device";
-                bottom-option: "Screen";
-                label: "Capture";
-                toggle-up: capture-entire-device;
-                toggled(toggle-up) => {
-                    capture-entire-device = toggle-up;
-                }
-            }
-
-            VerticalToggle {
-                top-option: "Light";
-                bottom-option: "Dark";
-                label: "Theme";
-                toggle-up: !is-dark-theme;
-                toggled(toggle-up) => {
-                    is-dark-theme = !toggle-up;
-                    theme-set(!toggle-up);
-                }
-            }
+        theme-changed(i) => {
+            root.is-dark-theme = (i == 1);
+            root.theme-set(i == 1);
         }
-
-        VerticalLayout {
-            HorizontalLayout {
-                alignment: center;
-                TextXs {
-                    text: "Scale";
-                    color: Palette.content-primary;
-                    vertical-stretch: 0;
-                }
-            }
-
-            HorizontalLayout {
-                alignment: center;
-                spacing: Size.sz2;
-                height: Size.sz8;
-                for i in scale-options.length: Button {
-                    importance: Importance.primary;
-                    invert-enabled-colors: true;
-                    width: 70px;
-                    height: parent.height;
-                    enabled: settings.scale != scale-options[i];
-                    label: scale-labels[i];
-                    clicked => {
-                        scale-set(scale-options[i]);
-                    }
-                }
+        scale-changed(i) => {
+            root.scale-set(i == 0 ? 0.5 : i == 2 ? 1.5 : i == 3 ? 2.0 : 1.0);
+        }
+        capture-changed(i) => {
+            root.capture-entire-device = (i == 1);
+        }
+        screenshot() => {
+            root.screenshot(root.capture-entire-device);
+        }
+        // ControlPanel toggles its own `recording` before firing this, so
+        // `cp.recording` already reflects the new state.
+        record() => {
+            if (cp.recording) {
+                root.record(root.capture-entire-device);
+            } else {
+                root.stop();
             }
         }
     }

@@ -105,7 +105,7 @@ pub enum ParseSeedQrError {
 }
 
 /// Parse standard, compact, or plaintext mnemonic SeedQR format.
-/// https://github.com/SeedSigner/seedsigner/blob/dev/docs/seed_qr/README.md
+/// <https://github.com/SeedSigner/seedsigner/blob/dev/docs/seed_qr/README.md>
 pub fn parse_seedqr(qr_data: &[u8]) -> Result<Mnemonic, ParseSeedQrError> {
     // 12 or 24 word standard qr
     if qr_data.len() == 48 || qr_data.len() == 96 {

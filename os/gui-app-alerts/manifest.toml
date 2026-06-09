@@ -6,4 +6,3 @@ en = "Alerts"
 
 [permissions]
 template = ["gui-app", "navigable"]
-"os/gui-server" = ["UpdateKioskPolicy"]

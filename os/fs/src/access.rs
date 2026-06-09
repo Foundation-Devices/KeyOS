@@ -40,7 +40,7 @@ impl_access_handler!(GetAirlockWriteAccess, write_access, Airlock);
 impl Server {
     pub fn check_read_access(&self, pid: server::xous::PID, location: Location) -> Result<(), Error> {
         match location {
-            Location::CommonAssets | Location::AppData => Ok(()),
+            Location::CommonAssets | Location::AppData | Location::AppResources => Ok(()),
             _ => {
                 if self.read_access.contains(&(pid, location)) {
                     Ok(())
@@ -54,6 +54,7 @@ impl Server {
     pub fn check_write_access(&self, pid: server::xous::PID, location: Location) -> Result<(), Error> {
         match location {
             Location::AppData => Ok(()),
+            Location::AppResources => Err(Error::InvalidOperation),
             _ => {
                 if self.write_access.contains(&(pid, location)) {
                     Ok(())

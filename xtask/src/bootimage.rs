@@ -294,6 +294,13 @@ fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
                 );
                 app_file_disk.write_all(&fs::read(app_file_local)?)?;
             }
+
+            let app_resources_local = app_dir_local.path().join("resources");
+            if app_resources_local.is_dir() {
+                println!("  - Copying app resources");
+                let resources_dir_disk = app_dir_disk.create_dir("resources")?;
+                copy_dir_to_fat(&app_resources_local, &resources_dir_disk)?;
+            }
         }
     } else {
         println!("* no apps directory found");
@@ -351,6 +358,29 @@ fn process_directory(
         } else if entry.is_file() {
             process_image_file(target_dir, &entry, out_dir)?;
             *image_count += 1;
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir_to_fat(dir_path: &Path, target_dir: &Dir<'_, StreamSlice<&mut File>>) -> anyhow::Result<()> {
+    let mut entries = fs::read_dir(dir_path)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let entry_name = entry.file_name();
+        if entry_name.to_string_lossy() == ".DS_Store" {
+            continue;
+        }
+        let entry = entry.path();
+        if entry.is_dir() {
+            let dir_name = entry.file_name().unwrap().to_str().unwrap();
+            let sub_dir = target_dir.create_dir(dir_name)?;
+            copy_dir_to_fat(&entry, &sub_dir)?;
+        } else if entry.is_file() {
+            let file_name = entry.file_name().unwrap();
+            let mut file_disk = target_dir.create_file(file_name.to_str().unwrap())?;
+            file_disk.write_all(&fs::read(&entry)?)?;
         }
     }
     Ok(())

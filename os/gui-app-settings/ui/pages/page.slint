@@ -115,6 +115,15 @@ export component RootSettingsPage inherits BasePage {
                     MenuSectionLayout {
                         MenuActionItem {
                             first: true;
+                            label: TR2.lookup(TrId.AppsTitle);
+                            clicked => {
+                                Navigate.apps({ });
+                            }
+                        }
+
+                        HLine { }
+
+                        MenuActionItem {
                             label: TR2.lookup(TrId.MainSettings);
                             clicked => {
                                 Navigate.settings({ });

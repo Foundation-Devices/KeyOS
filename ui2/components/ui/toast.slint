@@ -1,0 +1,237 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { ToastTheme } from "toast_theme.slint";
+
+export enum ToastVariant {
+    default,
+    success,
+    warning,
+    error,
+}
+
+export enum ToastPosition {
+    top,
+    bottom,
+}
+
+export component Toast {
+    in property <bool> open: true;
+    in property <string> message: "";
+    in property <image> icon;
+    in property <ControlSize> size: ControlSize.md;
+    in property <ToastVariant> variant: ToastVariant.default;
+    in property <ToastPosition> position: ToastPosition.bottom;
+    in property <string> action: "";
+    in property <string> font-family: ToastTheme.size(root.size).font-family;
+    in property <length> font-size: ToastTheme.size(root.size).font-size;
+    in property <length> card-width: ToastTheme.size(root.size).card-width;
+    in property <length> toast-padding: ToastTheme.size(root.size).toast-padding;
+    in property <length> icon-size: ToastTheme.size(root.size).icon-size;
+    in property <length> border-radius: ToastTheme.size(root.size).border-radius;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> action-font-size: Theme.font-size-label;
+    in property <length> close-button-size: 24px;
+    in property <length> action-height: 26px;
+    in property <length> action-horizontal-padding: 10px;
+    in property <int> action-font-weight: 700;
+    in property <length> action-radius: 13px;
+    in property <length> close-icon-size: 14px;
+    in property <color> message-color: Theme.palette-foreground;
+    in property <color> icon-color: accent-color();
+    in property <color> action-color: accent-color();
+    in property <color> close-icon-color: Theme.palette-muted;
+    in property <color> card-border-color: root.variant == ToastVariant.default ? Theme.palette-border : root.accent-color().with-alpha(Theme.is-dark ? 0.72 : 0.34);
+    in property <length> card-border-width: 1px;
+
+    callback dismissed();
+    callback action-clicked();
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-card-width:
+        min(root.card-width, max(220px, root.width - 32px));
+    property <length> actual-padding: root.toast-padding;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> actual-border-radius: root.border-radius;
+    property <bool> has-action: root.action != "";
+
+    pure function accent-color() -> color {
+        if root.variant == ToastVariant.success {
+            return Theme.is-dark ? #4ade80 : #15803d;
+        }
+        if root.variant == ToastVariant.warning {
+            return Theme.is-dark ? #fbbf24 : #b45309;
+        }
+        if root.variant == ToastVariant.error {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-primary;
+    }
+
+    in property <color> toast-background:
+        root.variant == ToastVariant.default ? Theme.palette-surface : accent-color().with-alpha(Theme.is-dark ? 0.18 : 0.1);
+
+    preferred-width: 360px;
+    preferred-height: 160px;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        if root.open: card := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: root.position == ToastPosition.top ? 16px : parent.height - self.height - 16px;
+            width: root.actual-card-width;
+            background: root.toast-background;
+            border-color: root.card-border-color;
+            border-width: root.card-border-width;
+            border-radius: root.actual-border-radius;
+            clip: true;
+
+            action_measure := Text {
+                x: -10000px;
+                y: -10000px;
+                text: root.action;
+                font-family: root.actual-font-family;
+                font-size: root.action-font-size;
+                font-weight: root.action-font-weight;
+                visible: false;
+            }
+
+            property <length> icon-slot-width: root.icon.width > 0 ? root.actual-icon-size : 0px;
+            property <length> action-width:
+                root.has-action ? max(56px, action_measure.preferred-width + root.action-horizontal-padding * 2) : 0px;
+            property <length> action-gap: root.has-action ? 12px : 0px;
+            property <length> message-width:
+                max(96px, self.width - root.actual-padding * 2 - icon-slot-width - (root.icon.width > 0 ? 12px : 0px) - action-width - action-gap - root.close-button-size - 12px);
+
+            message_measure := Text {
+                x: -10000px;
+                y: -10000px;
+                width: card.message-width;
+                text: root.message;
+                color: Theme.palette-foreground;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                wrap: word-wrap;
+                visible: false;
+            }
+
+            property <length> inner-content-height:
+                max(max(message_measure.preferred-height, root.actual-icon-size), max(root.close-button-size, root.has-action ? root.action-height : 0px));
+            height: root.actual-padding * 2 + self.inner-content-height;
+
+            content := HorizontalLayout {
+                x: root.actual-padding;
+                y: root.actual-padding;
+                width: parent.width - root.actual-padding * 2;
+                height: card.inner-content-height;
+                spacing: 12px;
+
+                if root.icon.width > 0: Rectangle {
+                    width: root.actual-icon-size;
+                    height: parent.height;
+
+                    Image {
+                        x: 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: root.actual-icon-size;
+                        height: root.actual-icon-size;
+                        source: root.icon;
+                        colorize: root.icon-color;
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: parent.height;
+
+                    Text {
+                        x: 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width;
+                        height: self.preferred-height;
+                        text: root.message;
+                        color: root.message-color;
+                        font-family: root.actual-font-family;
+                        font-size: root.actual-font-size;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-alignment: left;
+                    }
+                }
+
+                if root.has-action: Rectangle {
+                    width: card.action-width;
+                    height: parent.height;
+
+                    action-button := Rectangle {
+                        x: 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: card.action-width;
+                        height: root.action-height;
+                        border-radius: root.action-radius;
+                        background: transparent;
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            padding-left: root.action-horizontal-padding;
+                            padding-right: root.action-horizontal-padding;
+                            alignment: center;
+
+                            action-label := Text {
+                                text: root.action;
+                                color: root.action-color;
+                                font-family: root.actual-font-family;
+                                font-size: root.action-font-size;
+                                font-weight: root.action-font-weight;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        action-touch := TouchArea {
+                            clicked => {
+                                root.action-clicked();
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: root.close-button-size;
+                    height: parent.height;
+
+                    close-button := Rectangle {
+                        x: 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: root.close-button-size;
+                        height: root.close-button-size;
+                        border-radius: root.close-button-size / 2;
+                        background: transparent;
+
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: root.close-icon-size;
+                            height: root.close-icon-size;
+                            source: @image-url("../../resources/icons/x.svg");
+                            colorize: root.close-icon-color;
+                        }
+
+                        dismiss-touch := TouchArea {
+                            clicked => {
+                                root.dismissed();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

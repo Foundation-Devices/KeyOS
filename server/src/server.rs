@@ -57,8 +57,7 @@ impl<S: Server> ServerContext<S> {
     }
 }
 
-/// Start a server in a background thread and open a connection to it. Useful for
-/// anonymous servers, see [`crate::Name`].
+/// Start a server in a background thread and open a connection to it.
 pub fn listen_and_connect<S: Server + Send + 'static>(mut server: S, pid: xous::PID) -> xous::CID {
     let sid = create_sid(S::NAME);
     std::thread::spawn(move || main_loop(&mut server, sid));

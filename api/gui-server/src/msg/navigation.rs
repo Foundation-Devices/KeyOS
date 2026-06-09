@@ -20,6 +20,35 @@ pub struct NavigateTo {
     pub args: Vec<u8>,
 }
 
+/// Reason an app launch failed. Carries enough information for the SDK / UI to
+/// pick a useful follow-up (import a cert, enable developer mode, restart, …)
+/// instead of just printing a generic "launch failed" message.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum LaunchFailureReason {
+    /// App is signed by a key not in the trusted set.
+    SignatureRejected,
+    /// Required permission not granted to the launching context.
+    MissingPermission,
+    /// Anything else — app-manager-internal failure, IPC failure, etc.
+    Internal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum RunAppResponse {
+    Launched { pid: usize },
+    AlreadyRunning { pid: usize },
+    Locked,
+    NotReady,
+    AppIdNotFound,
+    LaunchFailed { reason: LaunchFailureReason },
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(RunAppResponse)]
+pub struct RunApp {
+    pub app_id: [u8; APP_ID_SIZE],
+}
+
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(())]
 pub struct FinishResponse {

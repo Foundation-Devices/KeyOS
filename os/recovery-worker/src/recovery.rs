@@ -933,9 +933,7 @@ impl RecoveryWorkerServer {
         let mut asset_roots: HashSet<(String, Location)> = HashSet::new();
         for (tar_asset_path, asset_location) in assets {
             let fs_path = asset_tar_path_to_fs_path(tar_asset_path, *asset_location);
-            let root_depth = if *asset_location == Location::System { 2 } else { 1 };
-            let root = fs_path.split('/').take(root_depth).collect::<Vec<_>>().join("/");
-            if !root.is_empty() {
+            if let Some(root) = asset_fs_path_to_wipe_root(&fs_path, *asset_location) {
                 asset_roots.insert((root, *asset_location));
             }
         }
@@ -1012,20 +1010,13 @@ impl RecoveryWorkerServer {
                 bail!("App readback from {fs_elf_path} failed");
             }
 
-            // Read the manifest from the archive and verify its hash before writing to the final path
+            // Read and copy the manifest file
             let tar_manifest_path = format!("{tar_app_path}/manifest.json");
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, &tar_manifest_path, |_| ())?;
 
-            let manifest_hash = self
-                .crypto
-                .sha256(&file_mem.as_slice::<u8>()[..file_size])
-                .context("couldn't calculate manifest file hash")?;
-            if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
-                bail!("App manifest {tar_manifest_path} hash mismatch");
-            }
-
             let fs_manifest_path = &format!("{fs_app_dir}/manifest.json");
+
             self.fs.remove(fs_manifest_path, Location::System).ok();
             fw_utils::hash::write_file_progress(
                 &self.fs,
@@ -1035,6 +1026,18 @@ impl RecoveryWorkerServer {
                 file_size,
                 |_| (),
             )?;
+
+            // Read and verify the app manifest file
+            let (mem, size) =
+                fw_utils::hash::read_file_progress(&self.fs, fs_manifest_path, Location::System, |_| ())
+                    .context("couldn't read the manifest file back")?;
+            let manifest_hash = self
+                .crypto
+                .sha256(&mem.as_slice::<u8>()[..size])
+                .context("couldn't calculate manifest file hash")?;
+            if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
+                bail!("App manifest {fs_manifest_path} hash mismatch");
+            }
 
             progress_fn(((i + 1) as f32) / (apps.len() as f32));
         }
@@ -1062,15 +1065,6 @@ impl RecoveryWorkerServer {
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, tar_asset_path, |_| ())?;
 
-            // Verify the asset hash before writing to the final path
-            let asset_hash = self
-                .crypto
-                .sha256(&file_mem.as_slice::<u8>()[..file_size])
-                .context("couldn't calculate asset file hash")?;
-            if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
-                bail!("Asset {tar_asset_path} hash mismatch");
-            }
-
             // Remove the version from the path and apply location-specific fixes
             let fs_asset_path = asset_tar_path_to_fs_path(tar_asset_path, *asset_location);
             let mut asset_path_parts = fs_asset_path.split('/').collect::<Vec<_>>();
@@ -1090,6 +1084,18 @@ impl RecoveryWorkerServer {
                 file_size,
                 |_| (),
             )?;
+
+            // Read and verify the asset file
+            let (mem, size) =
+                fw_utils::hash::read_file_progress(&self.fs, fs_asset_path, *asset_location, |_| ())
+                    .context("couldn't read the asset file back")?;
+            let asset_hash = self
+                .crypto
+                .sha256(&mem.as_slice::<u8>()[..size])
+                .context("couldn't calculate asset file hash")?;
+            if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
+                bail!("Asset {tar_asset_path} hash mismatch");
+            }
 
             progress_fn(((i + 1) as f32) / (assets.len() as f32));
         }
@@ -1125,6 +1131,8 @@ impl RecoveryWorkerServer {
             let version = path_parts.first();
             let is_app_dir = path_parts.get(1).map(|p| p == "keyos").unwrap_or_default()
                 && path_parts.get(2).map(|p| p == "apps").unwrap_or_default();
+            let is_app_resource =
+                is_app_dir && path_parts.get(4).map(|p| p == "resources").unwrap_or_default();
             let is_asset = path_parts.get(1).map(|p| p == "keyos").unwrap_or_default()
                 && path_parts.get(2).map(|p| p == "common").unwrap_or_default();
             let is_boot_asset =
@@ -1147,6 +1155,9 @@ impl RecoveryWorkerServer {
                 let app_dir = path_parts.join("/");
                 log::debug!("Found app dir: {app_dir}");
                 apps.push(app_dir);
+            } else if is_app_resource {
+                log::debug!("Found app resource: {file_name} (path: {file_path:?})");
+                assets.push((file_path, Location::System));
             } else if is_asset {
                 log::debug!("Found common asset: {file_name} (path: {file_path:?})");
                 assets.push((file_path, Location::System));
@@ -1352,6 +1363,24 @@ fn asset_tar_path_to_fs_path(tar_asset_path: &str, asset_location: Location) -> 
     }
 
     path_parts.join("/")
+}
+
+fn asset_fs_path_to_wipe_root(fs_path: &str, asset_location: Location) -> Option<String> {
+    let path_parts = fs_path.split('/').collect::<Vec<_>>();
+    let root_depth = if asset_location == Location::System
+        && path_parts.get(0) == Some(&"keyos")
+        && path_parts.get(1) == Some(&"apps")
+        && path_parts.get(3) == Some(&"resources")
+    {
+        4
+    } else if asset_location == Location::System {
+        2
+    } else {
+        1
+    };
+
+    let root = path_parts.into_iter().take(root_depth).collect::<Vec<_>>().join("/");
+    (!root.is_empty()).then_some(root)
 }
 
 fn verify_manifest_hash(manifest: &RecoveryManifest, path: &str, hash: [u8; 32]) -> bool {

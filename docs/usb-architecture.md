@@ -203,10 +203,8 @@ TYPE 0x02 — Debug response:
 | `0x05` | `CLOSE_APP` | `pid_lo pid_hi` (2 B LE) | Ack (empty) |
 | `0x06` | `KERNEL_CMD` | 1 B: command character (see below) | Kernel debug output (variable) |
 | `0x07` | `INPUT_TEXT` | UTF-8 text bytes | Ack (empty) |
-| `0x08` | `GET_VERSION` | — | KeyOS version UTF-8 string |
-
-The current checked-in protocol does not define a `LAUNCH_APP` debug command.
-Do not use `0x08` for app launch; it is reserved for `GET_VERSION`.
+| `0x08` | `GET_VERSION` | — | UTF-8 KeyOS version bytes |
+| `0x09` | `LAUNCH_APP` | 16-byte AppId | `pid_lo pid_hi` (2 B LE) |
 
 **TAP touch kinds:** `0` = Press, `1` = Release, `2` = Drag. Screen coordinates:
 origin top-left, 480 x 800 pixels.
@@ -292,7 +290,7 @@ over USB. It is the most feature-complete host tool.
 - **Transport:** `rusb` crate. Auto-detects the vendor-specific interface (class
   `0xFF`) by iterating the USB config descriptor. A background reader thread
   demuxes IN frames into separate `log_rx` and `resp_rx` channels.
-- **Debug commands used:** All 8 (`0x01`–`0x08`).
+- **Debug commands used:** All 9 (`0x01`–`0x09`).
 - **Additional capabilities:**
   - SAM-BA bootloader mode: flash read / write / verify (via `sambuca` crate).
   - HID APDU exchange: CTAP/FIDO mode (usage page `0xF1D0`) and Ledger mode
@@ -312,21 +310,36 @@ and search.
 - **Log parsing:** Accumulates bytes from TYPE `0x01` frames, splits on `0x1E`
   record terminators.
 
+### foundation CLI (SDK)
+
+**Location:** `sdk/crates/cli/`
+
+The SDK CLI for Flux app developers.
+
+- **`foundation logs`** — Launches `keyos-log-viewer` as a subprocess (no direct
+  USB usage).
+- **`foundation sideload`** — Builds and signs the app, copies the ELF and manifest
+  to mass storage (Interface 2), then launches it through the `passport-drive`
+  MCP server. The SDK package stages that helper as `foundation-passport-drive`.
+- **Debug commands used:** `0x09` only.
+
 ### Tool Command Matrix
 
-| Capability | passport-drive | keyos-log-viewer |
-|------------|:-:|:-:|
-| `0x01` SCREENSHOT | x | |
-| `0x02` TAP | x | |
-| `0x03` POWER_BTN | x | |
-| `0x04` REBOOT_SAMBA | x | |
-| `0x05` CLOSE_APP | x | |
-| `0x06` KERNEL_CMD | x | x |
-| `0x07` INPUT_TEXT | x | |
-| `0x08` GET_VERSION | x | |
-| Log Streaming (TYPE 0x01) | x | x |
-| SAM-BA Flash R/W | x | |
-| HID APDU (CTAP + Ledger) | x | |
+| Capability | passport-drive | keyos-log-viewer | foundation sideload |
+|------------|:-:|:-:|:-:|
+| `0x01` SCREENSHOT | x | | |
+| `0x02` TAP | x | | |
+| `0x03` POWER_BTN | x | | |
+| `0x04` REBOOT_SAMBA | x | | |
+| `0x05` CLOSE_APP | x | | |
+| `0x06` KERNEL_CMD | x | x | |
+| `0x07` INPUT_TEXT | x | | |
+| `0x08` GET_VERSION | x | | |
+| `0x09` LAUNCH_APP | x | | x |
+| Log Streaming (TYPE 0x01) | x | x | |
+| SAM-BA Flash R/W | x | | |
+| HID APDU (CTAP + Ledger) | x | | |
+| Mass Storage (IF 2) | | | x |
 
 ---
 

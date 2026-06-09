@@ -1,0 +1,169 @@
+{
+  "component": "SlideToConfirm",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal",
+    "confirmed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "track-color",
+      "displayName": "Track Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.secondary",
+          "confirmed": "color.secondary",
+          "disabled": "color.secondary"
+        }
+      }
+    },
+    {
+      "name": "track-border-color",
+      "displayName": "Track Border Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.border",
+          "confirmed": "color.success",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "label-color",
+      "displayName": "Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.muted",
+          "confirmed": "color.success",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "thumb-color",
+      "displayName": "Thumb Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "confirmed": "color.success",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "thumb-label-color",
+      "displayName": "Thumb Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.white",
+          "confirmed": "color.white",
+          "disabled": "color.white"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "control-height",
+      "displayName": "Control Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 72.0,
+        "sm": 60.0,
+        "lg": 84.0
+      }
+    },
+    {
+      "name": "thumb-width",
+      "displayName": "Thumb Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 512.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 128.0,
+        "sm": 112.0,
+        "lg": 144.0
+      }
+    },
+    {
+      "name": "thumb-padding-horizontal",
+      "displayName": "Thumb Padding Horizontal",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 16.0,
+        "sm": 12.0,
+        "lg": 20.0
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 22.0,
+        "sm": 18.0,
+        "lg": 26.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlRadius.md",
+        "sm": "controlRadius.sm",
+        "lg": "controlRadius.lg"
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT
+
+import { Theme, UISize, ControlSize } from "@ui/theme.slint";
+import { Button } from "@ui/button.slint";
+import { Card } from "@ui/card.slint";
+import { Navigate } from "../../gen/navigate.slint";
+
+component PageAction inherits Button {
+    size: ControlSize.md;
+}
+
+export component SecondPagePage inherits Rectangle {
+    background: Theme.palette-background;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 24px + UISize.control-center-status-bar-height;
+        padding-bottom: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "Page 2";
+            color: Theme.palette-foreground;
+            font-family: "Montserrat";
+            font-size: 24px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "Navigation is wired up and shared SDK assets resolve from the generated shared SDK surface.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 17px;
+            font-weight: 500;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+
+        Card {
+            width: 100%;
+            size: lg;
+            title: "Second page";
+            body: "Use this page to confirm routing, back navigation, and simulator behavior while you build out real screens.";
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        PageAction {
+            width: 100%;
+            text: "Back to page 1";
+            clicked => {
+                Navigate.backward();
+            }
+        }
+    }
+}

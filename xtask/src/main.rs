@@ -23,7 +23,7 @@ mod tags;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.3.2";
+const KEYOS_VERSION: &str = "1.3.0";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
@@ -226,19 +226,6 @@ enum Commands {
     },
     /// Generate a release tarball from a manifest file.
     GenerateRelease { manifest_file: PathBuf, output_path: PathBuf },
-    /// Build the patch bodies a release manifest references.
-    BuildPatches {
-        manifest_file: PathBuf,
-        /// Tree of the version being patched from.
-        #[arg(long)]
-        base: PathBuf,
-        /// Tree of the version being patched to.
-        #[arg(long)]
-        new: PathBuf,
-        /// Where the patches are written, at the paths the manifest gives.
-        #[arg(long)]
-        out: PathBuf,
-    },
     /// Check crates against both targets (armv7a-unknown-xous-elf and host)
     Check {
         /// Specific crates to check. If not provided, all workspace crates will be checked.
@@ -354,9 +341,6 @@ fn main() {
         }
         Commands::GenerateRelease { manifest_file, output_path } => {
             release_generator::generate_release(&manifest_file, &output_path).unwrap();
-        }
-        Commands::BuildPatches { manifest_file, base, new, out } => {
-            release_generator::build_patches(&manifest_file, &base, &new, &out).unwrap();
         }
         Commands::Check { crates } => {
             check_crates(crates);
@@ -489,7 +473,16 @@ fn check_crates(crates: Vec<String>) {
     let mut arm_crates = Vec::new();
     let mut host_crates = Vec::new();
 
+    // simulator / simulator-cli live in their own workspaces (stock Slint + GPU
+    // renderer), so they can't be checked with `-p` from this workspace. Skip
+    // them here; check them via their own manifests (e.g. `cargo check
+    // --manifest-path apps/simulator/Cargo.toml`).
+    const SEPARATE_WORKSPACE_CRATES: &[&str] = &["simulator", "simulator-cli"];
+
     for crate_name in &crates_to_check {
+        if SEPARATE_WORKSPACE_CRATES.contains(&crate_name.as_str()) {
+            continue;
+        }
         let is_host_only = HOST_ONLY_CRATES.contains(&crate_name.as_str());
         let is_arm_only = ARM_ONLY_CRATES.contains(&crate_name.as_str());
 

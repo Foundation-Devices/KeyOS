@@ -18,9 +18,10 @@ component ManualUpdateButton inherits Button {
     importance: Importance.secondary;
     icon: "file";
     label: TR2.lookup(TrId.UpdateManualUpdate);
-    enabled: UpdateGlobal.update-sufficient-battery;
+    enabled: false;
     clicked => {
         UpdateGlobal.manual-update();
+        Navigate.update-install({ });
     }
 }
 
@@ -58,13 +59,6 @@ component NoUpdateAvailable {
                 color: Palette.content-tertiary;
                 horizontal-alignment: center;
                 visible: last-checked-on != "";
-            }
-
-            TextSm {
-                text: TR2.lookup(TrId.CommonUpdateChargeBattery);
-                color: Palette.content-tertiary;
-                horizontal-alignment: center;
-                visible: !UpdateGlobal.update-sufficient-battery;
             }
         }
 
@@ -130,7 +124,7 @@ component UpdateAvailable {
                     text: TR2.lookup(TrId.CommonUpdateChargeBattery);
                     color: Palette.content-tertiary;
                     horizontal-alignment: center;
-                    visible: !UpdateGlobal.update-sufficient-battery;
+                    visible: QlGlobal.ql-live && !UpdateGlobal.update-sufficient-battery;
                 }
             }
         }

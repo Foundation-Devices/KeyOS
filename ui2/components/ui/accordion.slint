@@ -1,0 +1,160 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { AccordionTheme } from "accordion_theme.slint";
+
+export struct AccordionItemData {
+    title: string,
+    subtitle: string,
+    body: string,
+    disabled: bool,
+}
+
+export component Accordion {
+    in property <[AccordionItemData]> items: [];
+    in property <[bool]> expanded-states: [];
+    in property <bool> allow-multiple: false;
+    in property <ControlSize> size: ControlSize.md;
+    in property <string> font-family: AccordionTheme.size(root.size).font-family;
+    in property <length> font-size: AccordionTheme.size(root.size).font-size;
+    in property <length> header-height: AccordionTheme.size(root.size).header-height;
+    in property <length> padding-horizontal: AccordionTheme.size(root.size).padding-horizontal;
+    in property <length> icon-size: AccordionTheme.size(root.size).icon-size;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> background: Theme.palette-surface;
+    in property <color> border-color: Theme.palette-border;
+    in property <length> border-width: 1px;
+    in property <length> border-radius: 24px;
+    in property <color> separator-color: Theme.palette-border;
+    in property <color> title-color: Theme.palette-foreground;
+    in property <color> title-disabled-color: Theme.palette-muted;
+    in property <int> title-font-weight: 600;
+    in property <color> subtitle-color: Theme.palette-muted;
+    in property <color> chevron-color: Theme.palette-muted;
+    in property <color> body-color: Theme.palette-foreground;
+    in property <color> expanded-divider-color: Theme.palette-border;
+
+    callback toggle-requested(int);
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-header-height: root.header-height;
+    property <length> actual-padding-horizontal: root.padding-horizontal;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> subtitle-font-size: Theme.font-size-subtitle;
+    pure function item-expanded(index: int) -> bool {
+        return index >= 0 && index < root.expanded-states.length && root.expanded-states[index];
+    }
+
+    preferred-width: 320px;
+    preferred-height: content.preferred-height;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.background;
+        border-color: root.border-color;
+        border-width: root.border-width;
+        border-radius: root.border-radius;
+        clip: true;
+
+        content := VerticalLayout {
+            spacing: 0px;
+
+            for item[index] in root.items: item-row := Rectangle {
+                height: item-content.preferred-height;
+
+                item-content := VerticalLayout {
+                    spacing: 0px;
+
+                    if index > 0: Rectangle {
+                        height: 1px;
+                        background: root.separator-color;
+                    }
+
+                    header := Rectangle {
+                        height: item.subtitle != "" ? root.actual-header-height + 10px : root.actual-header-height;
+                        background: transparent;
+
+                        HorizontalLayout {
+                            padding-left: root.actual-padding-horizontal;
+                            padding-right: root.actual-padding-horizontal;
+                            spacing: 12px;
+
+                            VerticalLayout {
+                                vertical-stretch: 1;
+                                alignment: center;
+                                spacing: item.subtitle != "" ? 2px : 0px;
+
+                                Text {
+                                    text: item.title;
+                                    color: item.disabled ? root.title-disabled-color : root.title-color;
+                                    font-family: root.actual-font-family;
+                                    font-size: root.actual-font-size;
+                                    font-weight: root.title-font-weight;
+                                    horizontal-alignment: left;
+                                }
+
+                                if item.subtitle != "": Text {
+                                    text: item.subtitle;
+                                    color: root.subtitle-color;
+                                    font-family: root.actual-font-family;
+                                    font-size: root.subtitle-font-size;
+                                    horizontal-alignment: left;
+                                }
+                            }
+
+                            Rectangle {
+                                width: root.actual-icon-size;
+                                height: parent.height;
+
+                                Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: root.actual-icon-size;
+                                    height: root.actual-icon-size;
+                                    source: root.item-expanded(index) ? @image-url("../../resources/icons/chevron-up.svg") : @image-url("../../resources/icons/chevron-down.svg");
+                                    colorize: root.chevron-color;
+                                }
+                            }
+                        }
+
+                        header-touch := TouchArea {
+                            enabled: !item.disabled;
+                            clicked => {
+                                root.toggle-requested(index);
+                            }
+                        }
+                    }
+
+                    if root.item-expanded(index): VerticalLayout {
+                        spacing: 0px;
+
+                        Rectangle {
+                            height: 1px;
+                            background: root.expanded-divider-color;
+                        }
+
+                        Rectangle {
+                            height: body-text.preferred-height + root.actual-padding-horizontal * 1.5;
+
+                            body-text := Text {
+                                x: root.actual-padding-horizontal;
+                                y: root.actual-padding-horizontal - 2px;
+                                width: parent.width - root.actual-padding-horizontal * 2;
+                                text: item.body;
+                                color: root.body-color;
+                                font-family: root.actual-font-family;
+                                font-size: root.actual-font-size;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

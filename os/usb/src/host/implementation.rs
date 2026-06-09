@@ -80,7 +80,6 @@ struct Device {
     handle: usize,
     claimed: Option<xous::PID>,
     address: u8,
-    descriptors: ehci::descriptors::DescriptorSet,
 }
 
 struct InterruptContext<'a> {
@@ -110,7 +109,7 @@ impl server::Server for UsbHostServer {
 
 impl UsbHostServer {
     const BUFFER_POOL_SIZE: usize = 8;
-    const DEVICE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
+    const DEVICE_CONNECTION_TIMEOUT: Duration = Duration::from_millis(300);
     const QH_POOL_SIZE: usize = 16;
     const QTD_POOL_SIZE: usize = 128;
     pub const WORK_PERIOD_MS: usize = 100;
@@ -226,10 +225,7 @@ impl UsbHostServer {
             log::warn!("Error during ehci work(): {e:?}");
         }
         if self.otg_watch_since.is_some_and(|since| since.elapsed() >= Self::DEVICE_CONNECTION_TIMEOUT) {
-            log::info!(
-                "No device after {:?} of host-mode activation, backing off OTG",
-                Self::DEVICE_CONNECTION_TIMEOUT
-            );
+            log::info!("No device after host-mode activation, backing off OTG");
             self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
             self.otg_watch_since = None;
         }
@@ -368,7 +364,7 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         log::info!("Device connected and configured: {descriptors:?}");
         let handle = *self.next_device_handle;
         *self.next_device_handle += 1;
-        self.devices.push(Device { handle, claimed: None, address, descriptors: descriptors.clone() });
+        self.devices.push(Device { handle, claimed: None, address });
         self.send_event(&UsbEvent::Connect { handle, descriptors });
     }
 
@@ -411,11 +407,6 @@ impl ArchiveEventSubscriptionHandler<Subscribe> for UsbHostServer {
         subscriber: server::ArchiveEventSubscriber<UsbEvent>,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), server::Infallible> {
-        for device in &self.devices {
-            subscriber
-                .send(&UsbEvent::Connect { handle: device.handle, descriptors: device.descriptors.clone() })
-                .ok();
-        }
         self.event_subscribers.push(subscriber);
         Ok(())
     }

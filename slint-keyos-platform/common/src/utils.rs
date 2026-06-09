@@ -17,8 +17,23 @@ pub fn workspace_dir() -> PathBuf {
     cargo_path.parent().unwrap().to_path_buf()
 }
 
+/// Slint library namespace for per-app generated component themes
+/// (`@theme/button_theme.slint`), set by `foundation build`/`sim`.
+const KEYOS_THEME_LIBRARY_NAME: &str = "theme";
+
 pub fn library_paths() -> std::collections::HashMap<String, PathBuf> {
-    std::collections::HashMap::from([(KEYOS_UI_LIBRARY_NAME.to_owned(), workspace_dir().join("ui/ui"))])
+    let ui_path = std::env::var_os("FOUNDATION_UI_LIBRARY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_dir().join("ui/ui"));
+    // Per-app generated component themes, emitted by `foundation build` into the
+    // app's target dir. Falls back to the UI dir (which ships the shared
+    // no-overrides defaults) so a plain in-tree build still resolves `@theme/*`.
+    let theme_path =
+        std::env::var_os("FOUNDATION_THEMES_SLINT_DIR").map(PathBuf::from).unwrap_or_else(|| ui_path.clone());
+    std::collections::HashMap::from([
+        (KEYOS_UI_LIBRARY_NAME.to_owned(), ui_path),
+        (KEYOS_THEME_LIBRARY_NAME.to_owned(), theme_path),
+    ])
 }
 
 pub fn parse_nine_slice_filename(path: &Path) -> Option<(String, [u16; 4])> {

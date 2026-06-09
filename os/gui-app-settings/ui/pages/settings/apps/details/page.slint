@@ -1,0 +1,236 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import {
+    BasePage,
+    ContentSection,
+    HLine,
+    MenuSection,
+    MenuSectionLayout,
+    TextLg,
+    TextMd,
+    TextSm
+} from "@ui/widgets.slint";
+import { Palette, Size } from "@ui/theme.slint";
+import { Utils } from "@ui/utils.slint";
+
+import { TR2, TrId } from "../../../../gen/tr.slint";
+import { AppManagementGlobal } from "../../../../globals/app-management-global.slint";
+import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
+import { AppDetailsProps } from "props.slint";
+
+component AppSummaryCard inherits Rectangle {
+    in property <AppDetailsProps> app;
+
+    height: 84px;
+
+    HorizontalLayout {
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        padding-top: Size.sz4;
+        padding-bottom: Size.sz4;
+        spacing: Size.sz4;
+
+        Rectangle {
+            width: Size.sz13;
+            height: Size.sz13;
+            background: Palette.transparent;
+
+            Image {
+                width: Size.sz13;
+                height: Size.sz13;
+                source: AppManagementGlobal.app-icon(root.app.icon_key);
+                image-fit: contain;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: Size.sz1;
+
+            TextLg {
+                text: root.app.name;
+                color: Palette.content-primary;
+            }
+        }
+    }
+}
+
+component InfoRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    height: value-text.preferred-height + Size.sz8 < 64px ? 64px : value-text.preferred-height + Size.sz8;
+
+    HorizontalLayout {
+        alignment: space-between;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        spacing: Size.sz4;
+
+        VerticalLayout {
+            alignment: center;
+
+            TextSm {
+                text: root.label;
+                color: Palette.content-tertiary;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            value-text := TextMd {
+                width: 260px;
+                text: root.value;
+                color: Palette.content-primary;
+                horizontal-alignment: right;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+    }
+}
+
+component PermissionRow inherits Rectangle {
+    in property <string> permission;
+
+    height: permission-text.preferred-height + Size.sz8;
+
+    permission-text := TextSm {
+        x: Size.sz4;
+        y: Size.sz4;
+        width: parent.width - (Size.sz4 * 2);
+        text: root.permission;
+        color: Palette.content-primary;
+        wrap: word-wrap;
+    }
+}
+
+component DescriptionRow inherits Rectangle {
+    in property <string> description;
+
+    height: description-text.preferred-height + Size.sz8;
+
+    description-text := TextSm {
+        x: Size.sz4;
+        y: Size.sz4;
+        width: parent.width - (Size.sz4 * 2);
+        text: root.description;
+        color: Palette.content-primary;
+        wrap: word-wrap;
+    }
+}
+
+export component AppDetailsPage inherits BasePage {
+    in property <AppDetailsProps> props;
+
+    private property <[string]> permissions_list: props.permissions == "" ? [] : Utils.split(props.permissions, "\n");
+    property <bool> at-top: flickable.viewport-y == 0;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
+    private property <length> shadow-gutter: Size.sz2;
+
+    header := SettingsNavHeader {
+        y: 0px;
+        title: TR2.lookup(TrId.AppsDetailsTitle);
+    }
+
+    flickable := Flickable {
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+        viewport-width: self.width;
+
+        ContentSection {
+            x: Size.sz6 + root.shadow-gutter;
+            width: flickable.width - ((Size.sz6 + root.shadow-gutter) * 2);
+            padding-top: Size.sz6 + root.shadow-gutter;
+            padding-bottom: Size.sz6 + root.shadow-gutter;
+            spacing: Size.sz7;
+
+            MenuSection {
+                title: "";
+
+                AppSummaryCard {
+                    app: props;
+                }
+            }
+
+            MenuSection {
+                title: "";
+
+                MenuSectionLayout {
+                    InfoRow {
+                        label: TR2.lookup(TrId.AppsPublisher);
+                        value: props.publisher;
+                    }
+
+                    HLine { }
+
+                    InfoRow {
+                        label: TR2.lookup(TrId.AppsVersion);
+                        value: props.version;
+                    }
+
+                    HLine { }
+
+                    InfoRow {
+                        label: TR2.lookup(TrId.AppsSize);
+                        value: props.size;
+                    }
+
+                    HLine { }
+
+                    InfoRow {
+                        label: TR2.lookup(TrId.AppsAppId);
+                        value: props.app_id;
+                    }
+                }
+            }
+
+            MenuSection {
+                title: TR2.lookup(TrId.AppsDescription);
+
+                MenuSectionLayout {
+                    DescriptionRow {
+                        description: props.description;
+                    }
+                }
+            }
+
+            MenuSection {
+                title: TR2.lookup(TrId.AppsRequestedPermissions);
+
+                MenuSectionLayout {
+                    if permissions_list.length == 0: PermissionRow {
+                        permission: TR2.lookup(TrId.AppsNoRequestedPermissions);
+                    }
+
+                    for permission[index] in permissions_list: VerticalLayout {
+                        PermissionRow {
+                            permission: permission;
+                        }
+
+                        if index < permissions_list.length - 1: HLine { }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: flickable.width;
+        height: 80px;
+        y: flickable.y;
+        visible: !at-top;
+        background: @linear-gradient(0deg, #00000000 0%, Palette.background-primary 100%);
+    }
+
+    Rectangle {
+        width: flickable.width;
+        height: 80px;
+        y: flickable.y + flickable.height - self.height;
+        visible: !at-bottom;
+        background: @linear-gradient(0deg, Palette.background-primary 0%, #00000000 100%);
+    }
+}

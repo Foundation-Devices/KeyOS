@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
-use usb_debug_protocol::{Command, TouchKind, UsbDebugClient};
+use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, TouchKind, UsbDebugClient};
 
 // Screen / framebuffer constants (pub(crate) so mcp module can use them)
 pub(crate) const SCREEN_WIDTH: u32 = 480;
@@ -101,6 +101,11 @@ enum CliCommand {
     InputText {
         /// Text to type
         text: String,
+    },
+    /// Launch a Flux app by its 16-byte hex app ID
+    LaunchApp {
+        /// 32-character hex app ID (with optional 0x prefix)
+        app_id: String,
     },
     /// Close/kill an app by PID (uses gui-server graceful close)
     CloseApp {
@@ -487,6 +492,26 @@ fn main() -> Result<()> {
                 std::fs::read_to_string(&file).with_context(|| format!("Cannot read {}", file.display()))?;
             let actions: Vec<Action> = serde_json::from_str(&content).context("Invalid JSON actions file")?;
             run_actions(&client, &actions)?;
+        }
+        CliCommand::LaunchApp { app_id } => {
+            let hex = app_id.strip_prefix("0x").unwrap_or(&app_id);
+            let bytes = hex::decode(hex).context("Invalid hex app ID")?;
+            anyhow::ensure!(bytes.len() == 16, "App ID must be exactly 16 bytes (32 hex chars)");
+            let app_id: [u8; 16] = bytes.try_into().unwrap();
+            eprintln!("Launching app...");
+            let payload = client.send(Command::LaunchApp { app_id }, Duration::from_secs(10))?;
+            let result = LaunchAppResult::decode(&payload)?;
+            match result.status {
+                LaunchAppStatus::Launched => {
+                    eprintln!("App launched with PID {}.", result.pid);
+                }
+                LaunchAppStatus::AlreadyRunning => {
+                    eprintln!(
+                        "App is already running with PID {}. Newly copied code will not run until the app is closed and launched again.",
+                        result.pid
+                    );
+                }
+            }
         }
         CliCommand::CloseApp { pid } => {
             eprintln!("Closing app with PID {pid}...");

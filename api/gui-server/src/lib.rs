@@ -5,6 +5,7 @@ use {
     num_derive::FromPrimitive,
     num_traits::FromPrimitive,
     server::{AsScalar, CheckedConn, CheckedPermissions, FromScalar, MessageAllowed},
+    std::time::Duration,
     xous::{MemoryRange, CID, PID, SID},
 };
 
@@ -93,6 +94,16 @@ pub struct GuiApi<P: CheckedPermissions> {
 }
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
+    pub fn try_connect() -> Option<Self> { CheckedConn::try_connect().map(|conn| Self { conn }) }
+
+    pub fn try_connect_with_timeout(timeout: Duration) -> Option<Self> {
+        CheckedConn::try_connect_with_timeout(timeout).map(|conn| Self { conn })
+    }
+
+    /// Blocking connect: waits until gui-server has registered its name. gui-server is a
+    /// mandatory system service, so callers wait for it instead of timing out and failing.
+    pub fn connect() -> Self { Self { conn: CheckedConn::default() } }
+
     /// Switches the focus to the app window of the given PID and the app zoom-in start position.
     /// Used by the app launcher and app switcher.
     pub fn switch_to(&self, next_pid: PID, x: usize, y: usize) -> Result<(), GuiServerError>
@@ -164,14 +175,6 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         self.conn.try_send_scalar(msg::InjectKey { is_pressed, key })?;
         Ok(())
     }
-
-    pub fn update_kiosk_policy(&self, policy: msg::UpdateKioskPolicy) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<msg::UpdateKioskPolicy>,
-    {
-        self.conn.try_send_scalar(policy)?;
-        Ok(())
-    }
 }
 
 impl<P: CheckedPermissions> GuiApi<P> {
@@ -181,7 +184,8 @@ impl<P: CheckedPermissions> GuiApi<P> {
     {
         let sid = xous::create_server()?;
         let cid_self = xous::connect(sid)?;
-        let api = Self { inner: GuiApiLight::default(), sid, cid_self };
+        let inner = GuiApiLight::connect();
+        let api = Self { inner, sid, cid_self };
         let gui_server_pid = api.inner.conn.get_remote_pid();
 
         let gui_server_cid = xous::connect_for_process(gui_server_pid, api.sid)?;
@@ -298,6 +302,34 @@ impl<P: CheckedPermissions> GuiApi<P> {
         P: MessageAllowed<msg::AnimateNextFrame>,
     {
         self.conn.try_send_scalar(msg::AnimateNextFrame { animation_kind })?;
+        Ok(())
+    }
+
+    pub fn show_control_center(&self) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::ShowControlCenter>,
+    {
+        self.conn.try_send_scalar(msg::ShowControlCenter(true))?;
+        Ok(())
+    }
+
+    // if background is None, the background will be the system default
+    pub fn hide_control_center(&self) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::ShowControlCenter>,
+    {
+        self.conn.try_send_scalar(msg::ShowControlCenter(false))?;
+        Ok(())
+    }
+
+    /// Prevents the device from auto-locking and auto-shutting down while `enabled` is true
+    /// Dimming is still allowed
+    /// Call with `false` to release the lock
+    pub fn set_wake_lock(&self, enabled: bool) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::SetWakeLock>,
+    {
+        self.conn.try_send_scalar(msg::SetWakeLock(enabled))?;
         Ok(())
     }
 }

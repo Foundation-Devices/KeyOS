@@ -14,7 +14,6 @@ use ngwallet::bdk_wallet::bitcoin::secp256k1::{All, Secp256k1};
 use quantum_link::SendMessageError;
 use slint_keyos_platform::{
     file_backed::JsonBacked,
-    gui_server_api::msg::UpdateKioskPolicy,
     gui_server_api::navigation::filepicker::{AllowedExtensions, Location, SelectFileOptions},
     navigation::select_file,
     settings::global,
@@ -25,9 +24,9 @@ use xous_api_ticktimer::TicktimerPrivileged;
 
 use crate::{
     backup_permissions::BackupPermissions, fs_permissions::FileSystemPermissions,
-    gui_permissions::GuiPermissions, timezones::TimeZoneModel, tr, AppWindow, BackupGlobal, BatteryGlobal,
-    BluetoothApi, DateTimeGlobal, GuiApi, PowerManagerExtApi, QlStatus, QuantumLinkApi, Security,
-    SettingsApi, UpdateApi,
+    gui_permissions::GuiPermissions, timezones::TimeZoneModel, tr, AppManagerApi, AppWindow, BackupGlobal,
+    BatteryGlobal, BluetoothApi, DateTimeGlobal, GuiApi, PowerManagerExtApi, QlStatus, QuantumLinkApi,
+    Security, SettingsApi, UpdateApi,
 };
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -43,6 +42,7 @@ pub struct AppState {
     pub power_manager: PowerManagerExtApi,
     pub ticktimer: TicktimerPrivileged,
     pub bt: BluetoothApi,
+    pub app_manager: AppManagerApi,
     pub ql_status: QlStatus,
 
     pub secp: Secp256k1<All>,
@@ -76,6 +76,7 @@ impl AppState {
             power_manager: Default::default(),
             ticktimer: TicktimerPrivileged::default(),
             bt: BluetoothApi::default(),
+            app_manager: AppManagerApi::default(),
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             secp: Secp256k1::new(),
             last_backup: None,
@@ -275,14 +276,10 @@ impl AppState {
             log::info!("Cancelled keycard backup flow {active_route:?}");
         }
 
-        // Ensure swipe back is available and auto-lock is restored when an update page is left
+        // Ensure swipe back is available and wake lock is released when an update page is left
         if active_route != RouteOption::UpdateProgress {
-            self.set_update_kiosk_enabled(true);
+            self.gui.set_wake_lock(false).ok();
+            self.platform_config.enable_swipe_back.set(true);
         }
-    }
-
-    pub fn set_update_kiosk_enabled(&self, enabled: bool) {
-        self.gui.update_kiosk_policy(UpdateKioskPolicy::all(enabled)).ok();
-        self.platform_config.enable_swipe_back.set(enabled);
     }
 }

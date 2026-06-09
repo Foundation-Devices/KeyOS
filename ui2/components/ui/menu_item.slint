@@ -1,0 +1,141 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { MenuRow } from "menu.slint";
+import { Theme, ControlSize } from "theme.slint";
+import { MenuItemTheme } from "menu_item_theme.slint";
+
+export component MenuItem inherits MenuRow {
+    in property <string> label: "";
+    in property <string> subtitle: "";
+    in property <ControlSize> size: ControlSize.md;
+    in property <image> start-icon;
+    in property <image> end-icon;
+    in property <string> trailing-text: "";
+    in property <bool> selected: false;
+    in property <bool> destructive: false;
+    in property <bool> disabled: false;
+    in property <string> font-family: MenuItemTheme.size(root.size).font-family;
+    in property <length> font-size: MenuItemTheme.size(root.size).font-size;
+    in property <length> item-height: MenuItemTheme.size(root.size).item-height;
+    in property <length> padding-horizontal: MenuItemTheme.size(root.size).padding-horizontal;
+    in property <length> icon-size: MenuItemTheme.size(root.size).icon-size;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> subtitle-font-size: Theme.font-size-subtitle;
+    in property <length> trailing-font-size: root.actual-font-size;
+    in property <color> label-color:
+        root.disabled ? Theme.palette-muted : root.destructive ? Theme.palette-danger : Theme.palette-foreground;
+    in property <color> accent-color:
+        root.disabled ? Theme.palette-muted : root.destructive ? Theme.palette-danger : root.selected ? Theme.palette-primary : root.label-color;
+    in property <color> secondary-color:
+        root.disabled ? Theme.palette-muted : root.destructive ? Theme.palette-danger : Theme.palette-muted;
+    in property <int> label-font-weight: root.selected ? 600 : 500;
+    in property <int> subtitle-font-weight: 500;
+    in property <int> trailing-font-weight: 500;
+    in property <length> item-spacing: 12px;
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-item-height: root.item-height;
+    property <length> actual-padding-horizontal: root.padding-horizontal;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> content-gap: root.subtitle != "" ? 3px : 0px;
+    property <bool> has-leading: root.start-icon.width > 0;
+    property <bool> has-trailing: root.trailing-text != "" || root.end-icon.width > 0;
+
+    interactive: true;
+    row-disabled: root.disabled;
+    divider: true;
+    content-padding-horizontal: root.actual-padding-horizontal;
+    preferred-width: 314px;
+    preferred-height: max(root.actual-item-height, root.actual-icon-size + 20px);
+    height: self.preferred-height;
+
+    // NOTE: do NOT add invisible measurement Text elements at this level — MenuItem
+    // inherits MenuRow, and any direct child of MenuItem is placed into MenuRow's
+    // content VerticalLayout via @children. A sibling Text (even with visible:false)
+    // contributes its preferred-height to the VerticalLayout, which silently shrinks
+    // the visible HorizontalLayout's share of the row and clips the label text at
+    // the top. If you need a measurement, nest it inside HorizontalLayout instead.
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: root.item-spacing;
+
+        if root.has-leading: Rectangle {
+            width: root.actual-icon-size;
+            height: parent.height;
+            background: transparent;
+
+            Image {
+                x: 0px;
+                y: (parent.height - self.height) / 2;
+                width: root.actual-icon-size;
+                height: root.actual-icon-size;
+                source: root.start-icon;
+                colorize: root.accent-color;
+            }
+        }
+
+        VerticalLayout {
+            spacing: root.content-gap;
+            horizontal-stretch: 1;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                color: root.accent-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.label-font-weight;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: root.secondary-color;
+                font-family: root.actual-font-family;
+                font-size: root.subtitle-font-size;
+                font-weight: root.subtitle-font-weight;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        if root.has-trailing: HorizontalLayout {
+            spacing: root.trailing-text != "" && root.end-icon.width > 0 ? 10px : 0px;
+            alignment: center;
+
+            if root.trailing-text != "": Text {
+                text: root.trailing-text;
+                color: root.secondary-color;
+                font-family: root.actual-font-family;
+                font-size: root.trailing-font-size;
+                font-weight: root.trailing-font-weight;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+            }
+
+            if root.end-icon.width > 0: Rectangle {
+                width: root.actual-icon-size;
+                height: parent.height;
+                background: transparent;
+
+                Image {
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    width: root.actual-icon-size;
+                    height: root.actual-icon-size;
+                    source: root.end-icon;
+                    colorize: root.accent-color;
+                }
+            }
+        }
+    }
+}

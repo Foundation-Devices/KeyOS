@@ -15,8 +15,6 @@ pub struct UpdateState {
     /// Whether an update was applied and requires acknowledgment after reboot
     #[serde(default)]
     pub update_applied: bool,
-    #[serde(default)]
-    pub resume_progress_percentage: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

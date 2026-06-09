@@ -368,7 +368,7 @@ PHONY+= bootstrap
 rebuild: clean all
 
 ChkFileSize: $(AT91BOOTSTRAP)
-	@( fsize=`stat -f '%z' $(BINDIR)/$(BOOT_NAME).bin 2>/dev/null || stat -c '%s' $(BINDIR)/$(BOOT_NAME).bin`; \
+	@( fsize=`wc -c < $(BINDIR)/$(BOOT_NAME).bin | tr -d ' '`; \
 	  sram_size=`expr $(BOOTSTRAP_MAXSIZE) \* 2`; \
 	  rsize=`./scripts/get_sram_size.sh $(BINDIR)/$(BOOT_NAME).map`; \
 	  if [ $$? -ne 0 ] ; then \

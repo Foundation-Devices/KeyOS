@@ -9,3 +9,6 @@ en = "Simulator CLI"
     "GetSystemTheme",
     "SetSystemTheme",
 ]
+"os/gui-server" = [
+    "RunApp",
+]

@@ -64,7 +64,7 @@ impl<P> BasicFsPermissions for P where
 /// Abstraction over filesystem operations for testing and generic code.
 ///
 /// - [`FileSystem`]: actual keyos fs server
-/// - [`FsTest`]: uses temporary directories (test-only)
+/// - `FsTest`: uses temporary directories (test-only)
 pub trait FsAdapter {
     type File: FileAdapter<Self::Permissions>;
     type Permissions: CheckedPermissions;
@@ -521,6 +521,7 @@ pub mod test_utils {
             roots.insert(Location::Usb, base.join("usb"));
             roots.insert(Location::User, base.join("user"));
             roots.insert(Location::Boot, base.join("boot"));
+            roots.insert(Location::AppResources, base.join("app-resources"));
 
             for path in roots.values() {
                 std::fs::create_dir_all(path).unwrap();

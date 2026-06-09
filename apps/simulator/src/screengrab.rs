@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use std::{
+    env,
     fs::{create_dir_all, read_dir, File, OpenOptions},
+    path::PathBuf,
     sync::mpsc,
 };
 
@@ -12,7 +14,9 @@ use image::{
     ExtendedColorType, ImageEncoder, RgbaImage,
 };
 
-use crate::{gui_permissions::GuiPermissions, MainWindow, GIF_DELAY_MS, SCREENSHOTS_DIR};
+use crate::{
+    gui_permissions::GuiPermissions, MainWindow, GIF_DELAY_MS, SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV,
+};
 
 pub fn setup(window: &MainWindow) {
     window.on_screenshot(|grab_entire_device| {
@@ -45,7 +49,8 @@ pub fn setup(window: &MainWindow) {
 }
 
 pub fn screenshot(grab_entire_device: bool) -> anyhow::Result<()> {
-    create_dir_all(format!("../../{SCREENSHOTS_DIR}"))?;
+    let screenshots_dir = screenshots_dir();
+    create_dir_all(&screenshots_dir)?;
 
     let file_name =
         &numbered_file(if grab_entire_device { "device_screenshot_" } else { "screenshot_" }, ".png")?;
@@ -61,11 +66,12 @@ pub fn screenshot(grab_entire_device: bool) -> anyhow::Result<()> {
     let Some(screen) = RgbaImage::from_vec(width as u32, height as u32, frame) else {
         anyhow::bail!("Could not convert screenshot to RgbaImage")
     };
-    let file = File::create(format!("../../{SCREENSHOTS_DIR}/{file_name}"))?;
+    let screenshot_path = screenshots_dir.join(file_name);
+    let file = File::create(&screenshot_path)?;
 
     PngEncoder::new(file).write_image(&screen, screen.width(), screen.height(), ExtendedColorType::Rgba8)?;
 
-    log::info!("Screenshot saved to {SCREENSHOTS_DIR}/{file_name}");
+    log::info!("Screenshot saved to {}", screenshot_path.display());
 
     Ok(())
 }
@@ -78,7 +84,7 @@ pub enum RecordingMessage {
 pub fn recording() -> anyhow::Result<mpsc::Sender<RecordingMessage>> {
     let (sender, receiver) = mpsc::channel();
 
-    create_dir_all(format!("../../{SCREENSHOTS_DIR}"))?;
+    create_dir_all(screenshots_dir())?;
 
     std::thread::spawn(move || {
         let mut encoder: std::option::Option<GifEncoder<File>> = None;
@@ -98,7 +104,7 @@ pub fn recording() -> anyhow::Result<mpsc::Sender<RecordingMessage>> {
                 }
                 Ok(RecordingMessage::Stop) => {
                     encoder = None;
-                    log::info!("Recording saved to {SCREENSHOTS_DIR}/{file_name}");
+                    log::info!("Recording saved to {}", screenshots_dir().join(&file_name).display());
                 }
                 Err(_) => {}
             }
@@ -117,15 +123,16 @@ fn start_recording(grab_entire_device: bool) -> anyhow::Result<(Option<GifEncode
     let file_name =
         numbered_file(if grab_entire_device { "device_recording_" } else { "screen_recording_" }, ".gif")?;
 
-    create_dir_all(format!("../../{SCREENSHOTS_DIR}"))?;
+    let screenshots_dir = screenshots_dir();
+    create_dir_all(&screenshots_dir)?;
 
-    let file =
-        OpenOptions::new().append(true).create(true).open(format!("../../{SCREENSHOTS_DIR}/{file_name}"))?;
+    let recording_path = screenshots_dir.join(&file_name);
+    let file = OpenOptions::new().append(true).create(true).open(&recording_path)?;
 
     let mut encoder = GifEncoder::new_with_speed(file, 30);
     encoder.set_repeat(image::codecs::gif::Repeat::Infinite)?;
 
-    log::info!("Recording to {SCREENSHOTS_DIR}/{file_name}");
+    log::info!("Recording to {}", recording_path.display());
     Ok((Some(encoder), file_name))
 }
 
@@ -151,7 +158,7 @@ fn record_frame(encoder: &mut GifEncoder<File>, grab_entire_device: bool) -> any
 }
 
 fn numbered_file(prefix: &str, ext: &str) -> anyhow::Result<String> {
-    let dir_files = read_dir(format!("../../{SCREENSHOTS_DIR}"))?;
+    let dir_files = read_dir(screenshots_dir())?;
 
     let mut screenshot_numbers: Vec<u32> = dir_files
         .filter_map(|entry| {
@@ -174,10 +181,56 @@ fn numbered_file(prefix: &str, ext: &str) -> anyhow::Result<String> {
     Ok(file_name)
 }
 
+fn screenshots_dir() -> PathBuf {
+    env::var_os(SCREENSHOTS_DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("../../").join(SCREENSHOTS_DIR))
+}
+
 fn get_frame_dimensions(grab_entire_device: bool) -> (u32, u32) {
     if grab_entire_device {
         (DEVICE_WIDTH as u32, DEVICE_HEIGHT as u32)
     } else {
         (SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::screenshots_dir;
+    use crate::{SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV};
+
+    #[test]
+    fn uses_legacy_relative_screenshots_dir_by_default() {
+        let _guard = ScreenshotEnvGuard::capture();
+        std::env::remove_var(SCREENSHOTS_DIR_ENV);
+
+        assert_eq!(screenshots_dir(), PathBuf::from("../../").join(SCREENSHOTS_DIR));
+    }
+
+    #[test]
+    fn uses_configured_screenshots_dir_when_env_is_set() {
+        let _guard = ScreenshotEnvGuard::capture();
+        std::env::set_var(SCREENSHOTS_DIR_ENV, "/tmp/foundation-screenshots");
+
+        assert_eq!(screenshots_dir(), PathBuf::from("/tmp/foundation-screenshots"));
+    }
+
+    struct ScreenshotEnvGuard(Option<std::ffi::OsString>);
+
+    impl ScreenshotEnvGuard {
+        fn capture() -> Self { Self(std::env::var_os(SCREENSHOTS_DIR_ENV)) }
+    }
+
+    impl Drop for ScreenshotEnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.0 {
+                std::env::set_var(SCREENSHOTS_DIR_ENV, value);
+            } else {
+                std::env::remove_var(SCREENSHOTS_DIR_ENV);
+            }
+        }
     }
 }

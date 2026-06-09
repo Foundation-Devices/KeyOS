@@ -20,6 +20,7 @@ power-manager = { workspace = true }
 rkyv = { workspace = true }
 security = { workspace = true }
 server = { workspace = true }
+settings = { workspace = true }
 usb = { workspace = true }
 usb-debug-protocol = { workspace = true }
 utralib = { workspace = true }

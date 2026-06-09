@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "foundation-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Terminal UI abstractions for Foundation CLI"
+
+[dependencies]
+indicatif = { workspace = true }
+console = { workspace = true }
+dialoguer = { workspace = true }

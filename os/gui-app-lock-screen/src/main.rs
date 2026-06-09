@@ -8,7 +8,6 @@ use security::{messages::RawPin, MAX_LOGIN_ATTEMPTS};
 use slint_keyos_platform::{
     app,
     gui_server_api::{
-        msg::UpdateKioskPolicy,
         navigation::lockscreen::{VerifyPinOptions, VerifyPinResult},
         InputMessage,
     },
@@ -51,9 +50,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    cx.gui
-        .update_kiosk_policy(UpdateKioskPolicy::default().set_home_button(false).set_control_center(false))
-        .ok();
+    // Hide control center on launch
+    cx.gui.hide_control_center().ok();
 
     // Fetch the visually important settings
     let settings = SettingsApi::default();
@@ -173,11 +171,11 @@ fn init_state(state: StoredValue<AppState>) {
     ui_state.set_is_pin_entry(state.borrow().security.get_pin_entry_mode() == security::PinEntryMode::Pin);
 
     ui_state.on_show_control_center(move || {
-        state.borrow().gui.update_kiosk_policy(UpdateKioskPolicy::default().set_control_center(true)).ok();
+        state.borrow().gui.show_control_center().ok();
     });
 
     ui_state.on_hide_control_center(move || {
-        state.borrow().gui.update_kiosk_policy(UpdateKioskPolicy::default().set_control_center(false)).ok();
+        state.borrow().gui.hide_control_center().ok();
     });
 
     ui_state.on_ease_swipe_offset(move |current_position, pressed_position, height| {

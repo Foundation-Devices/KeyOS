@@ -1,0 +1,167 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Panel, PanelHeading, PanelDivider } from "panel.slint";
+import { LabeledSwitch, SwitchOption } from "labeled_switch.slint";
+import { ActionTile } from "action_tile.slint";
+
+// ControlPanel — the assembled control-panel screen. Compact layout: Theme and
+// Scale are single rows (title + control); Capture has its toggle in the header
+// row and the two capture tiles beneath a divider.
+export component ControlPanel inherits Rectangle {
+    in-out property <int> theme-index: 0;     // 0 = Light, 1 = Dark
+    in-out property <int> scale-index: 1;      // 0.5x / 1x / 1.5x / 2x
+    in-out property <int> capture-index: 0;    // Screen only / With Device Frame
+    in-out property <bool> recording: false;   // toggles the record tile to a stop icon
+
+    callback theme-changed(int);
+    callback scale-changed(int);
+    callback capture-changed(int);
+    callback screenshot();
+    callback record();
+
+    background: #000000;
+    // Size to content so the 24px padding is symmetric on all four sides
+    // regardless of the window height.
+    preferred-width: body.preferred-width;
+    preferred-height: body.preferred-height;
+    min-width: body.min-width;
+    min-height: body.min-height;
+
+    // Full-bleed background artwork.
+    Image {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("control-panel-bg.png");
+        image-fit: fill;
+    }
+
+    body := VerticalLayout {
+        padding: 24px;
+        spacing: 24px;
+        alignment: start;
+
+        // --- Theme: title + toggle on one row ---
+        Panel {
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                PanelHeading {
+                    // Fixed title column so all three selectors get the same width.
+                    text: "Theme";
+                    width: 82px;
+                }
+
+                LabeledSwitch {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    selected-index <=> root.theme-index;
+                    options: [
+                        { icon: @image-url("icons/sun.svg"), text: "Light" },
+                        { icon: @image-url("icons/moon.svg"), text: "Dark" },
+                    ];
+                    changed(i) => {
+                        root.theme-changed(i);
+                    }
+                }
+            }
+        }
+
+        // --- Scale: same teal selector as Theme/Capture, 4 options ---
+        Panel {
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                PanelHeading {
+                    text: "Scale";
+                    width: 82px;
+                }
+
+                LabeledSwitch {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    selected-index <=> root.scale-index;
+                    options: [
+                        { text: "0.5x" },
+                        { text: "1x" },
+                        { text: "1.5x" },
+                        { text: "2x" },
+                    ];
+                    changed(i) => {
+                        root.scale-changed(i);
+                    }
+                }
+            }
+        }
+
+        // --- Capture: header (title + toggle), divider, then tiles ---
+        Panel {
+            VerticalLayout {
+                spacing: 0px;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 8px;
+
+                    PanelHeading {
+                        text: "Capture";
+                        width: 82px;
+                    }
+
+                    LabeledSwitch {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        selected-index <=> root.capture-index;
+                        options: [
+                            { icon: @image-url("icons/device-screen.svg"), text: "Screen only" },
+                            { icon: @image-url("icons/device-frame.svg"), text: "With Device Frame" },
+                        ];
+                        changed(i) => {
+                            root.capture-changed(i);
+                        }
+                    }
+                }
+
+                PanelDivider { }
+
+                HorizontalLayout {
+                    padding: 16px;
+                    spacing: 24px;
+
+                    ActionTile {
+                        tile-height: 102px;
+                        icon: @image-url("icons/camera.svg");
+                        text: "Screenshot";
+                        clicked => {
+                            root.screenshot();
+                        }
+                    }
+
+                    ActionTile {
+                        tile-height: 102px;
+                        icon: root.recording ? @image-url("icons/stop.svg") : @image-url("icons/record.svg");
+                        text: root.recording ? "Stop Recording" : "Screen Recording";
+                        active: root.recording;
+                        clicked => {
+                            root.recording = !root.recording;
+                            root.record();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

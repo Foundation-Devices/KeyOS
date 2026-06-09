@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from link.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct LinkSizeProps {
+    font-family: string,
+    font-size: length,
+    row-height: length,
+    icon-size: length,
+}
+
+export global LinkTheme {
+    in-out property <LinkSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        row-height: 44px,
+        icon-size: 16px,
+    };
+    in-out property <LinkSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        row-height: 52px,
+        icon-size: 18px,
+    };
+    in-out property <LinkSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        row-height: 60px,
+        icon-size: 20px,
+    };
+
+    public pure function size(s: ControlSize) -> LinkSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

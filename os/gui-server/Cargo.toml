@@ -44,6 +44,7 @@ utralib = { workspace = true }
 [target.'cfg(not(keyos))'.dependencies]
 bytemuck = "1.21.0"
 fast_image_resize = { version = "4.2.3", features = ["image"] }
+libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 image_swizzle = "0.2.0"
 rayon = "1.10.0"

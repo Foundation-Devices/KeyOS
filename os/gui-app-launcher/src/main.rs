@@ -4,15 +4,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context};
 use fs::{FileSystemEventType, Location};
 use gui_server_api::{
     consts::CLOSE_TIMEOUT_EXIT_CODE,
-    msg::UpdateKioskPolicy,
     navigation::{
         alerts::{AlertResult, InvokeAlert},
         qrscanner::{MatchedQrResult, ScanQrMatchedRule, ScanQrOptions, ScanQrResult},
-        SETTINGS_APP_ID,
     },
     InputMessage,
 };
@@ -30,7 +27,6 @@ use slint_keyos_platform::{
     slint::{ComponentHandle, Timer, VecModel},
     spawn_local, subscribe_archive, subscribe_scalar, StoredValue,
 };
-use update::messages::ProgressUpdate;
 use xous::{app_id_to_pid, current_pid, AppId, PID};
 
 use crate::{fs_permissions::FileSystemPermissions, gui_permissions::GuiPermissions};
@@ -70,7 +66,6 @@ const BITCOIN_SCRUB_MOVE_DEADBAND_PX: f32 = 2.0;
 app_manager::use_api!();
 haptics::use_api!();
 quantum_link::use_api!();
-update::use_api!();
 
 pub struct UniversalQrMatch {
     app_id: AppId,
@@ -186,29 +181,31 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     }
 
     cx.set_input_handler({
-        move |app_input| match app_input.msg {
-            InputMessage::CloseRequested => {
-                state.borrow_mut().persistent.save();
-            }
-            InputMessage::Hidden => {
-                let mut state = state.borrow_mut();
-                state.is_visible = false;
-                state.last_scrubbed_point = None;
-                state.last_scrub_update_time = None;
-                state.last_scrub_x = None;
-                // Clear loading state when the launcher is hidden
-                let ui = state.ui();
-                clear_launching_state(&ui);
-                clear_bitcoin_scrub(&ui);
-                state.loading_state_timer.stop();
-            }
-            InputMessage::Visible => {
-                state.borrow_mut().is_visible = true;
-                if state.borrow().is_fs_unavailable {
-                    invoke_fs_format_alert(state);
+        move |app_input| {
+            match app_input.msg {
+                InputMessage::CloseRequested => {
+                    state.borrow_mut().persistent.save();
                 }
+                InputMessage::Hidden => {
+                    let mut state = state.borrow_mut();
+                    state.is_visible = false;
+                    state.last_scrubbed_point = None;
+                    state.last_scrub_update_time = None;
+                    state.last_scrub_x = None;
+                    // Clear loading state when the launcher is hidden
+                    let ui = state.ui();
+                    clear_launching_state(&ui);
+                    clear_bitcoin_scrub(&ui);
+                    state.loading_state_timer.stop();
+                }
+                InputMessage::Visible => {
+                    state.borrow_mut().is_visible = true;
+                    if state.borrow().is_fs_unavailable {
+                        invoke_fs_format_alert(state);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     });
 
@@ -540,7 +537,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     .detach();
 
     setup_ql_status(state);
-    setup_update_resume(state);
     setup_bitcoin_status(state);
     refresh_bitcoin_status(state);
 
@@ -585,7 +581,7 @@ fn setup_bitcoin_status(state: StoredValue<AppState>) {
                 quantum_link::messages::SubscribeExchangeRate,
             );
             while let Some(exchange_rate) = exchange_rate.next().await {
-                log::info!("Received quantum link exchange rate: {exchange_rate:?}");
+                log::info!("Received QuantumLink exchange rate: {exchange_rate:?}");
                 {
                     let mut state = state.borrow_mut();
                     {
@@ -619,7 +615,7 @@ fn setup_bitcoin_status(state: StoredValue<AppState>) {
                 );
 
             while let Some(history) = exchange_rate_history.next().await {
-                log::info!("Received quantum link exchange rate history");
+                log::info!("Received QuantumLink exchange rate history");
                 {
                     let mut state = state.borrow_mut();
                     {
@@ -974,9 +970,8 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             gui_api.switch_to(pid, 0, 0).expect("switch_to failed");
         }
 
-        app_manager::AppEvent::LaunchError { app_id, error: e } => {
+        app_manager::AppEvent::LaunchError(e) => {
             log::error!("App launch error: {e:?}");
-            clear_update_settings_crash(state, app_id);
             error_message(
                 &ui,
                 tr::lookup_id(TrId::LauncherCrashHeader),
@@ -989,8 +984,6 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
 
         // TODO (SFT-5433): push the crash message into a log
         app_manager::AppEvent::AppCrashed { app_id, pid, exit_code, panic_message, .. } => {
-            clear_update_settings_crash(state, app_id);
-
             let app_name = AppManagerApi::default()
                     .app_name_by_app_id(&app_id.into(), "en") // TODO: i18n, get the locale from the settings
                     .unwrap_or_else(|| "Unknown App".to_string());
@@ -1019,130 +1012,6 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
                 )
             }
         }
-    }
-}
-
-fn setup_update_resume(state: StoredValue<AppState>) {
-    spawn_local(async move {
-        let mut fs_events = subscribe_scalar::<fs_permissions::FileSystemPermissions, _>(
-            fs::messages::SubscribeFilesystemEvent(Location::AppData),
-        );
-
-        while let Some(event) = fs_events.next().await {
-            match event.event_type {
-                FileSystemEventType::Mounted => {
-                    maybe_resume_update(state);
-                    return;
-                }
-                FileSystemEventType::Unmounted => {}
-                FileSystemEventType::Error => {
-                    log::error!("app data filesystem error while waiting to resume update")
-                }
-            }
-        }
-    })
-    .detach();
-
-    spawn_local(async move {
-        let mut update_events = subscribe_archive::<update_permissions::UpdatePermissions, _>(
-            update::messages::SubscribeUpdateProgress,
-        );
-
-        while let Some(event) = update_events.next().await {
-            match event {
-                ProgressUpdate::InstallError(_) | ProgressUpdate::DownloadError(_) => {
-                    clear_update_resume_state(state);
-                }
-                ProgressUpdate::Rebooting | ProgressUpdate::Done => {}
-                ProgressUpdate::DownloadProgress(_)
-                | ProgressUpdate::DownloadComplete
-                | ProgressUpdate::InstallProgress(_) => {}
-            }
-        }
-    })
-    .detach();
-}
-
-fn maybe_resume_update(state: StoredValue<AppState>) {
-    let ui = state.borrow().ui();
-    let update = UpdateApi::default();
-
-    if update.check_update_applied() {
-        show_update_applied_alert(state);
-        update.clear_update_applied();
-        return;
-    }
-
-    if !update.update_status().needs_continue {
-        return;
-    }
-
-    if let Err(e) = try_resume_update(state) {
-        log::error!("failed to resume interrupted update: {e:?}");
-        clear_update_resume_state(state);
-        error_message(
-            &ui,
-            tr::lookup_id(TrId::LauncherCrashHeader),
-            tr::lookup_id(TrId::LauncherCrashContent),
-            Some(format!("{e:?}")),
-            None,
-            None,
-        );
-    }
-}
-
-fn show_update_applied_alert(state: StoredValue<AppState>) {
-    let gui = state.borrow().gui.clone();
-    gui.invoke_alert(InvokeAlert {
-        app_title: None,
-        title: tr::lookup_id(TrId::MainUpdateAppliedHeader).to_string(),
-        icon: "check-circle".to_string(),
-        line1: tr::lookup_id(TrId::MainUpdateAppliedDescription).to_string(),
-        line2: None,
-        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
-        button2_title: None,
-        button3_title: None,
-    })
-    .ok();
-}
-
-fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
-    let state = state.borrow();
-    let ui = state.ui();
-
-    log::info!("interrupted update detected; launching settings to resume");
-    ui.global::<State>().set_update_resume_active(true);
-    ui.global::<State>().set_loading_app_id(format!("0x{}", hex::encode(SETTINGS_APP_ID.0)).into());
-
-    state.gui.update_kiosk_policy(UpdateKioskPolicy::all(false)).context("set kiosk policy")?;
-
-    let settings_pid =
-        app_id_to_pid(&SETTINGS_APP_ID).map_err(|e| anyhow!("lookup settings app PID: {e:?}"))?;
-
-    match settings_pid {
-        Some(pid) => state.gui.switch_to(pid, 0, 0).context("switch to settings")?,
-        None => AppManagerApi::default()
-            .launch_app(&SETTINGS_APP_ID)
-            .map_err(|e| anyhow!("failed to launch settings: {e:?}"))?,
-    }
-
-    Ok(())
-}
-
-fn clear_update_settings_crash(state: StoredValue<AppState>, app_id: [u32; 4]) {
-    if state.borrow().ui().global::<State>().get_update_resume_active()
-        && AppId::from(app_id) == SETTINGS_APP_ID
-    {
-        clear_update_resume_state(state);
-    }
-}
-
-fn clear_update_resume_state(state: StoredValue<AppState>) {
-    let ui = state.borrow().ui();
-    ui.global::<State>().set_update_resume_active(false);
-    clear_launching_state(&ui);
-    if let Err(e) = state.borrow().gui.update_kiosk_policy(UpdateKioskPolicy::all(true)) {
-        log::error!("failed to clear kiosk policy after update resume failure: {e:?}");
     }
 }
 

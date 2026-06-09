@@ -3,14 +3,14 @@
 
 use gui_server_api::{
     error::NavigationError,
-    msg::{NavigateTo, NavigationResult, ShowModal},
+    msg::{LaunchFailureReason, NavigateTo, NavigationResult, RunApp, RunAppResponse, ShowModal},
     InputMessage,
 };
 use log::{debug, error, warn};
 use server::ArchiveRequest;
 use xous::{AppId, PID};
 
-use crate::{AppManagerApi, Gui, GuiState};
+use crate::{AppManagerApi, Gui, GuiState, StartupState};
 
 impl Gui {
     pub(crate) fn handle_show_modal_request(&mut self, request: ArchiveRequest<ShowModal>) {
@@ -19,7 +19,7 @@ impl Gui {
             return;
         }
 
-        let Some(pid) = self.launch_app(AppId(request.message.app_id)) else {
+        let Some(pid) = self.launch_app(AppId(request.message.app_id)).ok().map(|(pid, _)| pid) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -36,7 +36,7 @@ impl Gui {
         }
         let NavigateTo { app_id, .. } = &request.message;
 
-        let Some(pid) = self.launch_app(AppId(*app_id)) else {
+        let Some(pid) = self.launch_app(AppId(*app_id)).ok().map(|(pid, _)| pid) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -46,18 +46,51 @@ impl Gui {
         self.switch_to_window_with_nav(pid, Some(request));
     }
 
-    fn launch_app(&self, app_id: AppId) -> Option<PID> {
-        let mut pid_res = xous::app_id_to_pid(&app_id).ok()?;
-        let app_already_running = pid_res.is_some();
-        if !app_already_running {
-            let app_manager_api = AppManagerApi::default();
-            pid_res = app_manager_api
-                .launch_app_blocking(&app_id)
-                .inspect_err(|e| error!("Couldn't launch the app: {e:?}"))
-                .ok();
+    pub(crate) fn handle_run_app_request(&mut self, request: RunApp) -> RunAppResponse {
+        if self.startup_state != StartupState::Started {
+            return RunAppResponse::NotReady;
         }
 
-        pid_res
+        #[cfg(not(feature = "recovery-os"))]
+        if self.is_locked() || self.active_app_pid() == self.app_registry.onboarding_app_pid() {
+            return RunAppResponse::Locked;
+        }
+
+        let app_id = AppId(request.app_id);
+        let (pid, already_running) = match self.launch_app(app_id) {
+            Ok(result) => result,
+            Err(error) => return error,
+        };
+
+        self.switch_to_window(pid);
+
+        if already_running {
+            RunAppResponse::AlreadyRunning { pid: pid.get() as usize }
+        } else {
+            RunAppResponse::Launched { pid: pid.get() as usize }
+        }
+    }
+
+    fn launch_app(&self, app_id: AppId) -> Result<(PID, bool), RunAppResponse> {
+        let mut pid_res = xous::app_id_to_pid(&app_id)
+            .map_err(|_| RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal })?;
+        if let Some(pid) = pid_res {
+            return Ok((pid, true));
+        }
+
+        let app_manager_api = AppManagerApi::default();
+        pid_res = app_manager_api.launch_app_blocking(&app_id).map(Some).map_err(|error| {
+            error!("Couldn't launch the app: {error:?}");
+            match error {
+                app_manager::AppManagerError::UnknownAppId => RunAppResponse::AppIdNotFound,
+                app_manager::AppManagerError::VerificationFailed => {
+                    RunAppResponse::LaunchFailed { reason: LaunchFailureReason::SignatureRejected }
+                }
+                _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
+            }
+        })?;
+
+        pid_res.map(|pid| (pid, false)).ok_or(RunAppResponse::AppIdNotFound)
     }
 
     pub(crate) fn respond_to_nav_request(&mut self, response: NavigationResult) {

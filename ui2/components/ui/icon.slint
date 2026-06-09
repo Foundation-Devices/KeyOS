@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { IconTheme } from "icon_theme.slint";
+
+export component Icon inherits Rectangle {
+    in property <image> icon;
+    in property <ControlSize> size: ControlSize.md;
+    in property <color> icon-color: Theme.palette-foreground;
+    in property <length> icon-size: IconTheme.size(root.size).icon-size;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> icon-background: transparent;
+
+    property <length> actual-icon-size: root.icon-size;
+    property <color> actual-color: root.icon-color;
+
+    preferred-width: root.actual-icon-size;
+    preferred-height: root.actual-icon-size;
+    width: self.preferred-width;
+    height: self.preferred-height;
+    background: root.icon-background;
+
+    Image {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        source: root.icon;
+        colorize: root.actual-color;
+    }
+}

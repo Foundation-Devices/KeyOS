@@ -5,7 +5,7 @@ memory = ["SECURAM"]
 extends = "../../api/quantum-link"
 
 [appName]
-en = "Quantum Link Service"
+en = "QuantumLink Service"
 
 [servers."os/quantum-link"]
 BtRecvWake = { id = 100, type = "scalar" }

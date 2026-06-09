@@ -52,9 +52,7 @@ impl AllowedExtensions {
     pub fn contains<S: AsRef<str>>(&self, extension: S) -> bool {
         match self {
             Self::All => true,
-            Self::Specific(extensions) => {
-                extensions.iter().any(|allowed| allowed.eq_ignore_ascii_case(extension.as_ref()))
-            }
+            Self::Specific(extensions) => extensions.contains(&extension.as_ref().to_string()),
         }
     }
 }
@@ -181,17 +179,4 @@ impl SelectFileResult {
     }
 
     pub fn serialize(&self) -> Vec<u8> { rkyv::to_bytes::<rkyv::rancor::Error>(self).unwrap().to_vec() }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn allowed_extensions_match_case_insensitively() {
-        let extensions = AllowedExtensions::specific(["png", "jpg"]);
-
-        assert!(extensions.contains("JPG"));
-        assert!(extensions.contains("Png"));
-    }
 }

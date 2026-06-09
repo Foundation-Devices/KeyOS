@@ -63,6 +63,20 @@ pub struct MapFileMessage {
     pub location: Location,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AppResourcesRoot {
+    BuiltIn,
+    Sideloaded,
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<(), Error>)]
+pub struct RegisterAppResources {
+    pub app_id: [u8; xous::APP_ID_SIZE],
+    pub root: AppResourcesRoot,
+    pub app_dir: String,
+}
+
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Metadata, Error>)]
 pub enum GetMetadata {

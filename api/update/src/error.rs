@@ -5,6 +5,8 @@
 pub enum Error {
     #[error("failed to reboot")]
     Reboot,
+    #[error("failed to start a new update, must continue previous")]
+    StartButShouldContinue,
     #[error("no update downloaded")]
     NoUpdateDownloaded,
     #[error("io error: {0}")]

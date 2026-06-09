@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[workspace]
+resolver = "2"
+members = ["components", "theme-editor"]
+
+[workspace.dependencies]
+slint = "1.9"

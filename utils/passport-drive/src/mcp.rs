@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use hidapi::HidDevice;
 use serde_json::{json, Value};
-use usb_debug_protocol::{Command, TouchKind, UsbDebugClient};
+use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, TouchKind, UsbDebugClient};
 
 use crate::{LOG_TERMINATOR, SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -197,6 +197,17 @@ fn tool_definitions() -> Value {
             }
         },
         {
+            "name": "launch_app",
+            "description": "Launch a Flux app by its 16-byte hex app ID. Returns whether it was launched or already running, plus the PID.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app_id": { "type": "string", "description": "32-character hex app ID (with optional 0x prefix)" }
+                },
+                "required": ["app_id"]
+            }
+        },
+        {
             "name": "close_app",
             "description": "Close/kill an app by PID. Uses gui-server's graceful close mechanism. Only works for app processes (not system services).",
             "inputSchema": {
@@ -333,6 +344,13 @@ fn tool_definitions() -> Value {
             "description": "Get the list of running processes on the device with PID, name, CPU%, RAM usage, and thread states. Sends the 't' kernel debug command via USB and returns the compact process list.",
             "inputSchema": { "type": "object", "properties": {}, "required": [] }
         },
+        // Developer Mode probe (used by `foundation sideload` to fail early
+        // when the user hasn't enabled Developer Mode on the device).
+        {
+            "name": "get_developer_mode",
+            "description": "Read the device's DeveloperMode setting via the usb-debug GetDeveloperMode command. Returns 'enabled' or 'disabled'.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        },
         // Kernel debug
         {
             "name": "send_kernel_command",
@@ -392,6 +410,7 @@ fn handle_tool(state: &mut McpState, name: &str, args: &Value) -> Value {
         "send_kernel_command" => handle_send_kernel_command(state, args),
         "reboot_to_samba" => handle_reboot_to_samba(state, args),
         "input_text" => handle_input_text(state, args),
+        "launch_app" => handle_launch_app(state, args),
         "close_app" => handle_close_app(state, args),
         "samba_list_devices" => handle_samba_list_devices(),
         "samba_connect" => handle_samba_connect(state),
@@ -408,6 +427,7 @@ fn handle_tool(state: &mut McpState, name: &str, args: &Value) -> Value {
         "send_apdu" => handle_send_apdu(state, args),
         "get_process_list" => handle_get_process_list(state),
         "get_version" => handle_get_version(state),
+        "get_developer_mode" => handle_get_developer_mode(state),
         _ => error_result(&format!("Unknown tool: {name}")),
     }
 }
@@ -637,6 +657,29 @@ fn handle_get_version(state: &McpState) -> Value {
     }
 }
 
+fn handle_get_developer_mode(state: &McpState) -> Value {
+    let dev = match state.require_device() {
+        Ok(d) => d,
+        Err(e) => return error_result(&e),
+    };
+
+    match dev.send(Command::GetDeveloperMode, Duration::from_secs(5)) {
+        Ok(payload) => {
+            // Wire format: single-byte payload, 0x00 = off, 0x01 = on.
+            // Anything else is a protocol-level violation; treat as error.
+            match payload.first().copied() {
+                Some(0) => text_result("disabled"),
+                Some(1) => text_result("enabled"),
+                Some(other) => {
+                    error_result(&format!("get_developer_mode: unexpected payload byte 0x{other:02x}"))
+                }
+                None => error_result("get_developer_mode: empty payload"),
+            }
+        }
+        Err(e) => error_result(&format!("get_developer_mode request failed: {e}")),
+    }
+}
+
 fn handle_get_process_list(state: &McpState) -> Value {
     let dev = match state.require_device() {
         Ok(d) => d,
@@ -659,6 +702,46 @@ fn handle_reboot_to_samba(state: &mut McpState, _args: &Value) -> Value {
     state.device.take();
 
     text_result("Device rebooting to SAM-BA mode. Use samba_connect to connect to it.")
+}
+
+fn handle_launch_app(state: &McpState, args: &Value) -> Value {
+    let dev = match state.require_device() {
+        Ok(d) => d,
+        Err(e) => return error_result(&e),
+    };
+
+    let hex_str = match args.get("app_id").and_then(|v| v.as_str()) {
+        Some(s) => s.strip_prefix("0x").unwrap_or(s),
+        None => return error_result("app_id is required (32-character hex string)"),
+    };
+
+    let bytes = match hex::decode(hex_str) {
+        Ok(b) if b.len() == 16 => {
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(&b);
+            arr
+        }
+        Ok(b) => {
+            return error_result(&format!("app_id must be 16 bytes (32 hex chars), got {} bytes", b.len()))
+        }
+        Err(e) => return error_result(&format!("Invalid hex app_id: {e}")),
+    };
+
+    match dev.send(Command::LaunchApp { app_id: bytes }, Duration::from_secs(10)) {
+        Ok(payload) => match LaunchAppResult::decode(&payload) {
+            Ok(result) => match result.status {
+                LaunchAppStatus::Launched => {
+                    text_result(&format!("App launched successfully with PID {}", result.pid))
+                }
+                LaunchAppStatus::AlreadyRunning => text_result(&format!(
+                    "App is already running with PID {}. Newly copied code will not run until the app is closed and launched again.",
+                    result.pid
+                )),
+            },
+            Err(e) => error_result(&format!("Invalid launch_app response: {e}")),
+        },
+        Err(e) => error_result(&format!("Failed to launch app: {e}")),
+    }
 }
 
 fn handle_close_app(state: &McpState, args: &Value) -> Value {

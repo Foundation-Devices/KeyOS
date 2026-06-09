@@ -11,9 +11,11 @@ publish = false
 anyhow = "1.0"
 app-manager = { workspace = true }
 app-manifest = { path = "../app-manifest" }
+const-oid = { version = "0.9", features = ["db"] }
 constant_time_eq = "0.4.2"
 cosign2 = { path = "../../imports/cosign2/cosign2", default-features = false }
 crypto = { workspace = true }
+file-backed = { workspace = true }
 fs = { workspace = true }
 fw-utils = { path = "../../utils/fw-utils" }
 hex = "0.4.3"
@@ -23,14 +25,19 @@ num-derive = "0.4"
 num-traits = "0.2"
 power-manager = { workspace = true }
 rand = "0.8"
+regex = { workspace = true }
 rkyv = { workspace = true }
+serde = { workspace = true }
 serde_json = "1.0.139"
 server = { path = "../../server" }
 tar = { path = "../../imports/tar-rs" }
 thiserror = "1.0"
+x509-cert = "0.2"
 xous = { path = "../../xous/xous-rs" }
 
 [target.'cfg(not(keyos))'.dependencies]
+secp256k1 = "0.29"
+sha2 = { workspace = true }
 system-manifests = { path = "../system-manifests/" }
 
 [lints.rust]

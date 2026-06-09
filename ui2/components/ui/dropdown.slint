@@ -1,0 +1,248 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { DropdownTheme } from "dropdown_theme.slint";
+
+export component Dropdown {
+    in property <string> label: "";
+    in property <string> placeholder: "Select an option";
+    in property <[string]> options: ["Option 1", "Option 2", "Option 3"];
+    in property <ControlSize> size: ControlSize.md;
+    in-out property <int> selected-index: -1;
+    in-out property <bool> open: false;
+    in property <bool> disabled: false;
+    in property <bool> interactive: true;
+    in property <int> max-visible-items: 5;
+
+    in property <string> font-family: DropdownTheme.size(root.size).font-family;
+    in property <length> font-size: DropdownTheme.size(root.size).font-size;
+    in property <length> control-height: DropdownTheme.size(root.size).control-height;
+    in property <length> padding-horizontal: DropdownTheme.size(root.size).padding-horizontal;
+    in property <length> option-height: DropdownTheme.size(root.size).option-height;
+    in property <length> icon-size: DropdownTheme.size(root.size).icon-size;
+    in property <length> border-radius: DropdownTheme.size(root.size).border-radius;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> label-font-size: Theme.font-size-label;
+    in property <int> label-font-weight: 500;
+    in property <color> label-color: root.disabled ? Theme.palette-muted.with-alpha(0.8) : Theme.palette-muted;
+    in property <color> trigger-background: root.disabled ? Theme.palette-secondary : Theme.palette-surface;
+    in property <color> trigger-border-color: root.open ? Theme.palette-primary : Theme.palette-border;
+    in property <length> trigger-border-width: root.open ? 2px : 1px;
+    in property <color> value-color: root.disabled ? Theme.palette-muted : (root.selected-text == "" ? Theme.palette-muted : Theme.palette-foreground);
+    in property <color> chevron-color: Theme.palette-muted;
+    in property <color> popup-background: Theme.palette-surface;
+    in property <color> popup-border-color: Theme.palette-border;
+    in property <length> popup-border-width: 1px;
+    in property <color> option-pressed-background: Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.12 : 0.08);
+    in property <color> option-selected-background: Theme.palette-primary.with-alpha(Theme.is-dark ? 0.24 : 0.12);
+    in property <color> option-text-color: Theme.palette-foreground;
+    in property <color> option-selected-text-color: Theme.palette-primary;
+    in property <color> option-check-color: Theme.palette-primary;
+
+    out property <string> selected-text:
+        root.selected-index >= 0 && root.selected-index < root.options.length ? root.options[root.selected-index] : "";
+    private property <length> control-y: root.label != "" ? root.label-line-height + 6px : 0px;
+
+    callback changed(int, string);
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-control-height: root.control-height;
+    property <length> actual-padding-horizontal: root.padding-horizontal;
+    property <length> actual-option-height: root.option-height;
+    property <length> actual-icon-size: root.icon-size;
+    // Clamp the requested radius to half the control height so a "radius-full"
+    // token (often 9999px) renders as a pill, not an ellipse.
+    property <length> actual-border-radius:
+        min(root.border-radius, actual-control-height / 2);
+    property <length> label-line-height: root.label != "" ? max(18px, root.label-font-size + 2px) : 0px;
+    // Fixed-height popup: show up to `max-visible-items` options and let the
+    // inner Flickable scroll through any beyond that (+8px for the list padding).
+    property <length> popup-height:
+        root.open ? (min(root.max-visible-items, root.options.length) * actual-option-height + 8px) : 0px;
+
+    preferred-width: 280px;
+    preferred-height: label-line-height + actual-control-height + (root.label != "" ? 6px : 0px);
+
+    changed open => {
+        if (!root.interactive) {
+            if (root.open) {
+                root.open = false;
+            }
+            popup.close();
+        } else if (root.open && !root.disabled && root.options.length > 0) {
+            popup.show();
+        } else {
+            popup.close();
+        }
+    }
+
+    changed disabled => {
+        if (root.disabled && root.open) {
+            root.open = false;
+        }
+    }
+
+    changed interactive => {
+        if (!root.interactive && root.open) {
+            root.open = false;
+        }
+    }
+
+    if root.label != "": Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.label-line-height;
+        text: root.label;
+        color: root.label-color;
+        font-family: root.actual-font-family;
+        font-size: root.label-font-size;
+        font-weight: root.label-font-weight;
+        vertical-alignment: center;
+    }
+
+    trigger := Rectangle {
+        x: 0px;
+        y: root.control-y;
+        width: root.width;
+        height: root.actual-control-height;
+        preferred-height: root.actual-control-height;
+        background: root.trigger-background;
+        border-color: root.trigger-border-color;
+        border-width: root.trigger-border-width;
+        border-radius: root.actual-border-radius;
+
+        Text {
+            x: root.actual-padding-horizontal;
+            y: 0px;
+            width: parent.width - root.actual-padding-horizontal * 2 - root.actual-icon-size - 8px;
+            height: parent.height;
+            text: root.selected-text == "" ? root.placeholder : root.selected-text;
+            color: root.value-color;
+            font-family: root.actual-font-family;
+            font-size: root.actual-font-size;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Rectangle {
+            x: parent.width - root.actual-padding-horizontal - self.width;
+            y: 0px;
+            width: root.actual-icon-size;
+            height: parent.height;
+
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: root.actual-icon-size;
+                height: root.actual-icon-size;
+                source: root.open ? @image-url("../../resources/icons/chevron-up.svg") : @image-url("../../resources/icons/chevron-down.svg");
+                colorize: root.chevron-color;
+            }
+        }
+
+        dropdown-touch := TouchArea {
+            enabled: !root.disabled && root.interactive;
+            clicked => {
+                root.open = !root.open;
+            }
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0px;
+        y: root.control-y + root.actual-control-height + 4px;
+        width: root.width;
+        height: root.popup-height;
+        close-policy: close-on-click-outside;
+        forward-focus: popup-focus;
+
+        popup-panel := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: root.popup-background;
+            border-color: root.popup-border-color;
+            border-width: root.popup-border-width;
+            border-radius: root.actual-border-radius + 2px;
+            clip: true;
+        }
+
+        popup-focus := FocusScope {
+            width: 100%;
+            height: 100%;
+            init => {
+                self.focus();
+                root.open = true;
+            }
+
+            changed has-focus => {
+                root.open = self.has-focus;
+            }
+
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: option-list.preferred-height;
+
+                option-list := VerticalLayout {
+                    width: parent.width;
+                    padding: 4px;
+                    spacing: 2px;
+
+                    for option[index] in root.options: Rectangle {
+                        width: parent.width - 8px;
+                        height: root.actual-option-height;
+                        preferred-height: root.actual-option-height;
+                        border-radius: max(14px, root.actual-border-radius - 6px);
+                        background: option-touch.pressed ? root.option-pressed-background : index == root.selected-index ? root.option-selected-background : transparent;
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            padding-left: root.actual-padding-horizontal - 2px;
+                            padding-right: root.actual-padding-horizontal - 2px;
+                            spacing: 8px;
+
+                            Text {
+                                text: option;
+                                color: index == root.selected-index ? root.option-selected-text-color : root.option-text-color;
+                                font-family: root.actual-font-family;
+                                font-size: root.actual-font-size;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            if index == root.selected-index: Rectangle {
+                                width: root.actual-icon-size;
+                                height: parent.height;
+
+                                Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: root.actual-icon-size - 2px;
+                                    height: root.actual-icon-size - 2px;
+                                    source: @image-url("../../resources/icons/check.svg");
+                                    colorize: root.option-check-color;
+                                }
+                            }
+                        }
+
+                        option-touch := TouchArea {
+                            clicked => {
+                                root.selected-index = index;
+                                root.open = false;
+                                popup.close();
+                                root.changed(index, option);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

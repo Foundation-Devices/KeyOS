@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from icon_button.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct IconButtonSizeProps {
+    border-width: length,
+    border-radius: length,
+    control-size: length,
+    icon-size: length,
+}
+
+export global IconButtonTheme {
+    in-out property <IconButtonSizeProps> size-sm: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        control-size: Theme.control-size-sm,
+        icon-size: Theme.icon-size-sm,
+    };
+    in-out property <IconButtonSizeProps> size-md: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        control-size: Theme.control-size-md,
+        icon-size: Theme.icon-size-md,
+    };
+    in-out property <IconButtonSizeProps> size-lg: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        control-size: Theme.control-size-lg,
+        icon-size: Theme.icon-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> IconButtonSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

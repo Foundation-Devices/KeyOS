@@ -30,7 +30,7 @@ use slint_keyos_platform::{
     router::Router,
     settings::global::{OnboardingStatus, SystemTheme},
     sleep,
-    slint::{ComponentHandle, ModelRc, SharedString, ToSharedString},
+    slint::{ComponentHandle, Model, ModelRc, SharedString, ToSharedString},
     spawn_local, spawn_worker, subscribe_archive, timeout, StoredValue,
 };
 use update::messages::ProgressUpdate;
@@ -119,7 +119,7 @@ fn init_state(ui: AppWindow, gui: Arc<GuiApi>) -> StoredValue<AppState> {
         quantum_link::start_quantum_link_without_filesystem::<QuantumLinkPrestartPermissions>();
     }
 
-    // Now that quantum link is actually started (with or without a filesystem),
+    // Now that QuantumLink is actually started (with or without a filesystem),
     // we can connect to it.
     StoredValue::new(AppState::new(ui.as_weak(), gui, security))
 }
@@ -134,7 +134,6 @@ fn on_startup(state: StoredValue<AppState>) {
 
     if matches!(master_key_state, MasterKeyState::Erased) {
         log::info!("master key erased, prioritizing master key recovery flow");
-        ui.global::<SeedGlobal>().set_is_master_key_recovery(true);
         nav.invoke_master_key_deleted_main(NavigateOptions { animate: Animate::None, replace: true });
         return;
     }
@@ -463,8 +462,8 @@ fn init_quantum_link(state: StoredValue<AppState>) {
                 ProgressUpdate::InstallProgress(progress) => {
                     callbacks.set_fw_update_state(FwUpdateState::Installing);
 
-                    let percent = progress.completion_percentage;
-                    let secs_remaining = progress.estimated_seconds_remaining;
+                    let percent = progress.completion_percentage();
+                    let secs_remaining = progress.estimate_time_remaining_secs();
                     let mins_remaining = secs_remaining.div_ceil(60).max(1);
                     let time_str = format!("{mins_remaining}m");
 
@@ -702,7 +701,15 @@ fn init_seed_global(state: StoredValue<AppState>) {
         .detach()
     });
 
-    seed_quiz::init_seed_callbacks!(ui);
+    seed_global.on_validate_seed_word(move |word: SharedString| {
+        let word = word.as_str();
+        bip39::Language::English.word_list().contains(&word)
+    });
+
+    seed_global.on_validate_full_seed(move |words: slint::ModelRc<SharedString>| {
+        let mnemonic_str = words.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(" ");
+        bip39::Mnemonic::parse_normalized(&mnemonic_str).is_ok()
+    });
 
     seed_global.on_restore_from_seed_words(move |words| {
         spawn_local(state::setup_seed::restore_from_seed_words(state, words)).detach();
@@ -848,13 +855,13 @@ fn init_connect_wallet(state: StoredValue<AppState>) {
     .detach();
 }
 
-impl From<seed_quiz::SeedWordChallenge> for SeedWordChallenge {
-    fn from(c: seed_quiz::SeedWordChallenge) -> SeedWordChallenge {
-        let options = ModelRc::from(c.options.map(SharedString::from));
+impl From<state::seed_challenge::SeedWordChallenge> for SeedWordChallenge {
+    fn from(s: state::seed_challenge::SeedWordChallenge) -> SeedWordChallenge {
+        let options = ModelRc::from(s.options.map(SharedString::from));
         crate::SeedWordChallenge {
-            correct_option_index: c.correct_option_index as i32,
+            correct_option_index: s.correct_option_index as i32,
             options,
-            mnemonic_index: c.word_index as i32,
+            mnemonic_index: s.mnemonic_index as i32,
         }
     }
 }

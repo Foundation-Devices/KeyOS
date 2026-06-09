@@ -434,7 +434,7 @@ impl AppState {
         }
     }
 
-    // todo: this should wait until we've established a quantum link connection instead of retrying
+    // todo: this should wait until we've established a QuantumLink connection instead of retrying
     // indefinitely.
     pub fn publish_account_config(state: StoredValue<AppState>, id: AccountId) {
         let Some(config) = state.borrow().store.get_account_config(&id).map(|c| c.clone()) else {
@@ -488,7 +488,7 @@ impl AppState {
         state: StoredValue<AppState>,
         AccountUpdate { account_id, update }: AccountUpdate,
     ) -> anyhow::Result<()> {
-        log::info!("Received quantum link account update {account_id}");
+        log::info!("Received QuantumLink account update {account_id}");
 
         let account_id = account_id.parse::<AccountId>().context("invalid account id")?;
 

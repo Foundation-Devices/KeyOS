@@ -73,7 +73,7 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     }
 
     /// Apply the previously downloaded firmware update. This should be called after receiving a
-    /// [ProgressUpdate::Downloaded] event.
+    /// [`messages::ProgressUpdate::DownloadComplete`] event.
     pub fn apply_downloaded_update(&self)
     where
         P: server::MessageAllowed<messages::ApplyDownloadedUpdate>,

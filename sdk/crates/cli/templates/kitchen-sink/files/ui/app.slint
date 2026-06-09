@@ -1,0 +1,2015 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT
+
+import { Theme, UISize, Images, ButtonVariant, ControlSize } from "@ui/theme.slint";
+import { Button } from "@ui/button.slint";
+import { IconButton, IconButtonVariant, IconButtonSize, IconButtonShape } from "@ui/icon_button.slint";
+import { Chip, ChipVariant, ChipSize, ChipColor } from "@ui/chip.slint";
+import { Input, InputVariant } from "@ui/input.slint";
+import { Search } from "@ui/search.slint";
+import { Dropdown } from "@ui/dropdown.slint";
+import { Checkbox } from "@ui/checkbox.slint";
+import { Radio } from "@ui/radio.slint";
+import { RadioGroup } from "@ui/radio_group.slint";
+import { Switch } from "@ui/switch.slint";
+import { Tabs, TabsVariant, TabsColor, TabsOrientation } from "@ui/tabs.slint";
+import { SegmentedControl } from "@ui/segmented_control.slint";
+import { SlideToConfirm } from "@ui/slide_to_confirm.slint";
+import { Link } from "@ui/link.slint";
+import { Slider } from "@ui/slider.slint";
+import { TextArea, TextAreaVariant } from "@ui/textarea.slint";
+import { Card } from "@ui/card.slint";
+import { Menu, MenuRow } from "@ui/menu.slint";
+import { MenuItem } from "@ui/menu_item.slint";
+import { Accordion } from "@ui/accordion.slint";
+import { MediaImage } from "@ui/image_view.slint";
+import { Divider, DividerOrientation, DividerLabelAlignment } from "@ui/divider.slint";
+import { Dialog, DialogVariant } from "@ui/dialog.slint";
+import { Sheet } from "@ui/sheet.slint";
+import { Toast, ToastVariant, ToastPosition } from "@ui/toast.slint";
+import { ProgressBar, ProgressBarTone, ProgressValueFormat } from "@ui/progress_bar.slint";
+import { Spinner, SpinnerSize, SpinnerTone } from "@ui/spinner.slint";
+import { Icon } from "@ui/icon.slint";
+
+export {
+    Theme,
+    Images,
+    ButtonVariant,
+    ControlSize,
+    IconButtonVariant,
+    IconButtonSize,
+    IconButtonShape,
+    ChipVariant,
+    ChipSize,
+    ChipColor,
+    InputVariant,
+    TextAreaVariant,
+    TabsVariant,
+    TabsColor,
+    TabsOrientation,
+    DividerOrientation,
+    DividerLabelAlignment,
+    DialogVariant,
+    ToastVariant,
+    ToastPosition,
+    ProgressBarTone,
+    ProgressValueFormat,
+    SpinnerSize,
+    SpinnerTone,
+}
+
+component PageTitle inherits Text {
+    in property <string> copy: "";
+    text: root.copy;
+    color: Theme.palette-foreground;
+    font-family: Theme.font-primary;
+    font-size: Theme.font-size-title;
+    font-weight: Theme.font-weight-bold;
+    wrap: word-wrap;
+}
+
+component SectionLabel inherits Text {
+    in property <string> copy: "";
+    text: root.copy;
+    color: Theme.palette-muted;
+    font-family: Theme.font-primary;
+    font-size: Theme.font-size-label;
+    font-weight: Theme.font-weight-bold;
+    wrap: word-wrap;
+}
+
+component RowLabel inherits Text {
+    in property <string> copy: "";
+    text: root.copy;
+    color: Theme.palette-muted;
+    font-family: Theme.font-primary;
+    font-size: Theme.font-size-helper;
+    font-weight: Theme.font-weight-medium;
+    horizontal-alignment: left;
+    wrap: word-wrap;
+}
+
+component Swatch inherits Rectangle {
+    in property <color> swatch-color: Theme.palette-primary;
+    in property <string> label: "";
+    width: 96px;
+    height: 72px;
+    background: root.swatch-color;
+    border-color: Theme.palette-border;
+    border-width: 1px;
+    border-radius: 8px;
+
+    Text {
+        x: 8px;
+        y: parent.height - self.preferred-height - 8px;
+        width: parent.width - 16px;
+        text: root.label;
+        color: #ffffff;
+        font-family: Theme.font-primary;
+        font-size: Theme.font-size-helper;
+        font-weight: Theme.font-weight-bold;
+        overflow: elide;
+    }
+}
+
+component Page inherits Rectangle {
+    in property <string> title: "";
+    in property <string> summary: "";
+    preferred-height: page-content.preferred-height;
+    background: transparent;
+
+    page-content := VerticalLayout {
+        width: parent.width;
+        spacing: 18px;
+
+        PageTitle {
+            width: parent.width;
+            copy: root.title;
+        }
+
+        if root.summary != "": Text {
+            width: parent.width;
+            text: root.summary;
+            color: Theme.palette-muted;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-subtitle;
+            wrap: word-wrap;
+        }
+
+        @children
+    }
+}
+
+component Section inherits Rectangle {
+    in property <string> title: "";
+    preferred-height: section-content.preferred-height;
+    background: transparent;
+
+    section-content := VerticalLayout {
+        width: parent.width;
+        spacing: 10px;
+
+        SectionLabel {
+            width: parent.width;
+            copy: root.title;
+        }
+
+        @children
+
+        Rectangle {
+            width: parent.width;
+            height: 1px;
+            background: Theme.palette-border.with-alpha(Theme.is-dark ? 0.64 : 0.8);
+        }
+    }
+}
+
+component FramedDemo inherits Rectangle {
+    in property <length> frame-height: 220px;
+    preferred-height: root.frame-height;
+    height: root.frame-height;
+    background: Theme.palette-secondary.with-alpha(Theme.is-dark ? 0.28 : 0.36);
+    border-color: Theme.palette-border;
+    border-width: 1px;
+    border-radius: 8px;
+    clip: true;
+
+    @children
+}
+
+export component AppWindow inherits Window {
+    in-out property <int> selected-component: 0;
+    // Accordion is a controlled component: it reports toggle-requested(index) and
+    // renders from expanded-states, so the app owns the open/closed state.
+    in-out property <[bool]> accordion-default-expanded: [true, false, false];
+    in-out property <[bool]> accordion-multi-expanded: [true, true];
+
+    title: "Kitchen Sink";
+    preferred-width: 480px;
+    preferred-height: 800px;
+    width: 480px;
+    height: 800px;
+    background: Theme.palette-background;
+
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        background: Theme.palette-background;
+
+        VerticalLayout {
+            width: root.width;
+            height: root.height;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 18px + UISize.control-center-status-bar-height;
+            padding-bottom: 24px;
+            spacing: 14px;
+
+            // Pin the selector to its closed control height; the option list is
+            // a PopupWindow that floats above the content below. Without the pin
+            // the slot grows to fit the open list, leaving a gap when closed.
+            Rectangle {
+                width: root.width - 40px;
+                height: component-dropdown.preferred-height;
+
+                component-dropdown := Dropdown {
+                    width: parent.width;
+                    label: "Component";
+                    options: [
+                        "Button",
+                        "Icon Button",
+                        "Chip",
+                        "Input",
+                        "Search",
+                        "Dropdown",
+                        "Checkbox",
+                        "Radio",
+                        "Radio Group",
+                        "Switch",
+                        "Tabs",
+                        "Segmented Control",
+                        "Slide To Confirm",
+                        "Link",
+                        "Slider",
+                        "Text Area",
+                        "Card",
+                        "Menu",
+                        "Accordion",
+                        "Media Image",
+                        "Divider",
+                        "Dialog",
+                        "Sheet",
+                        "Toast",
+                        "Progress Bar",
+                        "Spinner",
+                        "Icon",
+                        "Theme Tokens",
+                    ];
+                    selected-index <=> root.selected-component;
+                    max-visible-items: 8;
+                }
+            }
+
+            Rectangle {
+                width: 100%;
+                height: 1px;
+                background: Theme.palette-border;
+            }
+
+            // Wrap the scrolling gallery in a layout-managed, clipping
+            // Rectangle (the same shape as the shared ScrollBody widget). A
+            // bare Flickable placed directly in a layout takes its
+            // expands-to-parent-geometry default size and can draw over the
+            // fixed Component dropdown above it; nesting it inside a Rectangle
+            // confines it to its own stretch slot below the dropdown.
+            Rectangle {
+                width: 100%;
+                vertical-stretch: 1;
+                clip: true;
+
+                Flickable {
+                    width: 100%;
+                    height: 100%;
+                    viewport-height: gallery-content.preferred-height;
+
+                    gallery-content := VerticalLayout {
+                        width: root.width - 40px;
+                        spacing: 22px;
+
+                        if root.selected-component == 0: Page {
+                            title: "Button";
+                            summary: "Action buttons across variants, sizes, icons, loading, and disabled states.";
+
+                            Section {
+                                title: "Variants";
+                                Button {
+                                    width: parent.width;
+                                    text: "Primary";
+                                    variant: ButtonVariant.primary;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Secondary";
+                                    variant: ButtonVariant.secondary;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Tertiary";
+                                    variant: ButtonVariant.tertiary;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Ghost";
+                                    variant: ButtonVariant.ghost;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Danger";
+                                    variant: ButtonVariant.danger;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                Button {
+                                    width: parent.width;
+                                    text: "Small";
+                                    variant: ButtonVariant.primary;
+                                    size: ControlSize.sm;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Medium";
+                                    variant: ButtonVariant.primary;
+                                    size: ControlSize.md;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Large";
+                                    variant: ButtonVariant.primary;
+                                    size: ControlSize.lg;
+                                    full-width: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Parameters";
+                                Button {
+                                    width: parent.width;
+                                    text: "Start icon";
+                                    start-icon: Images.icon("check", 24px);
+                                    variant: ButtonVariant.primary;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "End icon";
+                                    end-icon: Images.icon("arrow-right", 24px);
+                                    variant: ButtonVariant.secondary;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Loading";
+                                    loading: true;
+                                    variant: ButtonVariant.primary;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Disabled";
+                                    disabled: true;
+                                    variant: ButtonVariant.secondary;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Focused";
+                                    force-focused: true;
+                                    variant: ButtonVariant.tertiary;
+                                    full-width: true;
+                                }
+
+                                Button {
+                                    width: parent.width;
+                                    text: "Pressed";
+                                    force-pressed: true;
+                                    variant: ButtonVariant.primary;
+                                    full-width: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 1: Page {
+                            title: "Icon Button";
+                            summary: "Icon-only button variants, sizes, shapes, and interaction states.";
+
+                            Section {
+                                title: "Variants";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 14px;
+                                    IconButton {
+                                        icon: Images.icon("settings", 24px);
+                                        label: "Default";
+                                        variant: IconButtonVariant.default;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("settings", 24px);
+                                        label: "Ghost";
+                                        variant: IconButtonVariant.ghost;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("settings", 24px);
+                                        label: "Outlined";
+                                        variant: IconButtonVariant.outlined;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes and shape";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 14px;
+                                    IconButton {
+                                        icon: Images.icon("plus", 20px);
+                                        label: "Small";
+                                        size: IconButtonSize.sm;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("plus", 24px);
+                                        label: "Medium";
+                                        size: IconButtonSize.md;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("plus", 28px);
+                                        label: "Large";
+                                        size: IconButtonSize.lg;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("plus", 24px);
+                                        label: "Square";
+                                        shape: IconButtonShape.square;
+                                        variant: IconButtonVariant.outlined;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 14px;
+                                    IconButton {
+                                        icon: Images.icon("heart", 24px);
+                                        label: "Focused";
+                                        force-focused: true;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("heart", 24px);
+                                        label: "Pressed";
+                                        force-pressed: true;
+                                    }
+
+                                    IconButton {
+                                        icon: Images.icon("heart", 24px);
+                                        label: "Disabled";
+                                        disabled: true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 2: Page {
+                            title: "Chip";
+                            summary: "Compact labels with tone, selection, icon, and close affordances.";
+
+                            Section {
+                                title: "Variants";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
+                                    Chip {
+                                        text: "Filled";
+                                        variant: ChipVariant.filled;
+                                        color: ChipColor.primary;
+                                    }
+
+                                    Chip {
+                                        text: "Outlined";
+                                        variant: ChipVariant.outlined;
+                                        color: ChipColor.primary;
+                                    }
+
+                                    Chip {
+                                        text: "Soft";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.primary;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Colors";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Chip {
+                                        text: "Default";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.default;
+                                    }
+
+                                    Chip {
+                                        text: "Success";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.success;
+                                    }
+
+                                    Chip {
+                                        text: "Warning";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.warning;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Chip {
+                                        text: "Danger";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.danger;
+                                    }
+
+                                    Chip {
+                                        text: "Secondary";
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.secondary;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes and parameters";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Chip {
+                                        text: "Small";
+                                        size: ChipSize.sm;
+                                        color: ChipColor.primary;
+                                    }
+
+                                    Chip {
+                                        text: "Medium";
+                                        size: ChipSize.md;
+                                        color: ChipColor.primary;
+                                    }
+
+                                    Chip {
+                                        text: "Large";
+                                        size: ChipSize.lg;
+                                        color: ChipColor.primary;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Chip {
+                                        text: "Icon";
+                                        icon: Images.icon("star", 20px);
+                                        variant: ChipVariant.soft;
+                                        color: ChipColor.warning;
+                                    }
+
+                                    Chip {
+                                        text: "Selected";
+                                        selected: true;
+                                        variant: ChipVariant.outlined;
+                                        color: ChipColor.primary;
+                                    }
+
+                                    Chip {
+                                        text: "Close";
+                                        closable: true;
+                                        variant: ChipVariant.filled;
+                                        color: ChipColor.danger;
+                                    }
+                                }
+
+                                Chip {
+                                    text: "Disabled";
+                                    disabled: true;
+                                    variant: ChipVariant.soft;
+                                    color: ChipColor.default;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 3: Page {
+                            title: "Input";
+                            summary: "Text input variants, control sizes, adornments, helper errors, and disabled/read-only states.";
+
+                            Section {
+                                title: "Variants";
+                                Input {
+                                    width: parent.width;
+                                    label: "Default";
+                                    placeholder: "Default field";
+                                    value: "Text";
+                                    variant: InputVariant.default;
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Filled";
+                                    placeholder: "Filled field";
+                                    value: "Text";
+                                    variant: InputVariant.filled;
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Outlined";
+                                    placeholder: "Outlined field";
+                                    value: "Text";
+                                    variant: InputVariant.outlined;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes and states";
+                                Input {
+                                    width: parent.width;
+                                    label: "Small";
+                                    value: "Small";
+                                    size: ControlSize.sm;
+                                    clearable: true;
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Large";
+                                    value: "Large";
+                                    size: ControlSize.lg;
+                                    prefix-icon: Images.icon("lock", 24px);
+                                    suffix-icon: Images.icon("check", 24px);
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Error";
+                                    value: "Needs review";
+                                    error: "This field shows error styling.";
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Disabled";
+                                    value: "Disabled";
+                                    disabled: true;
+                                }
+
+                                Input {
+                                    width: parent.width;
+                                    label: "Read only";
+                                    value: "Read only";
+                                    read-only: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 4: Page {
+                            title: "Search";
+                            summary: "Search inputs share input variants with the search prefix and clear affordance.";
+
+                            Section {
+                                title: "Variants";
+                                Search {
+                                    width: parent.width;
+                                    label: "Filled";
+                                    value: "backup";
+                                    variant: InputVariant.filled;
+                                }
+
+                                Search {
+                                    width: parent.width;
+                                    label: "Default";
+                                    value: "wallet";
+                                    variant: InputVariant.default;
+                                }
+
+                                Search {
+                                    width: parent.width;
+                                    label: "Outlined";
+                                    placeholder: "Search settings";
+                                    variant: InputVariant.outlined;
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                Search {
+                                    width: parent.width;
+                                    label: "Focused";
+                                    value: "theme";
+                                    force-focused: true;
+                                }
+
+                                Search {
+                                    width: parent.width;
+                                    label: "Error";
+                                    value: "missing";
+                                    error: "No results found.";
+                                }
+
+                                Search {
+                                    width: parent.width;
+                                    label: "Disabled";
+                                    value: "disabled";
+                                    disabled: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 5: Page {
+                            title: "Dropdown";
+                            summary: "Select controls with sizes, labels, disabled state, and non-interactive display.";
+
+                            Section {
+                                title: "Sizes";
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Small";
+                                    options: ["One", "Two", "Three"];
+                                    selected-index: 0;
+                                    size: ControlSize.sm;
+                                }
+
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Medium";
+                                    options: ["Primary", "Secondary", "Tertiary"];
+                                    selected-index: 1;
+                                    size: ControlSize.md;
+                                }
+
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Large";
+                                    options: ["Light", "Dark", "System"];
+                                    selected-index: 2;
+                                    size: ControlSize.lg;
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Placeholder";
+                                    placeholder: "Choose one";
+                                    options: ["A", "B", "C"];
+                                    selected-index: -1;
+                                }
+
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Disabled";
+                                    options: ["Disabled"];
+                                    selected-index: 0;
+                                    disabled: true;
+                                }
+
+                                Dropdown {
+                                    width: parent.width;
+                                    label: "Display only";
+                                    options: ["Display"];
+                                    selected-index: 0;
+                                    interactive: false;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 6: Page {
+                            title: "Checkbox";
+                            summary: "Checkbox rows with checked, indeterminate, description, size, and disabled variants.";
+
+                            Section {
+                                title: "States";
+                                Checkbox {
+                                    label: "Unchecked";
+                                    description: "Default row";
+                                    checked: false;
+                                }
+
+                                Checkbox {
+                                    label: "Checked";
+                                    description: "Selected row";
+                                    checked: true;
+                                }
+
+                                Checkbox {
+                                    label: "Indeterminate";
+                                    description: "Partial state";
+                                    indeterminate: true;
+                                }
+
+                                Checkbox {
+                                    label: "Disabled";
+                                    description: "Unavailable option";
+                                    checked: true;
+                                    disabled: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                Checkbox {
+                                    label: "Small";
+                                    checked: true;
+                                    size: ControlSize.sm;
+                                }
+
+                                Checkbox {
+                                    label: "Medium";
+                                    checked: true;
+                                    size: ControlSize.md;
+                                }
+
+                                Checkbox {
+                                    label: "Large";
+                                    checked: true;
+                                    size: ControlSize.lg;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 7: Page {
+                            title: "Radio";
+                            summary: "Individual radio rows for standalone or manually managed groups.";
+
+                            Section {
+                                title: "States";
+                                Radio {
+                                    label: "Unchecked";
+                                    description: "Available option";
+                                    checked: false;
+                                }
+
+                                Radio {
+                                    label: "Checked";
+                                    description: "Selected option";
+                                    checked: true;
+                                }
+
+                                Radio {
+                                    label: "Disabled";
+                                    description: "Unavailable option";
+                                    checked: true;
+                                    disabled: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                Radio {
+                                    label: "Small";
+                                    checked: true;
+                                    size: ControlSize.sm;
+                                }
+
+                                Radio {
+                                    label: "Medium";
+                                    checked: true;
+                                    size: ControlSize.md;
+                                }
+
+                                Radio {
+                                    label: "Large";
+                                    checked: true;
+                                    size: ControlSize.lg;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 8: Page {
+                            title: "Radio Group";
+                            summary: "Managed radio selection with descriptions and disabled items.";
+
+                            Section {
+                                title: "Default";
+                                RadioGroup {
+                                    width: parent.width;
+                                    options: ["Starter", "Pro", "Enterprise"];
+                                    descriptions: ["Compact controls", "Balanced density", "Expanded layout"];
+                                    disabled-items: [false, false, true];
+                                    selected-index: 1;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                RadioGroup {
+                                    width: parent.width;
+                                    options: ["Small A", "Small B"];
+                                    selected-index: 0;
+                                    size: ControlSize.sm;
+                                }
+
+                                RadioGroup {
+                                    width: parent.width;
+                                    options: ["Large A", "Large B"];
+                                    selected-index: 1;
+                                    size: ControlSize.lg;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 9: Page {
+                            title: "Switch";
+                            summary: "Binary toggles with checked, description, size, and disabled variants.";
+
+                            Section {
+                                title: "States";
+                                Switch {
+                                    label: "Off";
+                                    description: "Default state";
+                                    checked: false;
+                                }
+
+                                Switch {
+                                    label: "On";
+                                    description: "Enabled state";
+                                    checked: true;
+                                }
+
+                                Switch {
+                                    label: "Disabled";
+                                    description: "Unavailable toggle";
+                                    checked: true;
+                                    disabled: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                Switch {
+                                    label: "Small";
+                                    checked: true;
+                                    size: ControlSize.sm;
+                                }
+
+                                Switch {
+                                    label: "Medium";
+                                    checked: true;
+                                    size: ControlSize.md;
+                                }
+
+                                Switch {
+                                    label: "Large";
+                                    checked: true;
+                                    size: ControlSize.lg;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 10: Page {
+                            title: "Tabs";
+                            summary: "Tabs across style variants, colors, icons, orientation, panels, and sizes.";
+
+                            Section {
+                                title: "Variants";
+                                Tabs {
+                                    width: parent.width;
+                                    options: ["One", "Two", "Three"];
+                                    panels: ["Solid panel", "Second panel", "Third panel"];
+                                    variant: TabsVariant.solid;
+                                    selected-index: 0;
+                                }
+
+                                Tabs {
+                                    width: parent.width;
+                                    options: ["One", "Two", "Three"];
+                                    panels: ["Bordered panel", "Second panel", "Third panel"];
+                                    variant: TabsVariant.bordered;
+                                    selected-index: 1;
+                                }
+
+                                Tabs {
+                                    width: parent.width;
+                                    options: ["One", "Two", "Three"];
+                                    panels: ["Light panel", "Second panel", "Third panel"];
+                                    variant: TabsVariant.light;
+                                    selected-index: 2;
+                                }
+
+                                Tabs {
+                                    width: parent.width;
+                                    options: ["One", "Two", "Three"];
+                                    panels: ["Underlined panel", "Second panel", "Third panel"];
+                                    variant: TabsVariant.underlined;
+                                    selected-index: 0;
+                                }
+                            }
+
+                            Section {
+                                title: "Colors and orientation";
+                                Tabs {
+                                    width: parent.width;
+                                    options: ["OK", "Warn", "Stop"];
+                                    panels: ["Success color", "Warning color", "Danger color"];
+                                    variant: TabsVariant.light;
+                                    color: TabsColor.success;
+                                    selected-index: 0;
+                                    show-panel: false;
+                                }
+
+                                FramedDemo {
+                                    frame-height: 240px;
+                                    Tabs {
+                                        x: 12px;
+                                        y: 12px;
+                                        width: parent.width - 24px;
+                                        height: parent.height - 24px;
+                                        options: ["General", "Security", "Keys"];
+                                        panels: ["General settings", "Security controls", "Key material"];
+                                        icons: [
+                                            Images.icon("settings", 24px),
+                                            Images.icon("lock", 24px),
+                                            Images.icon("key", 24px)
+                                        ];
+                                        orientation: TabsOrientation.vertical;
+                                        variant: TabsVariant.bordered;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 11: Page {
+                            title: "Segmented Control";
+                            summary: "Panel-less tabs for compact mode selection.";
+
+                            Section {
+                                title: "Sizes";
+                                SegmentedControl {
+                                    width: parent.width;
+                                    options: ["Day", "Week", "Month"];
+                                    selected-index: 0;
+                                    size: ControlSize.sm;
+                                }
+
+                                SegmentedControl {
+                                    width: parent.width;
+                                    options: ["Low", "Medium", "High"];
+                                    selected-index: 1;
+                                    size: ControlSize.md;
+                                }
+
+                                SegmentedControl {
+                                    width: parent.width;
+                                    options: ["One", "Two", "Three"];
+                                    selected-index: 2;
+                                    size: ControlSize.lg;
+                                }
+                            }
+
+                            Section {
+                                title: "With disabled item";
+                                SegmentedControl {
+                                    width: parent.width;
+                                    options: ["Auto", "Manual", "Off"];
+                                    disabled-items: [false, true, false];
+                                    selected-index: 0;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 12: Page {
+                            title: "Slide To Confirm";
+                            summary: "Confirmation control with sizes, confirmed state, and disabled state.";
+
+                            Section {
+                                title: "Sizes";
+                                SlideToConfirm {
+                                    width: parent.width;
+                                    label: "Slide";
+                                    hint: "Small confirm";
+                                    size: ControlSize.sm;
+                                }
+
+                                SlideToConfirm {
+                                    width: parent.width;
+                                    label: "Slide";
+                                    hint: "Medium confirm";
+                                    size: ControlSize.md;
+                                }
+
+                                SlideToConfirm {
+                                    width: parent.width;
+                                    label: "Slide";
+                                    hint: "Large confirm";
+                                    size: ControlSize.lg;
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                SlideToConfirm {
+                                    width: parent.width;
+                                    label: "Done";
+                                    hint: "Confirmed state";
+                                    confirmed: true;
+                                }
+
+                                SlideToConfirm {
+                                    width: parent.width;
+                                    label: "Locked";
+                                    hint: "Disabled state";
+                                    disabled: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 13: Page {
+                            title: "Link";
+                            summary: "Inline links with visited, external, focus, pressed, underline, and disabled states.";
+
+                            Section {
+                                title: "Sizes";
+                                Link {
+                                    label: "Small link";
+                                    size: ControlSize.sm;
+                                }
+
+                                Link {
+                                    label: "Medium external link";
+                                    external: true;
+                                    size: ControlSize.md;
+                                }
+
+                                Link {
+                                    label: "Large link";
+                                    size: ControlSize.lg;
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                Link {
+                                    label: "Visited";
+                                    visited: true;
+                                }
+
+                                Link {
+                                    label: "Focused";
+                                    force-focused: true;
+                                }
+
+                                Link {
+                                    label: "Pressed";
+                                    force-pressed: true;
+                                }
+
+                                Link {
+                                    label: "No underline";
+                                    underlined: false;
+                                }
+
+                                Link {
+                                    label: "Disabled";
+                                    disabled: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 14: Page {
+                            title: "Slider";
+                            summary: "Continuous and stepped sliders across sizes, focus, and disabled states.";
+
+                            Section {
+                                title: "Sizes";
+                                Slider {
+                                    width: parent.width;
+                                    value: 24;
+                                    size: ControlSize.sm;
+                                }
+
+                                Slider {
+                                    width: parent.width;
+                                    value: 52;
+                                    size: ControlSize.md;
+                                }
+
+                                Slider {
+                                    width: parent.width;
+                                    value: 78;
+                                    size: ControlSize.lg;
+                                }
+                            }
+
+                            Section {
+                                title: "Parameters";
+                                Slider {
+                                    width: parent.width;
+                                    minimum: -50;
+                                    maximum: 50;
+                                    value: 10;
+                                    step: 5;
+                                    force-focused: true;
+                                }
+
+                                Slider {
+                                    width: parent.width;
+                                    value: 40;
+                                    disabled: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 15: Page {
+                            title: "Text Area";
+                            summary: "Multi-line input variants, autosizing, validation, clear button, and disabled/read-only states.";
+
+                            Section {
+                                title: "Variants";
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Flat";
+                                    value: "A flat textarea with autosize.";
+                                    variant: TextAreaVariant.flat;
+                                    min-rows: 2;
+                                }
+
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Bordered";
+                                    value: "A bordered textarea.";
+                                    variant: TextAreaVariant.bordered;
+                                    min-rows: 2;
+                                }
+
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Faded";
+                                    value: "A faded textarea.";
+                                    variant: TextAreaVariant.faded;
+                                    min-rows: 2;
+                                }
+                            }
+
+                            Section {
+                                title: "States";
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Required";
+                                    required: true;
+                                    placeholder: "Enter notes";
+                                    description: "Helper text below the field.";
+                                    min-rows: 2;
+                                }
+
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Error";
+                                    value: "Too short";
+                                    error: "Use at least ten characters.";
+                                    clearable: true;
+                                    min-rows: 2;
+                                }
+
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Disabled";
+                                    value: "Disabled";
+                                    disabled: true;
+                                    min-rows: 2;
+                                }
+
+                                TextArea {
+                                    width: parent.width;
+                                    label: "Read only";
+                                    value: "Read only content";
+                                    read-only: true;
+                                    min-rows: 2;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 16: Page {
+                            title: "Card";
+                            summary: "Content cards with eyebrow, title, subtitle, body, footer, icon, interaction, and selected state.";
+
+                            Section {
+                                title: "Content variants";
+                                Card {
+                                    width: parent.width;
+                                    eyebrow: "BALANCE";
+                                    title: "Selected Card";
+                                    subtitle: "Subtitle text";
+                                    body: "A selected card uses the accent color to make theme changes easy to spot.";
+                                    footer: "Footer metadata";
+                                    icon: Images.icon("star", 24px);
+                                    selected: true;
+                                }
+
+                                Card {
+                                    width: parent.width;
+                                    title: "Interactive Card";
+                                    body: "Interactive cards preserve the same visual structure while enabling click behavior.";
+                                    icon: Images.icon("settings", 24px);
+                                    interactive: true;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes";
+                                Card {
+                                    width: parent.width;
+                                    title: "Small";
+                                    body: "Small control-size token.";
+                                    size: ControlSize.sm;
+                                }
+
+                                Card {
+                                    width: parent.width;
+                                    title: "Large";
+                                    body: "Large control-size token.";
+                                    size: ControlSize.lg;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 17: Page {
+                            title: "Menu";
+                            summary: "Menu containers, custom rows, menu items, icons, trailing values, selection, destructive, and disabled states.";
+
+                            Section {
+                                title: "Items";
+                                Menu {
+                                    width: parent.width;
+                                    full-width: true;
+                                    MenuItem {
+                                        label: "Selected item";
+                                        subtitle: "Start icon and selected state";
+                                        start-icon: Images.icon("check", 24px);
+                                        selected: true;
+                                    }
+
+                                    MenuItem {
+                                        label: "Trailing value";
+                                        trailing-text: "Cmd+S";
+                                        end-icon: Images.icon("chevron-right", 24px);
+                                    }
+
+                                    MenuItem {
+                                        label: "Destructive";
+                                        start-icon: Images.icon("trash-2", 24px);
+                                        destructive: true;
+                                    }
+
+                                    MenuItem {
+                                        label: "Disabled";
+                                        disabled: true;
+                                        end-icon: Images.icon("lock", 24px);
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Custom row";
+                                Menu {
+                                    width: parent.width;
+                                    full-width: true;
+                                    MenuRow {
+                                        interactive: true;
+                                        content-padding-horizontal: 16px;
+                                        content-padding-vertical: 12px;
+                                        RowLabel {
+                                            copy: "MenuRow with arbitrary child content";
+                                        }
+
+                                        ProgressBar {
+                                            width: parent.width;
+                                            value: 62;
+                                            label: "Progress";
+                                            size: ControlSize.sm;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 18: Page {
+                            title: "Accordion";
+                            summary: "Expandable grouped content with subtitles, disabled rows, and multiple-open state.";
+
+                            Section {
+                                title: "Default";
+                                Accordion {
+                                    width: parent.width;
+                                    items: [
+                                        {
+                                            title: "Palette",
+                                            subtitle: "Expanded",
+                                            body: "Theme color tokens appear throughout every component.",
+                                            disabled: false
+                                        },
+                                        {
+                                            title: "Typography",
+                                            subtitle: "Collapsed",
+                                            body: "Font roles and sizes update from the active theme.",
+                                            disabled: false
+                                        },
+                                        {
+                                            title: "Disabled",
+                                            subtitle: "Unavailable",
+                                            body: "This row cannot expand.",
+                                            disabled: true
+                                        },
+                                    ];
+                                    expanded-states: root.accordion-default-expanded;
+                                    toggle-requested(index) => {
+                                        root.accordion-default-expanded[index] = !root.accordion-default-expanded[index];
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Multiple";
+                                Accordion {
+                                    width: parent.width;
+                                    allow-multiple: true;
+                                    size: ControlSize.sm;
+                                    items: [
+                                        { title: "Small row", subtitle: "", body: "Small accordion sizing.", disabled: false },
+                                        {
+                                            title: "Another row",
+                                            subtitle: "",
+                                            body: "Multiple rows can be open.",
+                                            disabled: false
+                                        },
+                                    ];
+                                    expanded-states: root.accordion-multi-expanded;
+                                    toggle-requested(index) => {
+                                        root.accordion-multi-expanded[index] = !root.accordion-multi-expanded[index];
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 19: Page {
+                            title: "Media Image";
+                            summary: "Image frame with fit, caption, rounded corners, and border controls.";
+
+                            Section {
+                                title: "Default";
+                                MediaImage {
+                                    width: parent.width;
+                                    frame-width: parent.width;
+                                    source: Images.common("images/sample");
+                                    alt: "Sample";
+                                    caption: "App-owned image loaded from resources/images/sample.svg";
+                                }
+                            }
+
+                            Section {
+                                title: "Parameters";
+                                MediaImage {
+                                    width: parent.width;
+                                    frame-width: parent.width;
+                                    frame-height: 130px;
+                                    source: Images.common("images/sample");
+                                    rounded: false;
+                                    show-border: false;
+                                    fit: ImageFit.contain;
+                                    caption: "Contain, square corners, no border.";
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 20: Page {
+                            title: "Divider";
+                            summary: "Horizontal and vertical dividers with labels and alignment options.";
+
+                            Section {
+                                title: "Horizontal";
+                                Divider {
+                                    width: parent.width;
+                                    full-width: true;
+                                }
+
+                                Divider {
+                                    width: parent.width;
+                                    full-width: true;
+                                    label: "Start";
+                                    label-alignment: DividerLabelAlignment.start;
+                                }
+
+                                Divider {
+                                    width: parent.width;
+                                    full-width: true;
+                                    label: "Middle";
+                                    label-alignment: DividerLabelAlignment.middle;
+                                }
+
+                                Divider {
+                                    width: parent.width;
+                                    full-width: true;
+                                    label: "End";
+                                    label-alignment: DividerLabelAlignment.end;
+                                }
+                            }
+
+                            Section {
+                                title: "Vertical";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: 120px;
+                                    spacing: 28px;
+                                    Divider {
+                                        orientation: DividerOrientation.vertical;
+                                    }
+
+                                    Divider {
+                                        orientation: DividerOrientation.vertical;
+                                        thickness: 2px;
+                                        divider-color: Theme.palette-primary;
+                                    }
+
+                                    Divider {
+                                        orientation: DividerOrientation.vertical;
+                                        thickness: 4px;
+                                        divider-color: Theme.palette-danger;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 21: Page {
+                            title: "Dialog";
+                            summary: "Modal dialog variants, actions, icons, dismiss affordance, and sizing.";
+
+                            Section {
+                                title: "Default";
+                                FramedDemo {
+                                    frame-height: 320px;
+                                    Dialog {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        title: "Confirm theme";
+                                        message: "This dialog shows the default treatment with primary and secondary actions.";
+                                        icon: Images.icon("info", 24px);
+                                        primary-action: "Apply";
+                                        secondary-action: "Cancel";
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Danger";
+                                FramedDemo {
+                                    frame-height: 320px;
+                                    Dialog {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        title: "Delete item";
+                                        message: "Danger dialogs use the danger button treatment and accent.";
+                                        icon: Images.icon("circle-alert", 24px);
+                                        variant: DialogVariant.danger;
+                                        primary-action: "Delete";
+                                        secondary-action: "Cancel";
+                                        size: ControlSize.sm;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 22: Page {
+                            title: "Sheet";
+                            summary: "Bottom sheet with handle, detents, dismiss affordance, and size variants.";
+
+                            Section {
+                                title: "Default";
+                                FramedDemo {
+                                    frame-height: 420px;
+                                    Sheet {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        title: "Theme details";
+                                        body: "The sheet fills from the bottom using the selected detent.";
+                                        selected-detent: 1;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Compact";
+                                FramedDemo {
+                                    frame-height: 320px;
+                                    Sheet {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        title: "Compact sheet";
+                                        body: "Small controls and no handle.";
+                                        show-handle: false;
+                                        selected-detent: 0;
+                                        size: ControlSize.sm;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 23: Page {
+                            title: "Toast";
+                            summary: "Toast variants, action button, icon, top/bottom placement, and sizing.";
+
+                            Section {
+                                title: "Variants";
+                                FramedDemo {
+                                    frame-height: 150px;
+                                    Toast {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        message: "Default toast";
+                                        icon: Images.icon("info", 24px);
+                                        variant: ToastVariant.default;
+                                        action: "Undo";
+                                    }
+                                }
+
+                                FramedDemo {
+                                    frame-height: 150px;
+                                    Toast {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        message: "Success toast";
+                                        icon: Images.icon("check", 24px);
+                                        variant: ToastVariant.success;
+                                    }
+                                }
+
+                                FramedDemo {
+                                    frame-height: 150px;
+                                    Toast {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        message: "Warning toast";
+                                        icon: Images.icon("circle-alert", 24px);
+                                        variant: ToastVariant.warning;
+                                        position: ToastPosition.top;
+                                    }
+                                }
+
+                                FramedDemo {
+                                    frame-height: 150px;
+                                    Toast {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        message: "Error toast";
+                                        icon: Images.icon("x", 24px);
+                                        variant: ToastVariant.error;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 24: Page {
+                            title: "Progress Bar";
+                            summary: "Determinate, indeterminate, value-label, tone, size, and disabled variants.";
+
+                            Section {
+                                title: "Tones";
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Default";
+                                    value: 42;
+                                    tone: ProgressBarTone.default;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Primary";
+                                    value: 56;
+                                    tone: ProgressBarTone.primary;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Success";
+                                    value: 72;
+                                    tone: ProgressBarTone.success;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Warning";
+                                    value: 38;
+                                    tone: ProgressBarTone.warning;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Danger";
+                                    value: 86;
+                                    tone: ProgressBarTone.danger;
+                                }
+                            }
+
+                            Section {
+                                title: "Sizes and parameters";
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Small";
+                                    value: 33;
+                                    size: ControlSize.sm;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Large";
+                                    value: 67;
+                                    size: ControlSize.lg;
+                                    value-format: ProgressValueFormat.value;
+                                    value-label: "67 / 100";
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Indeterminate";
+                                    indeterminate: true;
+                                    disable-animation: true;
+                                }
+
+                                ProgressBar {
+                                    width: parent.width;
+                                    label: "Disabled";
+                                    value: 48;
+                                    disabled: true;
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 25: Page {
+                            title: "Spinner";
+                            summary: "Loading spinners across size and tone variants.";
+
+                            Section {
+                                title: "Sizes";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 20px;
+                                    alignment: start;
+                                    Spinner {
+                                        size: SpinnerSize.sm;
+                                    }
+
+                                    Spinner {
+                                        size: SpinnerSize.md;
+                                    }
+
+                                    Spinner {
+                                        size: SpinnerSize.lg;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Tones";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 20px;
+                                    alignment: start;
+                                    Spinner {
+                                        tone: SpinnerTone.primary;
+                                    }
+
+                                    Spinner {
+                                        tone: SpinnerTone.neutral;
+                                    }
+
+                                    Spinner {
+                                        tone: SpinnerTone.success;
+                                    }
+
+                                    Spinner {
+                                        tone: SpinnerTone.warning;
+                                    }
+
+                                    Spinner {
+                                        tone: SpinnerTone.danger;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 26: Page {
+                            title: "Icon";
+                            summary: "Themed icon component with size and color parameters.";
+
+                            Section {
+                                title: "Sizes";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 20px;
+                                    Icon {
+                                        icon: Images.icon("check", 20px);
+                                        size: ControlSize.sm;
+                                        icon-color: Theme.palette-primary;
+                                    }
+
+                                    Icon {
+                                        icon: Images.icon("settings", 24px);
+                                        size: ControlSize.md;
+                                        icon-color: Theme.palette-foreground;
+                                    }
+
+                                    Icon {
+                                        icon: Images.icon("star", 28px);
+                                        size: ControlSize.lg;
+                                        icon-color: Theme.color-warning;
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Colors";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 20px;
+                                    Icon {
+                                        icon: Images.icon("heart", 24px);
+                                        icon-color: Theme.palette-danger;
+                                    }
+
+                                    Icon {
+                                        icon: Images.icon("lock", 24px);
+                                        icon-color: Theme.color-success;
+                                    }
+
+                                    Icon {
+                                        icon: Images.icon("info", 24px);
+                                        icon-color: Theme.color-info;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.selected-component == 27: Page {
+                            title: "Theme Tokens";
+                            summary: "A compact readout of palette, typography, spacing, radius, control, and icon tokens.";
+
+                            Section {
+                                title: "Palette";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Swatch {
+                                        swatch-color: Theme.palette-primary;
+                                        label: "Primary";
+                                    }
+
+                                    Swatch {
+                                        swatch-color: Theme.palette-secondary;
+                                        label: "Secondary";
+                                    }
+
+                                    Swatch {
+                                        swatch-color: Theme.palette-danger;
+                                        label: "Danger";
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+                                    Swatch {
+                                        swatch-color: Theme.palette-surface;
+                                        label: "Surface";
+                                    }
+
+                                    Swatch {
+                                        swatch-color: Theme.palette-foreground;
+                                        label: "Foreground";
+                                    }
+
+                                    Swatch {
+                                        swatch-color: Theme.palette-muted;
+                                        label: "Muted";
+                                    }
+                                }
+                            }
+
+                            Section {
+                                title: "Typography";
+                                Text {
+                                    width: parent.width;
+                                    text: "Title role";
+                                    color: Theme.palette-foreground;
+                                    font-family: Theme.font-primary;
+                                    font-size: Theme.font-size-title;
+                                    font-weight: Theme.font-weight-bold;
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    text: "Body role";
+                                    color: Theme.palette-foreground;
+                                    font-family: Theme.font-primary;
+                                    font-size: Theme.font-size-body;
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    text: "Subtitle role";
+                                    color: Theme.palette-muted;
+                                    font-family: Theme.font-secondary;
+                                    font-size: Theme.font-size-subtitle;
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    text: "Label role";
+                                    color: Theme.palette-muted;
+                                    font-family: Theme.font-primary;
+                                    font-size: Theme.font-size-label;
+                                    font-weight: Theme.font-weight-medium;
+                                }
+                            }
+
+                            Section {
+                                title: "Shape and spacing";
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: Theme.spacing-md;
+                                    Rectangle {
+                                        width: 64px;
+                                        height: 64px;
+                                        background: Theme.palette-primary;
+                                        border-radius: Theme.radius-sm;
+                                    }
+
+                                    Rectangle {
+                                        width: 64px;
+                                        height: 64px;
+                                        background: Theme.palette-primary;
+                                        border-radius: Theme.radius-md;
+                                    }
+
+                                    Rectangle {
+                                        width: 64px;
+                                        height: 64px;
+                                        background: Theme.palette-primary;
+                                        border-radius: Theme.radius-lg;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
+                                    Rectangle {
+                                        width: Theme.control-size-sm;
+                                        height: 10px;
+                                        background: Theme.palette-border;
+                                        border-radius: 5px;
+                                    }
+
+                                    Rectangle {
+                                        width: Theme.control-size-md;
+                                        height: 10px;
+                                        background: Theme.palette-border;
+                                        border-radius: 5px;
+                                    }
+
+                                    Rectangle {
+                                        width: Theme.control-size-lg;
+                                        height: 10px;
+                                        background: Theme.palette-border;
+                                        border-radius: 5px;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width;
+                            height: 24px;
+                            background: transparent;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

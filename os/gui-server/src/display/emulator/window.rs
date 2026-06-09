@@ -20,14 +20,18 @@ use {
         touch::{Touch, TouchKind},
     },
     image::ImageBuffer,
-    std::{num::NonZeroU32, sync::Arc},
+    std::{
+        num::NonZeroU32,
+        sync::Arc,
+        time::{Duration, Instant},
+    },
     winit::{
         application::ApplicationHandler,
         dpi::{LogicalPosition, PhysicalPosition, PhysicalSize},
         event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         event_loop::EventLoop,
         keyboard::{Key as WinitKey, NamedKey},
-        window::{Window, WindowButtons},
+        window::{Window, WindowButtons, WindowLevel},
     },
 };
 
@@ -38,8 +42,10 @@ impl server::CheckedPermissions for AllSimulatorPermissions {
 }
 impl<T> server::MessageAllowed<T> for AllSimulatorPermissions {}
 
+type HostedSimulatorApi = gui_server_api::simulator::SimulatorApi<AllSimulatorPermissions>;
+
 struct EmulatorApp {
-    simulator_api: gui_server_api::simulator::SimulatorApi<AllSimulatorPermissions>,
+    simulator_api: HostedSimulatorApi,
     capture_api: gui_server_api::GuiApiLight<AllSimulatorPermissions>,
     window: Option<Arc<Window>>,
     window_size: PhysicalSize<u32>,
@@ -49,9 +55,35 @@ struct EmulatorApp {
     last_pressed: bool,
     resizer: fast_image_resize::Resizer,
     surface: Option<softbuffer::Surface>,
+    raised: bool,
+    drop_level_at: Option<Instant>,
 }
 
 impl EmulatorApp {
+    fn send_simulator_event(
+        &self,
+        action: &str,
+        f: impl FnOnce(&HostedSimulatorApi) -> Result<(), gui_server_api::GuiServerError>,
+    ) {
+        let result = f(&self.simulator_api);
+        if let Err(err) = result {
+            log::warn!("Failed to {action}: {err:?}");
+        }
+    }
+
+    fn send_capture_event(
+        &self,
+        action: &str,
+        f: impl FnOnce(
+            &gui_server_api::GuiApiLight<AllSimulatorPermissions>,
+        ) -> Result<(), gui_server_api::GuiServerError>,
+    ) {
+        let result = f(&self.capture_api);
+        if let Err(err) = result {
+            log::warn!("Failed to {action}: {err:?}");
+        }
+    }
+
     fn update_scale_factor(&mut self) {
         let new_scale_factor = PlatformDisplay::scale_factor();
         if self.scale_factor == new_scale_factor {
@@ -63,12 +95,16 @@ impl EmulatorApp {
         );
         self.scale_factor = new_scale_factor;
         let Some(surface) = &mut self.surface else { return };
-        surface
-            .resize(
-                NonZeroU32::new(self.window_size.width).unwrap(),
-                NonZeroU32::new(self.window_size.height).unwrap(),
-            )
-            .unwrap();
+        let (Some(width), Some(height)) =
+            (NonZeroU32::new(self.window_size.width), NonZeroU32::new(self.window_size.height))
+        else {
+            log::warn!("Skipping hosted simulator resize for zero-sized window: {:?}", self.window_size);
+            return;
+        };
+
+        if let Err(err) = surface.resize(width, height) {
+            log::warn!("Failed to resize hosted simulator surface: {err:?}");
+        }
     }
 }
 
@@ -76,18 +112,23 @@ impl ApplicationHandler for EmulatorApp {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         println!("Resuming");
         self.update_scale_factor();
-        let attributes = Window::default_attributes()
+        let mut attributes = Window::default_attributes()
             .with_transparent(true)
             .with_enabled_buttons(WindowButtons::MINIMIZE)
             .with_resizable(false)
             .with_inner_size(self.window_size)
-            .with_title("Passport Prime");
+            .with_title("Passport Simulator");
+        // macOS ignores a post-creation set_outer_position() here, so restore at creation.
+        if let Some(pos) = read_window_pos() {
+            attributes = attributes.with_position(pos);
+        }
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
         self.window = Some(window.clone());
-        if let Some(pos) = read_window_pos() {
-            window.set_outer_position(pos);
-        }
-        self.last_window_pos = window.outer_position().ok();
+        // Track the inner (content) position, not the outer frame: winit applies
+        // the creation-time position to the content rect, so saving/restoring the
+        // outer position would shift the window up by the title bar height each
+        // time. Reading the content position keeps save and restore symmetric.
+        self.last_window_pos = window.inner_position().ok();
         VIRTUAL_VSYNC_EVENTS.lock().unwrap().push(Box::new({
             let window = window.clone();
             move || window.request_redraw()
@@ -95,12 +136,19 @@ impl ApplicationHandler for EmulatorApp {
 
         let context = unsafe { softbuffer::Context::new(&*window) }.unwrap();
         let mut surface = unsafe { softbuffer::Surface::new(&context, &*window) }.unwrap();
-        surface
-            .resize(
-                NonZeroU32::new(self.window_size.width).unwrap(),
-                NonZeroU32::new(self.window_size.height).unwrap(),
-            )
-            .unwrap();
+        let (Some(width), Some(height)) =
+            (NonZeroU32::new(self.window_size.width), NonZeroU32::new(self.window_size.height))
+        else {
+            log::warn!(
+                "Skipping hosted simulator surface init for zero-sized window: {:?}",
+                self.window_size
+            );
+            return;
+        };
+        if let Err(err) = surface.resize(width, height) {
+            log::warn!("Failed to initialize hosted simulator surface size: {err:?}");
+            return;
+        }
         self.surface = Some(surface);
     }
 
@@ -118,42 +166,77 @@ impl ApplicationHandler for EmulatorApp {
         // Wayland doesn't support retrieving window location nor setting it.
         if let Some(pos) = self.last_window_pos {
             // Save new window position if it's changed
-            let curr_window_pos = window.outer_position().expect("window pos");
+            let Ok(curr_window_pos) = window.inner_position() else {
+                log::warn!("Failed to read hosted simulator window position");
+                return;
+            };
             if pos != curr_window_pos {
                 self.last_window_pos = Some(curr_window_pos);
-                save_window_pos(pos);
+                save_window_pos(curr_window_pos);
             }
         }
 
         match event {
             WindowEvent::RedrawRequested => {
+                if !self.raised {
+                    // First frame: the window is on screen now (winit's focus is a
+                    // no-op before then). Launched from the `foundation` CLI it can
+                    // open behind the terminal on macOS, where programmatic
+                    // activation is throttled and only works intermittently. Pin the
+                    // window above others via the window server (not subject to that
+                    // throttling) so it reliably shows in front. It is dropped back
+                    // to a normal level once it actually gains focus (see the Focused
+                    // arm), which keeps it in front rather than falling behind the
+                    // terminal as a blind timed drop would.
+                    window.focus_window();
+                    window.set_window_level(WindowLevel::AlwaysOnTop);
+                    self.drop_level_at = Some(Instant::now() + Duration::from_secs(2));
+                    self.raised = true;
+                } else if let Some(deadline) = self.drop_level_at {
+                    if Instant::now() >= deadline {
+                        // Focus never arrived (activation throttled); drop the level
+                        // and re-assert front order as a best effort.
+                        window.set_window_level(WindowLevel::Normal);
+                        window.focus_window();
+                        self.drop_level_at = None;
+                    }
+                }
                 //let measure = std::time::Instant::now();
                 let mut image_buffer = ImageBuffer::new(DEVICE_WIDTH, DEVICE_HEIGHT);
                 draw_whole_device(&mut image_buffer);
 
-                let src = fast_image_resize::images::Image::from_vec_u8(
+                let Ok(src) = fast_image_resize::images::Image::from_vec_u8(
                     DEVICE_WIDTH,
                     DEVICE_HEIGHT,
                     image_buffer.into_vec(),
                     fast_image_resize::PixelType::U8x4,
-                )
-                .unwrap();
+                ) else {
+                    log::warn!("Failed to create hosted simulator source frame buffer");
+                    return;
+                };
                 let Some(surface) = &mut self.surface else { return };
-                let mut surface_buffer = surface.buffer_mut().unwrap();
-                let mut dst = fast_image_resize::images::Image::from_slice_u8(
+                let Ok(mut surface_buffer) = surface.buffer_mut() else {
+                    log::warn!("Failed to acquire hosted simulator surface buffer");
+                    return;
+                };
+                let Ok(mut dst) = fast_image_resize::images::Image::from_slice_u8(
                     self.window_size.width,
                     self.window_size.height,
                     bytemuck::cast_slice_mut(&mut surface_buffer),
                     fast_image_resize::PixelType::U8x4,
-                )
-                .unwrap();
+                ) else {
+                    log::warn!("Failed to create hosted simulator destination frame buffer");
+                    return;
+                };
 
                 let resize_opts =
                     fast_image_resize::ResizeOptions::new().resize_alg(fast_image_resize::ResizeAlg::Nearest);
                 self.resizer.resize(&src, &mut dst, Some(&resize_opts)).ok();
                 image_swizzle::bgra_to_rgba_inplace(bytemuck::cast_slice_mut(&mut surface_buffer));
                 //println!("Frame time: {:?}", measure.elapsed());
-                surface_buffer.present().unwrap();
+                if let Err(err) = surface_buffer.present() {
+                    log::warn!("Failed to present hosted simulator frame: {err:?}");
+                }
             }
 
             WindowEvent::CursorMoved { position, .. } => {
@@ -187,7 +270,9 @@ impl ApplicationHandler for EmulatorApp {
                     }
 
                     let touch = Touch { kind: TouchKind::Drag, id: 0, x: x as usize, y: y as usize };
-                    self.capture_api.inject_touch(touch).expect("send touch");
+                    self.send_capture_event("send hosted simulator drag touch", |capture_api| {
+                        capture_api.inject_touch(touch)
+                    });
                 }
             }
 
@@ -219,14 +304,18 @@ impl ApplicationHandler for EmulatorApp {
                 let is_dragging_window =
                     self.last_pressed && !is_in_pwr_button && !is_within_touch_area && !is_in_home_button;
                 if is_dragging_window {
-                    window.drag_window().unwrap();
+                    start_window_drag(window);
                 }
 
                 // Send virtual power button press and release events to the button server
                 if self.last_pressed && is_in_pwr_button {
-                    self.simulator_api.simulate_power_button(true).expect("simulate power button press");
+                    self.send_simulator_event("simulate hosted power button press", |simulator_api| {
+                        simulator_api.simulate_power_button(true)
+                    });
                 } else if is_in_pwr_button {
-                    self.simulator_api.simulate_power_button(false).expect("simulate power button press");
+                    self.send_simulator_event("simulate hosted power button release", |simulator_api| {
+                        simulator_api.simulate_power_button(false)
+                    });
                 }
 
                 let is_in_home_button = is_within_area(
@@ -251,7 +340,9 @@ impl ApplicationHandler for EmulatorApp {
                     let kind = if self.last_pressed { TouchKind::Press } else { TouchKind::Release };
                     let touch = Touch { kind, id: 0, x: x as usize, y: y as usize };
 
-                    self.capture_api.inject_touch(touch).expect("send touch");
+                    self.send_capture_event("send hosted simulator touch", |capture_api| {
+                        capture_api.inject_touch(touch)
+                    });
                 }
             }
 
@@ -279,12 +370,17 @@ impl ApplicationHandler for EmulatorApp {
                     };
                     let x = (self.last_cursor_pos.x as u32).saturating_sub(TOUCH_AREA_X as u32);
                     let y = (self.last_cursor_pos.y as u32).saturating_sub(TOUCH_AREA_Y as u32);
-                    self.simulator_api.simulate_scroll(x, y, delta_x, delta_y).expect("simulate scroll");
+                    self.send_simulator_event("simulate hosted scroll", |simulator_api| {
+                        simulator_api.simulate_scroll(x, y, delta_x, delta_y)
+                    });
                 }
             }
 
             WindowEvent::CloseRequested => {
-                gui_server_api::GuiApiLight::<AllSimulatorPermissions>::default().shutdown().ok();
+                self.capture_api.shutdown().ok();
+                // Any close (close button or Cmd-Q) of either simulator window
+                // quits the whole hosted sim, not just this one.
+                quit_whole_simulator();
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
@@ -301,21 +397,43 @@ impl ApplicationHandler for EmulatorApp {
                     _ => None,
                 };
                 if let Some(key) = key {
-                    self.simulator_api.simulate_key(key, is_pressed).expect("simulate key");
+                    self.send_simulator_event("simulate hosted key input", |simulator_api| {
+                        simulator_api.simulate_key(key, is_pressed)
+                    });
+                }
+            }
+
+            WindowEvent::Focused(true) => {
+                // The window became active, so dropping it back to a normal level now
+                // keeps it in front of the terminal instead of falling behind it.
+                if self.drop_level_at.take().is_some() {
+                    window.set_window_level(WindowLevel::Normal);
                 }
             }
 
             _ => (),
         }
     }
+
+    fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        // The winit event loop is exiting (e.g. Cmd-Q routed as a loop exit) —
+        // quit the whole hosted simulator, not just this window.
+        quit_whole_simulator();
+    }
 }
 
 pub(crate) fn run_window() {
     let event_loop = EventLoop::new().unwrap();
 
+    // gui-server runs on a sibling thread (see main) and registers its name
+    // independently, so block until it is up rather than timing out: the window is
+    // useless without it.
+    let simulator_api = HostedSimulatorApi::connect();
+    let capture_api = gui_server_api::GuiApiLight::connect();
+
     let mut app = EmulatorApp {
-        simulator_api: Default::default(),
-        capture_api: Default::default(),
+        simulator_api,
+        capture_api,
         window: None,
         window_size: PhysicalSize::new(DEVICE_WIDTH, DEVICE_HEIGHT),
         scale_factor: 1.0,
@@ -324,8 +442,28 @@ pub(crate) fn run_window() {
         last_pressed: false,
         resizer: fast_image_resize::Resizer::new(),
         surface: None,
+        raised: false,
+        drop_level_at: None,
     };
     event_loop.run_app(&mut app).unwrap();
+    // The loop exited (e.g. Cmd-Q routed as a loop-exit rather than a per-window
+    // CloseRequested) — tear down the rest of the hosted simulator too.
+    quit_whole_simulator();
+}
+
+/// Quit the whole hosted simulator (every process in our group) by mirroring the
+/// terminal Ctrl-C (SIGINT). The hosted kernel spawns all services in one
+/// process group, so this stops the control panel + kernel too — letting a close
+/// or Cmd-Q on either simulator window quit everything, not just this window.
+fn quit_whole_simulator() {
+    #[cfg(unix)]
+    // SAFETY: kill(2) with pid 0 sends SIGINT to our whole process group, the
+    // same teardown the terminal delivers on Ctrl-C.
+    unsafe {
+        libc::kill(0, libc::SIGINT);
+    }
+    #[cfg(not(unix))]
+    std::process::exit(0);
 }
 
 fn is_within_area(pos: LogicalPosition<f64>, x: usize, y: usize, w: usize, h: usize) -> bool {
@@ -335,19 +473,23 @@ fn is_within_area(pos: LogicalPosition<f64>, x: usize, y: usize, w: usize, h: us
     !(outside_x || outside_y)
 }
 
+fn start_window_drag(window: &Window) {
+    if let Err(err) = window.drag_window() {
+        log::warn!("Failed to drag hosted simulator window: {err:?}");
+    }
+}
+
 fn save_window_pos(pos: PhysicalPosition<i32>) {
     let str = format!("{}\n{}", pos.x, pos.y);
-    std::fs::write(".last_pos", str).expect("save .last_pos");
+    if let Err(err) = std::fs::write(".last_pos", str) {
+        log::warn!("Failed to save hosted simulator window position: {err}");
+    }
 }
 
 fn read_window_pos() -> Option<PhysicalPosition<i32>> {
-    std::fs::read_to_string(".last_pos").ok().and_then(|s| {
-        let lines = s.lines().collect::<Vec<_>>();
-        if lines.len() < 2 {
-            return None;
-        }
-        let x = lines[0].parse::<i32>().ok()?;
-        let y = lines[1].parse::<i32>().ok()?;
-        Some(PhysicalPosition::new(x, y))
-    })
+    let contents = std::fs::read_to_string(".last_pos").ok()?;
+    let mut lines = contents.lines();
+    let x = lines.next()?.parse::<i32>().ok()?;
+    let y = lines.next()?.parse::<i32>().ok()?;
+    Some(PhysicalPosition::new(x, y))
 }

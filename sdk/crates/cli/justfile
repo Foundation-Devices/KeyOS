@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+# Install foundation CLI with macOS code signing
+install:
+    # Remove build artifacts from embedded directories
+    rm -rf nix-flake/imports/*/target nix-flake/imports/*/.git
+    cargo install --path .
+    [ "$(uname)" = "Darwin" ] && codesign -s - -f ~/.cargo/bin/foundation || true
+    @echo "Installed size: $(ls -lh ~/.cargo/bin/foundation | awk '{print $5}')"

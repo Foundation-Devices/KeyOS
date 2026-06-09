@@ -1,0 +1,354 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Internal components must be defined before use
+
+component ComponentItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> dark-mode;
+    in property <bool> selected;
+
+    callback clicked();
+
+    height: 32px;
+    border-radius: 6px;
+    background: selected ? (dark-mode ? #3a3a3a : #e8e8e8) : touch.has-hover ? (dark-mode ? #2a2a2a : #f0f0f0) : transparent;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+
+        Text {
+            text: root.text;
+            color: selected ? (dark-mode ? #ffffff : #1a1a1a) : (dark-mode ? #cccccc : #444444);
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component CategoryHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> dark-mode;
+
+    height: 24px;
+
+    HorizontalLayout {
+        Text {
+            text: title;
+            color: dark-mode ? #888888 : #666666;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <bool> dark-mode;
+    in property <bool> showing-themes-page: false;
+    in property <int> selected-category;
+    in property <int> selected-component;
+
+    callback select-themes-page();
+    callback select-component(int, int);
+
+    background: dark-mode ? #242424 : #ffffff;
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            padding: 12px;
+            spacing: 2px;
+
+            CategoryHeader {
+                title: "THEME";
+                dark-mode: root.dark-mode;
+            }
+
+            ComponentItem {
+                text: "Tokens";
+                dark-mode: root.dark-mode;
+                selected: root.showing-themes-page;
+                clicked => {
+                    root.select-themes-page();
+                }
+            }
+
+            // FORM category
+            CategoryHeader {
+                title: "FORM";
+                dark-mode: root.dark-mode;
+            }
+
+            ComponentItem {
+                text: "Button";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 0;
+                clicked => {
+                    root.select-component(0, 0);
+                }
+            }
+
+            ComponentItem {
+                text: "IconButton";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 1;
+                clicked => {
+                    root.select-component(0, 1);
+                }
+            }
+
+            ComponentItem {
+                text: "Icon";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 15;
+                clicked => {
+                    root.select-component(0, 15);
+                }
+            }
+
+            ComponentItem {
+                text: "Chip";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 2;
+                clicked => {
+                    root.select-component(0, 2);
+                }
+            }
+
+            ComponentItem {
+                text: "Input";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 3;
+                clicked => {
+                    root.select-component(0, 3);
+                }
+            }
+
+            ComponentItem {
+                text: "Search";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 4;
+                clicked => {
+                    root.select-component(0, 4);
+                }
+            }
+
+            ComponentItem {
+                text: "Dropdown";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 5;
+                clicked => {
+                    root.select-component(0, 5);
+                }
+            }
+
+            ComponentItem {
+                text: "Checkbox";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 6;
+                clicked => {
+                    root.select-component(0, 6);
+                }
+            }
+
+            ComponentItem {
+                text: "Radio";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 7;
+                clicked => {
+                    root.select-component(0, 7);
+                }
+            }
+
+            ComponentItem {
+                text: "Switch";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 8;
+                clicked => {
+                    root.select-component(0, 8);
+                }
+            }
+
+            ComponentItem {
+                text: "Tabs";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 9;
+                clicked => {
+                    root.select-component(0, 9);
+                }
+            }
+
+            ComponentItem {
+                text: "SlideToConfirm";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 10;
+                clicked => {
+                    root.select-component(0, 10);
+                }
+            }
+
+            ComponentItem {
+                text: "Link";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 11;
+                clicked => {
+                    root.select-component(0, 11);
+                }
+            }
+
+            ComponentItem {
+                text: "Slider";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 12;
+                clicked => {
+                    root.select-component(0, 12);
+                }
+            }
+
+            ComponentItem {
+                text: "TextArea";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 13;
+                clicked => {
+                    root.select-component(0, 13);
+                }
+            }
+
+            ComponentItem {
+                text: "RadioGroup";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 0 && root.selected-component == 14;
+                clicked => {
+                    root.select-component(0, 14);
+                }
+            }
+
+            // CONTAINERS category
+            CategoryHeader {
+                title: "CONTAINERS";
+                dark-mode: root.dark-mode;
+            }
+
+            ComponentItem {
+                text: "Card";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 0;
+                clicked => {
+                    root.select-component(1, 0);
+                }
+            }
+
+            ComponentItem {
+                text: "Menu";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 1;
+                clicked => {
+                    root.select-component(1, 1);
+                }
+            }
+
+            ComponentItem {
+                text: "MenuItem";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 2;
+                clicked => {
+                    root.select-component(1, 2);
+                }
+            }
+
+            ComponentItem {
+                text: "Accordion";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 3;
+                clicked => {
+                    root.select-component(1, 3);
+                }
+            }
+
+            ComponentItem {
+                text: "Image";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 4;
+                clicked => {
+                    root.select-component(1, 4);
+                }
+            }
+
+            ComponentItem {
+                text: "Divider";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 1 && root.selected-component == 5;
+                clicked => {
+                    root.select-component(1, 5);
+                }
+            }
+
+            // OVERLAYS category
+            CategoryHeader {
+                title: "OVERLAYS";
+                dark-mode: root.dark-mode;
+            }
+
+            ComponentItem {
+                text: "Dialog";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 2 && root.selected-component == 0;
+                clicked => {
+                    root.select-component(2, 0);
+                }
+            }
+
+            ComponentItem {
+                text: "Sheet";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 2 && root.selected-component == 1;
+                clicked => {
+                    root.select-component(2, 1);
+                }
+            }
+
+            ComponentItem {
+                text: "Toast";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 2 && root.selected-component == 2;
+                clicked => {
+                    root.select-component(2, 2);
+                }
+            }
+
+            // FEEDBACK category
+            CategoryHeader {
+                title: "FEEDBACK";
+                dark-mode: root.dark-mode;
+            }
+
+            ComponentItem {
+                text: "ProgressBar";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 3 && root.selected-component == 0;
+                clicked => {
+                    root.select-component(3, 0);
+                }
+            }
+
+            ComponentItem {
+                text: "Spinner";
+                dark-mode: root.dark-mode;
+                selected: root.selected-category == 3 && root.selected-component == 1;
+                clicked => {
+                    root.select-component(3, 1);
+                }
+            }
+        }
+    }
+}

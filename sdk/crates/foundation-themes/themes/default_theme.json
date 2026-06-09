@@ -1,0 +1,76 @@
+{
+  "id": "default_theme",
+  "name": "Default Theme",
+  "sort_order": 0,
+  "tokens": {
+    "colors": {
+      "light": {
+        "primary": "#009db9",
+        "primary-pressed": "#006f83",
+        "secondary": "#d5d4d5",
+        "danger": "#ff3333",
+        "surface": "#ffffff",
+        "background": "#ffffff",
+        "text": "#231f20",
+        "text-muted": "#959394"
+      },
+      "dark": {
+        "primary": "#33b1c7",
+        "primary-pressed": "#8ad2df",
+        "secondary": "#5a595a",
+        "danger": "#ff3333",
+        "surface": "#231f20",
+        "background": "#231f20",
+        "text": "#ffffff",
+        "text-muted": "#959394"
+      }
+    },
+    "spacing": {
+      "xs": 4.0,
+      "sm": 8.0,
+      "md": 12.0,
+      "lg": 16.0,
+      "xl": 24.0
+    },
+    "controlSize": {
+      "sm": 48.0,
+      "md": 56.0,
+      "lg": 64.0
+    },
+    "iconSize": {
+      "sm": 20.0,
+      "md": 24.0,
+      "lg": 28.0
+    },
+    "controlRadius": {
+      "sm": 20.0,
+      "md": 24.0,
+      "lg": 28.0
+    },
+    "controlPaddingInline": {
+      "sm": 14.0,
+      "md": 16.0,
+      "lg": 20.0
+    },
+    "typography": {
+      "font-size-sm": 20.0,
+      "font-size-md": 22.0,
+      "font-size-lg": 24.0,
+      "font-size-title": 24.0,
+      "font-size-body": 18.0,
+      "font-size-subtitle": 16.0,
+      "font-size-label": 14.0,
+      "font-size-helper": 14.0,
+      "font-primary": "Montserrat",
+      "font-secondary": "Montserrat",
+      "font-tertiary": "Montserrat"
+    },
+    "radius": {
+      "sm": 8.0,
+      "md": 16.0,
+      "default": "radius.lg",
+      "lg": 24.0,
+      "full": 9999.0
+    }
+  }
+}

@@ -45,6 +45,8 @@ export component MasterKeyDeletedMainPage inherits OnboardingShieldPage {
                 label: TR2.lookup(TrId.MasterKeyDeletedProvideMasterKey);
                 importance: primary;
                 clicked => {
+                    SeedGlobal.is-master-key-recovery = true;
+
                     // Create the PIN if it hasn't been created before.
                     // The PIN needs to be created for the seed recovery code to work properly
                     if (!SeedGlobal.is-pin-set()) {

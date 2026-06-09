@@ -1,0 +1,187 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { SliderTheme } from "slider_theme.slint";
+
+export component Slider {
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 100.0;
+    in property <float> step: 1.0;
+    in-out property <float> value: 50.0;
+    in property <ControlSize> size: ControlSize.md;
+    in property <bool> disabled: false;
+    in property <bool> force-focused: false;
+
+    in property <color> track-color: root.disabled ? Theme.palette-border : Theme.palette-primary;
+    in property <color> fill-color:
+        root.disabled ? Theme.palette-muted.with-alpha(0.4) : slider-touch.pressed ? Theme.palette-primary-pressed : Theme.palette-primary;
+    in property <color> thumb-color: root.disabled ? Theme.palette-surface.with-alpha(0.88) : Theme.palette-background;
+    in property <color> thumb-border-color: root.disabled ? Theme.palette-border : Theme.palette-primary;
+    in property <length> track-height: SliderTheme.size(root.size).track-height;
+    in property <length> track-radius: root.actual-track-height / Theme.capsule-radius-divisor;
+    in property <length> thumb-size: SliderTheme.size(root.size).thumb-size;
+    in property <length> thumb-radius: root.actual-thumb-size / Theme.capsule-radius-divisor;
+    in property <length> row-height: SliderTheme.size(root.size).row-height;
+    in property <length> track-touch-expansion: SliderTheme.size(root.size).track-touch-expansion;
+    in property <length> thumb-touch-expansion: SliderTheme.size(root.size).thumb-touch-expansion;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <float> slider-opacity: root.disabled ? 0.76 : 1.0;
+    in property <length> thumb-border-width: root.is-focused ? 2px : 1px;
+    in property <length> focus-ring-size: 4px;
+
+    out property <bool> has-focus: focus-scope.has-focus;
+
+    callback changed(float);
+    callback pressed();
+    callback released();
+
+    forward-focus: focus-scope;
+
+    pure function snap-value(raw: float) -> float {
+        return root.step > 0.0 ? clamp(
+                root.range-start + Math.round((clamp(raw, root.range-start, root.range-end) - root.range-start) / root.step) * root.step,
+                root.range-start,
+                root.range-end) : clamp(raw, root.range-start, root.range-end);
+    }
+
+    pure function value-from-position(local-x: length) -> float {
+        return root.snap-value(
+            root.range-start + clamp(local-x - root.track-left, 0px, root.actual-track-width) / root.actual-track-width * root.value-range);
+    }
+
+    property <length> actual-track-height: root.track-height;
+    property <length> actual-thumb-size: root.thumb-size;
+    // Clamp track-radius to half the track height so a "radius-full" token
+    // (often 9999px) renders the track as a pill, not an ellipse.
+    property <length> actual-track-radius:
+        min(
+            root.track-radius,
+            root.actual-track-height / 2);
+    // Same clamp for the thumb (always a circle, never larger than its diameter).
+    property <length> actual-thumb-radius:
+        min(
+            root.thumb-radius,
+            root.actual-thumb-size / 2);
+    property <length> actual-row-height: root.row-height;
+    property <length> actual-track-touch-expansion: root.track-touch-expansion;
+    property <length> actual-thumb-touch-expansion: root.thumb-touch-expansion;
+    property <length> actual-track-touch-height:
+        root.actual-track-height + root.actual-track-touch-expansion * 2;
+    property <length> actual-thumb-touch-size:
+        root.actual-thumb-size + root.actual-thumb-touch-expansion * 2;
+    property <length> actual-touch-height:
+        max(
+            root.actual-row-height,
+            max(root.actual-track-touch-height, root.actual-thumb-touch-size));
+    property <float> range-start: min(root.minimum, root.maximum);
+    property <float> range-end: max(root.minimum, root.maximum);
+    property <float> value-range: max(0.0001, root.range-end - root.range-start);
+    property <float> clamped-value: clamp(root.value, root.range-start, root.range-end);
+    property <float> normalized-value: (root.clamped-value - root.range-start) / root.value-range;
+    property <bool> is-focused: (focus-scope.has-focus || root.force-focused) && !root.disabled;
+    property <color> actual-track-color: root.track-color;
+    property <color> actual-fill-color: root.fill-color;
+    property <color> actual-thumb-color: root.thumb-color;
+    property <color> actual-thumb-border-color: root.thumb-border-color;
+    property <length> track-left: root.actual-thumb-size / 2;
+    property <length> actual-track-width: max(1px, root.width - root.actual-thumb-size);
+    property <length> track-top: (root.height - root.actual-track-height) / 2;
+    property <length> fill-width: root.normalized-value * root.actual-track-width;
+    property <length> thumb-left: root.track-left + root.normalized-value * root.actual-track-width - root.actual-thumb-size / 2;
+    property <length> thumb-top: (root.height - root.actual-thumb-size) / 2;
+    property <length> actual-thumb-border-width: root.thumb-border-width;
+    property <color> focus-ring-color:
+        root.is-focused ? root.actual-thumb-border-color.with-alpha(Theme.is-dark ? 0.28 : 0.16) : transparent;
+
+    preferred-width: 280px;
+    preferred-height: root.actual-touch-height;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        opacity: root.slider-opacity;
+
+        Rectangle {
+            x: root.track-left;
+            y: root.track-top;
+            width: root.actual-track-width;
+            height: root.actual-track-height;
+            border-radius: root.actual-track-radius;
+            background: root.actual-track-color;
+        }
+
+        Rectangle {
+            x: root.track-left;
+            y: root.track-top;
+            width: root.fill-width;
+            height: root.actual-track-height;
+            border-radius: root.actual-track-radius;
+            background: root.actual-fill-color;
+        }
+
+        Rectangle {
+            x: root.thumb-left - root.focus-ring-size;
+            y: root.thumb-top - root.focus-ring-size;
+            width: root.actual-thumb-size + root.focus-ring-size * 2;
+            height: root.actual-thumb-size + root.focus-ring-size * 2;
+            border-radius: self.width / 2;
+            background: root.focus-ring-color;
+        }
+
+        Rectangle {
+            x: root.thumb-left;
+            y: root.thumb-top;
+            width: root.actual-thumb-size;
+            height: root.actual-thumb-size;
+            border-radius: root.actual-thumb-radius;
+            background: root.actual-thumb-color;
+            border-width: root.actual-thumb-border-width;
+            border-color: root.actual-thumb-border-color;
+        }
+
+        slider-touch := TouchArea {
+            y: (parent.height - self.height) / 2;
+            width: parent.width;
+            height: root.actual-touch-height;
+            enabled: !root.disabled;
+
+            moved => {
+                if self.pressed {
+                    if root.value-from-position(self.mouse-x) != root.value {
+                        root.value = root.value-from-position(self.mouse-x);
+                        root.changed(root.value);
+                    }
+                }
+            }
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    focus-scope.focus();
+                    root.value = root.value-from-position(self.mouse-x);
+                    root.changed(root.value);
+                    root.pressed();
+                }
+                if event.kind == PointerEventKind.up {
+                    root.value = root.value-from-position(self.mouse-x);
+                    root.changed(root.value);
+                    root.released();
+                }
+                if event.kind == PointerEventKind.cancel {
+                    root.released();
+                }
+            }
+        }
+
+        focus-scope := FocusScope {
+            x: 0px;
+            y: 0px;
+            width: 0px;
+            height: 0px;
+            enabled: !root.disabled;
+        }
+    }
+}

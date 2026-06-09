@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+export struct InstalledApp {
+    app_id: string,
+    name: string,
+    icon_key: string,
+    publisher: string,
+    version: string,
+    size: string,
+    description: string,
+    permissions: string,
+}
+
+// A single row in the unified, virtualized apps list. The list mixes section
+// headers, installed-app cards, and the fixed settings rows into one ListView
+// model (Slint can't concatenate the dynamic apps model with static rows, so
+// Rust assembles it). `kind` + `action_id` identify each row so the delegate
+// can pick localized text and behavior; `first`/`last`/`show_divider` drive the
+// per-row card chrome (rounded corners on group edges, dividers between rows).
+export enum AppsListRowKind {
+    section-header,
+    app,
+    action,
+    toggle,
+    empty,
+}
+
+export struct AppsListRow {
+    kind: AppsListRowKind,
+    action_id: int,
+    app: InstalledApp,
+    first: bool,
+    last: bool,
+    show_divider: bool,
+}
+
+export struct TrustedPublisher {
+    name: string,
+    company: string,
+    contact_email: string,
+    support_url: string,
+    public_key: string,
+    serial_number: string,
+    subject: string,
+    basic_constraints: string,
+    key_usage: string,
+    extended_key_usage: string,
+}
+
+export enum TrustedPublisherImportResult {
+    canceled,
+    installed,
+    failed,
+}
+
+export global AppManagementGlobal {
+    in property <[AppsListRow]> apps-list-rows: [];
+    callback refresh-installed-apps();
+    pure callback app-icon(string) -> image;
+
+    in property <[TrustedPublisher]> trusted-publishers: [];
+    callback refresh-trusted-publishers();
+    callback import-trusted-publisher() -> TrustedPublisherImportResult;
+    callback remove-trusted-publisher(string) -> string;
+}

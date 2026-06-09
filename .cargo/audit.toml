@@ -1,10 +1,6 @@
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071", # rsa Marvin Attack - no fix available yet
-    # quick-xml 0.28.2 is only used for build-time code generation with repository-controlled XML inputs.
-    "RUSTSEC-2026-0194",
-    # Its consumers use Reader, not the NsReader path affected by this advisory.
-    "RUSTSEC-2026-0195",
 ]
 # Ignore informational warnings (unmaintained, unsound notices)
 informational_warnings = []

@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from menu_item.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct MenuItemSizeProps {
+    font-family: string,
+    font-size: length,
+    item-height: length,
+    padding-horizontal: length,
+    icon-size: length,
+}
+
+export global MenuItemTheme {
+    in-out property <MenuItemSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        item-height: 56px,
+        padding-horizontal: Theme.control-padding-inline-sm,
+        icon-size: Theme.icon-size-sm,
+    };
+    in-out property <MenuItemSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        item-height: 64px,
+        padding-horizontal: Theme.control-padding-inline-md,
+        icon-size: Theme.icon-size-md,
+    };
+    in-out property <MenuItemSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        item-height: 72px,
+        padding-horizontal: Theme.control-padding-inline-lg,
+        icon-size: Theme.icon-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> MenuItemSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

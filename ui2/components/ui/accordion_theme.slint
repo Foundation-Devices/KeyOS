@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from accordion.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct AccordionSizeProps {
+    font-family: string,
+    font-size: length,
+    header-height: length,
+    padding-horizontal: length,
+    icon-size: length,
+}
+
+export global AccordionTheme {
+    in-out property <AccordionSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        header-height: Theme.control-size-sm,
+        padding-horizontal: Theme.control-padding-inline-sm,
+        icon-size: Theme.icon-size-sm,
+    };
+    in-out property <AccordionSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        header-height: Theme.control-size-md,
+        padding-horizontal: Theme.control-padding-inline-md,
+        icon-size: Theme.icon-size-md,
+    };
+    in-out property <AccordionSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        header-height: Theme.control-size-lg,
+        padding-horizontal: Theme.control-padding-inline-lg,
+        icon-size: Theme.icon-size-lg,
+    };
+
+    public pure function size(s: ControlSize) -> AccordionSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

@@ -1,0 +1,192 @@
+{
+  "component": "Chip",
+  "variants": [
+    "filled",
+    "outlined",
+    "soft"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "background",
+      "displayName": "Background",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "filled": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.primary"
+        },
+        "outlined": {
+          "normal": "color.transparent",
+          "focused": "color.transparent",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "soft": {
+          "normal": "color.secondary",
+          "focused": "color.secondary",
+          "pressed": "color.secondary",
+          "disabled": "color.secondary"
+        }
+      }
+    },
+    {
+      "name": "foreground",
+      "displayName": "Foreground",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "filled": {
+          "normal": "color.white",
+          "focused": "color.white",
+          "pressed": "color.white",
+          "disabled": "color.white"
+        },
+        "outlined": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.primary"
+        },
+        "soft": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.primary"
+        }
+      }
+    },
+    {
+      "name": "border-color",
+      "displayName": "Border Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "filled": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "outlined": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.primary"
+        },
+        "soft": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "border-width",
+      "displayName": "Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 0.5,
+      "defaults": {
+        "default": 1.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.default"
+      }
+    },
+    {
+      "name": "padding-horizontal",
+      "displayName": "Padding Horizontal",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 10.0,
+        "sm": 8.0,
+        "lg": 12.0
+      }
+    },
+    {
+      "name": "padding-vertical",
+      "displayName": "Padding Vertical",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 7.0,
+        "sm": 6.0,
+        "lg": 8.0
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 14.0,
+        "sm": 12.0,
+        "lg": 16.0
+      }
+    },
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 14.0,
+        "sm": 12.0,
+        "lg": 16.0
+      }
+    }
+  ]
+}

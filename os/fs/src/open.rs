@@ -28,7 +28,7 @@ impl server::BlockingArchiveHandler<OpenFileMessage> for Server {
         }
         self.create_base_dir(msg.location, sender)?;
 
-        let path = crate::path_of(msg.location, &msg.path, sender);
+        let path = self.path_of(msg.location, &msg.path, sender)?;
         let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
         if msg.flags.create {
             mount.create_file(sender, msg.location, path, msg.flags)
@@ -47,7 +47,7 @@ impl server::BlockingArchiveHandler<OpenDirMessage> for Server {
     ) -> Result<DirHandle, Error> {
         self.check_read_access(sender, msg.location)?;
         self.create_base_dir(msg.location, sender)?;
-        let path = crate::path_of(msg.location, &msg.path, sender);
+        let path = self.path_of(msg.location, &msg.path, sender)?;
         let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
         mount.open_dir(sender, msg.location, path)
     }
@@ -62,7 +62,7 @@ impl server::BlockingArchiveHandler<CreateDirMessage> for Server {
     ) -> Result<DirHandle, Error> {
         self.check_write_access(sender, msg.location)?;
         self.create_base_dir(msg.location, sender)?;
-        let path = crate::path_of(msg.location, &msg.path, sender);
+        let path = self.path_of(msg.location, &msg.path, sender)?;
         let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
         mount.create_dir(sender, msg.location, path)
     }

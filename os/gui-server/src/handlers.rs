@@ -7,6 +7,7 @@ use xous::{MemoryRange, PID};
 
 mod camera;
 mod capture;
+mod control_center;
 mod framebuffer;
 mod keyboard;
 mod navigation;

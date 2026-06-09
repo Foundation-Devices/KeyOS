@@ -10,6 +10,7 @@ edition = "2021"
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+hex = "0.4"
 hidapi = "2"
 png = "0.17"
 rusb = "0.9"

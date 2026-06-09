@@ -116,7 +116,7 @@ macro_rules! message_api_scalar {
             pub struct [<Subscribe $ty>];
 
             impl<P: server::CheckedPermissions> crate::SettingsApi<P> {
-                #[doc = "Subscribes to the [`settings::global::" $ty "`] setting"]
+                #[doc = "Subscribes to the [`crate::global::" $ty "`] setting"]
                 pub fn [<server_subscribe_$ty:snake>]<S>(&self, context: &mut server::ServerContext<S>)
                 where
                     S: server::Server + server::ScalarEventHandler<$ty>,
@@ -125,7 +125,7 @@ macro_rules! message_api_scalar {
                     self.conn.subscribe_scalar_infallible([<Subscribe $ty>], context)
                 }
 
-                #[doc = "Gets the value of the [`settings::global::" $ty "`] setting"]
+                #[doc = "Gets the value of the [`crate::global::" $ty "`] setting"]
                 pub fn [<get_$ty:snake>](&self) -> response_type!($ty, $storage)
                 where
                     P: server::MessageAllowed<[<Get $ty>]>,
@@ -133,7 +133,7 @@ macro_rules! message_api_scalar {
                     self.conn.send_blocking_scalar([<Get $ty>]::default())
                 }
 
-                #[doc = "Sets the value of the [`settings::global::" $ty "`] setting"]
+                #[doc = "Sets the value of the [`crate::global::" $ty "`] setting"]
                 pub fn [<set_$ty:snake>](&self, value: impl Into<$ty>)
                 where
                     P: server::MessageAllowed<[<Set $ty>]>,
@@ -160,7 +160,7 @@ macro_rules! message_api_archive {
             pub struct [<Subscribe $ty>];
 
             impl<P: server::CheckedPermissions> crate::SettingsApi<P> {
-                #[doc = "Subscribes to the [`settings::global::" $ty "`] setting"]
+                #[doc = "Subscribes to the [`crate::global::" $ty "`] setting"]
                 pub fn [<server_subscribe_$ty:snake>]<S>(&self, context: &mut server::ServerContext<S>)
                 where
                     S: server::Server + server::ArchiveEventHandler<$ty>,
@@ -169,7 +169,7 @@ macro_rules! message_api_archive {
                     self.conn.subscribe_archive_infallible([<Subscribe $ty>], context)
                 }
 
-                #[doc = "Gets the value of the [`settings::global::" $ty "`] setting"]
+                #[doc = "Gets the value of the [`crate::global::" $ty "`] setting"]
                 pub fn [<get_$ty:snake>](&self) -> response_type!($ty, $storage)
                 where
                     P: server::MessageAllowed<[<Get $ty>]>,
@@ -177,7 +177,7 @@ macro_rules! message_api_archive {
                     self.conn.send_blocking_archive([<Get $ty>]::default())
                 }
 
-                #[doc = "Sets the value of the [`settings::global::" $ty "`] setting"]
+                #[doc = "Sets the value of the [`crate::global::" $ty "`] setting"]
                 pub fn [<set_$ty:snake>](&self, value: impl Into<$ty>)
                 where
                     P: server::MessageAllowed<[<Set $ty>]>,

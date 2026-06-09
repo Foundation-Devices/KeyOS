@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from dialog.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct DialogSizeProps {
+    font-family: string,
+    font-size: length,
+    panel-width: length,
+    panel-padding: length,
+    icon-size: length,
+    border-radius: length,
+}
+
+export global DialogTheme {
+    in-out property <DialogSizeProps> size-sm: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-sm,
+        panel-width: 360px,
+        panel-padding: Theme.icon-size-sm,
+        icon-size: Theme.control-radius-sm,
+        border-radius: 20px,
+    };
+    in-out property <DialogSizeProps> size-md: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-md,
+        panel-width: 420px,
+        panel-padding: Theme.icon-size-md,
+        icon-size: Theme.control-radius-md,
+        border-radius: 24px,
+    };
+    in-out property <DialogSizeProps> size-lg: {
+        font-family: Theme.font-primary,
+        font-size: Theme.font-size-lg,
+        panel-width: 480px,
+        panel-padding: Theme.icon-size-lg,
+        icon-size: Theme.control-radius-lg,
+        border-radius: 28px,
+    };
+
+    public pure function size(s: ControlSize) -> DialogSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

@@ -144,6 +144,47 @@ pub fn format_float(value: f32, decimals: i32, locale_str: &str) -> String {
     result
 }
 
+pub fn format_file_size(bytes: u64, locale_str: &str) -> String {
+    let units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0;
+
+    while value >= 1024.0 && unit_index < units.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    let value = if unit_index == 0 {
+        format_u64(bytes, locale_str)
+    } else {
+        format_file_size_decimal(value, locale_str)
+    };
+
+    format!("{value} {}", units[unit_index])
+}
+
+fn format_u64(value: u64, locale_str: &str) -> String {
+    let locale = NumFormatLocale::from_name(locale_str).unwrap_or(NumFormatLocale::en);
+    value.to_formatted_string(&locale)
+}
+
+fn format_file_size_decimal(value: f64, locale_str: &str) -> String {
+    let rounded = if value < 10.0 { format!("{value:.1}") } else { format!("{value:.0}") };
+
+    let Some((integer, fractional)) = rounded.split_once('.') else {
+        return format_u64(rounded.parse().unwrap_or_default(), locale_str);
+    };
+    let integer = format_u64(integer.parse().unwrap_or_default(), locale_str);
+    if fractional == "0" {
+        return integer;
+    }
+
+    let decimal_separator =
+        NumFormatLocale::from_name(locale_str).map(|locale| locale.decimal()).unwrap_or(".");
+
+    format!("{integer}{decimal_separator}{fractional}")
+}
+
 pub fn format_currency(major: i32, minor: i32, currency: &str) -> String {
     // Use the rusty_money crate to format the currency
     match iso::find(currency) {
@@ -246,6 +287,20 @@ mod tests {
         assert_eq!(format_float(1234.56789, 2, &locale), "1.234,57");
         assert_eq!(format_float(1234.0, 2, &locale), "1.234,00");
         assert_eq!(format_float(1234.123, 5, &locale), "1.234,12305"); // Differs due to floating point limits
+    }
+
+    #[test]
+    fn test_format_file_size_en() {
+        assert_eq!(format_file_size(512, "en"), "512 B");
+        assert_eq!(format_file_size(1024, "en"), "1 KiB");
+        assert_eq!(format_file_size(1536, "en"), "1.5 KiB");
+        assert_eq!(format_file_size(1_234_567, "en"), "1.2 MiB");
+    }
+
+    #[test]
+    fn test_format_file_size_es() {
+        assert_eq!(format_file_size(1536, "es"), "1,5 KiB");
+        assert_eq!(format_file_size(1_234_567, "es"), "1,2 MiB");
     }
 
     //=========================================================================

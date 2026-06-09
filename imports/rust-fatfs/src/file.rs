@@ -348,14 +348,9 @@ impl<'a, T: ReadWriteSeek> Seek for File<'a, T> {
         } else {
             match self.first_cluster {
                 Some(n) => {
-                    // Seeking forward can carry on from the cursor. Only a backward
-                    // seek has to walk the chain again from its head.
-                    let (start, mut cluster) = match self.current_cluster {
-                        Some(current) if old_cluster_count <= cluster_count => (old_cluster_count, current),
-                        _ => (0, n),
-                    };
-                    let mut iter = self.fs.cluster_iter(cluster);
-                    for i in start..cluster_count {
+                    let mut cluster = n;
+                    let mut iter = self.fs.cluster_iter(n);
+                    for i in 0..cluster_count {
                         cluster = match iter.next() {
                             Some(r) => r?,
                             None => {

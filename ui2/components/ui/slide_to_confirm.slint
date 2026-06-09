@@ -1,0 +1,196 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { SlideToConfirmTheme } from "slide_to_confirm_theme.slint";
+
+export component SlideToConfirm {
+    in property <string> label: "Slide";
+    in property <string> hint: "Slide to confirm";
+    in property <string> confirmed-label: "Confirmed";
+    in property <ControlSize> size: ControlSize.md;
+    in-out property <bool> confirmed: false;
+    in property <bool> disabled: false;
+    in property <color> track-color: default-track-color();
+    in property <color> track-border-color:
+        root.confirmed ? default-confirmed-track-border-color() : default-track-border-color();
+    in property <color> label-color:
+        root.confirmed ? default-confirmed-label-color() : default-label-color();
+    in property <color> thumb-color:
+        root.confirmed ? default-confirmed-thumb-color() : root.disabled ? Theme.palette-border : default-thumb-color();
+    in property <color> thumb-label-color:
+        root.confirmed ? default-confirmed-thumb-label-color() : default-thumb-label-color();
+    in property <string> font-family: SlideToConfirmTheme.size(root.size).font-family;
+    in property <length> font-size: SlideToConfirmTheme.size(root.size).font-size;
+    in property <length> control-height: SlideToConfirmTheme.size(root.size).control-height;
+    in property <length> thumb-width: SlideToConfirmTheme.size(root.size).thumb-width;
+    in property <length> thumb-padding-horizontal: SlideToConfirmTheme.size(root.size).thumb-padding-horizontal;
+    in property <length> icon-size: SlideToConfirmTheme.size(root.size).icon-size;
+    in property <length> border-radius: SlideToConfirmTheme.size(root.size).border-radius;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> track-border-width: 1px;
+    in property <length> track-inset: 4px;
+    in property <length> label-font-size: root.actual-font-size - 1px;
+    in property <int> label-font-weight: 500;
+    in property <int> thumb-font-weight: 600;
+    in property <length> thumb-border-radius: max(10px, root.actual-border-radius - 4px);
+
+    callback activated();
+
+    pure function default-track-color() -> color {
+        return Theme.palette-secondary;
+    }
+
+    pure function default-track-border-color() -> color {
+        return Theme.palette-border;
+    }
+
+    pure function default-label-color() -> color {
+        return Theme.palette-muted;
+    }
+
+    pure function default-thumb-color() -> color {
+        return Theme.palette-primary;
+    }
+
+    pure function default-confirmed-track-border-color() -> color {
+        return Theme.is-dark ? #22c55e : #17a34a;
+    }
+
+    pure function default-confirmed-label-color() -> color {
+        return Theme.is-dark ? #4ade80 : #15803d;
+    }
+
+    pure function default-confirmed-thumb-color() -> color {
+        return Theme.is-dark ? #22c55e : #17a34a;
+    }
+
+    pure function default-thumb-label-color() -> color {
+        return #ffffff;
+    }
+
+    pure function default-confirmed-thumb-label-color() -> color {
+        return #ffffff;
+    }
+
+    private property <string> actual-font-family: root.font-family;
+    private property <length> actual-font-size: root.font-size;
+    private property <length> actual-control-height: root.control-height;
+    private property <length> actual-thumb-width: root.thumb-width;
+    private property <length> actual-thumb-padding-horizontal: root.thumb-padding-horizontal;
+    private property <length> actual-icon-size: root.icon-size;
+    // Clamp the requested radius to half the control height so a "radius-full"
+    // token (often 9999px) renders as a pill, not an ellipse.
+    private property <length> actual-border-radius:
+        min(root.border-radius, actual-control-height / 2);
+    private property <length> inset: root.track-inset;
+    private property <length> thumb-height: max(0px, root.actual-control-height - inset * 2);
+    private property <length> max-offset: max(0px, root.width - actual-thumb-width - inset * 2);
+    private property <length> drag-offset: root.confirmed ? max-offset : 0px;
+    private property <color> actual-track-color: root.track-color;
+    private property <color> actual-track-border-color: root.track-border-color;
+    private property <color> actual-label-color: root.label-color;
+    private property <color> actual-thumb-color: root.thumb-color;
+    private property <color> actual-thumb-label-color: root.thumb-label-color;
+
+    changed confirmed => {
+        if (!root.confirmed) {
+            root.drag-offset = 0px;
+        } else {
+            root.drag-offset = root.max-offset;
+        }
+    }
+
+    preferred-width: 320px;
+    preferred-height: actual-control-height;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.actual-track-color;
+        border-color: root.actual-track-border-color;
+        border-width: root.track-border-width;
+        border-radius: root.actual-border-radius;
+        clip: true;
+
+        Text {
+            x: (parent.width - self.preferred-width) / 2;
+            y: (parent.height - self.preferred-height) / 2;
+            text: root.confirmed ? root.confirmed-label : root.hint;
+            color: root.actual-label-color;
+            font-family: root.actual-font-family;
+            font-size: root.label-font-size;
+            font-weight: root.label-font-weight;
+        }
+
+        thumb := Rectangle {
+            x: root.inset + root.drag-offset;
+            y: root.inset;
+            width: root.actual-thumb-width;
+            height: root.thumb-height;
+            border-radius: root.thumb-border-radius;
+            background: root.actual-thumb-color;
+            clip: true;
+
+            animate x { duration: 140ms; }
+
+            HorizontalLayout {
+                padding-left: root.actual-thumb-padding-horizontal;
+                padding-right: root.actual-thumb-padding-horizontal;
+                spacing: 8px;
+                alignment: center;
+
+                Rectangle {
+                    width: root.actual-icon-size;
+                    height: parent.height;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: root.actual-icon-size;
+                        height: root.actual-icon-size;
+                        source: root.confirmed ? @image-url("../../resources/icons/check.svg") : @image-url("../../resources/icons/arrow-right.svg");
+                        colorize: root.actual-thumb-label-color;
+                    }
+                }
+
+                Text {
+                    text: root.label;
+                    color: root.actual-thumb-label-color;
+                    font-family: root.actual-font-family;
+                    font-size: root.actual-font-size;
+                    font-weight: root.thumb-font-weight;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+
+    drag-touch := TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: !root.disabled && !root.confirmed;
+
+        moved => {
+            if (self.pressed) {
+                root.drag-offset = clamp(self.mouse-x - self.pressed-x, 0px, root.max-offset);
+            }
+        }
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                if (root.drag-offset >= root.max-offset * 0.85) {
+                    root.confirmed = true;
+                    root.drag-offset = root.max-offset;
+                    root.activated();
+                } else {
+                    root.drag-offset = 0px;
+                }
+            }
+        }
+    }
+}

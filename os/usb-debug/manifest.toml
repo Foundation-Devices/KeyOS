@@ -22,10 +22,14 @@ en = "USB Debug Protocol"
     "InjectTouch",
     "InjectKey",
     "CloseApp",
+    "RunApp",
 ]
 "os/power-manager" = [
     "Reboot",
 ]
 "os/security" = [
     "GetOsVersionInfo",
+]
+"os/settings" = [
+    "GetDeveloperMode",
 ]

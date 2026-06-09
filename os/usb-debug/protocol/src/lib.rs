@@ -66,6 +66,55 @@ impl TouchKind {
     }
 }
 
+/// Result status for `Command::LaunchApp`.
+///
+/// The launch response payload starts with the PID as little-endian `u16`.
+/// Newer devices append this status byte so host tools can tell whether the
+/// app was freshly launched or an existing process was only foregrounded.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
+pub enum LaunchAppStatus {
+    Launched = 0,
+    AlreadyRunning = 1,
+}
+
+impl LaunchAppStatus {
+    pub fn from_byte(b: u8) -> Result<Self, ProtocolError> {
+        Self::from_u8(b).ok_or(ProtocolError::InvalidLaunchAppStatus(b))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LaunchAppResult {
+    pub pid: u16,
+    pub status: LaunchAppStatus,
+}
+
+impl LaunchAppResult {
+    pub fn new(pid: u16, status: LaunchAppStatus) -> Self { Self { pid, status } }
+
+    pub fn encode(self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(3);
+        out.extend_from_slice(&self.pid.to_le_bytes());
+        out.push(self.status as u8);
+        out
+    }
+
+    pub fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let bytes: &[u8; 2] = payload.first_chunk().ok_or(ProtocolError::TruncatedPayload {
+            cmd: CMD_LAUNCH_APP,
+            need: 2,
+            got: payload.len(),
+        })?;
+        let pid = u16::from_le_bytes(*bytes);
+        let status = match payload.get(2) {
+            Some(status) => LaunchAppStatus::from_byte(*status)?,
+            None => LaunchAppStatus::Launched,
+        };
+        Ok(Self { pid, status })
+    }
+}
+
 // Static frame headers so `Response::parts` can return `&[u8]` without
 // allocating or relying on temporary stack arrays.
 const HDR_LOG: &[u8] = &[FrameType::Log as u8];
@@ -81,18 +130,37 @@ const CMD_CLOSE_APP: u8 = 0x05;
 const CMD_KERNEL_CMD: u8 = 0x06;
 const CMD_INPUT_TEXT: u8 = 0x07;
 const CMD_GET_VERSION: u8 = 0x08;
+const CMD_LAUNCH_APP: u8 = 0x09;
+const CMD_GET_DEVELOPER_MODE: u8 = 0x0a;
 
 /// Host -> device command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Screenshot,
-    Tap { x: u16, y: u16, kind: TouchKind },
-    PowerButton { pressed: bool },
+    Tap {
+        x: u16,
+        y: u16,
+        kind: TouchKind,
+    },
+    PowerButton {
+        pressed: bool,
+    },
     RebootSamba,
-    CloseApp { pid: u16 },
-    KernelCmd { cmd_byte: u8 },
+    CloseApp {
+        pid: u16,
+    },
+    KernelCmd {
+        cmd_byte: u8,
+    },
     InputText(String),
     GetVersion,
+    LaunchApp {
+        app_id: [u8; 16],
+    },
+    /// Read the current value of the global `DeveloperMode` setting. Used by
+    /// host tools (e.g. `foundation sideload`) to fail early when the user
+    /// hasn't enabled Developer Mode on the device.
+    GetDeveloperMode,
 }
 
 impl Command {
@@ -107,6 +175,8 @@ impl Command {
             Command::KernelCmd { .. } => CMD_KERNEL_CMD,
             Command::InputText(_) => CMD_INPUT_TEXT,
             Command::GetVersion => CMD_GET_VERSION,
+            Command::LaunchApp { .. } => CMD_LAUNCH_APP,
+            Command::GetDeveloperMode => CMD_GET_DEVELOPER_MODE,
         }
     }
 
@@ -127,7 +197,7 @@ impl Command {
     pub fn encode_into(&self, out: &mut Vec<u8>) {
         out.push(self.cmd_byte());
         match self {
-            Command::Screenshot | Command::RebootSamba | Command::GetVersion => {}
+            Command::Screenshot | Command::RebootSamba | Command::GetVersion | Command::GetDeveloperMode => {}
             Command::Tap { x, y, kind } => {
                 out.extend_from_slice(&x.to_le_bytes());
                 out.extend_from_slice(&y.to_le_bytes());
@@ -144,6 +214,9 @@ impl Command {
             }
             Command::InputText(text) => {
                 out.extend_from_slice(text.as_bytes());
+            }
+            Command::LaunchApp { app_id } => {
+                out.extend_from_slice(app_id);
             }
         }
     }
@@ -187,6 +260,15 @@ impl Command {
                 Ok(Command::InputText(text.to_string()))
             }
             CMD_GET_VERSION => Ok(Command::GetVersion),
+            CMD_GET_DEVELOPER_MODE => Ok(Command::GetDeveloperMode),
+            CMD_LAUNCH_APP => {
+                let bytes: &[u8; 16] = payload.first_chunk().ok_or(ProtocolError::TruncatedPayload {
+                    cmd,
+                    need: 16,
+                    got: payload.len(),
+                })?;
+                Ok(Command::LaunchApp { app_id: *bytes })
+            }
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
@@ -247,6 +329,10 @@ pub enum Response {
     Screenshot(Payload),
     KernelOutput(Payload),
     Version(Vec<u8>),
+    /// Ack carrying a small fixed-size payload (e.g. LaunchApp returning the PID).
+    LaunchAck(Vec<u8>),
+    /// Reply to `Command::GetDeveloperMode`. Single-byte payload: 0x00 = off, 0x01 = on.
+    DeveloperMode(bool),
     /// Asynchronous log frame; not a reply to a `Command`.
     Log(Vec<u8>),
 }
@@ -261,8 +347,23 @@ impl Response {
             Response::Screenshot(p) => (HDR_RESP_OK, p),
             Response::KernelOutput(p) => (HDR_RESP_OK, p),
             Response::Version(d) => (HDR_RESP_OK, d.as_slice()),
+            Response::LaunchAck(d) => (HDR_RESP_OK, d.as_slice()),
+            Response::DeveloperMode(enabled) => (HDR_RESP_OK, dev_mode_byte(*enabled)),
             Response::Log(d) => (HDR_LOG, d.as_slice()),
         }
+    }
+}
+
+// Static one-byte payloads used by `Response::DeveloperMode` so `parts()` can
+// return a `&[u8]` slice without allocating or relying on a stack temporary.
+const DEV_MODE_ON: &[u8] = &[1];
+const DEV_MODE_OFF: &[u8] = &[0];
+
+fn dev_mode_byte(enabled: bool) -> &'static [u8] {
+    if enabled {
+        DEV_MODE_ON
+    } else {
+        DEV_MODE_OFF
     }
 }
 
@@ -282,6 +383,7 @@ pub enum ProtocolError {
     UnknownFrameType(u8),
     UnknownStatus(u8),
     InvalidTouchKind(u8),
+    InvalidLaunchAppStatus(u8),
     TruncatedPayload {
         cmd: u8,
         need: usize,
@@ -301,6 +403,9 @@ impl core::fmt::Display for ProtocolError {
             ProtocolError::UnknownFrameType(b) => write!(f, "unknown frame type 0x{b:02x}"),
             ProtocolError::UnknownStatus(b) => write!(f, "unknown status byte 0x{b:02x}"),
             ProtocolError::InvalidTouchKind(b) => write!(f, "invalid touch kind 0x{b:02x}"),
+            ProtocolError::InvalidLaunchAppStatus(b) => {
+                write!(f, "invalid launch app status 0x{b:02x}")
+            }
             ProtocolError::TruncatedPayload { cmd, need, got } => {
                 write!(f, "command 0x{cmd:02x} payload truncated: need {need}, got {got}")
             }
@@ -337,6 +442,8 @@ mod tests {
         roundtrip(Command::InputText("hello".to_string()));
         roundtrip(Command::InputText(String::new()));
         roundtrip(Command::GetVersion);
+        roundtrip(Command::GetDeveloperMode);
+        roundtrip(Command::LaunchApp { app_id: [0xab; 16] });
     }
 
     #[test]
@@ -373,5 +480,16 @@ mod tests {
     fn input_text_rejects_invalid_utf8() {
         let bytes = &[CMD_INPUT_TEXT, 0xff, 0xfe];
         assert!(matches!(Command::decode(bytes), Err(ProtocolError::InvalidUtf8)));
+    }
+
+    #[test]
+    fn launch_app_result_encodes_status_and_accepts_legacy_payload() {
+        let result = LaunchAppResult::new(0x1234, LaunchAppStatus::AlreadyRunning);
+        assert_eq!(result.encode(), vec![0x34, 0x12, 1]);
+        assert_eq!(LaunchAppResult::decode(&result.encode()).unwrap(), result);
+        assert_eq!(
+            LaunchAppResult::decode(&[0x34, 0x12]).unwrap(),
+            LaunchAppResult::new(0x1234, LaunchAppStatus::Launched)
+        );
     }
 }

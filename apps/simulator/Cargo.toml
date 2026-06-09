@@ -6,29 +6,29 @@ name = "simulator"
 version = "0.1.0"
 edition = "2021"
 
+# NOTE: the simulator control panel is a host-only desktop tool, so it uses
+# *stock* crates.io Slint with the GPU (femtovg) renderer — NOT the device's
+# Foundation software-renderer fork. It is therefore its own workspace (own
+# Cargo.lock) so femtovg's deps don't have to reconcile with the firmware's
+# pinned versions. It still path-depends on the firmware's slint-free IPC crates.
+[workspace]
+
 [dependencies]
 anyhow = "1.0"
-gui-server-api = { workspace = true }
+gui-server-api = { path = "../../api/gui-server" }
 image = "0.25"
+libc = "0.2"
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 serde = "1.0"
 serde_json = "1.0"
 server = { path = "../../server" }
-settings = { workspace = true }
+settings = { path = "../../api/settings" }
 
 [dependencies.slint]
-features = [
-    "std",
-    "serde",
-    "backend-winit",
-    "renderer-software",
-    "compat-1-2",
-]
-workspace = true
-
-[build-dependencies]
-slint-keyos-platform-common = { path = "../../slint-keyos-platform/common" }
+version = "1.12"
+# renderer-software is only used by the `shot` bin (headless layout self-check).
+features = ["backend-winit", "renderer-femtovg", "renderer-software", "unstable-winit-030", "serde"]
 
 [build-dependencies.slint-build]
-workspace = true
+version = "1.12"

@@ -1,0 +1,91 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+export component EditorTextField inherits Rectangle {
+    in property <bool> dark-mode;
+    in-out property <string> text: "";
+    in property <string> prefix: "";
+    in property <length> field-height: 22px;
+    in property <length> text-font-size: 11px;
+    in property <length> text-padding-left: 6px;
+    in property <length> text-padding-right: 6px;
+    in property <length> prefix-gap: 4px;
+    in property <length> field-border-radius: 4px;
+    in property <color> field-background: dark-mode ? #1a1a1a : #f0f0f0;
+    in property <color> field-foreground: dark-mode ? #ffffff : #1a1a1a;
+    in property <color> prefix-color: dark-mode ? #888888 : #666666;
+    in property <color> focus-border-color: #1a9a9a;
+    in property <color> unfocused-border-color: transparent;
+    in property <length> focused-border-width: 0px;
+    in property <length> unfocused-border-width: 0px;
+    out property <bool> has-focus: input-field.has-focus;
+
+    callback accepted(string);
+    callback edited(string);
+
+    property <length> prefix-slot-width:
+        root.prefix != "" ? prefix-measure.preferred-width + root.prefix-gap : 0px;
+    property <length> content-left: root.text-padding-left + root.prefix-slot-width;
+    property <length> content-width:
+        max(0px, root.width - root.content-left - root.text-padding-right);
+
+    height: root.field-height;
+    background: root.field-background;
+    border-radius: root.field-border-radius;
+    border-width: root.has-focus ? root.focused-border-width : root.unfocused-border-width;
+    border-color: root.has-focus ? root.focus-border-color : root.unfocused-border-color;
+    clip: true;
+
+    prefix-measure := Text {
+        x: -10000px;
+        y: -10000px;
+        visible: false;
+        text: root.prefix;
+        font-size: root.text-font-size;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        clip: true;
+
+        if root.prefix != "": Text {
+            x: root.text-padding-left;
+            y: 0px;
+            width: prefix-measure.preferred-width;
+            height: parent.height;
+            text: root.prefix;
+            color: root.prefix-color;
+            font-size: root.text-font-size;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+        }
+
+        Rectangle {
+            x: root.content-left;
+            y: 0px;
+            width: root.content-width;
+            height: parent.height;
+            background: transparent;
+            clip: true;
+
+            input-field := TextInput {
+                width: parent.width;
+                height: parent.height;
+                text <=> root.text;
+                color: root.field-foreground;
+                font-size: root.text-font-size;
+                vertical-alignment: center;
+
+                edited => {
+                    root.edited(self.text);
+                }
+
+                accepted => {
+                    root.accepted(self.text);
+                }
+            }
+        }
+    }
+}

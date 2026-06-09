@@ -1,0 +1,211 @@
+{
+  "component": "IconButton",
+  "variants": [
+    "default",
+    "ghost",
+    "outlined"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "background",
+      "displayName": "Background",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.surface",
+          "focused": "color.surface",
+          "pressed": "color.secondary.dark",
+          "disabled": "color.surface"
+        },
+        "ghost": {
+          "normal": "color.surface",
+          "focused": "color.surface",
+          "pressed": "color.secondary.dark",
+          "disabled": "color.surface"
+        },
+        "outlined": {
+          "normal": "color.surface",
+          "focused": "color.surface",
+          "pressed": "color.secondary.dark",
+          "disabled": "color.surface"
+        }
+      }
+    },
+    {
+      "name": "icon-color",
+      "displayName": "Icon Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.foreground",
+          "focused": "color.foreground",
+          "pressed": "color.foreground",
+          "disabled": "color.foreground"
+        },
+        "ghost": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary",
+          "disabled": "color.primary"
+        },
+        "outlined": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary",
+          "disabled": "color.primary"
+        }
+      }
+    },
+    {
+      "name": "border-color",
+      "displayName": "Border Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.transparent",
+          "focused": "color.secondary.dark",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "ghost": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        },
+        "outlined": {
+          "normal": "color.transparent",
+          "focused": "color.primary",
+          "pressed": "color.transparent",
+          "disabled": "color.transparent"
+        }
+      }
+    },
+    {
+      "name": "button-opacity",
+      "displayName": "Button Opacity",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05,
+      "defaults": {
+        "default": {
+          "normal": 1.0,
+          "focused": 1.0,
+          "pressed": 1.0,
+          "disabled": 0.5
+        },
+        "ghost": {
+          "normal": 1.0,
+          "focused": 1.0,
+          "pressed": 1.0,
+          "disabled": 0.5
+        },
+        "outlined": {
+          "normal": 1.0,
+          "focused": 1.0,
+          "pressed": 1.0,
+          "disabled": 0.5
+        }
+      }
+    },
+    {
+      "name": "touch-expansion",
+      "displayName": "Touch Expansion",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": 4.0,
+          "focused": 4.0,
+          "pressed": 4.0,
+          "disabled": 4.0
+        },
+        "ghost": {
+          "normal": 4.0,
+          "focused": 4.0,
+          "pressed": 4.0,
+          "disabled": 4.0
+        },
+        "outlined": {
+          "normal": 4.0,
+          "focused": 4.0,
+          "pressed": 4.0,
+          "disabled": 4.0
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "border-width",
+      "displayName": "Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 0.5,
+      "defaults": {
+        "default": 1.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.default"
+      }
+    },
+    {
+      "name": "control-size",
+      "displayName": "Control Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
+      }
+    }
+  ]
+}

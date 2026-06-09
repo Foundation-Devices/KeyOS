@@ -25,13 +25,14 @@ impl server::BlockingArchiveHandler<MapFileMessage> for Server {
             | Location::SystemAppData
             | Location::EncryptedRoot
             | Location::AppData
+            | Location::AppResources
             | Location::CommonAssets
             | Location::User
             | Location::Airlock => {}
             Location::Usb => return Err(Error::InvalidPath),
         }
         self.check_read_access(sender, msg.location)?;
-        let path = crate::path_of(msg.location, &msg.path, sender);
+        let path = self.path_of(msg.location, &msg.path, sender)?;
         if !self.mapped_files.contains_key(&path) {
             let mut file = self.mount(msg.location).ok_or(Error::NoMedia)?.root_dir().open_file(&path)?;
             let size = file.seek(SeekFrom::End(0))? as usize;

@@ -1,0 +1,644 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { TabsTheme } from "tabs_theme.slint";
+
+export enum TabsVariant {
+    solid,
+    bordered,
+    light,
+    underlined,
+}
+
+export enum TabsColor {
+    default,
+    primary,
+    secondary,
+    success,
+    warning,
+    danger,
+}
+
+export enum TabsOrientation {
+    horizontal,
+    vertical,
+}
+
+component TabItem inherits Rectangle {
+    in property <string> label: "Overview";
+    in property <image> icon;
+    in property <bool> show-icon: false;
+    in property <ControlSize> size: ControlSize.md;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    in property <bool> vertical: false;
+    in property <bool> full-width: false;
+    in property <TabsVariant> variant: TabsVariant.solid;
+    in property <TabsColor> tab-color: TabsColor.default;
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+    in property <string> font-family: TabsTheme.size(root.size).font-family;
+    in property <length> font-size: TabsTheme.size(root.size).font-size;
+    in property <length> control-height: TabsTheme.size(root.size).control-height;
+    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
+    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <length> corner-radius: default-corner-radius();
+
+    out property <bool> has-focus: focus-scope.has-focus;
+
+    callback activated();
+
+    forward-focus: focus-scope;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> item-background: root.selected ? root.selected-background() : root.pressed-item ? root.pressed-background() : transparent;
+    in property <length> item-border-width: root.selected && root.variant == TabsVariant.bordered ? 1px : root.focused-item && root.variant != TabsVariant.underlined ? 2px : 0px;
+    in property <color> item-border-color: root.focused-item && root.variant != TabsVariant.underlined ? root.accent-color().with-alpha(Theme.is-dark ? 0.9 : 0.7) : root.selected && root.variant == TabsVariant.bordered ? Theme.palette-border.with-alpha(Theme.is-dark ? 0.9 : 1.0) : transparent;
+    in property <color> item-foreground: root.disabled ? Theme.palette-muted.with-alpha(0.68) : root.selected ? root.selected-foreground() : root.base-foreground();
+    in property <color> indicator-color: root.selected-foreground();
+
+    pure function accent-color() -> color {
+        if root.tab-color == TabsColor.primary {
+            return Theme.palette-primary;
+        }
+        if root.tab-color == TabsColor.secondary {
+            return Theme.palette-secondary-pressed;
+        }
+        if root.tab-color == TabsColor.success {
+            return Theme.is-dark ? #4ade80 : #15803d;
+        }
+        if root.tab-color == TabsColor.warning {
+            return Theme.is-dark ? #fbbf24 : #b45309;
+        }
+        if root.tab-color == TabsColor.danger {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-foreground;
+    }
+
+    pure function default-corner-radius() -> length {
+        if root.size == ControlSize.sm {
+            return 20px;
+        }
+        if root.size == ControlSize.lg {
+            return 28px;
+        }
+        return 24px;
+    }
+
+    pure function default-content-gap() -> length {
+        if root.size == ControlSize.sm {
+            return 8px;
+        }
+        if root.size == ControlSize.lg {
+            return 12px;
+        }
+        return 10px;
+    }
+
+    pure function selected-background() -> color {
+        if root.variant == TabsVariant.light {
+            if root.tab-color == TabsColor.default {
+                return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.12 : 0.07);
+            }
+            return root.accent-color().with-alpha(Theme.is-dark ? 0.22 : 0.12);
+        }
+        if root.variant == TabsVariant.underlined {
+            return transparent;
+        }
+        return Theme.palette-background;
+    }
+
+    pure function pressed-background() -> color {
+        if root.variant == TabsVariant.underlined {
+            return root.accent-color().with-alpha(Theme.is-dark ? 0.16 : 0.10);
+        }
+        if root.variant == TabsVariant.light {
+            if root.tab-color == TabsColor.default {
+                return Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.12 : 0.08);
+            }
+            return root.accent-color().with-alpha(Theme.is-dark ? 0.20 : 0.12);
+        }
+        return Theme.palette-background.with-alpha(Theme.is-dark ? 0.88 : 0.94);
+    }
+
+    pure function base-foreground() -> color {
+        return Theme.palette-muted;
+    }
+
+    pure function selected-foreground() -> color {
+        if root.tab-color == TabsColor.default {
+            return Theme.palette-foreground;
+        }
+        return root.accent-color();
+    }
+
+    pure function underline-thickness() -> length {
+        return root.actual-font-size >= 18px ? 3px : 2px;
+    }
+
+    property <bool> pressed-item: !root.disabled && (tab-touch.pressed || root.force-pressed);
+    property <bool> focused-item: !root.disabled && (focus-scope.has-focus || root.force-focused);
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-control-height: root.control-height;
+    property <length> actual-tab-padding-horizontal: root.tab-padding-horizontal;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> actual-corner-radius: root.corner-radius;
+    property <length> content-gap: root.show-icon ? default-content-gap() : 0px;
+    property <length> label-width: max(1px, label-measurer.preferred-width);
+    property <length> content-width:
+        root.label-width + (root.show-icon ? root.actual-icon-size + root.content-gap : 0px);
+    property <length> padded-content-width:
+        root.content-width + root.actual-tab-padding-horizontal * 2;
+    property <length> inner-radius:
+        root.variant == TabsVariant.underlined ? 0px : max(8px, root.actual-corner-radius - 2px);
+    property <length> indicator-length:
+        root.vertical ? max(24px, root.actual-control-height - 16px) : min(max(24px, root.content-width), root.width);
+
+    preferred-height: root.actual-control-height;
+    preferred-width: max(
+            root.actual-control-height,
+            root.padded-content-width);
+    horizontal-stretch: root.full-width ? 1 : 0;
+    border-radius: root.inner-radius;
+    clip: true;
+    background: root.item-background;
+    border-width: root.item-border-width;
+    border-color: root.item-border-color;
+
+    label-measurer := Text {
+        visible: false;
+        text: root.label;
+        font-family: root.actual-font-family;
+        font-size: root.actual-font-size;
+        font-weight: root.selected ? 600 : 500;
+    }
+
+    content-box := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 0px;
+        width: min(root.width, max(root.actual-control-height, root.padded-content-width));
+        height: parent.height;
+        background: transparent;
+
+        content-row := HorizontalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding-left: root.actual-tab-padding-horizontal;
+            padding-right: root.actual-tab-padding-horizontal;
+            spacing: root.content-gap;
+            alignment: root.vertical ? start : center;
+
+            if root.show-icon: Rectangle {
+                width: root.actual-icon-size;
+                height: parent.height;
+                background: transparent;
+
+                Image {
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width;
+                    height: root.actual-icon-size;
+                    source: root.icon;
+                    colorize: root.item-foreground;
+                }
+            }
+
+            label-slot := Rectangle {
+                width: root.vertical ? 0px : root.label-width;
+                height: parent.height;
+                horizontal-stretch: root.vertical ? 1 : 0;
+                background: transparent;
+
+                label-text := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.label;
+                    color: root.item-foreground;
+                    font-family: root.actual-font-family;
+                    font-size: root.actual-font-size;
+                    font-weight: root.selected ? 600 : 500;
+                    vertical-alignment: center;
+                    horizontal-alignment: root.vertical ? left : center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+
+    if root.selected && root.variant == TabsVariant.underlined && !root.vertical: Rectangle {
+        x: content-box.x + (content-box.width - self.width) / 2;
+        y: parent.height - self.height;
+        width: root.indicator-length;
+        height: root.underline-thickness();
+        background: root.indicator-color;
+        border-radius: root.underline-thickness();
+    }
+
+    if root.selected && root.variant == TabsVariant.underlined && root.vertical: Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: root.underline-thickness();
+        height: root.indicator-length;
+        background: root.indicator-color;
+        border-radius: root.underline-thickness();
+    }
+
+    tab-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: !root.disabled;
+        clicked => {
+            focus-scope.focus();
+            root.activated();
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+component TabsList inherits Rectangle {
+    in property <[string]> options: ["Overview", "Activity", "Files"];
+    in property <[image]> icons: [];
+    in property <[bool]> disabled-items: [];
+    in-out property <int> selected-index: 0;
+    in property <ControlSize> size: ControlSize.md;
+    in property <TabsVariant> variant: TabsVariant.solid;
+    in property <TabsColor> tab-color: TabsColor.default;
+    in property <bool> disabled: false;
+    in property <bool> vertical: false;
+    in property <bool> full-width: false;
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+    in property <string> font-family: TabsTheme.size(root.size).font-family;
+    in property <length> font-size: TabsTheme.size(root.size).font-size;
+    in property <length> control-height: TabsTheme.size(root.size).control-height;
+    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
+    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <length> tab-gap: default-tab-gap();
+    in property <length> list-padding: default-list-padding();
+    in property <length> corner-radius: default-border-radius();
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> list-background-color: list-background();
+    in property <length> list-border-width: root.variant == TabsVariant.bordered || root.variant == TabsVariant.solid ? 1px : 0px;
+    in property <color> list-stroke-color: list-border-color();
+    in property <color> list-edge-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.88 : 1.0);
+
+    callback select-requested(int, string);
+
+    pure function default-tab-gap() -> length {
+        if root.variant == TabsVariant.underlined {
+            return root.vertical ? 6px : 12px;
+        }
+        return 2px;
+    }
+
+    pure function default-list-padding() -> length {
+        if root.variant == TabsVariant.underlined {
+            return 0px;
+        }
+        return 4px;
+    }
+
+    pure function default-border-radius() -> length {
+        if root.size == ControlSize.sm {
+            return 20px;
+        }
+        if root.size == ControlSize.lg {
+            return 28px;
+        }
+        return 24px;
+    }
+
+    pure function item-disabled(index: int) -> bool {
+        return root.disabled || (index >= 0 && index < root.disabled-items.length && root.disabled-items[index]);
+    }
+
+    pure function has-icon(index: int) -> bool {
+        return index >= 0 && index < root.icons.length;
+    }
+
+    pure function list-background() -> color {
+        if root.variant == TabsVariant.solid {
+            return Theme.palette-secondary;
+        }
+        return transparent;
+    }
+
+    pure function list-border-color() -> color {
+        if root.variant == TabsVariant.bordered {
+            return Theme.palette-border;
+        }
+        if root.variant == TabsVariant.solid {
+            return Theme.palette-border.with-alpha(Theme.is-dark ? 0.28 : 0.52);
+        }
+        return transparent;
+    }
+
+    property <length> actual-control-height: root.control-height;
+    property <length> actual-tab-gap: root.tab-gap;
+    property <length> actual-list-padding: root.list-padding;
+    property <length> actual-border-radius: root.corner-radius;
+    property <int> item-count: max(1, root.options.length);
+    property <length> list-content-height:
+        root.vertical ? root.item-count * root.actual-control-height + max(0, root.item-count - 1) * root.actual-tab-gap : root.actual-control-height;
+    property <int> active-index:
+        root.options.length > 0 ? max(0, min(root.selected-index, root.options.length - 1)) : 0;
+
+    preferred-height: root.list-content-height + root.actual-list-padding * 2;
+    height: root.preferred-height;
+
+    background: root.list-background-color;
+    border-width: root.list-border-width;
+    border-color: root.list-stroke-color;
+    border-radius: root.variant == TabsVariant.underlined ? 0px : root.actual-border-radius;
+    clip: root.variant != TabsVariant.underlined;
+
+    if root.variant == TabsVariant.underlined && !root.vertical: Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: root.list-edge-color;
+    }
+
+    if root.variant == TabsVariant.underlined && root.vertical: Rectangle {
+        x: 0px;
+        y: 8px;
+        width: 1px;
+        height: parent.height - 16px;
+        background: root.list-edge-color;
+    }
+
+    if root.vertical: VerticalLayout {
+        padding: root.actual-list-padding;
+        spacing: root.actual-tab-gap;
+
+        for option[index] in root.options: tab-vertical := TabItem {
+            width: parent.width - root.actual-list-padding * 2;
+            label: option;
+            icon: root.has-icon(index) ? root.icons[index] : @image-url("");
+            show-icon: root.has-icon(index);
+            selected: root.active-index == index;
+            disabled: root.item-disabled(index);
+            vertical: true;
+            full-width: true;
+            size: root.size;
+            variant: root.variant;
+            tab-color: root.tab-color;
+            force-focused: root.force-focused && root.active-index == index;
+            force-pressed: root.force-pressed && root.active-index == index;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            control-height: root.control-height;
+            tab-padding-horizontal: root.tab-padding-horizontal;
+            icon-size: root.icon-size;
+            corner-radius: root.corner-radius;
+            activated => {
+                if (root.active-index != index) {
+                    root.selected-index = index;
+                    root.select-requested(index, option);
+                }
+            }
+        }
+    }
+
+    if !root.vertical: HorizontalLayout {
+        padding: root.actual-list-padding;
+        spacing: root.actual-tab-gap;
+
+        for option[index] in root.options: tab-horizontal := TabItem {
+            label: option;
+            icon: root.has-icon(index) ? root.icons[index] : @image-url("");
+            show-icon: root.has-icon(index);
+            selected: root.active-index == index;
+            disabled: root.item-disabled(index);
+            vertical: false;
+            full-width: root.full-width;
+            size: root.size;
+            variant: root.variant;
+            tab-color: root.tab-color;
+            force-focused: root.force-focused && root.active-index == index;
+            force-pressed: root.force-pressed && root.active-index == index;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            control-height: root.control-height;
+            tab-padding-horizontal: root.tab-padding-horizontal;
+            icon-size: root.icon-size;
+            corner-radius: root.corner-radius;
+            activated => {
+                if (root.active-index != index) {
+                    root.selected-index = index;
+                    root.select-requested(index, option);
+                }
+            }
+        }
+    }
+}
+
+component TabsPanel inherits Rectangle {
+    in property <[string]> panels: [];
+    in property <int> selected-index: 0;
+    in property <string> font-family: "Montserrat";
+    in property <length> font-size: 20px;
+    in property <length> panel-padding: default-panel-padding();
+    in property <length> panel-min-height: default-panel-min-height();
+    in property <length> corner-radius: 24px;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> panel-background: Theme.palette-background;
+    in property <color> panel-foreground: Theme.palette-foreground;
+    in property <color> panel-border-color: Theme.palette-border;
+    in property <length> panel-border-width: 1px;
+
+    pure function default-panel-padding() -> length {
+        return 20px;
+    }
+
+    pure function default-panel-min-height() -> length {
+        return 128px;
+    }
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-panel-padding: root.panel-padding;
+    property <length> actual-panel-min-height: root.panel-min-height;
+    property <length> actual-border-radius: root.corner-radius;
+    property <int> active-index:
+        root.panels.length > 0 ? max(0, min(root.selected-index, root.panels.length - 1)) : 0;
+    property <string> panel-text:
+        root.panels.length > 0 && root.active-index < root.panels.length ? root.panels[root.active-index] : "";
+
+    preferred-height: max(root.actual-panel-min-height, panel-body.preferred-height + root.actual-panel-padding * 2);
+
+    background: root.panel-background;
+    border-color: root.panel-border-color;
+    border-width: root.panel-border-width;
+    border-radius: root.actual-border-radius;
+    clip: true;
+
+    panel-body := Text {
+        x: root.actual-panel-padding;
+        y: root.actual-panel-padding;
+        width: parent.width - root.actual-panel-padding * 2;
+        text: root.panel-text;
+        color: root.panel-foreground;
+        font-family: root.actual-font-family;
+        font-size: root.actual-font-size;
+        wrap: word-wrap;
+    }
+}
+
+export component Tabs {
+    in property <[string]> options: ["Overview", "Activity", "Files"];
+    in property <[string]> panels: ["Summary content", "Activity content", "Files content"];
+    in property <[image]> icons: [];
+    in property <[bool]> disabled-items: [];
+    in property <ControlSize> size: ControlSize.md;
+    in property <TabsVariant> variant: TabsVariant.solid;
+    in property <TabsColor> color: TabsColor.primary;
+    in property <TabsOrientation> orientation: TabsOrientation.horizontal;
+    in property <bool> full-width: true;
+    in property <bool> show-panel: true;
+    in-out property <int> selected-index: 0;
+    in property <bool> disabled: false;
+
+    in property <string> font-family: TabsTheme.size(root.size).font-family;
+    in property <length> font-size: TabsTheme.size(root.size).font-size;
+    in property <length> control-height: TabsTheme.size(root.size).control-height;
+    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
+    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <length> tab-gap: root.variant == TabsVariant.underlined ? (root.actual-vertical ? 6px : 12px) : 2px;
+    in property <length> list-padding: root.variant == TabsVariant.underlined ? 0px : 4px;
+    in property <length> panel-padding: 20px;
+    in property <length> panel-min-height: root.size == ControlSize.sm ? 112px : root.size == ControlSize.lg ? 160px : 128px;
+    in property <length> border-radius: root.size == ControlSize.sm ? 20px : root.size == ControlSize.lg ? 28px : 24px;
+
+    in property <bool> force-focused: false;
+    in property <bool> force-pressed: false;
+
+    callback changed(int, string);
+
+    property <bool> actual-vertical: root.orientation == TabsOrientation.vertical;
+    property <length> actual-control-height: root.control-height;
+    property <length> actual-tab-gap: root.tab-gap;
+    property <length> actual-list-padding: root.list-padding;
+    property <length> actual-panel-min-height: root.panel-min-height;
+    property <length> list-extent:
+        root.actual-vertical ? (root.options.length > 0 ? root.options.length * root.actual-control-height + (root.options.length - 1) * root.actual-tab-gap + root.actual-list-padding * 2 : root.actual-control-height + root.actual-list-padding * 2) : root.actual-control-height + root.actual-list-padding * 2;
+    property <length> panel-gap: root.show-panel ? 12px : 0px;
+    property <int> active-index:
+        root.options.length > 0 ? max(0, min(root.selected-index, root.options.length - 1)) : 0;
+
+    preferred-width: root.actual-vertical ? 520px : 360px;
+    preferred-height: root.actual-vertical ? max(root.list-extent, root.show-panel ? root.actual-panel-min-height : root.list-extent) : root.list-extent + root.panel-gap + (root.show-panel ? root.actual-panel-min-height : 0px);
+
+    if !root.actual-vertical: VerticalLayout {
+        spacing: root.panel-gap;
+
+        tab-list-top := TabsList {
+            width: parent.width;
+            height: self.preferred-height;
+            options: root.options;
+            icons: root.icons;
+            disabled-items: root.disabled-items;
+            selected-index <=> root.selected-index;
+            size: root.size;
+            variant: root.variant;
+            tab-color: root.color;
+            disabled: root.disabled;
+            vertical: false;
+            full-width: root.full-width;
+            force-focused: root.force-focused;
+            force-pressed: root.force-pressed;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            control-height: root.control-height;
+            tab-padding-horizontal: root.tab-padding-horizontal;
+            icon-size: root.icon-size;
+            tab-gap: root.tab-gap;
+            list-padding: root.list-padding;
+            corner-radius: root.border-radius;
+            select-requested(index, label) => {
+                root.changed(index, label);
+            }
+        }
+
+        if root.show-panel: TabsPanel {
+            width: parent.width;
+            height: self.preferred-height;
+            panels: root.panels;
+            selected-index: root.active-index;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            panel-padding: root.panel-padding;
+            panel-min-height: root.panel-min-height;
+            corner-radius: root.border-radius;
+        }
+    }
+
+    if root.actual-vertical: HorizontalLayout {
+        spacing: root.panel-gap;
+
+        tab-list-start := TabsList {
+            width: min(240px, max(172px, parent.width / 3));
+            height: max(parent.height, root.list-extent);
+            options: root.options;
+            icons: root.icons;
+            disabled-items: root.disabled-items;
+            selected-index <=> root.selected-index;
+            size: root.size;
+            variant: root.variant;
+            tab-color: root.color;
+            disabled: root.disabled;
+            vertical: true;
+            full-width: true;
+            force-focused: root.force-focused;
+            force-pressed: root.force-pressed;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            control-height: root.control-height;
+            tab-padding-horizontal: root.tab-padding-horizontal;
+            icon-size: root.icon-size;
+            tab-gap: root.tab-gap;
+            list-padding: root.list-padding;
+            corner-radius: root.border-radius;
+            select-requested(index, label) => {
+                root.changed(index, label);
+            }
+        }
+
+        if root.show-panel: TabsPanel {
+            horizontal-stretch: 1;
+            panels: root.panels;
+            selected-index: root.active-index;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            panel-padding: root.panel-padding;
+            panel-min-height: root.panel-min-height;
+            corner-radius: root.border-radius;
+        }
+    }
+}

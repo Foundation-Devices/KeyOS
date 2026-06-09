@@ -4,7 +4,6 @@
 import { Router } from "./gen/router.slint";
 import {  Size, Palette, Images, UISize, CurrentTheme, Palettes, Utils, Importance} from "@ui/theme.slint";
 import { Button, BaseWindow, OverlayMenu, PopupMenuItem, IconButton, TextMd, TextSm, Modal } from "@ui/widgets.slint";
-import { SeedCallbacks } from "@ui/pages.slint";
 import { StepModel } from "@ui/widgets/step-list.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Navigate } from "./gen/navigate.slint";
@@ -131,7 +130,7 @@ export component AppWindow inherits BaseWindow {
 }
 
 export * from "gen/exports.slint";
-export { Utils, Images, TR, CurrentTheme, StepModel, SeedCallbacks }
+export { Utils, Images, TR, CurrentTheme, StepModel }
 
 import { OnboardingCallbacks, SeedGlobal, KeycardBackupGlobal, KeycardRestoreGlobal, EraseGlobal } from "./onboarding-callbacks.slint";
 export { OnboardingCallbacks, SeedGlobal, KeycardBackupGlobal, KeycardRestoreGlobal, EraseGlobal }

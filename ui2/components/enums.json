@@ -1,0 +1,8 @@
+{
+  "$comment": "Source of truth for component enum variants that appear in both Rust (src/) and Slint (ui/). The parity_with_source_of_truth test in src/button.rs reads this file and asserts the Rust enum + the Slint file match. Add or rename a variant here AND in both languages, run `cargo test -p components button_enum_parity`, and trust the test instead of a hand-written cross-language grep.",
+  "Button": {
+    "variants": ["primary", "secondary", "tertiary", "ghost", "danger"],
+    "sizes": ["sm", "md", "lg"],
+    "states": ["normal", "focused", "loading", "pressed", "disabled"]
+  }
+}

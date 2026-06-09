@@ -3,7 +3,9 @@
 
 use gui_server_api::{
     error::NavigationError,
-    msg::{FinishResponse, GetPendingNavRequest, LoginSuccess, NavigateTo, NavigationCancel, ShowModal},
+    msg::{
+        FinishResponse, GetPendingNavRequest, LoginSuccess, NavigateTo, NavigationCancel, RunApp, ShowModal,
+    },
 };
 use server::{
     ArchiveRequest, BlockingArchive, BlockingArchiveAsyncHandler, BlockingArchiveHandler, ScalarHandler,
@@ -67,6 +69,17 @@ impl BlockingArchiveHandler<GetPendingNavRequest> for Gui {
             log::warn!("GetPendingNavRequest got from invalid pid: {sender}");
             None
         }
+    }
+}
+
+impl BlockingArchiveHandler<RunApp> for Gui {
+    fn handle(
+        &mut self,
+        msg: RunApp,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> <RunApp as BlockingArchive>::Response {
+        self.handle_run_app_request(msg)
     }
 }
 

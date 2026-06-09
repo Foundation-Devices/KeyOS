@@ -7,9 +7,7 @@ use slint_keyos_platform::{
     StoredValue,
 };
 
-use crate::{
-    state::AppState, FileSystem, FwUpdateError, FwUpdateState, Navigate, OnboardingCallbacks, SeedGlobal,
-};
+use crate::{state::AppState, FileSystem, FwUpdateError, FwUpdateState, Navigate, OnboardingCallbacks};
 
 pub struct DebugAction {
     pub label: &'static str,
@@ -62,7 +60,6 @@ pub fn init(state: StoredValue<AppState>) {
             label: "Master Key Erased",
             action: Box::new(move || {
                 let ui = state.borrow().ui();
-                ui.global::<SeedGlobal>().set_is_master_key_recovery(true);
                 let nav = ui.global::<Navigate>();
                 nav.invoke_master_key_deleted_main(Default::default());
             }),

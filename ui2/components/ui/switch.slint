@@ -1,0 +1,131 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { SwitchTheme } from "switch_theme.slint";
+
+export component Switch {
+    in property <string> label: "";
+    in property <string> description: "";
+    in property <ControlSize> size: ControlSize.md;
+    in-out property <bool> checked: false;
+    in property <bool> disabled: false;
+    in property <string> font-family: SwitchTheme.size(root.size).font-family;
+    in property <length> font-size: SwitchTheme.size(root.size).font-size;
+    in property <length> track-width: SwitchTheme.size(root.size).track-width;
+    in property <length> track-height: SwitchTheme.size(root.size).track-height;
+    in property <length> knob-size: SwitchTheme.size(root.size).knob-size;
+    in property <length> row-height: SwitchTheme.size(root.size).row-height;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> description-font-size: Theme.font-size-helper;
+    in property <color> accent-color: root.disabled ? Theme.palette-muted : Theme.palette-primary;
+    in property <color> track-color: root.checked ? root.accent-color : (root.disabled ? Theme.palette-border : Theme.palette-secondary);
+    in property <color> knob-color: Theme.palette-background;
+    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
+    in property <color> description-color: root.disabled ? Theme.palette-muted : Theme.palette-muted;
+
+    callback changed(bool);
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-track-width: root.track-width;
+    property <length> actual-track-height: root.track-height;
+    property <length> themed-knob-size: max(0px, actual-track-height - 4px);
+    // Cap the knob at (track-height - 4px) so it always nests inside the track
+    // with 2px of padding on each side, even when the theme JSON sets knob-size
+    // == track-height (or larger). Without this clamp the knob bulges past the
+    // pill's top/bottom edges.
+    property <length> actual-knob-size:
+        min(root.knob-size, max(0px, actual-track-height - 4px));
+    property <length> actual-row-height: root.row-height;
+    property <length> content-gap: root.description != "" ? 2px : 0px;
+    property <length> label-row-height: max(root.actual-track-height, label-measure.preferred-height);
+    property <length> description-height:
+        root.description != "" ? description-measure.preferred-height : 0px;
+    property <length> content-block-height:
+        root.label-row-height + root.content-gap + root.description-height;
+    property <length> content-top: (root.height - root.content-block-height) / 2;
+    property <length> text-left: root.actual-track-width + 10px;
+    property <length> text-width: max(
+        0px,
+        root.width - root.text-left);
+
+    preferred-width: root.actual-track-width + 10px + max(label-measure.preferred-width, description-measure.preferred-width);
+    preferred-height: max(actual-row-height, content-block-height);
+    width: self.preferred-width;
+    height: self.preferred-height;
+
+    label-measure := Text {
+        x: -10000px;
+        y: -10000px;
+        text: root.label;
+        font-family: root.actual-font-family;
+        font-size: root.actual-font-size;
+        visible: false;
+    }
+
+    description-measure := Text {
+        x: -10000px;
+        y: -10000px;
+        text: root.description;
+        font-family: root.actual-font-family;
+        font-size: root.description-font-size;
+        visible: false;
+    }
+
+    track := Rectangle {
+        x: 0px;
+        y: root.content-top + (root.label-row-height - self.height) / 2;
+        width: root.actual-track-width;
+        height: root.actual-track-height;
+        border-radius: root.actual-track-height / Theme.capsule-radius-divisor;
+        background: root.track-color;
+
+        Rectangle {
+            x: root.checked ? parent.width - self.width - 2px : 2px;
+            y: (parent.height - self.height) / 2;
+            width: root.actual-knob-size;
+            height: root.actual-knob-size;
+            border-radius: root.actual-knob-size / 2;
+            background: root.knob-color;
+
+            animate x { duration: 120ms; }
+        }
+    }
+
+    if root.label != "": Text {
+        x: root.text-left;
+        y: root.content-top + (root.label-row-height - self.preferred-height) / 2;
+        width: root.text-width;
+        text: root.label;
+        color: root.label-color;
+        font-family: root.actual-font-family;
+        font-size: root.actual-font-size;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.description != "": Text {
+        x: root.text-left;
+        y: root.content-top + root.label-row-height + root.content-gap;
+        width: root.text-width;
+        text: root.description;
+        color: root.description-color;
+        font-family: root.actual-font-family;
+        font-size: root.description-font-size;
+        overflow: elide;
+    }
+
+    TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: !root.disabled;
+
+        clicked => {
+            root.checked = !root.checked;
+            root.changed(root.checked);
+        }
+    }
+}

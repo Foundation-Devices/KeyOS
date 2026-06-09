@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "components"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# `components` is a host-side library only (used by `theme-editor` and
+# `foundation-themes`, never by firmware). The SDK install ships `components`
+# under `lib/keyos/Cargo.toml`'s workspace where `slint` has
+# `default-features = false`; the fallback `cargo run` of
+# `foundation-theme-compiler` has no other consumer that enables `std`, so
+# i-slint-core fails its "at least one of std or unsafe-single-threaded"
+# compile_error guard. Enable `std` explicitly here.
+slint = { workspace = true, features = ["std", "compat-1-2"] }
+
+# Plugin-schema (de)serialization for `theme_gen`. A plain version (not
+# `workspace = true`): `components` builds under multiple workspaces (the ui2 dev
+# workspace, the SDK-staged `lib/keyos` workspace) and not all of them define
+# serde as a workspace dependency.
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

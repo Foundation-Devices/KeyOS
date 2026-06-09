@@ -16,7 +16,7 @@ where
 
 /// An encapsulated blocking [`LendMut`] message, which can be responded to
 /// later during execution. It can be stored, and will return the message when
-/// dropped, or the [`DeferredLendMut::respond`] function is called.
+/// dropped, or the [`DeferredLendMut::set_response`] function is called.
 #[derive(Debug)]
 pub struct DeferredLendMut<M: LendMut> {
     sender: MessageSender,

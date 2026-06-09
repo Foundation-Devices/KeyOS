@@ -1225,6 +1225,29 @@
       "never": "Never",
       "title": "Auto Lock"
     },
+    "apps": {
+      "appId": "App ID",
+      "description": "Description",
+      "developerMode": "Developer Mode",
+      "detailsTitle": "App Details",
+      "installedApps": "Installed Apps",
+      "mcpControl": "MCP Control",
+      "noInstalledApps": "No installed apps",
+      "noRequestedPermissions": "No requested permissions",
+      "publisher": "Publisher",
+      "removeApp": "Remove App",
+      "removeAppDialog": {
+        "content": "Are you sure you want to remove {0}?",
+        "header": "Remove App",
+        "remove": "Remove"
+      },
+      "requestedPermissions": "Requested Permissions",
+      "sectionSettings": "Settings",
+      "size": "Size",
+      "title": "Apps",
+      "usbLogging": "USB Logging",
+      "version": "Version"
+    },
     "backUpToKeycards": {
       "title": "Back Up to Keycards"
     },

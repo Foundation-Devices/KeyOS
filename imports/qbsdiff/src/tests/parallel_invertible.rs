@@ -46,7 +46,6 @@ fn pathological_samples_par_invert() {
 }
 
 #[test]
-#[ignore = "generates 66MB of samples under assets/random"]
 fn random_samples_par_invert() {
     let assets = path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
     let descs = default_random_samples();

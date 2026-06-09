@@ -117,6 +117,10 @@ pub fn create_process_post(
     let pid_env = format!("{}", startup.pid);
     let process_name_env = args.name.to_string();
     let process_key_env: String = format!("{}", init.app_id);
+    // Capture the binary path before `args` is shadowed below; the hosted quit
+    // watchdog uses it to spot the window-owning simulator processes.
+    #[cfg(unix)]
+    let command_path = args.command.clone();
     let (shell, args) = if cfg!(windows) {
         ("cmd", ["/C", &args.command])
     } else if cfg!(unix) {
@@ -133,11 +137,54 @@ pub fn create_process_post(
         .env("XOUS_PROCESS_NAME", process_name_env)
         .env("XOUS_PROCESS_KEY", process_key_env)
         .spawn()
-        .map(|handle| (startup.pid, ProcessHandle(handle)))
+        .map(|handle| {
+            #[cfg(unix)]
+            watch_window_process(&command_path, handle.id());
+            (startup.pid, ProcessHandle(handle))
+        })
         .map_err(|_| {
             // eprintln!("couldn't start command: {}", e);
             crate::Error::InternalError
         })
+}
+
+/// Hosted simulator quit watchdog. Spawned for the processes that own a desktop
+/// window — the gui-server device screen and the simulator control panel: if one
+/// exits for ANY reason (close button, Cmd-Q, or even a hard kill that runs no
+/// cleanup), tear the whole simulator down by SIGINT-ing our process group — the
+/// same teardown as terminal Ctrl-C — so both windows close together instead of
+/// leaving one orphaned. Non-window processes are ignored. A name mismatch is a
+/// harmless no-op (the in-window close handlers still cover the normal cases).
+#[cfg(unix)]
+fn watch_window_process(command_path: &str, os_pid: u32) {
+    let basename =
+        std::path::Path::new(command_path).file_name().and_then(|name| name.to_str()).unwrap_or(command_path);
+    // Exact basename match so e.g. "simulator-cli" doesn't trip it.
+    if !matches!(basename, "gui-server" | "simulator" | "foundation-simulator") {
+        return;
+    }
+    let pid = os_pid as i32;
+    let _ = std::thread::Builder::new().name(format!("sim quit watchdog (pid {pid})")).spawn(move || {
+        // Block until this window-owning child exits, reaping it. We must NOT
+        // poll `kill(pid, 0)`: the hosted kernel never reaps its children, so
+        // once a window process exits it lingers as a zombie and
+        // `kill(pid, 0)` keeps reporting it alive — the watchdog would never
+        // fire (that's why Cmd-Q on the control panel didn't close the device
+        // screen). `waitpid` returns on (and reaps) the real exit instead.
+        let mut status: libc::c_int = 0;
+        loop {
+            let result = unsafe { libc::waitpid(pid, &mut status as *mut libc::c_int, 0) };
+            // Retry only if interrupted; any other return means it's gone.
+            if result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            break;
+        }
+        // The window process is gone — tear down the whole simulator group,
+        // the same teardown as terminal Ctrl-C.
+        // SAFETY: kill(2) with pid 0 sends SIGINT to our entire process group.
+        unsafe { libc::kill(0, libc::SIGINT) };
+    });
 }
 
 pub fn wait_process(mut joiner: ProcessHandle) -> crate::SysCallResult {

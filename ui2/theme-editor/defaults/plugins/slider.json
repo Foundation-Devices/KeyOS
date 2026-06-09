@@ -1,0 +1,163 @@
+{
+  "component": "Slider",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "track-color",
+      "displayName": "Track Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary.light",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "fill-color",
+      "displayName": "Fill Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary.light",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "thumb-color",
+      "displayName": "Thumb Color",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.background",
+          "focused": "color.background",
+          "disabled": "color.surface"
+        }
+      }
+    },
+    {
+      "name": "thumb-border-color",
+      "displayName": "Thumb Border",
+      "type": "color",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary.light",
+          "disabled": "color.border"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "track-height",
+      "displayName": "Track Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 16.0,
+        "sm": 12.0,
+        "lg": 20.0
+      }
+    },
+    {
+      "name": "track-radius",
+      "displayName": "Track Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 24.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.full"
+      }
+    },
+    {
+      "name": "thumb-size",
+      "displayName": "Thumb Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 48.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "thumb-radius",
+      "displayName": "Thumb Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 24.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.full"
+      }
+    },
+    {
+      "name": "row-height",
+      "displayName": "Row Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 96.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "track-touch-expansion",
+      "displayName": "Track Touch Expansion",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 0.0
+      }
+    },
+    {
+      "name": "thumb-touch-expansion",
+      "displayName": "Thumb Touch Expansion",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 0.0
+      }
+    }
+  ]
+}

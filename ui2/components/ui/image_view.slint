@@ -1,0 +1,103 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme } from "theme.slint";
+
+export component MediaImage {
+    in property <image> source;
+    in property <string> alt: "";
+    in property <string> caption: "";
+    in property <bool> rounded: true;
+    in property <bool> show-border: true;
+    in property <ImageFit> fit: ImageFit.cover;
+    in property <length> frame-width: root.width > 0px ? root.width : default-frame-width();
+    in property <length> frame-height: root.actual-frame-width * root.source-aspect-ratio;
+    in property <length> frame-radius: default-frame-radius();
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <string> font-family: "Montserrat";
+    in property <color> frame-background: Theme.palette-secondary.with-alpha(Theme.is-dark ? 0.4 : 0.7);
+    in property <color> frame-border-color: root.show-border ? Theme.palette-border : transparent;
+    in property <length> frame-border-width: root.show-border ? 1px : 0px;
+    in property <color> alt-background: Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.64 : 0.56);
+    in property <length> alt-radius: 999px;
+    in property <color> alt-color: Theme.palette-background;
+    in property <length> alt-font-size: Theme.font-size-label;
+    in property <int> alt-font-weight: 600;
+    in property <color> caption-color: Theme.palette-muted;
+    in property <length> caption-font-size: Theme.font-size-helper;
+
+    pure function default-frame-width() -> length {
+        return 320px;
+    }
+
+    pure function default-frame-height() -> length {
+        return 192px;
+    }
+
+    pure function default-frame-radius() -> length {
+        return 20px;
+    }
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: 16px;
+    property <length> actual-frame-width: root.frame-width;
+    property <float> source-aspect-ratio:
+        root.source.width > 0 ? (1.0 * root.source.height) / root.source.width : 0.6;
+    property <length> actual-frame-height: root.frame-height;
+    property <length> resolved-frame-height: root.actual-frame-height;
+    property <length> actual-frame-radius:
+        root.rounded ? root.frame-radius : 0px;
+
+    preferred-width: default-frame-width();
+    preferred-height: root.resolved-frame-height + (root.caption != "" ? 28px : 0px);
+
+    VerticalLayout {
+        spacing: 8px;
+
+        frame := Rectangle {
+            width: root.actual-frame-width;
+            height: root.resolved-frame-height;
+            background: root.frame-background;
+            border-color: root.frame-border-color;
+            border-width: root.frame-border-width;
+            border-radius: root.actual-frame-radius;
+            clip: true;
+
+            if root.source.width > 0: Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.source;
+                image-fit: root.fit;
+            }
+
+            if root.alt != "": Rectangle {
+                x: 12px;
+                y: parent.height - self.height - 12px;
+                height: alt-text.preferred-height + 10px;
+                width: alt-text.preferred-width + 16px;
+                background: root.alt-background;
+                border-radius: root.alt-radius;
+
+                alt-text := Text {
+                    x: 8px;
+                    y: 5px;
+                    text: root.alt;
+                    color: root.alt-color;
+                    font-family: root.actual-font-family;
+                    font-size: root.alt-font-size;
+                    font-weight: root.alt-font-weight;
+                }
+            }
+        }
+
+        if root.caption != "": Text {
+            text: root.caption;
+            color: root.caption-color;
+            font-family: root.actual-font-family;
+            font-size: root.caption-font-size;
+            wrap: word-wrap;
+        }
+    }
+}

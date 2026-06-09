@@ -87,6 +87,10 @@ share/python-wheels/
 *.egg
 *.pyc
 MANIFEST
+!/sdk/crates/manifest/
+!/sdk/crates/manifest/Cargo.toml
+!/sdk/crates/manifest/src/
+!/sdk/crates/manifest/src/lib.rs
 
 .idea
 .DS_Store
@@ -116,3 +120,9 @@ utils/secrets-gen2/provisioning-test/generated-keys/
 
 # flash dump default file name
 flash_dump.bin
+
+# Personal AI Configs
+.claude
+# generated files
+DEPENDENCIES.png
+DEPENDENCIES.md

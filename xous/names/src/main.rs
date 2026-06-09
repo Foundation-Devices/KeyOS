@@ -24,10 +24,12 @@ struct NameServer {
     waiting_connections: Vec<MessageEnvelope>,
     name_table: HashMap<String, RegisteredName>,
     message_name_to_id: HashMap<(String, String), Vec<MessageId>>,
+    server_owners: HashMap<String, AppId>,
     register_permissions: HashMap<AppId, HashSet<String>>,
     connect_permissions: HashMap<AppId, HashMap<String, Vec<MessageId>>>,
 }
 
+#[derive(Clone)]
 struct RegisteredName {
     sid: xous::SID,
     // fixed manifest SIDs are preloaded and not lifecycle-monitored
@@ -35,11 +37,37 @@ struct RegisteredName {
     cid: Option<xous::CID>,
 }
 
+fn manifest_server_names(manifest: &Manifest) -> HashSet<String> {
+    manifest.servers.keys().chain(manifest.fixed_sids.keys()).cloned().collect()
+}
+
 impl NameServer {
     fn process_manifest_servers(&mut self, manifest: &Manifest) -> Result<(), xous::Error> {
         let app_id = AppId(manifest.app_id);
+        let server_names = manifest_server_names(manifest);
+
+        self.reject_server_name_collisions(app_id, &server_names, &manifest.app_name_en())?;
+
+        let previously_owned_names: HashSet<String> = self
+            .server_owners
+            .iter()
+            .filter_map(|(server_name, owner)| (*owner == app_id).then(|| server_name.clone()))
+            .collect();
+        let replace_message_names: HashSet<String> =
+            previously_owned_names.union(&server_names).cloned().collect();
+
+        self.message_name_to_id.retain(|(server_name, _), _| !replace_message_names.contains(server_name));
+
+        for server_name in previously_owned_names.difference(&server_names) {
+            self.server_owners.remove(server_name);
+        }
+        for server_name in &server_names {
+            self.server_owners.insert(server_name.clone(), app_id);
+        }
+
+        let mut app_register_permissions = HashSet::new();
         for (server_name, messages) in &manifest.servers {
-            self.register_permissions.entry(app_id).or_default().insert(server_name.clone());
+            app_register_permissions.insert(server_name.clone());
             for (message_name, message) in messages {
                 self.message_name_to_id.insert((server_name.clone(), message_name.clone()), vec![message.id]);
             }
@@ -51,12 +79,42 @@ impl NameServer {
                 log::error!("Invalid SID string: {sid_str}");
             }
         }
+        self.register_permissions.insert(app_id, app_register_permissions);
+        Ok(())
+    }
+
+    fn reject_server_name_collisions(
+        &self,
+        app_id: AppId,
+        server_names: &HashSet<String>,
+        app_name: &str,
+    ) -> Result<(), xous::Error> {
+        for server_name in server_names {
+            let owner = self.server_owners.get(server_name).copied();
+            if let Some(owner_app_id) = owner {
+                if owner_app_id != app_id {
+                    log::error!(
+                        "Rejected manifest for `{app_name}`: server `{server_name}` is already owned by app_id=0x{}",
+                        hex::encode(owner_app_id.0)
+                    );
+                    return Err(xous::Error::MemoryInUse);
+                }
+            }
+
+            if self.name_table.contains_key(server_name) && owner != Some(app_id) {
+                log::error!(
+                    "Rejected manifest for `{app_name}`: server `{server_name}` is already registered"
+                );
+                return Err(xous::Error::MemoryInUse);
+            }
+        }
+
         Ok(())
     }
 
     fn process_manifest_permissions(&mut self, manifest: &Manifest) -> Result<(), xous::Error> {
         let app_id = AppId(manifest.app_id);
-        let app_permissions = self.connect_permissions.entry(app_id).or_default();
+        let mut app_permissions: HashMap<String, Vec<MessageId>> = HashMap::new();
         for (server_name, messages) in manifest.permissions.iter() {
             let server_permissions = app_permissions.entry(server_name.clone()).or_default();
             for message_name in messages {
@@ -71,6 +129,31 @@ impl NameServer {
             }
             server_permissions.sort_unstable();
         }
+        // Insert only after the whole manifest validated, so a rejected
+        // manifest leaves the app's existing permissions untouched (atomic
+        // replace rather than a partial in-place mutation).
+        self.connect_permissions.insert(app_id, app_permissions);
+        Ok(())
+    }
+
+    fn process_manifest_update(&mut self, manifest: &Manifest) -> Result<(), xous::Error> {
+        let mut staged = NameServer {
+            waiting_connections: Vec::new(),
+            name_table: self.name_table.clone(),
+            message_name_to_id: self.message_name_to_id.clone(),
+            server_owners: self.server_owners.clone(),
+            register_permissions: self.register_permissions.clone(),
+            connect_permissions: self.connect_permissions.clone(),
+        };
+
+        staged.process_manifest_servers(manifest)?;
+        staged.process_manifest_permissions(manifest)?;
+
+        self.name_table = staged.name_table;
+        self.message_name_to_id = staged.message_name_to_id;
+        self.server_owners = staged.server_owners;
+        self.register_permissions = staged.register_permissions;
+        self.connect_permissions = staged.connect_permissions;
         Ok(())
     }
 
@@ -252,8 +335,7 @@ impl NameServer {
 
         log::trace!("Parsed manifest for `{}`", manifest.app_name_en());
 
-        self.process_manifest_servers(&manifest)?;
-        self.process_manifest_permissions(&manifest)?;
+        self.process_manifest_update(&manifest)?;
         Ok(())
     }
 
@@ -395,6 +477,136 @@ fn respond_simple_success(mut msg: MessageEnvelope) {
     mem.buf.as_slice_mut::<u32>()[0] = 0;
     mem.valid = None;
     mem.offset = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+    use app_manifest::{Locale, Manifest, Message, MessageType};
+
+    use super::*;
+
+    const APP_ID: [u8; app_manifest::APP_ID_BYTE_LEN] =
+        [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
+    const OTHER_APP_ID: [u8; app_manifest::APP_ID_BYTE_LEN] =
+        [0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00];
+
+    fn manifest_with_servers(servers: &[&str]) -> Manifest { manifest_with_app_id_servers(APP_ID, servers) }
+
+    fn manifest_with_app_id_servers(
+        app_id: [u8; app_manifest::APP_ID_BYTE_LEN],
+        servers: &[&str],
+    ) -> Manifest {
+        let mut app_name = BTreeMap::new();
+        app_name.insert(Locale("en".to_string()), "Test App".to_string());
+
+        let mut manifest = Manifest {
+            app_name,
+            app_id,
+            icon: None,
+            publisher: None,
+            description: None,
+            version: None,
+            servers: BTreeMap::new(),
+            fixed_sids: BTreeMap::new(),
+            permissions: BTreeMap::new(),
+            memory: Vec::new(),
+            syscall: Vec::new(),
+            qr_match_rules: Vec::new(),
+        };
+
+        for (index, server_name) in servers.iter().enumerate() {
+            let mut messages = BTreeMap::new();
+            messages.insert(
+                "Ping".to_string(),
+                Message { id: index + 1, r#type: MessageType::Scalar, description: None, cfg: None },
+            );
+            manifest.servers.insert((*server_name).to_string(), messages);
+        }
+
+        manifest
+    }
+
+    fn set(values: &[&str]) -> HashSet<String> { values.iter().map(|value| (*value).to_string()).collect() }
+
+    fn message_key(server_name: &str, message_name: &str) -> (String, String) {
+        (server_name.to_string(), message_name.to_string())
+    }
+
+    #[test]
+    fn process_manifest_servers_replaces_registration_grants_for_app_id() {
+        let mut names = NameServer::default();
+        let original_manifest = manifest_with_servers(&["kept/server", "removed/server"]);
+        let refreshed_manifest = manifest_with_servers(&["kept/server"]);
+        let app_id = AppId(original_manifest.app_id);
+
+        names.process_manifest_servers(&original_manifest).unwrap();
+        assert_eq!(
+            names.register_permissions.get(&app_id).unwrap(),
+            &set(&["kept/server", "removed/server"])
+        );
+        assert!(names.message_name_to_id.contains_key(&message_key("removed/server", "Ping")));
+
+        names.process_manifest_servers(&refreshed_manifest).unwrap();
+
+        assert_eq!(names.register_permissions.get(&app_id).unwrap(), &set(&["kept/server"]));
+        assert!(!names.message_name_to_id.contains_key(&message_key("removed/server", "Ping")));
+    }
+
+    #[test]
+    fn process_manifest_update_preserves_existing_state_when_permissions_are_invalid() {
+        let mut names = NameServer::default();
+        let mut original_manifest = manifest_with_servers(&["kept/server", "removed/server"]);
+        original_manifest.permissions.insert("kept/server".to_string(), BTreeSet::from(["Ping".to_string()]));
+        let mut invalid_refresh = manifest_with_servers(&["kept/server"]);
+        invalid_refresh
+            .permissions
+            .insert("kept/server".to_string(), BTreeSet::from(["Missing".to_string()]));
+        let app_id = AppId(original_manifest.app_id);
+
+        names.process_manifest_update(&original_manifest).unwrap();
+
+        assert_eq!(names.process_manifest_update(&invalid_refresh), Err(xous::Error::ServerNotFound));
+        assert_eq!(
+            names.register_permissions.get(&app_id).unwrap(),
+            &set(&["kept/server", "removed/server"])
+        );
+        assert_eq!(names.server_owners.get("removed/server"), Some(&app_id));
+        assert_eq!(names.message_name_to_id.get(&message_key("removed/server", "Ping")), Some(&vec![2]));
+        assert_eq!(names.connect_permissions.get(&app_id).unwrap().get("kept/server"), Some(&vec![1]));
+    }
+
+    #[test]
+    fn process_manifest_servers_rejects_server_name_owned_by_another_app() {
+        let mut names = NameServer::default();
+        let mut original_manifest = manifest_with_app_id_servers(APP_ID, &["os/settings"]);
+        let mut colliding_manifest = manifest_with_app_id_servers(OTHER_APP_ID, &["os/settings"]);
+
+        original_manifest.servers.get_mut("os/settings").unwrap().get_mut("Ping").unwrap().id = 74;
+        colliding_manifest.servers.get_mut("os/settings").unwrap().get_mut("Ping").unwrap().id = 999;
+
+        names.process_manifest_servers(&original_manifest).unwrap();
+
+        assert_eq!(names.process_manifest_servers(&colliding_manifest), Err(xous::Error::MemoryInUse));
+        assert_eq!(names.message_name_to_id.get(&message_key("os/settings", "Ping")), Some(&vec![74]));
+        assert_eq!(names.server_owners.get("os/settings"), Some(&AppId(APP_ID)));
+        assert!(!names.register_permissions.contains_key(&AppId(OTHER_APP_ID)));
+    }
+
+    #[test]
+    fn process_manifest_servers_rejects_fixed_sid_collision() {
+        let mut names = NameServer::default();
+        let mut fixed_manifest = manifest_with_app_id_servers(APP_ID, &[]);
+        let colliding_manifest = manifest_with_app_id_servers(OTHER_APP_ID, &["fixed/server"]);
+
+        fixed_manifest.fixed_sids.insert("fixed/server".to_string(), "fixed-server-000".to_string());
+
+        names.process_manifest_servers(&fixed_manifest).unwrap();
+
+        assert_eq!(names.process_manifest_servers(&colliding_manifest), Err(xous::Error::MemoryInUse));
+        assert_eq!(names.server_owners.get("fixed/server"), Some(&AppId(APP_ID)));
+    }
 }
 
 fn main() -> ! { NameServer::default().run() }

@@ -1,0 +1,82 @@
+{
+  "component": "MenuItem",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "item-height",
+      "displayName": "Item Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 64.0,
+        "sm": 56.0,
+        "lg": 72.0
+      }
+    },
+    {
+      "name": "padding-horizontal",
+      "displayName": "Padding Horizontal",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlPaddingInline.md",
+        "sm": "controlPaddingInline.sm",
+        "lg": "controlPaddingInline.lg"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
+      }
+    }
+  ]
+}

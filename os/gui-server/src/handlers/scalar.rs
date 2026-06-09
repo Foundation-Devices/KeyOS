@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gui_server_api::msg::{
-    AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher, UpdateKioskPolicy,
-};
+use gui_server_api::msg::{AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher};
 use log::{error, info, warn};
 use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
 use xous::PID;
@@ -11,7 +9,7 @@ use xous::PID;
 use super::{BlurDone, CloseAppTimeout, ForceShutdownTimeout, OnFreeMemoryBelowThreshold};
 use crate::{
     handlers::{DisconnectHandlerMessage, OnVsyncMessage, PowerButtonTimerCallback},
-    Gui, KioskPolicy,
+    Gui,
 };
 
 impl ScalarHandler<SwitchTo> for Gui {
@@ -64,37 +62,6 @@ impl BlockingScalarHandler<SwitchToLauncher> for Gui {
         }
 
         false
-    }
-}
-
-impl ScalarHandler<UpdateKioskPolicy> for Gui {
-    fn handle(&mut self, update: UpdateKioskPolicy, sender: PID, _context: &mut ServerContext<Self>) {
-        info!("Kiosk policy set to {update:?} by PID={sender}");
-        let Some(window) = self.windows.get_mut(&sender) else {
-            warn!("Ignoring kiosk policy update from unknown PID={sender}");
-            return;
-        };
-
-        if let Some(home_button_enabled) = update.home_button_enabled {
-            window.kiosk_policy.home_button_enabled = home_button_enabled;
-        }
-        if let Some(power_button_enabled) = update.power_button_enabled {
-            window.kiosk_policy.power_button_enabled = power_button_enabled;
-        }
-        if let Some(control_center_enabled) = update.control_center_enabled {
-            window.kiosk_policy.control_center_enabled = control_center_enabled;
-        }
-        if let Some(auto_lock_enabled) = update.auto_lock_enabled {
-            window.kiosk_policy.auto_lock_enabled = auto_lock_enabled;
-        }
-
-        if window.kiosk_policy == KioskPolicy::default() {
-            log::debug!("Kiosk policy reset by PID={sender}");
-        }
-
-        if update.auto_lock_enabled.is_some() {
-            self.reset_auto_lock();
-        }
     }
 }
 

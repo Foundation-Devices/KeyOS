@@ -1,0 +1,41 @@
+{
+  "component": "Icon",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "icon-color",
+      "displayName": "Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.foreground"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 96.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0,
+        "sm": 16.0,
+        "lg": 24.0
+      }
+    }
+  ]
+}

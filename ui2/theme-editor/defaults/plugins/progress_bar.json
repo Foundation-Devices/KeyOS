@@ -1,0 +1,181 @@
+{
+  "component": "ProgressBar",
+  "variants": [
+    "default",
+    "primary",
+    "secondary",
+    "success",
+    "warning",
+    "danger"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "track-color",
+      "displayName": "Track Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.secondary"
+        },
+        "primary": {
+          "normal": "color.secondary"
+        },
+        "secondary": {
+          "normal": "color.secondary"
+        },
+        "success": {
+          "normal": "color.secondary"
+        },
+        "warning": {
+          "normal": "color.secondary"
+        },
+        "danger": {
+          "normal": "color.secondary"
+        }
+      }
+    },
+    {
+      "name": "fill-color-override",
+      "displayName": "Fill Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.foreground"
+        },
+        "primary": {
+          "normal": "color.primary"
+        },
+        "secondary": {
+          "normal": "color.secondary.dark"
+        },
+        "success": {
+          "normal": "color.success"
+        },
+        "warning": {
+          "normal": "color.warning"
+        },
+        "danger": {
+          "normal": "color.danger"
+        }
+      }
+    },
+    {
+      "name": "label-color",
+      "displayName": "Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.foreground"
+        },
+        "primary": {
+          "normal": "color.foreground"
+        },
+        "secondary": {
+          "normal": "color.foreground"
+        },
+        "success": {
+          "normal": "color.foreground"
+        },
+        "warning": {
+          "normal": "color.foreground"
+        },
+        "danger": {
+          "normal": "color.foreground"
+        }
+      }
+    },
+    {
+      "name": "value-color",
+      "displayName": "Value Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.muted"
+        },
+        "primary": {
+          "normal": "color.muted"
+        },
+        "secondary": {
+          "normal": "color.muted"
+        },
+        "success": {
+          "normal": "color.muted"
+        },
+        "warning": {
+          "normal": "color.muted"
+        },
+        "danger": {
+          "normal": "color.muted"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 8.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 13.0,
+        "sm": 12.0,
+        "lg": 14.0
+      }
+    },
+    {
+      "name": "label-gap",
+      "displayName": "Label Gap",
+      "type": "float",
+      "min": 0.0,
+      "max": 24.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 8.0,
+        "sm": 6.0,
+        "lg": 10.0
+      }
+    },
+    {
+      "name": "bar-height",
+      "displayName": "Bar Height",
+      "type": "float",
+      "min": 2.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 10.0,
+        "sm": 8.0,
+        "lg": 12.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 999.0
+      }
+    }
+  ]
+}

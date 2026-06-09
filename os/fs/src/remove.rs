@@ -57,7 +57,7 @@ impl BlockingArchiveHandler<Remove> for Server {
         _context: &mut server::ServerContext<Self>,
     ) -> <Remove as server::BlockingArchive>::Response {
         self.check_write_access(sender, msg.location)?;
-        let path = crate::path_of(msg.location, &msg.path, sender);
+        let path = self.path_of(msg.location, &msg.path, sender)?;
         if self.mount(msg.location).ok_or(Error::NoMedia)?.path_in_use(&path)? {
             return Err(Error::FileInUse);
         }

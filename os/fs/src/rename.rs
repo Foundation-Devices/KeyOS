@@ -13,8 +13,8 @@ impl server::BlockingArchiveHandler<Rename> for Server {
         _context: &mut server::ServerContext<Self>,
     ) -> <Rename as server::BlockingArchive>::Response {
         self.check_write_access(sender, msg.location)?;
-        let from = crate::path_of(msg.location, &msg.from, sender);
-        let to = crate::path_of(msg.location, &msg.to, sender);
+        let from = self.path_of(msg.location, &msg.from, sender)?;
+        let to = self.path_of(msg.location, &msg.to, sender)?;
         let mount = self.mount(msg.location).ok_or(Error::NoMedia)?;
         if mount.path_in_use(&from)? || mount.path_in_use(&to)? {
             return Err(Error::FileInUse);

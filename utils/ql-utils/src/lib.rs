@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Utilities for quantum link pairing flow.
+//! Utilities for QuantumLink pairing flow.
 
 use std::time::Duration;
 

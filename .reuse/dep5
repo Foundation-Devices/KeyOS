@@ -11,6 +11,8 @@ Files:
   **/BT_application*.bin
   **/config.toml
   flake.lock
+  sdk/flake.lock
+  sdk/nix/sdk-user-flake.lock
   .cargo/audit.toml
   .mcp.json
   AGENTS.md
@@ -215,6 +217,37 @@ Copyright: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 License: GPL-3.0-or-later
 
 Files:
+  sdk/crates/cli/crates/foundation-i18n/locales/*.json
+  sdk/crates/cli/src/commands/*/locales/*.json
+  sdk/crates/cli/templates/*/files/i18n/*.json
+  sdk/crates/cli/example-apps/gui-app-bitcoin/i18n/*.json
+Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+License: MIT
+
+Files:
+  sdk/crates/foundation-themes/themes/*.json
+  sdk/crates/cli/templates/*/files/theme/*.json
+  sdk/crates/cli/templates/*/files/resources/theme.json
+  ui2/theme-editor/defaults/*.json
+  ui2/theme-editor/defaults/plugins/*.json
+Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+License: MIT OR Apache-2.0
+
+Files:
+  sdk/crates/cli/example-apps/gui-app-bitcoin/ui/bg.png
+  sdk/crates/cli/templates/*/files/resources/*.svg
+  ui2/resources/fonts/*.ttf
+  ui2/resources/icons/*.svg
+  ui2/resources/images/*.svg
+Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+License: MIT OR Apache-2.0
+
+Files:
+  apps/simulator/ui/components/*.png
+Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+License: GPL-3.0-or-later
+
+Files:
     imports/armv7/*
 Copyright: 2020 by the respective authors
 License: MIT
@@ -307,4 +340,9 @@ Files:
 Copyright:
     2026 Foundation Devices, Inc. <hello@foundation.xyz>
     2026 immz https://github.com/immz4
+License: MIT OR Apache-2.0
+
+Files:
+  ui2/components/enums.json
+Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 License: MIT OR Apache-2.0

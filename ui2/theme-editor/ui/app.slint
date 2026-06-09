@@ -1,0 +1,905 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Sidebar } from "sidebar.slint";
+import { Preview } from "preview.slint";
+import { ThemeInfo, ThemeComponentInfo, VariantInfo, StateInfo, SizeInfo, PropertyDef, PropertyValueData, ThemeTokenPanel, ComponentThemeWorkspace } from "theme_editor.slint";
+import { Dropdown } from "@components/dropdown.slint";
+import { IconButton, IconButtonSize, IconButtonShape } from "@components/icon_button.slint";
+import { Button } from "@components/button.slint";
+import { Input } from "@components/input.slint";
+import { Theme, ButtonVariant, ButtonState, ControlSize } from "@components/theme.slint";
+import { ButtonTheme, ButtonVariantProps, ButtonSizeProps } from "@components/button_theme.slint";
+
+// Re-export theme types for Rust access
+export { Theme, ButtonTheme, ButtonVariant, ButtonState, ControlSize, ButtonVariantProps, ButtonSizeProps, ThemeInfo, ThemeComponentInfo, VariantInfo, StateInfo, SizeInfo, PropertyDef, PropertyValueData }
+
+component ThemeListItem inherits Rectangle {
+    in property <string> title;
+    in property <bool> dark-mode;
+    in property <bool> selected: false;
+    in property <bool> builtin: false;
+    callback clicked();
+
+    height: 44px;
+    border-radius: 8px;
+    background: root.selected ? (dark-mode ? #2f3f44 : #e9f8f8) : item-touch.has-hover ? (dark-mode ? #2a2a2a : #f3f3f3) : transparent;
+    border-width: root.selected ? 1px : 0px;
+    border-color: root.selected ? #1a9a9a : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+
+        Text {
+            text: root.title;
+            color: root.selected ? (dark-mode ? #ffffff : #1a1a1a) : (dark-mode ? #d7d7d7 : #2a2a2a);
+            font-size: 13px;
+            font-weight: root.selected ? 600 : 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        if root.builtin: Rectangle {
+            width: builtin-text.preferred-width + 12px;
+            height: 20px;
+            border-radius: 10px;
+            background: dark-mode ? #303030 : #ececec;
+
+            builtin-text := Text {
+                x: (parent.width - self.preferred-width) / 2;
+                y: (parent.height - self.preferred-height) / 2;
+                text: "Built-in";
+                color: dark-mode ? #a8a8a8 : #666666;
+                font-size: 10px;
+                font-weight: 600;
+            }
+        }
+    }
+
+    item-touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Theme Editor";
+    background: dark-mode ? #1a1a1a : #f5f5f5;
+    default-font-family: theme-font-family;
+    max-width: 100000px;
+    max-height: 100000px;
+
+    // Theme state
+    in-out property <bool> dark-mode: false;
+    in-out property <string> theme-font-family: "Arial";
+
+    in-out property <bool> showing-themes-page: false;
+    in-out property <int> component-page-mode: 0; // 0=Theme, 1=Props
+    // Shared right-sidebar width so Theme and Props keep the same width when toggled.
+    in-out property <length> right-panel-width: 360px;
+    in-out property <int> theme-preview-state-index: 0;
+    in-out property <int> theme-preview-version: 0;
+
+    // Selection state
+    in-out property <int> selected-category: 0;
+    in-out property <int> selected-component: 0;
+
+    // Callbacks
+    callback toggle-theme();
+    callback select-component(int, int);
+
+    // Hex color conversion callbacks - connected from Rust
+    callback parse-hex-color(string) -> color;
+    callback format-hex-color(color) -> string;
+
+    // Value comparison callbacks - connected from Rust for reliable equality checks
+    callback check-float-equal(float, float) -> bool;
+    callback check-color-equal(color, color) -> bool;
+    // Debug callback for visibility tracking
+    callback debug-visibility(string, bool, bool, bool);
+
+    // Button variant management - connected from Rust
+    callback btn-variant-changed(int);  // Called when user selects a different variant
+    in-out property <int> btn-selected-variant: 0;
+    // Button size management - connected from Rust
+    callback btn-size-changed(int);  // Called when user selects a different size
+    in-out property <int> btn-selected-size: 1;  // Default to md
+    // Theme management - connected from Rust
+    callback theme-changed(int);  // Called when user selects a different theme
+    callback token-value-changed(string, color, bool);  // Called when a token value changes (token_name, new_color, is_dark_mode)
+    callback new-theme();  // Called when user clicks "New Theme"
+    callback delete-theme();  // Called when user clicks "Delete Theme"
+    callback import-json();  // Called when user clicks "Import JSON"
+    callback export-json();  // Called when user clicks "Export JSON"
+    callback rename-theme(string);  // Called when user edits theme name
+    callback theme-parent-changed(string);  // Called when user selects a base theme from the dropdown
+    callback pick-base-theme();  // Called when user clicks the base-theme file-picker (📁)
+    callback reset-theme();  // Called when user resets the current theme to its parent/base
+    callback theme-values-edited();  // Called when theme editor values are edited
+    callback theme-tokens-edited();  // Called when token values that affect runtime are edited
+    in-out property <int> selected-theme: 0;
+    in-out property <[ThemeInfo]> theme-list: [
+        { name: "Default Theme", is-builtin: true },
+        { name: "My Custom Theme", is-builtin: false },
+        { name: "Verdant Theme", is-builtin: false },
+        { name: "Sunset Serif", is-builtin: false },
+        { name: "Signal Mono", is-builtin: false },
+    ];
+    in-out property <[string]> theme-name-list: [
+        "Default Theme",
+        "My Custom Theme",
+        "Verdant Theme",
+        "Sunset Serif",
+        "Signal Mono"
+    ];
+    in-out property <[string]> parent-theme-name-list: ["None"];
+    in-out property <int> selected-parent-theme: 0;
+    property <string> current-theme-name:
+        theme-list.length > selected-theme ? theme-list[selected-theme].name : "";
+    property <bool> current-theme-is-builtin:
+        theme-list.length > selected-theme ? theme-list[selected-theme].is-builtin : true;
+    property <string> current-theme-parent-name:
+        parent-theme-name-list.length > selected-parent-theme ? parent-theme-name-list[selected-parent-theme] : "None";
+    in-out property <string> theme-name-draft: current-theme-name;
+    in property <[string]> component-page-mode-options: ["Theme", "Props"];
+
+    // ===== DYNAMIC PLUGIN DATA (populated by Rust from JSON plugins) =====
+    in-out property <[ThemeComponentInfo]> theme-component-list: [];
+    in-out property <[string]> theme-component-name-list: [];
+    in-out property <int> theme-selected-component-index: 0;
+    in-out property <string> theme-selected-component-key: "button";
+    in-out property <string> theme-selected-component-name: "Button";
+    in-out property <int> theme-selected-variant-index: 0;
+    in-out property <int> theme-selected-size-index: 0;
+    in-out property <[VariantInfo]> variant-list: [];
+    in-out property <[string]> variant-name-list: [];
+    in-out property <[StateInfo]> state-list: [];
+    in-out property <[string]> state-name-list: [];
+    in-out property <[SizeInfo]> size-list: [];
+    in-out property <[string]> size-name-list: [];
+    // (matrix-size-list and matrix-size-index-offset are unused now that the
+    // Default row is shown in the matrix again — kept around in case we want
+    // to filter it out per-component later.)
+    in-out property <[SizeInfo]> matrix-size-list: [];
+    in-out property <int> matrix-size-index-offset: 0;
+    // True when the currently selected component's plugin has an `extends:` —
+    // enables the reset (↺) button on its Default-base rows so the user can
+    // clear a local override and re-inherit live from the parent.
+    in-out property <bool> theme-component-has-parent: false;
+    in-out property <[PropertyDef]> variant-prop-defs: [];
+    in-out property <[PropertyDef]> size-prop-defs: [];
+    in-out property <[PropertyValueData]> current-variant-values: [];
+    in-out property <[PropertyValueData]> current-size-values: [];
+    in-out property <int> variant-values-version: 0;
+    in-out property <int> size-values-version: 0;
+    // Callbacks for property changes from dynamic UI
+    callback component-theme-selected(string);
+    callback variant-prop-changed(int /* state_index */, int /* prop_index */, PropertyValueData /* new_value */);
+    callback size-prop-changed(int /* size_index */, int /* prop_index */, PropertyValueData /* new_value */);
+    callback clear-size-override(int /* size_index */, int /* prop_index */);
+    pure callback preview-variant-prop(string, string, string, string, int) -> PropertyValueData;
+    pure callback preview-size-prop(string, string, string, int) -> PropertyValueData;
+    in-out property <[string]> icon-results: [];
+    pure callback icon-image(string) -> image;
+    callback filter-icons(string);
+
+    // ===== TOKEN PROPERTIES (managed by Rust, swapped on theme change) =====
+    // Light mode tokens
+    in-out property <color> light-token-primary: #1a9a9a;
+    in-out property <color> light-token-primary-pressed: #158080;
+    in-out property <color> light-token-secondary: #e8e4df;
+    in-out property <color> light-token-danger: #dc2626;
+    in-out property <color> light-token-surface: #ffffff;
+    in-out property <color> light-token-background: #ffffff;
+    in-out property <color> light-token-text: #1a1a1a;
+    in-out property <color> light-token-text-muted: #6b6b6b;
+    // Dark mode tokens
+    in-out property <color> dark-token-primary: #2abaaa;
+    in-out property <color> dark-token-primary-pressed: #1a9a9a;
+    in-out property <color> dark-token-secondary: #3a3a3a;
+    in-out property <color> dark-token-danger: #ef4444;
+    in-out property <color> dark-token-surface: #1e1e1e;
+    in-out property <color> dark-token-background: #121212;
+    in-out property <color> dark-token-text: #fafafa;
+    in-out property <color> dark-token-text-muted: #9a9a9a;
+    // Spacing tokens
+    in-out property <float> token-spacing-xs: 4.0;
+    in-out property <float> token-spacing-sm: 8.0;
+    in-out property <float> token-spacing-md: 12.0;
+    in-out property <float> token-spacing-lg: 16.0;
+    in-out property <float> token-spacing-xl: 24.0;
+    // Control scale tokens
+    in-out property <float> token-control-size-sm: 48.0;
+    in-out property <float> token-control-size-md: 56.0;
+    in-out property <float> token-control-size-lg: 64.0;
+    in-out property <float> token-icon-size-sm: 20.0;
+    in-out property <float> token-icon-size-md: 24.0;
+    in-out property <float> token-icon-size-lg: 28.0;
+    in-out property <float> token-control-radius-sm: 20.0;
+    in-out property <float> token-control-radius-md: 24.0;
+    in-out property <float> token-control-radius-lg: 28.0;
+    in-out property <float> token-control-padding-inline-sm: 14.0;
+    in-out property <float> token-control-padding-inline-md: 16.0;
+    in-out property <float> token-control-padding-inline-lg: 20.0;
+    // Font size tokens
+    in-out property <float> token-font-size-sm: 20.0;
+    in-out property <float> token-font-size-md: 22.0;
+    in-out property <float> token-font-size-lg: 24.0;
+    // Font family tokens
+    in-out property <string> token-font-primary: "Montserrat";
+    in-out property <string> token-font-secondary: "Montserrat";
+    in-out property <string> token-font-tertiary: "Montserrat";
+    in-out property <int> token-font-primary-index: 0;
+    in-out property <int> token-font-secondary-index: 0;
+    in-out property <int> token-font-tertiary-index: 0;
+    // Radius tokens
+    in-out property <float> token-radius-sm: 8.0;
+    in-out property <float> token-radius-md: 16.0;
+    in-out property <float> token-radius-lg: 24.0;
+    in-out property <float> token-radius-full: 9999.0;
+    in-out property <int> token-radius-default-index: 2; // sm, md, lg, full
+    property <float> token-radius-default:
+        token-radius-default-index == 0 ? token-radius-sm : token-radius-default-index == 1 ? token-radius-md : token-radius-default-index == 2 ? token-radius-lg : token-radius-full;
+
+    // ===== BUTTON THEME PROPERTIES (managed by Rust, bound to ThemeEditor) =====
+    // Normal State - Style
+    in-out property <float> btn-normal-border-radius: 16.0;
+    in-out property <float> btn-normal-border-width: 0.0;
+    in-out property <color> btn-normal-border-color: transparent;
+    in-out property <color> btn-normal-background: #1a9a9a;
+    in-out property <color> btn-normal-foreground: #ffffff;
+    in-out property <float> btn-normal-font-weight: 500.0;
+    in-out property <float> btn-normal-touch-expansion: 4.0;
+    in-out property <float> btn-normal-opacity: 1.0;
+    // Normal State - Size
+    in-out property <string> btn-normal-font-family: "Arial";
+    in-out property <float> btn-normal-font-size: 16.0;
+    in-out property <float> btn-normal-padding-h: 16.0;
+    in-out property <float> btn-normal-padding-v: 8.0;
+    in-out property <float> btn-normal-icon-size: 20.0;
+    in-out property <float> btn-normal-min-height: 44.0;
+    // Size token binding state for the currently selected size
+    in-out property <bool> btn-normal-font-family-token-mode: true;
+    in-out property <int> btn-normal-font-family-selected-token: 0;
+    in-out property <int> btn-normal-font-family-actual-index: 0;
+    in-out property <bool> btn-normal-font-size-token-mode: true;
+    in-out property <int> btn-normal-font-size-selected-token: 1;
+    in-out property <bool> btn-normal-padding-h-token-mode: true;
+    in-out property <int> btn-normal-padding-h-selected-token: 6;
+    in-out property <bool> btn-normal-padding-v-token-mode: true;
+    in-out property <int> btn-normal-padding-v-selected-token: 4;
+    in-out property <bool> btn-normal-icon-size-token-mode: false;
+    in-out property <int> btn-normal-icon-size-selected-token: 0;
+    in-out property <bool> btn-normal-min-height-token-mode: false;
+    in-out property <int> btn-normal-min-height-selected-token: 0;
+    in-out property <bool> btn-normal-border-radius-token-mode: true;
+    in-out property <int> btn-normal-border-radius-selected-token: 9;
+    // Normal State - Overrides
+    in-out property <bool> btn-normal-border-radius-overridden: false;
+    in-out property <bool> btn-normal-border-width-overridden: false;
+    in-out property <bool> btn-normal-border-color-overridden: false;
+    in-out property <bool> btn-normal-background-overridden: false;
+    in-out property <bool> btn-normal-foreground-overridden: false;
+    in-out property <bool> btn-normal-font-weight-overridden: false;
+    in-out property <bool> btn-normal-touch-expansion-overridden: false;
+    in-out property <bool> btn-normal-opacity-overridden: false;
+    in-out property <bool> btn-normal-font-family-overridden: false;
+    in-out property <bool> btn-normal-font-size-overridden: false;
+    in-out property <bool> btn-normal-padding-h-overridden: false;
+    in-out property <bool> btn-normal-padding-v-overridden: false;
+    in-out property <bool> btn-normal-icon-size-overridden: false;
+    in-out property <bool> btn-normal-min-height-overridden: false;
+
+    // Pressed State - Style
+    in-out property <float> btn-pressed-border-radius: 16.0;
+    in-out property <float> btn-pressed-border-width: 0.0;
+    in-out property <color> btn-pressed-border-color: transparent;
+    in-out property <color> btn-pressed-background: #158080;
+    in-out property <color> btn-pressed-foreground: #ffffff;
+    in-out property <float> btn-pressed-font-weight: 500.0;
+    in-out property <float> btn-pressed-touch-expansion: 4.0;
+    in-out property <float> btn-pressed-opacity: 1.0;
+    // Pressed State - Size
+    in-out property <float> btn-pressed-font-size: 16.0;
+    in-out property <float> btn-pressed-padding-h: 16.0;
+    in-out property <float> btn-pressed-padding-v: 8.0;
+    in-out property <float> btn-pressed-icon-size: 20.0;
+    in-out property <float> btn-pressed-min-height: 44.0;
+    // Pressed State - Overrides
+    in-out property <bool> btn-pressed-border-radius-overridden: false;
+    in-out property <bool> btn-pressed-border-width-overridden: false;
+    in-out property <bool> btn-pressed-border-color-overridden: false;
+    in-out property <bool> btn-pressed-background-overridden: false;
+    in-out property <bool> btn-pressed-foreground-overridden: false;
+    in-out property <bool> btn-pressed-font-weight-overridden: false;
+    in-out property <bool> btn-pressed-touch-expansion-overridden: false;
+    in-out property <bool> btn-pressed-opacity-overridden: false;
+    in-out property <bool> btn-pressed-font-size-overridden: false;
+    in-out property <bool> btn-pressed-padding-h-overridden: false;
+    in-out property <bool> btn-pressed-padding-v-overridden: false;
+    in-out property <bool> btn-pressed-icon-size-overridden: false;
+    in-out property <bool> btn-pressed-min-height-overridden: false;
+
+    // Disabled State - Style
+    in-out property <float> btn-disabled-border-radius: 16.0;
+    in-out property <float> btn-disabled-border-width: 0.0;
+    in-out property <color> btn-disabled-border-color: transparent;
+    in-out property <color> btn-disabled-background: #1a9a9a;
+    in-out property <color> btn-disabled-foreground: #ffffff;
+    in-out property <float> btn-disabled-font-weight: 500.0;
+    in-out property <float> btn-disabled-touch-expansion: 4.0;
+    in-out property <float> btn-disabled-opacity: 0.5;
+    // Disabled State - Size
+    in-out property <float> btn-disabled-font-size: 16.0;
+    in-out property <float> btn-disabled-padding-h: 16.0;
+    in-out property <float> btn-disabled-padding-v: 8.0;
+    in-out property <float> btn-disabled-icon-size: 20.0;
+    in-out property <float> btn-disabled-min-height: 44.0;
+    // Disabled State - Overrides
+    in-out property <bool> btn-disabled-border-radius-overridden: false;
+    in-out property <bool> btn-disabled-border-width-overridden: false;
+    in-out property <bool> btn-disabled-border-color-overridden: false;
+    in-out property <bool> btn-disabled-background-overridden: false;
+    in-out property <bool> btn-disabled-foreground-overridden: false;
+    in-out property <bool> btn-disabled-font-weight-overridden: false;
+    in-out property <bool> btn-disabled-touch-expansion-overridden: false;
+    in-out property <bool> btn-disabled-opacity-overridden: false;
+    in-out property <bool> btn-disabled-font-size-overridden: false;
+    in-out property <bool> btn-disabled-padding-h-overridden: false;
+    in-out property <bool> btn-disabled-padding-v-overridden: false;
+    in-out property <bool> btn-disabled-icon-size-overridden: false;
+    in-out property <bool> btn-disabled-min-height-overridden: false;
+
+    changed selected-theme => {
+        root.theme-name-draft = root.current-theme-name;
+        if (root.selected-theme >= 0 && root.selected-theme < root.theme-list.length) {
+            root.theme-changed(root.selected-theme);
+        }
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            // Selectors are 32px tall and vertically centered, giving equal
+            // (24px) padding above and below them within the header.
+            height: 80px;
+            background: dark-mode ? #2a2a2a : #ffffff;
+
+            header-content := Rectangle {
+                x: 16px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 32px;
+                height: 34px;
+                background: transparent;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: center;
+
+                    // Theme-management controls live in the toolbar on every page —
+                    // Tokens and component editing share the same header.
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        // Theme name follows the file name (set on Load / Save).
+                        Text {
+                            text: root.theme-name-draft == "" ? "Untitled" : root.theme-name-draft;
+                            color: dark-mode ? #ffffff : #1a1a1a;
+                            font-size: 14px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: "Base:";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 12px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 200px;
+                            height: base-dropdown.preferred-height;
+
+                            base-dropdown := Dropdown {
+                                width: parent.width;
+                                label: "";
+                                size: ControlSize.sm;
+                                options: root.parent-theme-name-list;
+                                selected-index <=> root.selected-parent-theme;
+                                placeholder: "Default Theme";
+                                max-visible-items: 8;
+                                control-height: 34px;
+                                font-size: 14px;
+
+                                changed(_index, label) => {
+                                    root.theme-parent-changed(label);
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 34px;
+                            height: 34px;
+
+                            IconButton {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                icon: @image-url("../../resources/icons/upload.svg");
+                                label: "Choose base theme file";
+                                size: IconButtonSize.sm;
+                                shape: IconButtonShape.square;
+                                control-size: 34px;
+                                icon-size: 18px;
+                                clicked => {
+                                    root.pick-base-theme();
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "New";
+                            variant: ButtonVariant.secondary;
+                            size: ControlSize.sm;
+                            font-size: 13px;
+                            min-button-height: 34px;
+                            clicked => {
+                                root.new-theme();
+                            }
+                        }
+
+                        Button {
+                            text: "Load";
+                            variant: ButtonVariant.secondary;
+                            size: ControlSize.sm;
+                            font-size: 13px;
+                            min-button-height: 34px;
+                            clicked => {
+                                root.import-json();
+                            }
+                        }
+
+                        Button {
+                            text: "Save";
+                            variant: ButtonVariant.primary;
+                            size: ControlSize.sm;
+                            font-size: 13px;
+                            min-button-height: 34px;
+                            clicked => {
+                                root.export-json();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+
+                    Rectangle {
+                        width: 52px;
+                        height: parent.height;
+                        background: transparent;
+
+                        IconButton {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            icon: dark-mode ? @image-url("../../resources/icons/sun.svg") : @image-url("../../resources/icons/moon.svg");
+                            label: dark-mode ? "Switch to light mode" : "Switch to dark mode";
+                            size: IconButtonSize.sm;
+                            shape: IconButtonShape.circle;
+                            control-size: 34px;
+                            icon-size: 18px;
+                            clicked => {
+                                root.toggle-theme();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1px separator at the bottom of the header, dividing it from the
+            // content below.
+            Rectangle {
+                x: 0px;
+                y: parent.height - self.height;
+                width: parent.width;
+                height: 1px;
+                background: dark-mode ? #404040 : #999999;
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: 80px;
+            width: parent.width;
+            height: parent.height - 80px;
+            background: transparent;
+            // Resizable left-nav width: drag the splitter between the nav and the
+            // content to resize it.
+            property <length> nav-width: 220px;
+            property <bool> nav-dragging: false;
+
+            Sidebar {
+                x: 0px;
+                y: 0px;
+                width: body.nav-width;
+                height: parent.height;
+                dark-mode: root.dark-mode;
+                showing-themes-page: root.showing-themes-page;
+                selected-category: root.selected-category;
+                selected-component: root.selected-component;
+                select-themes-page => {
+                    root.showing-themes-page = true;
+                }
+                select-component(cat, comp) => {
+                    root.showing-themes-page = false;
+                    root.select-component(cat, comp);
+                }
+            }
+
+            // Left-nav splitter (drag to resize the navigation panel).
+            Rectangle {
+                x: body.nav-width;
+                y: 0px;
+                width: 6px;
+                height: parent.height;
+                background: body.nav-dragging || nav-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
+
+                Rectangle {
+                    x: 2px;
+                    y: (parent.height - 40px) / 2;
+                    width: 2px;
+                    height: 40px;
+                    border-radius: 1px;
+                    background: body.nav-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
+                }
+
+                nav-splitter-touch := TouchArea {
+                    mouse-cursor: col-resize;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            body.nav-dragging = true;
+                        }
+                        if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                            body.nav-dragging = false;
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            body.nav-width = clamp(
+                                body.nav-width + (self.mouse-x - self.pressed-x),
+                                160px,
+                                400px);
+                        }
+                    }
+                }
+            }
+
+            content-area := Rectangle {
+                x: body.nav-width + 6px;
+                y: 0px;
+                width: parent.width - body.nav-width - 6px;
+                height: parent.height;
+                background: transparent;
+
+                if root.showing-themes-page: themes-row := HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    spacing: 0px;
+                    // Resizable token-panel width: drag the splitter to its left.
+                    property <length> tokens-panel-width: 360px;
+                    property <bool> tokens-dragging: false;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: dark-mode ? #1a1a1a : #f5f5f5;
+
+                        Flickable {
+                            viewport-height: themes-page-content.preferred-height;
+
+                            themes-page-content := VerticalLayout {
+                                width: parent.width;
+                                padding: 24px;
+                                spacing: 16px;
+                                alignment: start;
+
+                                Text {
+                                    text: "Tokens";
+                                    color: dark-mode ? #ffffff : #1a1a1a;
+                                    font-size: 20px;
+                                    font-weight: 600;
+                                }
+
+                                Text {
+                                    text: "Tokens are the theme's shared design values — colors, spacing, control sizes, radii and fonts. Components don't hard-code these values; they reference tokens, so editing a token in the panel on the right updates every component that uses it, across both light and dark mode.";
+                                    color: dark-mode ? #b0b0b0 : #555555;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: "Component defaults";
+                                    color: dark-mode ? #ffffff : #1a1a1a;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                }
+
+                                Text {
+                                    text: "Each component defines a Default base for its size properties, plus optional Sm / Md / Lg overrides. A size with no override falls back to the Default — so you can set a value once on Default and every size inherits it unless it overrides explicitly.";
+                                    color: dark-mode ? #b0b0b0 : #555555;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: "Component inheritance";
+                                    color: dark-mode ? #ffffff : #1a1a1a;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                }
+
+                                Text {
+                                    text: "Some components build on a parent component — for example Search inherits from Input. Inherited entries stay greyed-out and follow the parent's value until you override them, so a change to the parent cascades down to its children.";
+                                    color: dark-mode ? #b0b0b0 : #555555;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: "Base theme";
+                                    color: dark-mode ? #ffffff : #1a1a1a;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                }
+
+                                Text {
+                                    text: "The Base Theme selector in the toolbar is what the current theme inherits from and is compared against when you Save — a saved theme records only the values that differ from its base. Default Theme is the only built-in base.";
+                                    color: dark-mode ? #b0b0b0 : #555555;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    // Splitter between the theme list and the token panel.
+                    Rectangle {
+                        width: 6px;
+                        background: themes-row.tokens-dragging || tokens-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
+
+                        Rectangle {
+                            x: 2px;
+                            y: (parent.height - 40px) / 2;
+                            width: 2px;
+                            height: 40px;
+                            border-radius: 1px;
+                            background: themes-row.tokens-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
+                        }
+
+                        tokens-splitter-touch := TouchArea {
+                            mouse-cursor: col-resize;
+                            pointer-event(event) => {
+                                if (event.kind == PointerEventKind.down) {
+                                    themes-row.tokens-dragging = true;
+                                }
+                                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                    themes-row.tokens-dragging = false;
+                                }
+                            }
+                            moved => {
+                                if (self.pressed) {
+                                    themes-row.tokens-panel-width = clamp(
+                                        themes-row.tokens-panel-width - (self.mouse-x - self.pressed-x),
+                                        250px,
+                                        themes-row.width - 250px);
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: themes-row.tokens-panel-width;
+                        background: dark-mode ? #242424 : #ffffff;
+
+                        ThemeTokenPanel {
+                            width: parent.width;
+                            height: parent.height;
+                            dark-mode: root.dark-mode;
+                            parse-hex-color(hex) => {
+                                return root.parse-hex-color(hex);
+                            }
+                            format-hex-color(c) => {
+                                return root.format-hex-color(c);
+                            }
+                            token-value-changed(name, c, is_dark) => {
+                                root.token-value-changed(name, c, is_dark);
+                            }
+                            theme-tokens-edited => {
+                                root.theme-tokens-edited();
+                            }
+                            light-token-primary <=> root.light-token-primary;
+                            light-token-primary-pressed <=> root.light-token-primary-pressed;
+                            light-token-secondary <=> root.light-token-secondary;
+                            light-token-danger <=> root.light-token-danger;
+                            light-token-surface <=> root.light-token-surface;
+                            light-token-background <=> root.light-token-background;
+                            light-token-text <=> root.light-token-text;
+                            light-token-text-muted <=> root.light-token-text-muted;
+                            dark-token-primary <=> root.dark-token-primary;
+                            dark-token-primary-pressed <=> root.dark-token-primary-pressed;
+                            dark-token-secondary <=> root.dark-token-secondary;
+                            dark-token-danger <=> root.dark-token-danger;
+                            dark-token-surface <=> root.dark-token-surface;
+                            dark-token-background <=> root.dark-token-background;
+                            dark-token-text <=> root.dark-token-text;
+                            dark-token-text-muted <=> root.dark-token-text-muted;
+                            token-spacing-xs <=> root.token-spacing-xs;
+                            token-spacing-sm <=> root.token-spacing-sm;
+                            token-spacing-md <=> root.token-spacing-md;
+                            token-spacing-lg <=> root.token-spacing-lg;
+                            token-spacing-xl <=> root.token-spacing-xl;
+                            token-control-size-sm <=> root.token-control-size-sm;
+                            token-control-size-md <=> root.token-control-size-md;
+                            token-control-size-lg <=> root.token-control-size-lg;
+                            token-icon-size-sm <=> root.token-icon-size-sm;
+                            token-icon-size-md <=> root.token-icon-size-md;
+                            token-icon-size-lg <=> root.token-icon-size-lg;
+                            token-control-radius-sm <=> root.token-control-radius-sm;
+                            token-control-radius-md <=> root.token-control-radius-md;
+                            token-control-radius-lg <=> root.token-control-radius-lg;
+                            token-control-padding-inline-sm <=> root.token-control-padding-inline-sm;
+                            token-control-padding-inline-md <=> root.token-control-padding-inline-md;
+                            token-control-padding-inline-lg <=> root.token-control-padding-inline-lg;
+                            token-font-size-sm <=> root.token-font-size-sm;
+                            token-font-size-md <=> root.token-font-size-md;
+                            token-font-size-lg <=> root.token-font-size-lg;
+                            token-font-primary <=> root.token-font-primary;
+                            token-font-secondary <=> root.token-font-secondary;
+                            token-font-tertiary <=> root.token-font-tertiary;
+                            token-font-primary-index <=> root.token-font-primary-index;
+                            token-font-secondary-index <=> root.token-font-secondary-index;
+                            token-font-tertiary-index <=> root.token-font-tertiary-index;
+                            token-radius-sm <=> root.token-radius-sm;
+                            token-radius-md <=> root.token-radius-md;
+                            token-radius-lg <=> root.token-radius-lg;
+                            token-radius-full <=> root.token-radius-full;
+                            token-radius-default-index <=> root.token-radius-default-index;
+                        }
+                    }
+                }
+
+                if !root.showing-themes-page && root.component-page-mode == 0: ComponentThemeWorkspace {
+                    width: parent.width;
+                    height: parent.height;
+                    dark-mode: root.dark-mode;
+                    settings-panel-width <=> root.right-panel-width;
+                    component-page-mode <=> root.component-page-mode;
+                    component-page-mode-options: root.component-page-mode-options;
+                    preview-state-index <=> root.theme-preview-state-index;
+                    preview-version <=> root.theme-preview-version;
+                    btn-selected-variant <=> root.btn-selected-variant;
+                    btn-selected-size <=> root.btn-selected-size;
+                    selected-component-key <=> root.theme-selected-component-key;
+                    selected-component-name <=> root.theme-selected-component-name;
+                    component-selected-variant <=> root.theme-selected-variant-index;
+                    component-selected-size <=> root.theme-selected-size-index;
+                    variant-list <=> root.variant-list;
+                    variant-name-list <=> root.variant-name-list;
+                    state-list <=> root.state-list;
+                    state-name-list <=> root.state-name-list;
+                    size-list <=> root.size-list;
+                    matrix-size-list <=> root.matrix-size-list;
+                    matrix-size-index-offset <=> root.matrix-size-index-offset;
+                    component-has-parent <=> root.theme-component-has-parent;
+                    size-name-list <=> root.size-name-list;
+                    variant-prop-defs <=> root.variant-prop-defs;
+                    size-prop-defs <=> root.size-prop-defs;
+                    current-variant-values <=> root.current-variant-values;
+                    current-size-values <=> root.current-size-values;
+                    variant-values-version <=> root.variant-values-version;
+                    size-values-version <=> root.size-values-version;
+                    token-font-primary: root.token-font-primary;
+                    token-font-secondary: root.token-font-secondary;
+                    token-font-tertiary: root.token-font-tertiary;
+                    number-token-values: [
+                        root.token-font-size-sm,
+                        root.token-font-size-md,
+                        root.token-font-size-lg,
+                        root.token-spacing-xs,
+                        root.token-spacing-sm,
+                        root.token-spacing-md,
+                        root.token-spacing-lg,
+                        root.token-spacing-xl,
+                        root.token-radius-sm,
+                        root.token-radius-default,
+                        root.token-radius-lg,
+                        root.token-radius-full,
+                        root.token-control-size-sm,
+                        root.token-control-size-md,
+                        root.token-control-size-lg,
+                        root.token-icon-size-sm,
+                        root.token-icon-size-md,
+                        root.token-icon-size-lg,
+                        root.token-control-radius-sm,
+                        root.token-control-radius-md,
+                        root.token-control-radius-lg,
+                        root.token-control-padding-inline-sm,
+                        root.token-control-padding-inline-md,
+                        root.token-control-padding-inline-lg
+                    ];
+                    parse-hex-color(hex) => {
+                        return root.parse-hex-color(hex);
+                    }
+                    format-hex-color(c) => {
+                        return root.format-hex-color(c);
+                    }
+                    check-float-equal(v, d) => {
+                        return root.check-float-equal(v, d);
+                    }
+                    check-color-equal(v, d) => {
+                        return root.check-color-equal(v, d);
+                    }
+                    btn-variant-changed(index) => {
+                        root.btn-variant-changed(index);
+                    }
+                    btn-size-changed(index) => {
+                        root.btn-size-changed(index);
+                    }
+                    variant-prop-changed(state_index, prop_index, value) => {
+                        root.variant-prop-changed(state_index, prop_index, value);
+                    }
+                    size-prop-changed(size_index, prop_index, value) => {
+                        root.size-prop-changed(size_index, prop_index, value);
+                    }
+                    clear-size-override(size_index, prop_index) => {
+                        root.clear-size-override(size_index, prop_index);
+                    }
+                    component-page-mode-changed(index) => {
+                        root.component-page-mode = index;
+                    }
+                    preview-variant-prop(component_key, variant_key, state_key, prop_name, version) => {
+                        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, version);
+                    }
+                    preview-size-prop(component_key, size_key, prop_name, version) => {
+                        return root.preview-size-prop(component_key, size_key, prop_name, version);
+                    }
+                }
+
+                if !root.showing-themes-page && root.component-page-mode == 1: Preview {
+                    width: parent.width;
+                    height: parent.height;
+                    dark-mode: root.dark-mode;
+                    props-panel-width <=> root.right-panel-width;
+                    selected-category: root.selected-category;
+                    selected-component: root.selected-component;
+                    component-page-mode <=> root.component-page-mode;
+                    component-page-mode-options: root.component-page-mode-options;
+                    show-tabs: false;
+                    active-tab: 1;
+                    icon-results <=> root.icon-results;
+                    icon-image(name) => {
+                        return root.icon-image(name);
+                    }
+                    filter-icons(query) => {
+                        root.filter-icons(query);
+                    }
+                    component-page-mode-changed(index) => {
+                        root.component-page-mode = index;
+                    }
+                }
+            }
+        }
+    }
+}

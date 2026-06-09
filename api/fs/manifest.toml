@@ -30,6 +30,7 @@ AsyncCopyBlock = { id = 27, type = "blockingScalar" }
 MountAirlock = { id = 28, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
 FormatAirlock = { id = 29, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
 FormatUsb = { id = 30, type = "blockingScalar" }
+RegisterAppResources = { id = 31, type = "blockingArchive" }
 GetUsbReadAccess = { id = 100, type = "blockingScalar" }
 GetUsbWriteAccess = { id = 101, type = "blockingScalar" }
 GetUserReadAccess = { id = 102, type = "blockingScalar" }

@@ -1,0 +1,99 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { MenuTheme } from "menu_theme.slint";
+
+export component MenuRow inherits Rectangle {
+    in property <bool> interactive: false;
+    in property <bool> row-disabled: false;
+    in property <bool> divider: true;
+    in property <length> content-padding-horizontal: 0px;
+    in property <length> content-padding-vertical: 0px;
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> pressed-background: Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.10 : 0.05);
+    in property <color> separator-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.8 : 0.9);
+    in property <length> separator-width: 1px;
+
+    callback clicked();
+
+    property <color> actual-pressed-background: root.pressed-background;
+    property <color> actual-separator-color: root.separator-color;
+    property <length> separator-height: root.divider ? root.separator-width : 0px;
+
+    preferred-height: content.preferred-height + root.content-padding-vertical * 2 + root.separator-height;
+    height: self.preferred-height;
+    clip: true;
+    background: row-touch.pressed ? root.actual-pressed-background : transparent;
+
+    content := VerticalLayout {
+        x: root.content-padding-horizontal;
+        y: root.content-padding-vertical;
+        width: max(0px, parent.width - root.content-padding-horizontal * 2);
+        height: max(0px, parent.height - root.content-padding-vertical * 2 - root.separator-height);
+        spacing: 0px;
+
+        @children
+    }
+
+    if root.divider: Rectangle {
+        x: 0px;
+        y: parent.height - self.height;
+        width: parent.width;
+        height: root.separator-width;
+        background: root.actual-separator-color;
+    }
+
+    row-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.interactive && !root.row-disabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Menu inherits Rectangle {
+    in property <ControlSize> size: ControlSize.md;
+    in property <bool> full-width: false;
+    in property <length> menu-height: content-natural-height;
+    in property <color> menu-background: Theme.palette-surface;
+    in property <color> menu-border-color: Theme.palette-border;
+    in property <length> menu-border-width: 1px;
+    in property <length> menu-border-radius: MenuTheme.size(root.size).menu-border-radius;
+    in property <length> menu-padding: MenuTheme.size(root.size).menu-padding;
+
+    property <color> actual-background: root.menu-background;
+    property <color> actual-border-color: root.menu-border-color;
+    property <length> actual-border-width: root.menu-border-width;
+    property <length> actual-border-radius: root.menu-border-radius;
+    property <length> actual-padding: root.menu-padding;
+    // Natural content height, used both as the default menu-height and as a floor
+    // when it is overridden. Treating menu-height as a hard ceiling (the previous
+    // behaviour) silently clipped MenuItems whenever the theme's menu-height
+    // happened to be smaller than the rendered content — which is what was
+    // cutting off the last MenuItem in the theme-editor matrix.
+    property <length> content-natural-height: content.preferred-height + root.actual-padding * 2;
+    property <length> actual-menu-height: max(root.menu-height, content-natural-height);
+
+    preferred-width: 314px;
+    preferred-height: root.actual-menu-height;
+    horizontal-stretch: root.full-width ? 1 : 0;
+    height: root.actual-menu-height;
+    background: root.actual-background;
+    border-color: root.actual-border-color;
+    border-width: root.actual-border-width;
+    border-radius: root.actual-border-radius;
+    clip: true;
+
+    content := VerticalLayout {
+        width: parent.width;
+        padding: root.actual-padding;
+        spacing: 0px;
+
+        @children
+    }
+}

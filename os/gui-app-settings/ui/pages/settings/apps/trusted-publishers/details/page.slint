@@ -1,0 +1,195 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import {
+    BasePage,
+    Button,
+    ContentSection,
+    ConfirmationModal,
+    ErrorModal,
+    TextMd,
+    TextSm
+} from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+
+import { Navigate } from "../../../../../gen/navigate.slint";
+import { TR2, TrId } from "../../../../../gen/tr.slint";
+import { AppManagementGlobal } from "../../../../../globals/app-management-global.slint";
+import { SettingsNavHeader } from "../../../../../widgets/nav-header.slint";
+import { TrustedPublisherDetailsProps } from "props.slint";
+
+component DetailField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <length> field-width;
+
+    width: field-width;
+    spacing: Size.sz1;
+
+    label-text := TextSm {
+        width: parent.width;
+        text: root.label;
+        color: Palette.content-tertiary;
+        wrap: no-wrap;
+        overflow: elide;
+    }
+
+    value-text := TextMd {
+        width: parent.width;
+        text: root.value;
+        color: Palette.content-primary;
+        wrap: word-wrap;
+    }
+}
+
+export component TrustedPublisherDetailsPage inherits BasePage {
+    in property <TrustedPublisherDetailsProps> props;
+
+    private property <bool> remove-confirm-visible: false;
+    private property <string> remove-error-message: "";
+
+    property <bool> at-top: flickable.viewport-y == 0;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
+    private property <length> shadow-gutter: Size.sz2;
+
+    header := SettingsNavHeader {
+        y: 0px;
+        title: TR2.lookup(TrId.AppsTrustedPublisherDetails);
+    }
+
+    flickable := Flickable {
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+        viewport-width: self.width;
+
+        ContentSection {
+            x: Size.sz6 + root.shadow-gutter;
+            width: flickable.width - ((Size.sz6 + root.shadow-gutter) * 2);
+            padding-top: Size.sz6 + root.shadow-gutter;
+            padding-bottom: Size.sz6 + root.shadow-gutter;
+            spacing: Size.sz7;
+
+            details := VerticalLayout {
+                width: parent.width;
+                spacing: Size.sz5;
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherName);
+                    value: props.name;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherCompany);
+                    value: props.company;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherContactEmail);
+                    value: props.contact_email;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherSupportUrl);
+                    value: props.support_url;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherPublicKey);
+                    value: props.public_key;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherSerialNumber);
+                    value: props.serial_number;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherSubject);
+                    value: props.subject;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherBasicConstraints);
+                    value: props.basic_constraints;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherKeyUsage);
+                    value: props.key_usage;
+                }
+
+                DetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsTrustedPublisherExtendedKeyUsage);
+                    value: props.extended_key_usage;
+                }
+            }
+
+            Button {
+                label: TR2.lookup(TrId.AppsRemoveTrustedPublisher);
+                importance: Importance.negative;
+                clicked => {
+                    root.remove-confirm-visible = true;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: flickable.width;
+        height: 80px;
+        y: flickable.y;
+        visible: !at-top;
+        background: @linear-gradient(0deg, #00000000 0%, Palette.background-primary 100%);
+    }
+
+    Rectangle {
+        width: flickable.width;
+        height: 80px;
+        y: flickable.y + flickable.height - self.height;
+        visible: !at-bottom;
+        background: @linear-gradient(0deg, Palette.background-primary 0%, #00000000 100%);
+    }
+
+    if remove-confirm-visible: ConfirmationModal {
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsRemoveTrustedPublisher);
+        text: TR2.lookup(TrId.AppsRemoveTrustedPublisherConfirm);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+        confirm-button-label: TR2.lookup(TrId.AppsRemoveTrustedPublisherConfirmButton);
+        critical: true;
+
+        cancel-clicked => {
+            root.remove-confirm-visible = false;
+        }
+
+        confirm-clicked => {
+            root.remove-confirm-visible = false;
+            root.remove-error-message = AppManagementGlobal.remove-trusted-publisher(props.public_key);
+            if root.remove-error-message == "" {
+                Navigate.backward();
+            }
+        }
+    }
+
+    if remove-error-message != "": ErrorModal {
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsUnableToRemoveTrustedPublisher);
+        text: root.remove-error-message;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.remove-error-message = "";
+        }
+    }
+}

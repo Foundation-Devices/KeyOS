@@ -8,7 +8,7 @@ mod messages;
 mod publish;
 mod utils;
 
-use core::{BackupFile, BackupKey, BackupMetadata};
+use core::{BackupFile, BackupKey, BackupMetadata, CryptoLive};
 use std::time::{Duration, SystemTime};
 
 use backup::{messages::*, Status};
@@ -207,13 +207,7 @@ impl BackupServer {
     ) -> whence::Result<BackupFile, backup::Error> {
         let backup_key = self.get_backup_key().whence()?;
         let device_name = Some(self.settings.get_device_name().0);
-        core::create_backup::<_, core::v2::CryptoLive>(
-            &self.fs,
-            backup_path,
-            backup_location,
-            &backup_key,
-            device_name,
-        )
+        core::create_backup::<_, CryptoLive>(&self.fs, backup_path, backup_location, &backup_key, device_name)
     }
 
     fn restore_backup(&mut self, backup_path: &str, location: fs::Location) -> Result<(), backup::Error> {
@@ -258,12 +252,7 @@ impl BackupServer {
         backup_location: fs::Location,
     ) -> whence::Result<BackupMetadata, backup::Error> {
         let backup_key = self.get_backup_key().whence()?;
-        core::restore_backup::<_, core::v1::CryptoLive, core::v2::CryptoLive>(
-            &self.fs,
-            backup_path,
-            backup_location,
-            &backup_key,
-        )
+        core::restore_backup::<_, CryptoLive>(&self.fs, backup_path, backup_location, &backup_key)
     }
 
     fn set_onboarding_complete(&mut self, onboarding_complete: bool) {

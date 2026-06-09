@@ -5,7 +5,7 @@
 name = "quantum-link"
 version = "0.1.0"
 edition = "2021"
-description = "Quantum Link Server API crate"
+description = "QuantumLink Server API crate"
 publish = false
 
 [dependencies]

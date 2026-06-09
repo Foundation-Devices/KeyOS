@@ -3,6 +3,7 @@
 
 mod camera;
 mod capture;
+mod control_center;
 mod framebuffer;
 mod keyboard;
 mod navigation;
@@ -13,6 +14,7 @@ mod simulator;
 
 pub use camera::*;
 pub use capture::*;
+pub use control_center::*;
 pub use framebuffer::*;
 pub use keyboard::*;
 pub use navigation::*;

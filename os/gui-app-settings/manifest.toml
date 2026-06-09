@@ -6,7 +6,14 @@ en = "Settings"
 
 [permissions]
 template = ["gui-app", "fs-generic"]
-"os/app-manager" = ["LaunchAppBlocking"]
+"os/app-manager" = [
+    "LaunchAppBlocking",
+    "GetInstalledApps",
+    "GetAppIcon",
+    "GetThirdPartyCertificates",
+    "ImportThirdPartyCertificate",
+    "RemoveThirdPartyCertificate",
+]
 "os/backup" = ["StatusSubscribe", "CreateBackup", "CreateBackupFile"]
 "os/bt" = ["GetBleVersionInfo", "SubscribeBleState", "GetBtAddr"]
 "os/power-manager-ext" = [
@@ -32,7 +39,7 @@ template = ["gui-app", "fs-generic"]
     "GetUsbReadAccess",
     "GetUsbWriteAccess",
 ]
-"os/gui-server" = ["SwitchToLauncher", "UpdateKioskPolicy"]
+"os/gui-server" = ["SwitchToLauncher", "SetWakeLock"]
 "os/settings" = [
     "GetTimeZone",
     "SetTimeZone",
@@ -54,6 +61,9 @@ template = ["gui-app", "fs-generic"]
     "SetEnvoyTimeSync",
     "GetMagicBackupEnabled",
     "SetMagicBackupEnabled",
+    "GetDeveloperMode",
+    "SetDeveloperMode",
+    "GetLocale",
     "GetPrimeColor",
     "GetOnboardingStatus",
     "SubscribeMagicBackupEnabled",

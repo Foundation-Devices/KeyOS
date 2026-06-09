@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from chip.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct ChipSizeProps {
+    border-width: length,
+    border-radius: length,
+    padding-horizontal: length,
+    padding-vertical: length,
+    font-size: length,
+    font-family: string,
+    icon-size: length,
+}
+
+export global ChipTheme {
+    in-out property <ChipSizeProps> size-sm: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        padding-horizontal: 8px,
+        padding-vertical: 6px,
+        font-size: 12px,
+        font-family: Theme.font-primary,
+        icon-size: 12px,
+    };
+    in-out property <ChipSizeProps> size-md: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        padding-horizontal: 10px,
+        padding-vertical: 7px,
+        font-size: 14px,
+        font-family: Theme.font-primary,
+        icon-size: 14px,
+    };
+    in-out property <ChipSizeProps> size-lg: {
+        border-width: 1px,
+        border-radius: Theme.radius-default,
+        padding-horizontal: 12px,
+        padding-vertical: 8px,
+        font-size: 16px,
+        font-family: Theme.font-primary,
+        icon-size: 16px,
+    };
+
+    public pure function size(s: ControlSize) -> ChipSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

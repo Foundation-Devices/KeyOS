@@ -33,10 +33,17 @@ pub const MODAL_HEIGHT: usize = 600;
 pub const MODAL_DRAG_BAR_MARGIN_PX: usize = 32;
 
 // Simulator consts
-pub const DEVICE_WIDTH: u32 = 576;
-pub const DEVICE_HEIGHT: u32 = 1072;
-pub const LCD_X: u32 = 48;
-pub const LCD_Y: u32 = 119;
+// Native (1x) size of the device-frame artwork (assets/device.png). The window
+// is sized DEVICE_WIDTH/HEIGHT * scale_factor, and the composite buffers derive
+// from these, so updating them here covers every scale mode.
+pub const DEVICE_WIDTH: u32 = 592;
+pub const DEVICE_HEIGHT: u32 = 1114;
+// Origin of the inset screen within the device-frame artwork, in native (1x)
+// pixels. The whole device composite is scaled by the scale factor afterward,
+// so this offset stays aligned at every scale. Both the rendered screen and the
+// touch area (TOUCH_AREA_X/Y) derive from these, so they move together.
+pub const LCD_X: u32 = 56;
+pub const LCD_Y: u32 = 138;
 
 // Physical coordinates of the virtual touch button area (as they come from the hardware)
 pub const VIRT_BUTTON_PHYS_ORIGIN_X: usize = 0;

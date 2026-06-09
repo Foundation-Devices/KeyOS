@@ -1,0 +1,4 @@
+{
+  "component": "Search",
+  "extends": "Input"
+}

@@ -1,0 +1,264 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { TextAreaTheme } from "textarea_theme.slint";
+
+export enum TextAreaVariant {
+    flat,
+    bordered,
+    faded,
+}
+
+export component TextArea {
+    in-out property <string> value: "";
+    in property <string> placeholder: "";
+    in property <string> label: "";
+    in property <string> description: "";
+    in property <string> error: "";
+    in property <TextAreaVariant> variant: TextAreaVariant.flat;
+    in property <ControlSize> size: ControlSize.md;
+    in property <bool> clearable: false;
+    in property <bool> disabled: false;
+    in property <bool> read-only: false;
+    in property <bool> required: false;
+    in property <bool> disable-autosize: false;
+    in property <int> min-rows: 3;
+    in property <int> max-rows: 8;
+    in property <bool> force-focused: false;
+
+    in property <color> background: root.disabled ? default-background().with-alpha(Theme.is-dark ? 0.8 : 1.0) : default-background();
+    in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
+    in property <color> placeholder-color: Theme.palette-muted;
+    in property <color> border-color: default-border-color();
+    in property <color> border-color-focus: Theme.palette-primary;
+    in property <color> border-color-error: Theme.palette-danger;
+    in property <color> description-color: Theme.palette-muted;
+    in property <color> error-color: Theme.palette-danger;
+    in property <length> border-width: 1px;
+    in property <length> border-radius: TextAreaTheme.size(root.size).border-radius;
+    in property <length> padding-horizontal: TextAreaTheme.size(root.size).padding-horizontal;
+    in property <length> padding-vertical: TextAreaTheme.size(root.size).padding-vertical;
+    in property <length> field-min-height: TextAreaTheme.size(root.size).field-min-height;
+    in property <length> font-size: TextAreaTheme.size(root.size).font-size;
+    in property <string> font-family: TextAreaTheme.size(root.size).font-family;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <length> label-font-size: Theme.font-size-label;
+    in property <length> helper-font-size: Theme.font-size-helper;
+    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-muted;
+    in property <int> label-font-weight: 500;
+    in property <int> required-font-weight: 600;
+
+    out property <bool> has-focus: text-area.has-focus || root.force-focused;
+
+    callback changed(string);
+    callback focused();
+    callback blurred();
+
+    forward-focus: text-area;
+
+    pure function default-background() -> color {
+        if root.variant == TextAreaVariant.bordered {
+            return Theme.palette-surface;
+        }
+        return Theme.palette-secondary;
+    }
+
+    pure function default-border-color() -> color {
+        if root.variant == TextAreaVariant.flat {
+            return transparent;
+        }
+        return Theme.palette-border;
+    }
+
+    pure function default-row-height() -> length {
+        if root.size == ControlSize.sm {
+            return 24px;
+        }
+        if root.size == ControlSize.lg {
+            return 32px;
+        }
+        return 28px;
+    }
+
+    property <int> safe-min-rows: max(1, root.min-rows);
+    property <int> safe-max-rows: max(root.safe-min-rows, root.max-rows);
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-padding-horizontal: root.padding-horizontal;
+    property <length> actual-padding-vertical: root.padding-vertical;
+    property <length> actual-border-radius: root.border-radius;
+    property <length> actual-row-height: default-row-height();
+    property <length> actual-field-min-height: root.field-min-height;
+    property <color> actual-background: root.background;
+    property <color> actual-foreground: root.foreground;
+    property <color> actual-placeholder-color: root.placeholder-color;
+    property <color> actual-border-color-default: root.border-color;
+    property <color> actual-border-color-focus: root.border-color-focus;
+    property <color> actual-border-color-error: root.border-color-error;
+    property <color> actual-description-color: root.description-color;
+    property <color> actual-error-color: root.error-color;
+    property <length> actual-border-width: root.border-width;
+    property <length> icon-slot-size: max(16px, actual-font-size);
+    property <bool> show-clear-button:
+        root.clearable && root.value != "" && !root.disabled && !root.read-only;
+    property <length> clear-slot-width: root.show-clear-button ? icon-slot-size + 8px : 0px;
+    property <length> content-width:
+        max(0px, field-container.width - root.actual-padding-horizontal * 2 - clear-slot-width);
+    property <length> helper-line-height:
+        (root.error != "" || root.description != "") ? max(18px, helper-font-size + 2px) : 0px;
+    property <length> label-line-height: root.label != "" ? max(18px, label-font-size + 2px) : 0px;
+    property <length> content-min-height:
+        root.actual-row-height * root.safe-min-rows;
+    property <length> content-max-height:
+        root.actual-row-height * root.safe-max-rows;
+    property <length> content-natural-height:
+        max(content-min-height, measure-text.preferred-height);
+    property <length> resolved-content-height:
+        root.disable-autosize ? content-min-height : min(content-max-height, content-natural-height);
+    property <length> resolved-field-height:
+        max(
+            root.actual-field-min-height,
+            resolved-content-height + root.actual-padding-vertical * 2);
+    property <color> active-border-color:
+        root.error != "" ? actual-border-color-error : root.has-focus ? actual-border-color-focus : actual-border-color-default;
+
+    preferred-width: 320px;
+    preferred-height: label-line-height + resolved-field-height + helper-line-height + (root.label != "" ? 6px : 0px) + ((root.error != "" || root.description != "") ? 6px : 0px);
+
+    changed has-focus => {
+        if (has-focus) {
+            root.focused();
+        } else {
+            root.blurred();
+        }
+    }
+
+    VerticalLayout {
+        spacing: 6px;
+
+        if root.label != "": HorizontalLayout {
+            spacing: 4px;
+
+            Text {
+                text: root.label;
+                color: root.label-color;
+                font-family: root.actual-font-family;
+                font-size: root.label-font-size;
+                font-weight: root.label-font-weight;
+            }
+
+            if root.required: Text {
+                text: "*";
+                color: root.actual-error-color;
+                font-family: root.actual-font-family;
+                font-size: root.label-font-size;
+                font-weight: root.required-font-weight;
+            }
+        }
+
+        field-container := Rectangle {
+            width: 100%;
+            height: root.resolved-field-height;
+            preferred-height: root.resolved-field-height;
+            background: root.actual-background;
+            border-color: root.active-border-color;
+            border-width: root.has-focus ? max(2px, root.actual-border-width) : root.actual-border-width;
+            border-radius: root.actual-border-radius;
+            clip: true;
+            property <length> content-width: root.content-width;
+
+            placeholder-text := Text {
+                x: root.actual-padding-horizontal;
+                y: root.actual-padding-vertical;
+                width: field-container.content-width;
+                text: root.placeholder;
+                color: root.actual-placeholder-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                wrap: word-wrap;
+                visible: root.value == "" && text-area.preedit-text == "";
+            }
+
+            measure-text := Text {
+                x: -10000px;
+                y: -10000px;
+                width: field-container.content-width;
+                text: root.value == "" ? "W" : root.value + "\n";
+                color: transparent;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                wrap: word-wrap;
+            }
+
+            text-area := TextInput {
+                x: root.actual-padding-horizontal;
+                y: root.actual-padding-vertical;
+                width: field-container.content-width;
+                height: field-container.height - root.actual-padding-vertical * 2;
+                text <=> root.value;
+                color: root.actual-foreground;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                enabled: !root.disabled;
+                read-only: root.read-only;
+                single-line: false;
+                wrap: word-wrap;
+                vertical-alignment: top;
+
+                edited => {
+                    root.changed(self.text);
+                }
+            }
+
+            if root.show-clear-button: Rectangle {
+                x: parent.width - root.actual-padding-horizontal - root.icon-slot-size;
+                y: root.actual-padding-vertical;
+                width: root.icon-slot-size;
+                height: root.icon-slot-size;
+
+                bubble := Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: self.width / 2;
+                    background: transparent;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: max(14px, root.actual-font-size - 1px);
+                        height: max(14px, root.actual-font-size - 1px);
+                        source: @image-url("../../resources/icons/x.svg");
+                        colorize: root.actual-placeholder-color;
+                    }
+                }
+
+                clear-touch := TouchArea {
+                    clicked => {
+                        root.value = "";
+                        root.changed("");
+                        text-area.focus();
+                    }
+                }
+            }
+        }
+
+        if root.error != "": Text {
+            text: root.error;
+            color: root.actual-error-color;
+            font-family: root.actual-font-family;
+            font-size: root.helper-font-size;
+            wrap: word-wrap;
+        }
+
+        if root.error == "" && root.description != "": Text {
+            text: root.description;
+            color: root.actual-description-color;
+            font-family: root.actual-font-family;
+            font-size: root.helper-font-size;
+            wrap: word-wrap;
+        }
+    }
+}

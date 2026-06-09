@@ -7,7 +7,7 @@ use std::sync::Arc;
 use slint_keyos_platform::gui_server_api;
 use slint_keyos_platform::{
     app,
-    gui_server_api::{msg::UpdateKioskPolicy, navigation::alerts::InvokeAlert, InputMessage},
+    gui_server_api::{navigation::alerts::InvokeAlert, InputMessage},
     StoredValue,
 };
 
@@ -21,7 +21,6 @@ app!("Alerts", kind = Alerts);
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
-    cx.gui.update_kiosk_policy(UpdateKioskPolicy::default().set_home_button(false)).ok();
 
     let state = StoredValue::new(AppState { ui: ui.as_weak(), gui: cx.gui.clone() });
 

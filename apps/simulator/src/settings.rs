@@ -4,7 +4,8 @@
 use {
     crate::{gui_permissions::GuiPermissions, MainWindow, Settings, DEP_SETTINGS_FILE, SETTINGS_FILE},
     anyhow::Context,
-    slint::ComponentHandle,
+    slint::{winit_030::WinitWindowAccessor, ComponentHandle},
+    std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration},
 };
 
 pub fn setup(window: &MainWindow) {
@@ -20,7 +21,7 @@ pub fn setup(window: &MainWindow) {
         }
     };
 
-    set_scale(settings.scale);
+    set_scale_when_ready(settings.scale);
     window.set_settings(settings.into());
 
     window.on_scale_set({
@@ -29,6 +30,23 @@ pub fn setup(window: &MainWindow) {
             set_scale(scale_factor);
             change_setting(&window, |settings| settings.scale = scale_factor);
         }
+    });
+}
+
+fn set_scale_when_ready(scale_factor: f32) {
+    std::thread::spawn(move || {
+        let Some(simulator_api) =
+            gui_server_api::simulator::SimulatorApi::<GuiPermissions>::try_connect_with_timeout(
+                std::time::Duration::from_secs(30),
+            )
+        else {
+            log::warn!("Timed out waiting for gui-server to apply initial scale factor");
+            return;
+        };
+
+        simulator_api.set_scale_factor(scale_factor).unwrap_or_else(|error| {
+            log::warn!("Could not set initial scale factor: {:?}", error);
+        });
     });
 }
 
@@ -65,9 +83,117 @@ pub fn write_settings_file(settings: &Settings) -> anyhow::Result<()> {
 }
 
 pub fn set_scale(scale_factor: f32) {
-    gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default()
-        .set_scale_factor(scale_factor)
-        .unwrap_or_else(|error| {
-            log::warn!("Could not set scale factor: {:?}", error);
-        })
+    let Some(simulator_api) = gui_server_api::simulator::SimulatorApi::<GuiPermissions>::try_connect() else {
+        log::debug!("Skipping simulator scale update because gui-server is not ready yet");
+        return;
+    };
+
+    simulator_api.set_scale_factor(scale_factor).unwrap_or_else(|error| {
+        log::warn!("Could not set scale factor: {:?}", error);
+    })
+}
+
+// Stored under ~/.foundation so the position survives SDK bundle reinstalls (the
+// bundle working tree is wiped on reinstall). Kept separate from the scale
+// settings so an older settings.json without a position still deserializes, and
+// so restoring it before run() lets the winit backend apply it at window creation
+// (macOS ignores a position set after the window shows).
+fn window_position_file() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".foundation/simulator/control-panel-position.json"))
+}
+
+pub fn restore_window_position(window: &MainWindow) {
+    let Some(path) = window_position_file() else { return };
+    let Ok(contents) = std::fs::read_to_string(&path) else { return };
+    match serde_json::from_str::<slint::PhysicalPosition>(&contents) {
+        Ok(pos) => window.window().set_position(pos),
+        Err(error) => log::warn!("Failed to parse control panel window position: {}", error),
+    }
+}
+
+// Slint's `position()`/`set_position()` nominally operate on the outer frame,
+// but on macOS the winit backend lands a position set before `run()` on the
+// window's content rect. Persisting the outer position therefore reopened the
+// window one title-bar height too high. Read and store the inner (content)
+// position via the winit backend so save and restore use the same reference and
+// round-trip exactly.
+fn read_inner_position(window: &MainWindow) -> Option<slint::PhysicalPosition> {
+    let pos = window.window().with_winit_window(|w| w.inner_position().ok()).flatten()?;
+    Some(slint::PhysicalPosition::new(pos.x, pos.y))
+}
+
+pub fn save_window_position(window: &MainWindow) {
+    let Some(path) = window_position_file() else { return };
+    let Some(pos) = read_inner_position(window) else {
+        log::warn!("Skipping control panel position save; winit window unavailable");
+        return;
+    };
+    let contents = match serde_json::to_string(&pos) {
+        Ok(contents) => contents,
+        Err(error) => {
+            log::warn!("Failed to serialize control panel window position: {}", error);
+            return;
+        }
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create control panel position directory: {}", error);
+            return;
+        }
+    }
+    std::fs::write(&path, contents).unwrap_or_else(|error| {
+        log::warn!("Failed to save control panel window position: {}", error);
+    });
+}
+
+// Persist only genuine user moves. macOS does not round-trip a window position
+// exactly: the value read back after setting one differs slightly, so blindly
+// re-saving the freshly restored position would walk the window across the
+// screen a little more on every launch. Track the last position treated as
+// settled and save only when it actually changes.
+fn save_window_position_if_moved(window: &MainWindow, last: &Rc<Cell<Option<slint::PhysicalPosition>>>) {
+    let Some(pos) = read_inner_position(window) else { return };
+    match last.get() {
+        // First observation is the just-restored position; adopt it as the
+        // baseline without saving so the restore round-trip isn't persisted.
+        None => last.set(Some(pos)),
+        Some(prev) if prev != pos => {
+            save_window_position(window);
+            last.set(Some(pos));
+        }
+        Some(_) => {}
+    }
+}
+
+// Restores the saved position, then keeps it persisted across both the normal
+// close (on_close_requested) and Ctrl-C (SIGINT, which doesn't fire that
+// callback) by polling on a timer. Both paths save only real moves via a shared
+// baseline. The returned timer must be held alive as long as the window runs.
+pub fn setup_window_position(window: &MainWindow) -> slint::Timer {
+    restore_window_position(window);
+
+    let last_pos: Rc<Cell<Option<slint::PhysicalPosition>>> = Rc::new(Cell::new(None));
+
+    window.window().on_close_requested({
+        let window_weak = window.as_weak();
+        let last_pos = last_pos.clone();
+        move || {
+            if let Some(window) = window_weak.upgrade() {
+                save_window_position_if_moved(&window, &last_pos);
+            }
+            // Any close (close button or Cmd-Q) quits the whole simulator, not
+            // just this control-panel window.
+            crate::quit_simulator();
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+
+    let timer = slint::Timer::default();
+    let window_weak = window.as_weak();
+    timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), move || {
+        let Some(window) = window_weak.upgrade() else { return };
+        save_window_position_if_moved(&window, &last_pos);
+    });
+    timer
 }

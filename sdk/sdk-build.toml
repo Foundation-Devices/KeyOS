@@ -1,0 +1,184 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+[sdk]
+version = "1.0.0"
+api_version = "1"
+keyos_api_interfaces = ["app-manager", "backup", "camera", "crypto", "fs", "gui-server", "haptics", "keycard", "nfc", "quantum-link", "rgb-led", "security", "settings"]
+
+[submodules.slint]
+path = "external/slint"
+repo = "git@github.com:Foundation-Devices/slint.git"
+ref = "v1.12.1-foundation11"
+env_override = "SLINT_DIR"
+
+[targets]
+triples = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[targets.overrides."aarch64-unknown-linux-gnu"]
+cross = true
+linker = "aarch64-unknown-linux-gnu-gcc"
+
+[[compile]]
+name = "foundation"
+manifest = "crates/cli"
+artifact = "foundation"
+binary = "foundation"
+
+[[compile]]
+name = "foundation-asset-tool"
+manifest = "tools/foundation-asset-tool"
+artifact = "foundation-asset-tool"
+binary = "foundation-asset-tool"
+
+[[compile]]
+name = "simulator"
+manifest = "../apps/simulator"
+package = "simulator"
+artifact = "simulator"
+binary = "foundation-simulator"
+
+[[compile]]
+name = "cosign2"
+manifest = "../imports/cosign2/cosign2-bin"
+package = "cosign2-bin"
+artifact = "cosign2"
+binary = "cosign2"
+
+[[compile]]
+name = "slint-viewer"
+manifest = "external/slint/tools/viewer"
+package = "slint-viewer"
+artifact = "slint-viewer"
+binary = "foundation-slint-viewer"
+cargo_flags = ["--features", "custom-translations"]
+
+[[compile]]
+name = "keyos-log-viewer"
+manifest = "../utils/keyos-log-viewer"
+package = "keyos-log-viewer"
+artifact = "keyos-log-viewer"
+binary = "foundation-keyos-log-viewer"
+
+[[compile]]
+name = "passport-drive"
+manifest = "../utils/passport-drive"
+package = "passport-drive"
+artifact = "passport-drive"
+binary = "foundation-passport-drive"
+
+[[compile]]
+name = "foundation-theme-compiler"
+manifest = "crates/foundation-themes"
+package = "foundation-themes"
+artifact = "foundation-theme-compiler"
+binary = "foundation-theme-compiler"
+
+[[compile]]
+name = "foundation-theme-editor"
+manifest = "../ui2/theme-editor"
+package = "theme-editor"
+artifact = "theme-editor"
+binary = "foundation-theme-editor"
+
+[[copy]]
+source = "../i18n"
+dest = "lib/keyos/i18n"
+
+[[copy]]
+source = "../keyos"
+dest = "lib/keyos/keyos"
+
+[[copy]]
+source = "../server"
+dest = "lib/keyos/server"
+
+[[copy]]
+source = "../os/app-manifest"
+dest = "lib/keyos/os/app-manifest"
+
+[[copy]]
+source = "../slint-keyos-platform"
+dest = "lib/keyos/slint-keyos-platform"
+
+[[copy]]
+source = "../api/bt"
+dest = "lib/keyos/api/bt"
+
+[[copy]]
+source = "../ui2/components"
+dest = "lib/keyos/ui2/components"
+
+# Plugin component schemas (button.json, …) for the per-app theme-compile step:
+# `foundation build` generates `<key>_theme.slint` from these + the app theme.
+[[copy]]
+source = "../ui2/theme-editor/defaults/plugins"
+dest = "lib/keyos/ui2/theme-editor/defaults/plugins"
+
+[[copy]]
+source = "crates/foundation-themes"
+dest = "lib/keyos/sdk/crates/foundation-themes"
+filter = "cargo_package"
+
+[[copy]]
+source = "external/slint"
+dest = "lib/slint"
+bundle = "common"
+filter = "slint_sdk"
+
+[[copy]]
+source = "../utils/file-backed"
+dest = "lib/keyos/utils/file-backed"
+
+[[copy]]
+source = "../utils/fiat-symbols"
+dest = "lib/keyos/utils/fiat-symbols"
+
+[[copy]]
+source = "../utils/defer"
+dest = "lib/keyos/utils/defer"
+
+[[copy]]
+source = "../utils/whence"
+dest = "lib/keyos/utils/whence"
+
+[[copy]]
+source = "../worker"
+dest = "lib/keyos/worker"
+
+[[copy]]
+source = "../xous/api"
+dest = "lib/keyos/xous/api"
+
+[[copy]]
+source = "../xous/ipc"
+dest = "lib/keyos/xous/ipc"
+
+[[copy]]
+source = "../xous/xous-rs"
+dest = "lib/keyos/xous/xous-rs"
+
+[[copy]]
+source = "crates/cli/templates"
+dest = "lib/templates"
+
+[[copy]]
+source = ".agents"
+dest = ".agents"
+
+[[copy]]
+source = ".claude"
+dest = ".claude"
+
+[[copy]]
+source = "examples"
+dest = "examples"
+
+[docs]
+guide_source = "docs"
+api_crates = []
+api_crates_workspace = ["foundation-manifest"]
+
+[signing]
+key_env = "FOUNDATION_SIGN_KEY"
+algorithm = "openpgp-detached"

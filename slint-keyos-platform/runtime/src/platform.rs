@@ -104,8 +104,11 @@ struct AppHandlers<PG: GuiAppGuiPermissions> {
 pub trait GuiAppFsPermissions:
     server::CheckedPermissions
     + server::MessageAllowed<fs::messages::OpenDirMessage>
+    + server::MessageAllowed<fs::messages::OpenFileMessage>
+    + server::MessageAllowed<fs::messages::CloseFile>
     + server::MessageAllowed<fs::messages::CloseDir>
     + server::MessageAllowed<fs::messages::NextEntry>
+    + server::MessageAllowed<fs::messages::ReadFile>
     + server::MessageAllowed<fs::messages::MapFileMessage>
 {
 }
@@ -114,8 +117,11 @@ impl<P> GuiAppFsPermissions for P
 where
     P: server::CheckedPermissions,
     P: server::MessageAllowed<fs::messages::OpenDirMessage>,
+    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
+    P: server::MessageAllowed<fs::messages::CloseFile>,
     P: server::MessageAllowed<fs::messages::CloseDir>,
     P: server::MessageAllowed<fs::messages::NextEntry>,
+    P: server::MessageAllowed<fs::messages::ReadFile>,
     P: server::MessageAllowed<fs::messages::MapFileMessage>,
 {
 }

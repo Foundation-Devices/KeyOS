@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme } from "theme.slint";
+
+export struct SwitchOption {
+    icon: image,
+    text: string,
+}
+
+// LabeledSwitch — the segmented pill toggle from the Control Panel design
+// (Figma "Labeled Switch"). A dark, inset track holds N equal-width options;
+// the selected one is a teal-gradient chip with dark icon/label, the rest are
+// transparent with grey icon/label. Two options in the design, but model-driven
+// so it generalises.
+export component LabeledSwitch {
+    in property <[SwitchOption]> options;
+    in-out property <int> selected-index: 0;
+    callback changed(int);
+
+    horizontal-stretch: 1;
+
+    track := Rectangle {
+        // Capsule: cap radius at half-height so it can't over-round (Slint does
+        // not auto-cap border-radius the way CSS does).
+        border-radius: self.height / 2;
+        border-width: 1px;
+        border-color: #1c1c1c;
+        background: @linear-gradient(0deg, #383838 0%, #2e2e2e 68%);
+        clip: true;
+
+        HorizontalLayout {
+            padding: 4px;
+            spacing: 0px;
+
+            for opt[idx] in root.options: Rectangle {
+                property <bool> is-selected: idx == root.selected-index;
+                horizontal-stretch: 1;
+                // Capsule chip: cap at half-height (Figma's 50px would over-round).
+                border-radius: min(50px, self.height / 2);
+                border-width: self.is-selected ? 1px : 0px;
+                border-color: #262626;
+                background: self.is-selected ? @linear-gradient(0deg, Theme.blue-500 0%, Theme.teal-400 100%) : transparent;
+                clip: true;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    if opt.icon.width > 0: Image {
+                        width: 16px;
+                        height: 16px;
+                        source: opt.icon;
+                        colorize: idx == root.selected-index ? #ffffff : #959394;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: opt.text;
+                        color: idx == root.selected-index ? #ffffff : #959394;
+                        font-family: Theme.font-primary;
+                        font-size: 14px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                // Faked top inner-shadow on the selected chip for neumorphic
+                // depth. No border-radius: the chip's clip already constrains it
+                // to the pill shape, and an explicit (uncapped) radius here would
+                // distort the rounded ends.
+                if self.is-selected: Rectangle {
+                    background: @linear-gradient(180deg, #00000040 0%, #00000000 14%);
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.selected-index = idx;
+                        root.changed(idx);
+                    }
+                }
+            }
+        }
+
+        // Faked top inner-shadow on the track (clipped to the track shape).
+        Rectangle {
+            background: @linear-gradient(180deg, #00000040 0%, #00000000 18%);
+        }
+    }
+}

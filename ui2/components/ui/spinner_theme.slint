@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from spinner.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct SpinnerSizeProps {
+    spinner-size: length,
+    stroke-width: length,
+    animation-speed: length,
+}
+
+export global SpinnerTheme {
+    in-out property <SpinnerSizeProps> size-sm: {
+        spinner-size: 18px,
+        stroke-width: 2px,
+        animation-speed: 60px,
+    };
+    in-out property <SpinnerSizeProps> size-md: {
+        spinner-size: 26px,
+        stroke-width: 3px,
+        animation-speed: 60px,
+    };
+    in-out property <SpinnerSizeProps> size-lg: {
+        spinner-size: 36px,
+        stroke-width: 4px,
+        animation-speed: 60px,
+    };
+
+    public pure function size(s: ControlSize) -> SpinnerSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

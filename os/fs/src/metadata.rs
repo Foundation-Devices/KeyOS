@@ -15,7 +15,7 @@ impl server::BlockingArchiveHandler<GetMetadata> for Server {
         match metadata {
             GetMetadata::Path { path, location } => {
                 self.check_read_access(sender, location)?;
-                let path = crate::path_of(location, &path, sender);
+                let path = self.path_of(location, &path, sender)?;
                 let (base, name) = path.rsplit_once('/').unwrap_or(("", &path));
                 let root = self.mount(location).ok_or(Error::NoMedia)?.root_dir();
                 let dir = if base.is_empty() { root } else { root.open_dir(base)? };

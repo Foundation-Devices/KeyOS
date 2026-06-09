@@ -33,6 +33,7 @@ create_modules! {
     BluetoothEnabled,
     CameraEnabled,
     UsbEnabled,
+    DeveloperMode,
 }
 
 global_scalar! {
@@ -159,7 +160,7 @@ impl AsScalar<2> for AutoLock {
 }
 
 global_scalar! {
-    /// Whether to set time from envoy via quantum link
+    /// Whether to set time from envoy via QuantumLink
     system,
     pub struct EnvoyTimeSync(pub bool);
 }
@@ -289,6 +290,11 @@ global_scalar! {
     pub struct UsbEnabled(pub bool);
 }
 
+global_scalar! {
+    system,
+    pub struct DeveloperMode(pub bool);
+}
+
 impl FromScalar<1> for MagicBackupEnabled {
     fn from_scalar(value: [u32; 1]) -> Self { Self(bool::from_scalar(value)) }
 }
@@ -326,6 +332,14 @@ impl FromScalar<1> for UsbEnabled {
 }
 
 impl AsScalar<1> for UsbEnabled {
+    fn as_scalar(&self) -> [u32; 1] { self.0.as_scalar() }
+}
+
+impl FromScalar<1> for DeveloperMode {
+    fn from_scalar(value: [u32; 1]) -> Self { Self(bool::from_scalar(value)) }
+}
+
+impl AsScalar<1> for DeveloperMode {
     fn as_scalar(&self) -> [u32; 1] { self.0.as_scalar() }
 }
 

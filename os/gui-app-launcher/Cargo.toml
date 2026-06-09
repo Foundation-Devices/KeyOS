@@ -28,7 +28,6 @@ serde_json = { workspace = true }
 server = { workspace = true }
 slint-keyos-platform = { workspace = true }
 thiserror = { workspace = true }
-update = { workspace = true }
 xous = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]

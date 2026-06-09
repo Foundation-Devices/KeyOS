@@ -1,0 +1,115 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { SpinnerTheme } from "spinner_theme.slint";
+
+export enum SpinnerSize {
+    sm,
+    md,
+    lg,
+}
+
+export enum SpinnerTone {
+    primary,
+    neutral,
+    success,
+    warning,
+    danger,
+}
+
+export component Spinner {
+    in property <SpinnerSize> size: SpinnerSize.md;
+    in property <SpinnerTone> tone: SpinnerTone.primary;
+    in property <color> track-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.65 : 0.9);
+    in property <color> accent-color-override: accent-color();
+    in property <length> spinner-size: SpinnerTheme.size(root.ctrl-size()).spinner-size;
+    in property <length> stroke-width: SpinnerTheme.size(root.ctrl-size()).stroke-width;
+    in property <float> animation-speed: 60.0;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <float> track-opacity: 0.22;
+    in property <float> accent-opacity: 1.0;
+
+    pure function ctrl-size() -> ControlSize {
+        if root.size == SpinnerSize.sm {
+            return ControlSize.sm;
+        }
+        if root.size == SpinnerSize.lg {
+            return ControlSize.lg;
+        }
+        return ControlSize.md;
+    }
+
+    pure function accent-color() -> color {
+        if root.tone == SpinnerTone.neutral {
+            return Theme.palette-foreground;
+        }
+        if root.tone == SpinnerTone.success {
+            return Theme.is-dark ? #4ade80 : #15803d;
+        }
+        if root.tone == SpinnerTone.warning {
+            return Theme.is-dark ? #fbbf24 : #b45309;
+        }
+        if root.tone == SpinnerTone.danger {
+            return Theme.palette-danger;
+        }
+        return Theme.palette-primary;
+    }
+
+    property <length> resolved-size: root.spinner-size;
+    property <length> resolved-stroke: root.stroke-width;
+    property <color> resolved-accent-color: root.accent-color-override;
+    property <float> resolved-animation-speed: root.animation-speed <= 1.0 ? 1.0 : root.animation-speed;
+    property <duration> resolved-duration: 60000ms / root.resolved-animation-speed;
+
+    // Rotation-free spin: the device-screen software renderer can't rotate
+    // elements (only whole-screen 90° steps), so a Timer advances `tick` one
+    // step at a time and we animate the *opacity* of a fixed ring of dots —
+    // the same approach as the legacy TimerLoader. Works on every renderer.
+    property <int> dot-count: 8;
+    property <int> tick: 0;
+
+    // Draw inside a square derived from the smaller side so a non-square layout
+    // slot (e.g. a stretched HorizontalLayout cell) can't distort the ring.
+    property <length> box: min(root.width, root.height);
+    property <length> dot-size: max(2px, root.resolved-stroke * 2);
+    property <length> ring-radius: (root.box - root.dot-size) / 2;
+
+    // Precomputed unit-circle offsets (cos, sin) at 45° steps, clockwise from
+    // the top — avoids runtime trig and keeps it renderer-agnostic.
+    property <[{ dx: float, dy: float}]> offsets: [
+        { dx: 0.0, dy: -1.0 },
+        { dx: 0.7071, dy: -0.7071 },
+        { dx: 1.0, dy: 0.0 },
+        { dx: 0.7071, dy: 0.7071 },
+        { dx: 0.0, dy: 1.0 },
+        { dx: -0.7071, dy: 0.7071 },
+        { dx: -1.0, dy: 0.0 },
+        { dx: -0.7071, dy: -0.7071 },
+    ];
+
+    preferred-width: root.resolved-size;
+    preferred-height: root.resolved-size;
+
+    timer := Timer {
+        interval: root.resolved-duration / root.dot-count;
+        running: true;
+        triggered() => {
+            root.tick = mod(root.tick + 1, root.dot-count);
+        }
+    }
+
+    for offset[idx] in root.offsets: Rectangle {
+        width: root.dot-size;
+        height: root.dot-size;
+        border-radius: root.dot-size / 2;
+        x: root.width / 2 + root.ring-radius * offset.dx - root.dot-size / 2;
+        y: root.height / 2 + root.ring-radius * offset.dy - root.dot-size / 2;
+        background: root.resolved-accent-color;
+        // Brightest at the rotating head (distance 0), fading to the dim track
+        // around the back of the ring.
+        opacity: root.track-opacity + (root.accent-opacity - root.track-opacity) * (1.0 - mod(root.tick - idx + root.dot-count, root.dot-count) / ((root.dot-count - 1) * 1.0));
+    }
+}

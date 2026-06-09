@@ -22,7 +22,8 @@
 //!   0x05 CLOSE_APP   – payload: pid_lo pid_hi (2 bytes)
 //!   0x06 KERNEL_CMD  – payload: 1 byte (command char h/i/m/p/t/s/c/a/o/k)
 //!   0x07 INPUT_TEXT  – payload: UTF-8 text
-//!   0x08 GET_VERSION – no payload.  Response: KeyOS version UTF-8 string
+//!   0x08 GET_VERSION – no payload.  Response: UTF-8 KeyOS version bytes.
+//!   0x09 LAUNCH_APP  – payload: 16-byte AppId.  Response: pid_lo pid_hi
 //!
 //! **This crate must NEVER be included in production firmware.**
 

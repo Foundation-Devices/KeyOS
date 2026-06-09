@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from textarea.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct TextAreaSizeProps {
+    border-width: length,
+    border-radius: length,
+    padding-horizontal: length,
+    padding-vertical: length,
+    field-min-height: length,
+    font-size: length,
+    font-family: string,
+}
+
+export global TextAreaTheme {
+    in-out property <TextAreaSizeProps> size-sm: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-sm,
+        padding-horizontal: Theme.control-padding-inline-sm,
+        padding-vertical: 10px,
+        field-min-height: 96px,
+        font-size: Theme.font-size-sm,
+        font-family: Theme.font-primary,
+    };
+    in-out property <TextAreaSizeProps> size-md: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-md,
+        padding-horizontal: Theme.control-padding-inline-md,
+        padding-vertical: 12px,
+        field-min-height: 128px,
+        font-size: Theme.font-size-md,
+        font-family: Theme.font-primary,
+    };
+    in-out property <TextAreaSizeProps> size-lg: {
+        border-width: 1px,
+        border-radius: Theme.control-radius-lg,
+        padding-horizontal: Theme.control-padding-inline-lg,
+        padding-vertical: 14px,
+        field-min-height: 160px,
+        font-size: Theme.font-size-lg,
+        font-family: Theme.font-primary,
+    };
+
+    public pure function size(s: ControlSize) -> TextAreaSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

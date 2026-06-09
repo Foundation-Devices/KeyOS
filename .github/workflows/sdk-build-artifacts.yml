@@ -1,0 +1,158 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+name: SDK Build Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdk-build-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: Build staging (macOS)
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Enable Nix binary cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build macOS SDK staging directories
+        run: |
+          nix develop .#maintainer --command cargo xtask build \
+            --target aarch64-apple-darwin \
+            --target x86_64-apple-darwin \
+            --release
+
+      # upload-artifact does not preserve file modes, so archive the staging
+      # tree (which contains executables) first and unpack it in the package
+      # job to keep bin/foundation et al. executable.
+      - name: Archive macOS staging tree
+        run: tar -C dist -cf foundation-sdk-stage-macos.tar .
+
+      - name: Upload macOS staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-sdk-stage-macos
+          path: foundation-sdk-stage-macos.tar
+          retention-days: 30
+          if-no-files-found: error
+
+  build-linux:
+    name: Build staging (Linux)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Enable Nix binary cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build Linux SDK staging directories
+        run: |
+          nix develop .#maintainer --command cargo xtask build \
+            --target x86_64-unknown-linux-gnu \
+            --target aarch64-unknown-linux-gnu \
+            --release
+
+      - name: Archive Linux staging tree
+        run: tar -C dist -cf foundation-sdk-stage-linux.tar .
+
+      - name: Upload Linux staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-sdk-stage-linux
+          path: foundation-sdk-stage-linux.tar
+          retention-days: 30
+          if-no-files-found: error
+
+  package:
+    name: Package SDK archives
+    needs:
+      - build-macos
+      - build-linux
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Enable Nix binary cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Download macOS staging artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: foundation-sdk-stage-macos
+          path: stage
+
+      - name: Download Linux staging artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: foundation-sdk-stage-linux
+          path: stage
+
+      - name: Merge staging directories
+        run: |
+          rm -rf dist
+          mkdir -p dist
+          tar -C dist -xf stage/foundation-sdk-stage-macos.tar
+          tar -C dist -xf stage/foundation-sdk-stage-linux.tar
+
+      - name: Package SDK archives
+        run: |
+          nix develop .#maintainer --command cargo xtask package --target all --output-dir dist
+
+      - name: Upload packaged SDK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-sdk-packages
+          path: |
+            dist/*.tar.gz
+            dist/*.sig
+            dist/checksums.sha256
+            dist/install.sh
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Add workflow summary
+        run: |
+          {
+            echo "## SDK artifacts"
+            echo
+            echo "GitHub Actions built one private artifact bundle named \`foundation-sdk-packages\`."
+            echo
+            echo "Included files:"
+            ls -1 dist | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"

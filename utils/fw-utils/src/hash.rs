@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(keyos)]
 use std::io::Read;
+#[cfg(keyos)]
 use std::num::NonZero;
 
+#[cfg(keyos)]
 use crypto::CryptoApi;
+#[cfg(keyos)]
 use fs::{FileSystem, Location, OpenFlags};
+#[cfg(keyos)]
 use micro_ecc_sys::{uECC_decompress, uECC_secp256k1, uECC_valid_public_key, uECC_verify};
+#[cfg(keyos)]
 use server::{CheckedPermissions, MessageAllowed};
 use thiserror::Error;
+#[cfg(keyos)]
 use xous::{keyos::PAGE_SIZE, DropDeallocate, MemoryFlags, MemoryRange};
 
 // Well-known public keys
@@ -37,9 +44,11 @@ const KNOWN_SIGNERS: [[u8; 33]; 4] = [
 
 #[derive(Debug, Error)]
 pub enum HashError {
+    #[cfg(keyos)]
     #[error("xous error: {0:?}")]
     XousError(xous::Error),
 
+    #[cfg(keyos)]
     #[error("{0}")]
     CryptoError(#[from] crypto::error::CryptoError),
 
@@ -49,6 +58,7 @@ pub enum HashError {
     #[error("cosign2 header is missing")]
     MissingCosign2Header,
 
+    #[cfg(keyos)]
     #[error("fs error: {0:?}")]
     FsError(#[from] fs::Error),
 
@@ -59,6 +69,7 @@ pub enum HashError {
     NotTrusted,
 }
 
+#[cfg(keyos)]
 impl From<xous::Error> for HashError {
     fn from(value: xous::Error) -> Self { HashError::XousError(value) }
 }
@@ -67,6 +78,7 @@ impl From<cosign2::Error> for HashError {
     fn from(value: cosign2::Error) -> Self { HashError::Cosign2Error(value) }
 }
 
+#[cfg(keyos)]
 pub fn read_file<P>(
     fs: &FileSystem<P>,
     path: impl Into<String>,
@@ -97,6 +109,7 @@ where
 }
 
 /// Calculate the SHA256 hash of the bootloader plaintext in SRAM.
+#[cfg(keyos)]
 pub fn hash_bootloader<P: crypto::ShaPermissions>(crypto: &CryptoApi<P>) -> Result<[u8; 32], HashError> {
     const BOOTLOADER_MAX_SIZE: usize = 1024 * 64; // 64KB
     const BOOTLOADER_SIZE_IDX: usize = 5; // bootloader actual size is stored in its vector table at this location
@@ -120,18 +133,14 @@ pub fn hash_bootloader<P: crypto::ShaPermissions>(crypto: &CryptoApi<P>) -> Resu
     Ok(crypto.sha256(&bootloader_mem.as_slice::<u8>()[..bootloader_size])?)
 }
 
-pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
-    crypto: &CryptoApi<P>,
+fn verify_cosign2_mem_with_backends(
     data: &[u8],
+    known_signers: &[[u8; 33]],
+    sha: &impl cosign2::Sha256,
+    secp: &impl cosign2::Secp256k1Verify,
     check_trust: bool,
 ) -> Result<cosign2::Header, HashError> {
-    let Some(header) = cosign2::Header::parse(
-        data,
-        &KNOWN_SIGNERS,
-        &Sha256 { crypto },
-        &EccVerifier {},
-        cosign2::Header::DEFAULT_SIZE,
-    )?
+    let Some(header) = cosign2::Header::parse(data, known_signers, sha, secp, cosign2::Header::DEFAULT_SIZE)?
     else {
         return Err(HashError::MissingCosign2Header);
     };
@@ -143,11 +152,104 @@ pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
     Ok(header)
 }
 
+#[cfg(keyos)]
+pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
+    crypto: &CryptoApi<P>,
+    data: &[u8],
+    check_trust: bool,
+) -> Result<cosign2::Header, HashError> {
+    verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &Sha256 { crypto }, &EccVerifier {}, check_trust)
+}
+
+#[cfg(not(keyos))]
+pub fn verify_cosign2_mem(data: &[u8], check_trust: bool) -> Result<cosign2::Header, HashError> {
+    verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &HostSha256, &HostEccVerifier, check_trust)
+}
+
+fn verify_cosign2_mem_with_third_party_keys_inner(
+    official_result: Result<cosign2::Header, HashError>,
+    data: &[u8],
+    trusted_third_party_pubkeys: &[[u8; 33]],
+    check_trust: bool,
+    sha: &impl cosign2::Sha256,
+    secp: &impl cosign2::Secp256k1Verify,
+) -> Result<cosign2::Header, HashError> {
+    if official_result.is_ok() || !check_trust || trusted_third_party_pubkeys.is_empty() {
+        return official_result;
+    }
+
+    let Some(header) = cosign2::Header::parse(data, &[], sha, secp, cosign2::Header::DEFAULT_SIZE)? else {
+        return Err(HashError::MissingCosign2Header);
+    };
+
+    if header.pubkey1() == [0; 33]
+        && header.signature1() == [0; 64]
+        && header.signature2() != [0; 64]
+        && trusted_third_party_pubkeys.contains(&header.pubkey2())
+    {
+        Ok(header)
+    } else {
+        official_result
+    }
+}
+
+/// Verify a cosign2-signed binary, accepting either an official Foundation
+/// signature (slot 1) or a developer signature (slot 2) made with one of
+/// `trusted_third_party_pubkeys`.
+///
+/// Short-circuit rules — return early with `official_result` when:
+/// * the official chain already verified, **or**
+/// * `check_trust` is false (caller has opted out of trust enforcement), **or**
+/// * `trusted_third_party_pubkeys` is empty (no third-party keys configured → third-party fallback is
+///   effectively disabled and the official error is the most informative one to surface).
+///
+/// Otherwise we re-parse the header and accept it only when *all* of: slot 1
+/// pubkey and signature are zero (the binary was never officially signed),
+/// slot 2 has a real signature, and slot 2's pubkey is in the trusted list.
+/// On miss we return the original official_result error, since that's what the
+/// caller's user is trying to debug.
+#[cfg(keyos)]
+pub fn verify_cosign2_mem_with_third_party_keys<P: crypto::ShaPermissions>(
+    crypto: &CryptoApi<P>,
+    data: &[u8],
+    trusted_third_party_pubkeys: &[[u8; 33]],
+    check_trust: bool,
+) -> Result<cosign2::Header, HashError> {
+    let official_result = verify_cosign2_mem(crypto, data, check_trust);
+    verify_cosign2_mem_with_third_party_keys_inner(
+        official_result,
+        data,
+        trusted_third_party_pubkeys,
+        check_trust,
+        &Sha256 { crypto },
+        &EccVerifier {},
+    )
+}
+
+#[cfg(not(keyos))]
+pub fn verify_cosign2_mem_with_third_party_keys(
+    data: &[u8],
+    trusted_third_party_pubkeys: &[[u8; 33]],
+    check_trust: bool,
+) -> Result<cosign2::Header, HashError> {
+    let official_result = verify_cosign2_mem(data, check_trust);
+    verify_cosign2_mem_with_third_party_keys_inner(
+        official_result,
+        data,
+        trusted_third_party_pubkeys,
+        check_trust,
+        &HostSha256,
+        &HostEccVerifier,
+    )
+}
+
 /// Buffer size for file reads during cosign2 verification
 /// Must be a multiple of `PAGE_SIZE` and `SHA_DMA_ALIGNMENT`
+#[cfg(keyos)]
 const CHUNK_SIZE_BYTES: usize = 32 * 64 * 512; // 1 mb
 
 /// Verifies the `cosign2` header of a file
+#[cfg(keyos)]
 pub fn verify_cosign2<P, PC>(
     fs: &FileSystem<P>,
     crypto: &CryptoApi<PC>,
@@ -206,6 +308,7 @@ where
     Ok(header)
 }
 
+#[cfg(keyos)]
 pub fn write_file_progress<P>(
     fs: &FileSystem<P>,
     path: impl Into<String>,
@@ -244,6 +347,7 @@ where
     Ok(())
 }
 
+#[cfg(keyos)]
 pub fn read_progress<R: std::io::Read>(
     mut reader: R,
     size: usize,
@@ -267,6 +371,7 @@ pub fn read_progress<R: std::io::Read>(
     Ok((file_mem, total_size))
 }
 
+#[cfg(keyos)]
 pub fn read_file_progress<P>(
     fs: &FileSystem<P>,
     path: impl Into<String>,
@@ -289,6 +394,7 @@ where
     read_progress(file, metadata.size as usize, progress_fn)
 }
 
+#[cfg(keyos)]
 pub fn copy_file_progress<P>(
     fs: &FileSystem<P>,
     path_src: impl Into<String>,
@@ -348,6 +454,7 @@ where
 /// Copies from any reader to a file without loading it entirely into memory.
 /// If the destination file already exists and is larger than `total_size`,
 /// it will be truncated to the new size.
+#[cfg(keyos)]
 pub fn stream_to_file_progress<P, R: Read>(
     fs: &FileSystem<P>,
     mut reader: R,
@@ -392,36 +499,42 @@ where
     Ok(())
 }
 
+#[cfg(keyos)]
 struct Sha256<'a, P: crypto::ShaPermissions> {
     crypto: &'a CryptoApi<P>,
 }
 
+#[cfg(keyos)]
 impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
-    fn hash(&self, data: &[u8]) -> [u8; 32] { self.crypto.sha256(data).expect("sha256") }
-}
-
-/// Stream `total_len` bytes from `reader` through the SHA-256 engine, hashing in fixed-size
-/// chunks so the whole input never has to be buffered at once. `progress_fn` is called with the
-/// running fraction hashed.
-pub fn sha256_streaming<P: crypto::ShaPermissions, R: std::io::Read, F: Fn(f32)>(
-    crypto: &CryptoApi<P>,
-    total_len: usize,
-    reader: R,
-    progress_fn: F,
-) -> Result<[u8; 32], HashError> {
-    use cosign2::Sha256Streaming as _;
-
-    Sha256Streaming { crypto, progress_fn: &progress_fn, binary_size: total_len.max(1) }
-        .hash_streaming(total_len, reader)
+    fn hash(&self, data: &[u8]) -> [u8; 32] {
+        // The cosign2::Sha256 trait returns [u8; 32] unconditionally — there's
+        // no Result variant we can propagate, so a hardware SHA failure has to
+        // panic here. We log enough context (input length, error) before
+        // panicking so the crash log isn't just "sha256".
+        match self.crypto.sha256(data) {
+            Ok(digest) => digest,
+            Err(e) => {
+                log::error!("sha256 hardware accelerator failed for {}-byte input: {e:?}", data.len());
+                panic!(
+                    "sha256 hardware accelerator failed (input len = {}, error = {:?}); \
+                     this should never happen on healthy hardware",
+                    data.len(),
+                    e
+                );
+            }
+        }
+    }
 }
 
 /// Streaming SHA-256 implementation to allow hashing of large files
+#[cfg(keyos)]
 struct Sha256Streaming<'a, P: crypto::ShaPermissions, F: Fn(f32)> {
     crypto: &'a CryptoApi<P>,
     progress_fn: &'a F,
     binary_size: usize,
 }
 
+#[cfg(keyos)]
 impl<'a, P: crypto::ShaPermissions, F: Fn(f32)> cosign2::Sha256Streaming for Sha256Streaming<'a, P, F> {
     type Error = HashError;
 
@@ -455,13 +568,16 @@ impl<'a, P: crypto::ShaPermissions, F: Fn(f32)> cosign2::Sha256Streaming for Sha
     }
 }
 
+#[cfg(keyos)]
 struct EccVerifier {}
 
+#[cfg(keyos)]
 impl EccVerifier {
     #[allow(dead_code)]
     pub fn new() -> Self { EccVerifier {} }
 }
 
+#[cfg(keyos)]
 impl cosign2::Secp256k1Verify for EccVerifier {
     fn verify_ecdsa(
         &self,
@@ -492,5 +608,44 @@ impl cosign2::Secp256k1Verify for EccVerifier {
         }
 
         cosign2::VerificationResult::Invalid
+    }
+}
+
+#[cfg(not(keyos))]
+struct HostSha256;
+
+#[cfg(not(keyos))]
+impl cosign2::Sha256 for HostSha256 {
+    fn hash(&self, data: &[u8]) -> [u8; 32] {
+        use sha2::Digest as _;
+
+        sha2::Sha256::digest(data).into()
+    }
+}
+
+#[cfg(not(keyos))]
+struct HostEccVerifier;
+
+#[cfg(not(keyos))]
+impl cosign2::Secp256k1Verify for HostEccVerifier {
+    fn verify_ecdsa(
+        &self,
+        msg: [u8; 32],
+        signature: [u8; 64],
+        pubkey: [u8; 33],
+    ) -> cosign2::VerificationResult {
+        let Ok(public_key) = secp256k1::PublicKey::from_slice(&pubkey) else {
+            return cosign2::VerificationResult::Invalid;
+        };
+        let Ok(signature) = secp256k1::ecdsa::Signature::from_compact(&signature) else {
+            return cosign2::VerificationResult::Invalid;
+        };
+
+        let secp = secp256k1::Secp256k1::verification_only();
+        if secp.verify_ecdsa(&secp256k1::Message::from_digest(msg), &signature, &public_key).is_ok() {
+            cosign2::VerificationResult::Valid
+        } else {
+            cosign2::VerificationResult::Invalid
+        }
     }
 }

@@ -1,0 +1,99 @@
+{
+  "component": "Divider",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "default"
+  ],
+  "variantProps": [
+    {
+      "name": "divider-color",
+      "displayName": "Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.border"
+        }
+      }
+    },
+    {
+      "name": "label-color",
+      "displayName": "Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.muted"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 8.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 13.0
+      }
+    },
+    {
+      "name": "label-gap",
+      "displayName": "Label Gap",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 8.0
+      }
+    },
+    {
+      "name": "label-start-margin",
+      "displayName": "Start Margin",
+      "type": "float",
+      "min": 0.0,
+      "max": 96.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 16.0
+      }
+    },
+    {
+      "name": "label-end-margin",
+      "displayName": "End Margin",
+      "type": "float",
+      "min": 0.0,
+      "max": 96.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 16.0
+      }
+    },
+    {
+      "name": "thickness",
+      "displayName": "Thickness",
+      "type": "float",
+      "min": 1.0,
+      "max": 12.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 1.0
+      }
+    }
+  ]
+}

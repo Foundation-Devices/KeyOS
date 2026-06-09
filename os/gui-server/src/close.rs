@@ -19,10 +19,10 @@ impl Gui {
     pub(crate) fn on_app_disconnected(&mut self, pid: PID) {
         info!("App with PID={pid} disconnected");
 
-        let Some(window) = self.windows.remove(&pid) else {
+        if self.windows.remove(&pid).is_none() {
             debug!("No app with PID={pid} is registered");
             return;
-        };
+        }
 
         if matches!(self.notified_nav_request, Some((p, _)) if p == pid) {
             self.notified_nav_request = None;
@@ -31,9 +31,7 @@ impl Gui {
             self.waiting_for_pid = None;
         }
 
-        if !window.kiosk_policy.auto_lock_enabled {
-            self.reset_auto_lock();
-        }
+        self.release_wake_lock_for(pid);
 
         if self.shutting_down.is_none() {
             // If the modal app died, collapse back to its background; if the background

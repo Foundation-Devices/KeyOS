@@ -41,7 +41,7 @@ where
             }
             Err(e) => {
                 if predicate(&e) {
-                    log::info!("failed to restore quantum link shard, retrying... {e:?}");
+                    log::info!("failed to restore QuantumLink shard, retrying... {e:?}");
                 } else {
                     Err(e)?;
                 }

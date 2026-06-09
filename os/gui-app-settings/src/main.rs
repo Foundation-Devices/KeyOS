@@ -19,12 +19,9 @@ use security::{messages::Lockout, OsVersionInfo, PinEntryMode};
 use slint_keyos_platform::{
     app, async_archive,
     futures_lite::StreamExt as _,
-    gui_server_api::{
-        msg::UpdateKioskPolicy,
-        navigation::{
-            filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
-            lockscreen::{VerifyPinOptions, VerifyPinResult},
-        },
+    gui_server_api::navigation::{
+        filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
+        lockscreen::{VerifyPinOptions, VerifyPinResult},
     },
     navigation::select_file,
     navigation::verify_pin,
@@ -79,6 +76,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     setup_settings_global(state);
+    setup_app_management_global(state);
     setup_datetime_globals(state);
     setup_about_global(state);
     setup_pin_global(state);
@@ -89,7 +87,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     setup_update_global(state);
     setup_callbacks(state);
     setup_save_settings_global(state);
-    resume_update_if_needed(state);
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, PERIODIC_UPDATE_INTERVAL, move || {
@@ -197,6 +194,16 @@ fn setup_settings_global(state: StoredValue<AppState>) {
         state.settings.set_show_security_words(show_security_words);
     });
 
+    let developer_mode = state.borrow().settings.get_developer_mode().0;
+    globals.set_developer_mode(developer_mode);
+    globals.on_set_developer_mode(move |developer_mode| {
+        let state = state.borrow();
+        let ui = state.ui();
+        ui.global::<SettingGlobal>().set_developer_mode(developer_mode);
+
+        state.settings.set_developer_mode(developer_mode);
+    });
+
     globals.on_factory_reset(move || {
         spawn_local(async move {
             let ui = state.borrow().ui();
@@ -242,6 +249,295 @@ fn setup_settings_global(state: StoredValue<AppState>) {
         },
     );
     globals.set_current_keyos_version(SharedString::from(version));
+}
+
+fn setup_app_management_global(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    let globals = ui.global::<AppManagementGlobal>();
+
+    #[cfg(keyos)]
+    {
+        let bundled_app_icon_cache = slint_keyos_platform::raw_image::new_bundled_app_icon_cache();
+        globals.on_app_icon(move |app_id| {
+            // Icon bytes are fetched on demand by app id and memoized by the
+            // texture cache, so the installed-apps listing never has to carry them.
+            slint_keyos_platform::raw_image::load_raw_image_bytes(
+                &bundled_app_icon_cache,
+                app_id.clone(),
+                move || state.borrow().app_manager.get_app_icon(app_id.as_str()).unwrap_or_default(),
+            )
+        });
+    }
+    #[cfg(not(keyos))]
+    {
+        let app_icon_fs = state.borrow().fs.clone();
+        let bundled_app_icon_cache = Default::default();
+        globals.on_app_icon(move |icon_path| {
+            slint_keyos_platform::raw_image::load_raw_image_file(
+                &app_icon_fs,
+                &bundled_app_icon_cache,
+                fs::Location::System,
+                icon_path,
+            )
+        });
+    }
+
+    refresh_installed_apps(state);
+    globals.on_refresh_installed_apps(move || {
+        refresh_installed_apps(state);
+    });
+
+    refresh_trusted_publishers(state);
+    globals.on_refresh_trusted_publishers(move || {
+        refresh_trusted_publishers(state);
+    });
+    globals.on_import_trusted_publisher(move || import_trusted_publisher(state));
+    globals
+        .on_remove_trusted_publisher(move |public_key| remove_trusted_publisher(state, public_key.as_str()));
+}
+
+fn refresh_installed_apps(state: StoredValue<AppState>) {
+    // Use the device's active locale so localized manifest.appName values (and
+    // size formatting below) are honored instead of always asking for English.
+    let locale = state.borrow().settings.get_locale();
+    let lang = locale.lang();
+    let apps = state.borrow().app_manager.try_get_installed_apps(lang).unwrap_or_else(|e| {
+        log::error!("failed to load installed apps: {e:?}");
+        Vec::new()
+    });
+
+    let installed_apps = apps
+        .into_iter()
+        .map(|app| {
+            let app_id = app.app_id;
+            let icon_key = {
+                #[cfg(keyos)]
+                {
+                    app_id.clone()
+                }
+                #[cfg(not(keyos))]
+                {
+                    app.bundled_icon_path.unwrap_or_default()
+                }
+            };
+
+            InstalledApp {
+                app_id: app_id.into(),
+                name: app.name.into(),
+                icon_key: icon_key.into(),
+                publisher: app.publisher.into(),
+                version: app.version.into(),
+                size: format_app_size(app.size_bytes, lang).into(),
+                description: app.description.into(),
+                permissions: app.permissions.join("\n").into(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Flatten the apps + the fixed settings section into one row model so the
+    // page can render them in a single virtualized ListView (Slint can't
+    // concatenate the dynamic apps model with static rows). `action_id`
+    // disambiguates rows of the same kind; the delegate maps it to localized
+    // text and behavior. `first`/`last`/`show_divider` drive the card chrome.
+    const ACTION_TRUSTED_PUBLISHERS: i32 = 0;
+    const TOGGLE_DEVELOPER_MODE: i32 = 1;
+    const HEADER_INSTALLED_APPS: i32 = 0;
+    const HEADER_SETTINGS: i32 = 1;
+
+    let mut rows: Vec<AppsListRow> = Vec::with_capacity(installed_apps.len() + 4);
+
+    rows.push(AppsListRow {
+        kind: AppsListRowKind::SectionHeader,
+        action_id: HEADER_INSTALLED_APPS,
+        ..Default::default()
+    });
+
+    if installed_apps.is_empty() {
+        rows.push(AppsListRow {
+            kind: AppsListRowKind::Empty,
+            first: true,
+            last: true,
+            ..Default::default()
+        });
+    } else {
+        let last_index = installed_apps.len() - 1;
+        for (index, app) in installed_apps.into_iter().enumerate() {
+            rows.push(AppsListRow {
+                kind: AppsListRowKind::App,
+                app,
+                first: index == 0,
+                last: index == last_index,
+                show_divider: index != last_index,
+                ..Default::default()
+            });
+        }
+    }
+
+    rows.push(AppsListRow {
+        kind: AppsListRowKind::SectionHeader,
+        action_id: HEADER_SETTINGS,
+        ..Default::default()
+    });
+    rows.push(AppsListRow {
+        kind: AppsListRowKind::Action,
+        action_id: ACTION_TRUSTED_PUBLISHERS,
+        first: true,
+        show_divider: true,
+        ..Default::default()
+    });
+    rows.push(AppsListRow {
+        kind: AppsListRowKind::Toggle,
+        action_id: TOGGLE_DEVELOPER_MODE,
+        last: true,
+        ..Default::default()
+    });
+
+    let ui = state.borrow().ui();
+    ui.global::<AppManagementGlobal>().set_apps_list_rows(ModelRc::new(VecModel::from(rows)));
+}
+
+fn refresh_trusted_publishers(state: StoredValue<AppState>) {
+    let trusted_publishers = state
+        .borrow()
+        .app_manager
+        .try_get_third_party_certificates()
+        .unwrap_or_else(|e| {
+            log::error!("failed to load third-party certificates: {e:?}");
+            Vec::new()
+        })
+        .into_iter()
+        .map(|cert| TrustedPublisher {
+            name: cert.name.into(),
+            company: cert.company.into(),
+            contact_email: cert.contact_email.into(),
+            support_url: cert.support_url.into(),
+            public_key: format_hex_groups(&cert.public_key, 4, 8).into(),
+            serial_number: cert.serial_number.replace(':', ": ").into(),
+            subject: cert.subject.replace(',', ",\n").into(),
+            basic_constraints: cert.basic_constraints.into(),
+            key_usage: cert.key_usage.into(),
+            extended_key_usage: cert.extended_key_usage.into(),
+        })
+        .collect::<Vec<_>>();
+
+    let ui = state.borrow().ui();
+    ui.global::<AppManagementGlobal>()
+        .set_trusted_publishers(ModelRc::new(VecModel::from(trusted_publishers)));
+}
+
+fn format_hex_groups(value: &str, group_len: usize, groups_per_line: usize) -> String {
+    let mut formatted = String::with_capacity(value.len() + (value.len() / group_len));
+    for (index, ch) in value.chars().enumerate() {
+        if index > 0 && index % (group_len * groups_per_line) == 0 {
+            formatted.push('\n');
+        } else if index > 0 && index % group_len == 0 {
+            formatted.push(' ');
+        }
+        formatted.push(ch);
+    }
+    formatted
+}
+
+fn import_trusted_publisher(state: StoredValue<AppState>) -> TrustedPublisherImportResult {
+    let certificate = {
+        let state = state.borrow();
+        read_third_party_certificate(&state)
+    };
+
+    match certificate {
+        Ok(Some(certificate_pem)) => {
+            let result = { state.borrow().app_manager.import_third_party_certificate(certificate_pem) };
+            match result {
+                Ok(app_manager::ImportThirdPartyCertificateResult::Imported(_)) => {
+                    refresh_trusted_publishers(state);
+                    TrustedPublisherImportResult::Installed
+                }
+                Ok(app_manager::ImportThirdPartyCertificateResult::Invalid) => {
+                    TrustedPublisherImportResult::Failed
+                }
+                Err(e) => {
+                    log::error!("failed to import third-party certificate: {e:?}");
+                    TrustedPublisherImportResult::Failed
+                }
+            }
+        }
+        Ok(None) => TrustedPublisherImportResult::Canceled,
+        Err(e) => {
+            log::error!("failed to read third-party certificate: {e:?}");
+            TrustedPublisherImportResult::Failed
+        }
+    }
+}
+
+const MAX_CERTIFICATE_BYTES: u64 = 4 * 1024;
+
+fn read_third_party_certificate(state: &AppState) -> anyhow::Result<Option<Vec<u8>>> {
+    let options = SelectFileOptions::default()
+        .with_start_location(Location::External)
+        .with_allowed_locations(AllowedLocations::specific([Location::External, Location::Airlock]))
+        .with_allowed_extensions(AllowedExtensions::specific(["crt"]))
+        .with_hidden_allowed(false)
+        .with_dirs_allowed(true)
+        .with_multiple_selection_mode(false);
+
+    let Some((path, location)) = select_file::<GuiPermissions>(options)
+        .context("Failed to select third-party certificate")?
+        .and_then(|selected| selected.files().get(0).cloned())
+    else {
+        return Ok(None);
+    };
+
+    let location = match location {
+        Location::Internal => fs::Location::User,
+        Location::External => fs::Location::Usb,
+        Location::Airlock => fs::Location::Airlock,
+    };
+
+    let file =
+        state.fs.open_file(path, location, fs::OpenFlags { read: true, write: false, create: false })?;
+    let mut certificate_pem = Vec::new();
+    // Certs are only a few KB. Read one byte past the cap so an oversized or
+    // malformed file is rejected rather than exhausting the app's heap.
+    file.take(MAX_CERTIFICATE_BYTES + 1).read_to_end(&mut certificate_pem)?;
+    anyhow::ensure!(
+        certificate_pem.len() as u64 <= MAX_CERTIFICATE_BYTES,
+        "third-party certificate exceeds {MAX_CERTIFICATE_BYTES} bytes",
+    );
+    Ok(Some(certificate_pem))
+}
+
+fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> SharedString {
+    let locale = state.borrow().settings.get_locale();
+    let result = { state.borrow().app_manager.remove_third_party_certificate(public_key, locale.lang()) };
+    match result {
+        Ok(app_manager::RemoveThirdPartyCertificateResult::Removed)
+        | Ok(app_manager::RemoveThirdPartyCertificateResult::NotFound) => {
+            refresh_trusted_publishers(state);
+            SharedString::default()
+        }
+        Ok(app_manager::RemoveThirdPartyCertificateResult::AppRequiresKey(app_name)) => {
+            i18n::replace_placeholders(
+                tr::lookup_id(TrId::AppsTrustedPublisherRemoveBlocked),
+                &[app_name.as_str()],
+            )
+            .into()
+        }
+        Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => {
+            tr::lookup_id(TrId::AppsTrustedPublisherRemoveFailed).into()
+        }
+        Err(e) => {
+            log::error!("failed to remove third-party certificate: {e:?}");
+            tr::lookup_id(TrId::AppsTrustedPublisherRemoveFailed).into()
+        }
+    }
+}
+
+fn format_app_size(size_bytes: u64, locale: &str) -> String {
+    if size_bytes == 0 {
+        String::new()
+    } else {
+        i18n::format_file_size(size_bytes, locale)
+    }
 }
 
 fn setup_datetime_globals(state: StoredValue<AppState>) {
@@ -757,82 +1053,6 @@ fn setup_update_global(state: StoredValue<AppState>) {
         start_firmware_download(state);
     });
 
-    update_global.on_manual_update(move || {
-        let options = SelectFileOptions::default()
-            .with_hidden_allowed(false)
-            .with_search_allowed(false)
-            .with_start_location(Location::Airlock)
-            .with_allowed_locations(AllowedLocations::specific([Location::External, Location::Airlock]))
-            .with_allowed_extensions(AllowedExtensions::specific(["tar"]));
-
-        let selected_file = select_file::<GuiPermissions>(options)
-            .context("failed to open file picker")
-            .and_then(|selection| {
-                let Some(selection) = selection else {
-                    return Ok(None);
-                };
-                let Some((path, location)) = selection.files().first().cloned() else {
-                    log::info!("no update file was selected");
-                    return Ok(None);
-                };
-
-                let location = match location {
-                    Location::External => fs::Location::Usb,
-                    Location::Airlock => fs::Location::Airlock,
-                    Location::Internal => {
-                        log::warn!("unsupported update file location: {location:?}");
-                        return Ok(None);
-                    }
-                };
-
-                let fs = FileSystem::default();
-                let mut source = fs
-                    .open_file(path, location, fs::OpenFlags { read: true, write: false, create: false })
-                    .context("failed to open update file")?;
-
-                let update_temp_file = update_temp_file();
-                fs.ensure_parent_dir_exists(&update_temp_file, fs::Location::System)
-                    .context("failed to create update staging directory")?;
-                let mut destination = fs
-                    .open_file(
-                        &update_temp_file,
-                        fs::Location::System,
-                        fs::OpenFlags { read: false, write: true, create: true },
-                    )
-                    .context("failed to create staged update file")?;
-
-                source.copy_to(&mut destination).context("failed to copy update file")?;
-                drop(source);
-                drop(destination);
-
-                Ok(Some(update_temp_file))
-            });
-
-        let ui = state.borrow().ui();
-        let update_global = ui.global::<UpdateGlobal>();
-        match selected_file {
-            Ok(Some(file)) => {
-                update_global.set_fw_update_state(FwUpdateState::Verifying);
-                update_global.set_fw_update_progress(0.0);
-                update_global.set_fw_update_eta(SharedString::default());
-                update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
-                state.borrow().set_update_kiosk_enabled(false);
-                ui.global::<Navigate>()
-                    .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
-                state.borrow().update.start_update(vec![file]);
-            }
-            Ok(None) => {}
-            Err(e) => {
-                log::error!("failed to stage update file: {e:?}");
-                FileSystem::default().remove(update_temp_file(), fs::Location::System).ok();
-                update_global.set_fw_update_state(FwUpdateState::Failed);
-                update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
-                ui.global::<Navigate>()
-                    .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
-            }
-        }
-    });
-
     ql_utils::on_update_sufficient_battery::<power_manager_ext_permissions::PowerManagerExtPermissions, _>(
         move |sufficient_battery| {
             log::info!("update sufficient_battery={}", sufficient_battery);
@@ -851,20 +1071,6 @@ fn setup_update_global(state: StoredValue<AppState>) {
         let mut disconnect_monitor: Option<TaskHandle<()>> = None;
 
         while let Some(event) = update_events.next().await {
-            // Keep auto-lock disabled until the user leaves the update page.
-            let restore_update_exit_controls = || {
-                let state = state.borrow();
-                state
-                    .gui
-                    .update_kiosk_policy(
-                        UpdateKioskPolicy::default()
-                            .set_home_button(true)
-                            .set_power_button(true)
-                            .set_control_center(true),
-                    )
-                    .ok();
-                state.platform_config.enable_swipe_back.set(true);
-            };
             let ui = state.borrow().ui();
             let update_global = ui.global::<UpdateGlobal>();
 
@@ -873,13 +1079,9 @@ fn setup_update_global(state: StoredValue<AppState>) {
                     update_global.set_fw_update_state(FwUpdateState::Receiving);
                     update_global.set_fw_update_progress(progress.completion_percentage() as f32);
 
-                    // Disable auto-lock and start monitoring for disconnection when download starts
+                    // Acquire the wake lock and start monitoring for disconnection when download starts
                     if progress.is_start() {
-                        state
-                            .borrow()
-                            .gui
-                            .update_kiosk_policy(UpdateKioskPolicy::default().set_auto_lock(false))
-                            .ok();
+                        state.borrow().gui.set_wake_lock(true).ok();
                         state.borrow().platform_config.enable_swipe_back.set(false);
                         let status = ql_status.clone().into_inner().into_stream();
                         let _ = disconnect_monitor.insert(spawn_local(async move {
@@ -904,8 +1106,8 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 ProgressUpdate::InstallProgress(progress) => {
                     update_global.set_fw_update_state(FwUpdateState::Installing);
 
-                    let percent = progress.completion_percentage;
-                    let secs_remaining = progress.estimated_seconds_remaining;
+                    let percent = progress.completion_percentage();
+                    let secs_remaining = progress.estimate_time_remaining_secs();
                     let mins_remaining = secs_remaining.div_ceil(60).max(1);
                     let time_str = format!("{mins_remaining}m");
 
@@ -923,13 +1125,16 @@ fn setup_update_global(state: StoredValue<AppState>) {
                     log::info!("update complete. rebooting...");
                     update_global.set_fw_update_state(FwUpdateState::Restarting);
                     notify_update_progress(state, FirmwareInstallEvent::Rebooting);
-                    state.borrow().set_update_kiosk_enabled(true);
+
+                    state.borrow().gui.set_wake_lock(false).ok();
+                    state.borrow().platform_config.enable_swipe_back.set(true);
                 }
                 ProgressUpdate::InstallError(error) => {
                     disconnect_monitor = None;
                     log::error!("failed to apply update {error:?}");
-                    FileSystem::default().remove(update_temp_file(), fs::Location::System).ok();
-                    restore_update_exit_controls();
+                    // Re-enable swipe back so the user can navigate away,
+                    // but keep the wake lock until they do.
+                    state.borrow().platform_config.enable_swipe_back.set(true);
                     handle_update_error(
                         state,
                         error.to_string(),
@@ -940,7 +1145,9 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 ProgressUpdate::DownloadError(error) => {
                     disconnect_monitor = None;
                     log::error!("failed to download update {error:?}");
-                    restore_update_exit_controls();
+                    // Re-enable swipe back so the user can navigate away,
+                    // but keep the wake lock until they do.
+                    state.borrow().platform_config.enable_swipe_back.set(true);
                     handle_update_error(
                         state,
                         error.to_string(),
@@ -952,29 +1159,6 @@ fn setup_update_global(state: StoredValue<AppState>) {
         }
     })
     .detach();
-}
-
-fn resume_update_if_needed(state: StoredValue<AppState>) {
-    let state = state.borrow();
-    if !state.update.update_status().needs_continue {
-        return;
-    }
-
-    let ui = state.ui();
-    let update_global = ui.global::<UpdateGlobal>();
-    if update_global.get_fw_update_state() == FwUpdateState::Installing {
-        return;
-    }
-
-    log::info!("continuing interrupted update");
-    state.set_update_kiosk_enabled(false);
-
-    update_global.set_fw_update_state(FwUpdateState::Installing);
-    update_global.set_fw_update_progress(0.0);
-    update_global.set_fw_update_eta(SharedString::default());
-
-    ui.global::<Navigate>().invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
-    state.update.continue_update();
 }
 
 fn setup_save_settings_global(state: StoredValue<AppState>) {
@@ -1123,8 +1307,6 @@ async fn save_settings_file(state: StoredValue<AppState>) -> anyhow::Result<()> 
 
     Ok(())
 }
-
-fn update_temp_file() -> String { format!("{}/update.bin", fs::SYSTEM_STATE_ROOT) }
 
 fn erase_system_state() {
     let fs = FileSystem::default();

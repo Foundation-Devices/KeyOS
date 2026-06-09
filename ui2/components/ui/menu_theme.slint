@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// GENERATED from menu.json by foundation theme tooling — do not edit by hand.
+// Token-backed props reference the shared Theme global; JSON literals are inlined.
+
+import { Theme, ControlSize } from "theme.slint";
+
+export struct MenuSizeProps {
+    menu-height: length,
+    menu-border-radius: length,
+    menu-padding: length,
+}
+
+export global MenuTheme {
+    in-out property <MenuSizeProps> size-sm: {
+        menu-height: 148px,
+        menu-border-radius: Theme.control-radius-sm,
+        menu-padding: 0px,
+    };
+    in-out property <MenuSizeProps> size-md: {
+        menu-height: 172px,
+        menu-border-radius: Theme.control-radius-md,
+        menu-padding: 0px,
+    };
+    in-out property <MenuSizeProps> size-lg: {
+        menu-height: 196px,
+        menu-border-radius: Theme.control-radius-lg,
+        menu-padding: 0px,
+    };
+
+    public pure function size(s: ControlSize) -> MenuSizeProps {
+        if s == ControlSize.sm {
+            return self.size-sm;
+        }
+        if s == ControlSize.lg {
+            return self.size-lg;
+        }
+        return self.size-md;
+    }
+}

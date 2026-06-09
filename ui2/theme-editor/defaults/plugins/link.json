@@ -1,0 +1,114 @@
+{
+  "component": "Link",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled",
+    "visited"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "text-color",
+      "displayName": "Text Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.muted",
+          "visited": "color.primary"
+        }
+      }
+    },
+    {
+      "name": "underline-color",
+      "displayName": "Underline Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "pressed": "color.primary.dark",
+          "disabled": "color.transparent",
+          "visited": "color.primary"
+        }
+      }
+    },
+    {
+      "name": "visited-color",
+      "displayName": "Visited Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.muted",
+          "focused": "color.muted",
+          "pressed": "color.muted",
+          "disabled": "color.transparent",
+          "visited": "color.muted"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "row-height",
+      "displayName": "Row Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 52.0,
+        "sm": 44.0,
+        "lg": 60.0
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 18.0,
+        "sm": 16.0,
+        "lg": 20.0
+      }
+    }
+  ]
+}

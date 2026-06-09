@@ -134,6 +134,10 @@ struct ServerConnection {
 
 /// Perform a synchronous syscall to the kernel.
 pub fn syscall(call: SysCall) -> SysCallResult {
+    if PROCESS_KEY.0 == [0u8; 16] {
+        return Err(crate::Error::ServerNotFound);
+    }
+
     let tid = thread_id();
 
     // If this call has memory attached to it, save that memory information

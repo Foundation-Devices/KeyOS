@@ -15,17 +15,55 @@ use crate::{
     ServerContext,
 };
 
-/// A connection to a running server.
+/// A typed connection to a running KeyOS server.
+///
+/// `CheckedConn<P>` is the lower-level message sender used by the public API
+/// crates. Most application code should call a crate-specific wrapper such as
+/// `BluetoothApi::enable_ble` or `SettingsApi::get_locale` instead of sending
+/// raw message values directly. When adding a wrapper method, choose the send
+/// method that matches the message trait implemented by `#[derive(Message)]`:
+///
+/// | Message trait | Send method | Use when |
+/// | --- | --- | --- |
+/// | [`BlockingScalar`] | [`send_blocking_scalar`](Self::send_blocking_scalar) or [`try_send_blocking_scalar`](Self::try_send_blocking_scalar) | The message fits in scalar registers and returns a response. |
+/// | [`Scalar`] | [`send_scalar`](Self::send_scalar), [`try_send_scalar`](Self::try_send_scalar), or [`send_scalar_nowait`](Self::send_scalar_nowait) | The message fits in scalar registers and has no response. |
+/// | [`BlockingArchive`] | [`send_blocking_archive`](Self::send_blocking_archive), [`try_send_blocking_archive`](Self::try_send_blocking_archive), or [`try_send_blocking_archive_buf`](Self::try_send_blocking_archive_buf) | The message is serialized with `rkyv` and returns a response. |
+/// | [`Archive`] | [`send_archive`](Self::send_archive), [`try_send_archive`](Self::try_send_archive), or [`send_archive_nowait`](Self::send_archive_nowait) | The message is serialized with `rkyv` and has no response. |
+/// | [`LendMut`] | [`lend_mut`](Self::lend_mut) | The caller lends a mutable memory range to the server and waits for the server to finish with it. |
+/// | [`Move`] | [`send_move`](Self::send_move), [`try_send_move`](Self::try_send_move), or [`send_move_nowait`](Self::send_move_nowait) | The caller transfers ownership of a memory range to the server. |
+/// | [`ScalarSubscription`] / [`ArchiveSubscription`] | [`subscribe_scalar`](Self::subscribe_scalar) or [`subscribe_archive`](Self::subscribe_archive) | The caller registers its [`ServerContext`] to receive future events. |
+///
+/// For normal system API wrappers, prefer the infallible methods when the target
+/// service is mandatory: delivery failure means the system service has crashed or
+/// disconnected, and the device should reboot rather than route unreachable
+/// error handling through every caller. Use `try_*` methods when the API
+/// intentionally exposes optional service availability, caller-recoverable
+/// transport failure, or explicit queue-full handling.
 #[derive(Clone)]
 pub struct CheckedConn<T: CheckedPermissions> {
     cid: Arc<DisconnectOnDrop>,
     _phantom: core::marker::PhantomData<fn() -> T>,
 }
 
+/// Marker trait for the server name and compile-time permissions attached to a
+/// connection.
+///
+/// Client crates normally get an implementation from `#[derive(Permissions)]`
+/// via the API crate's `use_api!` macro. The derived implementation also emits
+/// [`MessageAllowed<M>`] implementations for every message granted to the
+/// caller by the API manifest.
 pub trait CheckedPermissions: Clone + Default + 'static {
     const NAME: &str;
 }
 
+/// Compile-time proof that permissions type `P` may send message `M`.
+///
+/// API wrapper methods express their permission needs with bounds like
+/// `P: MessageAllowed<GetStatus>`. If a call fails to compile because this
+/// bound is not satisfied, grant that message in the app's manifest. Custom
+/// permission types only satisfy compile-time bounds; `xous-names` still
+/// enforces the manifest at runtime. Hand-written permissions are only valid for
+/// infrastructure paths that connect to their own server.
 pub trait MessageAllowed<M> {}
 
 impl<P: CheckedPermissions> std::fmt::Debug for CheckedConn<P> {
@@ -91,14 +129,22 @@ impl<P: CheckedPermissions> CheckedConn<P> {
     /// Get the remote process ID.
     pub fn get_remote_pid(&self) -> xous::PID { xous::get_remote_pid(self.cid.0).unwrap() }
 
-    /// Get a version of this connection that does not do any compile-time permission checking
+    /// Get a version of this connection that does not do compile-time
+    /// permission checking.
+    ///
+    /// Use this only for infrastructure code that has already enforced
+    /// permissions another way. Normal API wrappers should keep their
+    /// `P: MessageAllowed<M>` bounds so missing permissions fail at compile
+    /// time.
     pub fn unchecked(&self) -> CheckedConn<WithAllPermissions<P>> {
         CheckedConn { cid: self.cid.clone(), _phantom: Default::default() }
     }
 
     // ==================== BlockingScalar Messages ====================
 
-    /// Send a [`Scalar`] message.
+    /// Send a [`BlockingScalar`] message and wait for its response.
+    ///
+    /// Panics if the message cannot be delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn send_blocking_scalar<M>(&self, msg: M) -> M::Response
@@ -109,7 +155,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_blocking_scalar(self.cid.0, msg)
     }
 
-    /// Send a [`Scalar`] message, retaining the error.
+    /// Send a [`BlockingScalar`] message and wait for its response.
+    ///
+    /// Returns the underlying transport error if the message cannot be
+    /// delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn try_send_blocking_scalar<M>(&self, msg: M) -> Result<M::Response, xous::Error>
@@ -120,7 +169,8 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         try_send_blocking_scalar(self.cid.0, msg).map_err(|e| e.into_inner())
     }
 
-    /// Send a blocking scalar message asynchronously.
+    /// Send a [`BlockingScalar`] message and handle its response later on the
+    /// supplied [`ServerContext`].
     pub fn send_scalar_async<M, SR>(&self, msg: M, context: &mut ServerContext<SR>)
     where
         M: BlockingScalar,
@@ -131,7 +181,8 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         context.handlers.push((msg_id, scalar_async_response_handler::<M, SR>));
     }
 
-    /// Send a blocking scalar message asynchronously, retaining the error.
+    /// Send a [`BlockingScalar`] message asynchronously, returning the transport
+    /// error if the message cannot be queued.
     pub fn try_send_scalar_async<M, SR>(
         &self,
         msg: M,
@@ -151,7 +202,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
     // ==================== Scalar Messages (fire-and-forget) ====================
     //
 
-    /// Send a [`Scalar`] message, retaining the error. Blocks if the message queue is full.
+    /// Send a fire-and-forget [`Scalar`] message.
+    ///
+    /// Blocks if the message queue is full and panics if the message cannot be
+    /// delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn send_scalar<M>(&self, msg: M)
@@ -162,7 +216,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_scalar(self.cid.0, msg)
     }
 
-    /// Send a [`Scalar`] message, retaining the error. Blocks if the message queue is full.
+    /// Send a fire-and-forget [`Scalar`] message.
+    ///
+    /// Blocks if the message queue is full and returns the delivery error if
+    /// the message cannot be delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn try_send_scalar<M>(&self, msg: M) -> Result<(), xous::Error>
@@ -173,7 +230,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         try_send_scalar(self.cid.0, msg).map_err(|e| e.into_inner())
     }
 
-    /// Send a [`Scalar`] message. Does not block if the message queue is full.
+    /// Send a fire-and-forget [`Scalar`] message without waiting for queue
+    /// space.
+    ///
+    /// Returns an error if the queue is full or delivery otherwise fails.
     /// Can be used in an IRQ handler context.
     pub fn send_scalar_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
     where
@@ -185,7 +245,9 @@ impl<P: CheckedPermissions> CheckedConn<P> {
 
     // ==================== Archive Messages ====================
 
-    /// Send an [`BlockingArchive`] message and block for response.
+    /// Send a [`BlockingArchive`] message and wait for its response.
+    ///
+    /// Panics if the message cannot be delivered.
     pub fn send_blocking_archive<M>(&self, msg: M) -> M::Response
     where
         M: BlockingArchive,
@@ -194,8 +256,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_blocking_archive(self.cid.0, msg)
     }
 
-    /// Send an [`BlockingArchive`] message and block for response.
-    /// Retains the error channel
+    /// Send a [`BlockingArchive`] message and wait for its response.
+    ///
+    /// Returns the underlying transport error if the message cannot be
+    /// delivered or decoded.
     pub fn try_send_blocking_archive<M>(&self, msg: M) -> Result<M::Response, xous::Error>
     where
         M: BlockingArchive,
@@ -204,7 +268,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         try_send_blocking_archive(self.cid.0, msg).map_err(|e| e.into_inner().into_xous())
     }
 
-    /// Send an [`BlockingArchive`] message but reuses the `Buffer`.
+    /// Send a [`BlockingArchive`] message using an existing IPC buffer.
+    ///
+    /// Reusing a buffer avoids repeated large allocations in API methods that
+    /// may return large payloads.
     pub fn send_blocking_archive_buf<M>(&self, buf: &mut xous_ipc::Buffer, msg: M) -> M::Response
     where
         M: BlockingArchive,
@@ -213,8 +280,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_blocking_archive_buf(self.cid.0, buf, msg)
     }
 
-    /// Send an [`BlockingArchive`] message but reuses the `Buffer`.
-    /// Preserves the error channel
+    /// Send a [`BlockingArchive`] message using an existing IPC buffer.
+    ///
+    /// Returns the underlying transport error if the message cannot be
+    /// delivered or decoded.
     pub fn try_send_blocking_archive_buf<M>(
         &self,
         buf: &mut xous_ipc::Buffer,
@@ -227,7 +296,8 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         try_send_blocking_archive_buf(self.cid.0, buf, msg).map_err(|e| e.into_inner().into_xous())
     }
 
-    /// Send an [`BlockingArchive`] message without blocking (for server-to-server async).
+    /// Send a [`BlockingArchive`] message and handle its response later on the
+    /// supplied [`ServerContext`].
     pub fn send_blocking_archive_async<M, SR>(&self, msg: M, context: &mut ServerContext<SR>)
     where
         M: BlockingArchive,
@@ -240,7 +310,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
 
     // ==================== Archive Messages (fire-and-forget) ====================
 
-    /// Send a [`Archive`] message, retaining the error. Blocks if the message queue is full.
+    /// Send a fire-and-forget [`Archive`] message.
+    ///
+    /// Blocks if the message queue is full and returns the delivery error if
+    /// the message cannot be delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn try_send_archive<M>(&self, msg: M) -> Result<(), xous::Error>
@@ -251,7 +324,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_archive(self.cid.0, msg)
     }
 
-    /// Send a [`Archive`] message. Blocks if the message queue is full.
+    /// Send a fire-and-forget [`Archive`] message.
+    ///
+    /// Blocks if the message queue is full and panics if the message cannot be
+    /// delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     #[track_caller]
@@ -263,7 +339,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_archive(self.cid.0, msg).unwrap()
     }
 
-    /// Send a [`Archive`] message. Does not block if the message queue is full.
+    /// Send a fire-and-forget [`Archive`] message without waiting for queue
+    /// space.
+    ///
+    /// Returns an error if the queue is full or delivery otherwise fails.
     /// Can be used in an IRQ handler context.
     pub fn send_archive_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
     where
@@ -275,7 +354,11 @@ impl<P: CheckedPermissions> CheckedConn<P> {
 
     // ==================== LendMut Messages ====================
 
-    /// Send a [`LendMut`] message.
+    /// Send a [`LendMut`] message and wait for the server to finish with the
+    /// lent memory.
+    ///
+    /// Use this for APIs that pass a [`xous::MemoryRange`] to a server for
+    /// in-place reads or writes.
     pub fn lend_mut<M>(&self, msg: M) -> M::Response
     where
         M: LendMut,
@@ -286,7 +369,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
 
     // ==================== Move Messages ====================
 
-    /// Send a [`Move`] message, retaining the error. Blocks if the message queue is full.
+    /// Send a [`Move`] message, transferring ownership of its memory range.
+    ///
+    /// Blocks if the message queue is full and panics if the message cannot be
+    /// delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn send_move<M>(&self, msg: M)
@@ -297,7 +383,10 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_move(self.cid.0, msg)
     }
 
-    /// Send a [`Move`] message, retaining the error. Blocks if the message queue is full.
+    /// Send a [`Move`] message, transferring ownership of its memory range.
+    ///
+    /// Blocks if the message queue is full and returns the delivery error if
+    /// the message cannot be delivered.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn try_send_move<M>(&self, msg: M) -> Result<(), xous::Error>
@@ -308,7 +397,9 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         try_send_move(self.cid.0, msg).map_err(|e| e.into_inner())
     }
 
-    /// Send a [`Move`] message. Does not block if the message queue is full.
+    /// Send a [`Move`] message without waiting for queue space.
+    ///
+    /// Returns an error if the queue is full or delivery otherwise fails.
     /// Can be used in an IRQ handler context.
     pub fn send_move_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
     where

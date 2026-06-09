@@ -59,3 +59,6 @@ SubscribeCameraEnabled = { id = 70, type = "scalarEvent" }
 GetUsbEnabled = { id = 71, type = "blockingScalar" }
 SetUsbEnabled = { id = 72, type = "scalar" }
 SubscribeUsbEnabled = { id = 73, type = "scalarEvent" }
+GetDeveloperMode = { id = 74, type = "blockingScalar" }
+SetDeveloperMode = { id = 75, type = "scalar" }
+SubscribeDeveloperMode = { id = 76, type = "scalarEvent" }

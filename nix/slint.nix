@@ -6,20 +6,19 @@
   pkgs,
 }: let
   version = "v1.12.1-foundation6";
-  src = pkgs.fetchFromGitHub {
-    owner = "Foundation-Devices";
-    repo = "slint";
-    rev = version;
+  foundationSlint = pkgs.callPackage ./foundation-slint.nix {
+    inherit version;
     hash = "sha256-sCOZ+aXKmx+c2sfnNhjjM+oEUHQpBX2s54LNPTrDKTE=";
   };
 in {
   # https://github.com/NixOS/nixpkgs/blob/nixos-unstable/pkgs/by-name/sl/slint-lsp/package.nix
   slint-lsp = pkgs.slint-lsp.overrideAttrs (old: {
     pname = "foundation-slint-lsp";
-    inherit src version;
+    inherit version;
+    src = foundationSlint.source;
 
     cargoDeps = pkgs.rustPlatform.importCargoLock {
-      lockFile = "${src}/Cargo.lock";
+      lockFile = "${foundationSlint.source}/Cargo.lock";
     };
     buildAndTestSubdir = "tools/lsp";
 
@@ -31,10 +30,11 @@ in {
   # https://github.com/NixOS/nixpkgs/blob/nixos-unstable/pkgs/by-name/sl/slint-viewer/package.nix
   slint-viewer = pkgs.slint-viewer.overrideAttrs (old: {
     pname = "foundation-slint-viewer";
-    inherit src version;
+    inherit version;
+    src = foundationSlint.source;
 
     cargoDeps = pkgs.rustPlatform.importCargoLock {
-      lockFile = "${src}/Cargo.lock";
+      lockFile = "${foundationSlint.source}/Cargo.lock";
     };
     buildAndTestSubdir = "tools/viewer";
     cargoBuildFlags = ["--features" "custom-translations"];

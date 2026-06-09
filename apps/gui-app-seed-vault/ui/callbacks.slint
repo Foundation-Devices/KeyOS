@@ -33,6 +33,8 @@ export global Callbacks {
     pure callback entropy-to-words(string) -> [string];
     pure callback words-to-entropy([string]) -> string;
     pure callback nsec-to-npub(string) -> string;
+    pure callback validate-seed-word(string) -> bool;
+    pure callback validate-full-seed([string]) -> bool;
     pure callback get-seed-fingerprint([string]) -> string;
     callback get-pending-nostr-key() -> string;
     callback get-pending-imported-seed() -> ImportedSeedInfo;

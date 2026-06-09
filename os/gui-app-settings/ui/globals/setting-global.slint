@@ -22,6 +22,9 @@ export global SettingGlobal {
     in-out property <bool> show-security-words: false;
     callback set-show-security-words(bool);
 
+    in-out property <bool> developer-mode: false;
+    callback set-developer-mode(bool);
+
     in property <string> current-keyos-version: "";
 
     callback factory-reset();

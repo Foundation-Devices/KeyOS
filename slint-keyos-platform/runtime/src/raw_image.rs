@@ -22,6 +22,9 @@ pub fn load_raw_image<P>(
 ) -> Image
 where
     P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
+    P: server::MessageAllowed<fs::messages::CloseFile>,
+    P: server::MessageAllowed<fs::messages::ReadFile>,
     P: server::MessageAllowed<fs::messages::MapFileMessage>,
     P: server::MessageAllowed<fs::messages::GetMetadata>,
 {
@@ -32,20 +35,25 @@ where
         let dark_path = format!("{dark_variant}.raw");
 
         // Check if dark variant exists
-        if fs.metadata(&dark_path, fs::Location::CommonAssets).is_ok() {
+        if raw_image_location(fs, &dark_path).is_some() {
             log::debug!("Using dark variant: {dark_path}");
             actual_image_name = dark_variant;
         }
     }
 
     let path = format!("{actual_image_name}.raw");
-    let (texture, nine_slice_edges) = match cache.borrow_mut().entry(path.clone().into()) {
+    let Some(location) = raw_image_location(fs, &path) else {
+        log::warn!("Could not load image {actual_image_name:?}");
+        return Image::from(ImageInner::None);
+    };
+    let cache_key = format!("{location:?}:{path}");
+    let (texture, nine_slice_edges) = match cache.borrow_mut().entry(cache_key.into()) {
         std::collections::hash_map::Entry::Occupied(entry) => {
-            log::debug!("load_raw_image cache hit on {path}");
+            log::debug!("load_raw_image cache hit on {location:?}:{path}");
             entry.get().clone()
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
-            let Some(archived_image) = map_archive::<RawImage, _>(fs, &path) else {
+            let Some(archived_image) = load_archive_from_location::<RawImage, _>(fs, location, &path) else {
                 log::warn!("Could not load image {actual_image_name:?}");
                 return Image::from(ImageInner::None);
             };
@@ -69,6 +77,17 @@ where
         }
     }
     image
+}
+
+#[cfg(keyos)]
+fn raw_image_location<P>(fs: &fs::FileSystem<P>, path: &str) -> Option<fs::Location>
+where
+    P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::GetMetadata>,
+{
+    [fs::Location::AppResources, fs::Location::CommonAssets]
+        .into_iter()
+        .find(|location| fs.metadata(path, *location).is_ok())
 }
 
 #[cfg(keyos)]
@@ -122,6 +141,224 @@ where
 }
 
 #[cfg(keyos)]
+pub fn load_raw_image_file<P>(
+    fs: &fs::FileSystem<P>,
+    cache: &RefCell<HashMap<String, &'static StaticTextures>>,
+    location: fs::Location,
+    path: SharedString,
+) -> Image
+where
+    P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
+    P: server::MessageAllowed<fs::messages::CloseFile>,
+    P: server::MessageAllowed<fs::messages::ReadFile>,
+    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+{
+    let path = path.to_string();
+    let key = format!("{location:?}:{path}");
+    match cache.borrow_mut().entry(key) {
+        std::collections::hash_map::Entry::Occupied(entry) => {
+            log::debug!("load_raw_image_file cache hit on {location:?}:{path}");
+            Image::from(ImageInner::StaticTextures(*entry.get()))
+        }
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let Some(archived_image) = load_archive_from_location::<RawImage, _>(fs, location, &path) else {
+                log::warn!("Could not load image file {location:?}:{path}");
+                return Image::from(ImageInner::None);
+            };
+            let texture = archived_image.into();
+            entry.insert(texture);
+            Image::from(ImageInner::StaticTextures(texture))
+        }
+    }
+}
+
+/// Bounded cache of decoded bundled app icons.
+///
+/// Icons are fetched on demand over IPC (one per app id), so the number of
+/// distinct icons scales with the number of installed apps. Each decoded image
+/// owns its pixels (refcounted), and the LRU bound caps how many stay resident:
+/// evicting an entry drops the cache's reference, freeing the pixels once no
+/// on-screen delegate still holds the image.
+#[cfg(keyos)]
+pub type BundledAppIconCache = RefCell<lru::LruCache<String, Image>>;
+
+/// Maximum number of decoded bundled app icons kept resident at once.
+#[cfg(keyos)]
+pub const BUNDLED_APP_ICON_CACHE_CAP: usize = 32;
+
+#[cfg(keyos)]
+pub fn new_bundled_app_icon_cache() -> BundledAppIconCache {
+    RefCell::new(lru::LruCache::new(
+        std::num::NonZeroUsize::new(BUNDLED_APP_ICON_CACHE_CAP).expect("cache cap is non-zero"),
+    ))
+}
+
+/// Load a bundled app icon, fetching its bytes via `fetch_bytes()` only on a
+/// cache miss. The decoded image owns its pixels so the LRU can free it on
+/// eviction; a miss after eviction simply re-fetches and re-decodes.
+#[cfg(keyos)]
+pub fn load_raw_image_bytes<F>(cache: &BundledAppIconCache, cache_key: SharedString, fetch_bytes: F) -> Image
+where
+    F: FnOnce() -> Vec<u8>,
+{
+    let cached = cache.borrow_mut().get(cache_key.as_str()).cloned();
+    if let Some(image) = cached {
+        log::debug!("load_raw_image_bytes cache hit on {cache_key}");
+        return image;
+    }
+
+    let bytes = fetch_bytes();
+    if bytes.is_empty() {
+        return Image::from(ImageInner::None);
+    }
+
+    let mut aligned_bytes: rkyv::util::AlignedVec = rkyv::util::AlignedVec::with_capacity(bytes.len());
+    aligned_bytes.extend_from_slice(&bytes);
+    let Some(archived_image) = rkyv::access::<
+        slint_keyos_platform_common::ArchivedRawImage,
+        rkyv::rancor::Error,
+    >(aligned_bytes.as_slice())
+    .ok() else {
+        log::warn!("Could not load raw image bytes for {cache_key}");
+        return Image::from(ImageInner::None);
+    };
+
+    let Some(image) = decode_raw_image_to_owned(archived_image) else {
+        log::warn!("Could not decode raw image bytes for {cache_key}");
+        return Image::from(ImageInner::None);
+    };
+
+    cache.borrow_mut().put(cache_key.to_string(), image.clone());
+    image
+}
+
+/// Decode an archived raw image into an owned, refcounted `Image`.
+///
+/// Unlike the `StaticTextures` path (which borrows `&'static` data and therefore
+/// must leak), this copies the texture's pixels into a `SharedPixelBuffer` that
+/// frees with the last `Image` clone — required for an evicting cache.
+#[cfg(keyos)]
+fn decode_raw_image_to_owned(archived: &slint_keyos_platform_common::ArchivedRawImage) -> Option<Image> {
+    use slint_keyos_platform_common::ArchivedPixelFormat;
+
+    let total_width = archived.size.width.to_native() as usize;
+    let rect_x = archived.texture_rect.x.to_native() as usize;
+    let rect_y = archived.texture_rect.y.to_native() as usize;
+    let rect_w = archived.texture_rect.width.to_native() as usize;
+    let rect_h = archived.texture_rect.height.to_native() as usize;
+    let bytes = archived.bytes.as_slice();
+
+    if rect_w == 0 || rect_h == 0 {
+        return None;
+    }
+
+    let bpp = match &archived.pixel_format {
+        ArchivedPixelFormat::Rgb => 3usize,
+        ArchivedPixelFormat::Rgba | ArchivedPixelFormat::RgbaPremultiplied => 4,
+        ArchivedPixelFormat::AlphaMap => {
+            log::warn!("AlphaMap app icons are not supported by the owned-image path");
+            return None;
+        }
+    };
+
+    // The pixel data is laid out for `total_width`; the texture rect selects the
+    // sub-region for this image. Validate the rect fits before copying.
+    let stride = total_width.checked_mul(bpp)?;
+    let row_bytes = rect_w.checked_mul(bpp)?;
+    let last_row_start = (rect_y.checked_add(rect_h)?.checked_sub(1)?)
+        .checked_mul(stride)?
+        .checked_add(rect_x.checked_mul(bpp)?)?;
+    if last_row_start.checked_add(row_bytes)? > bytes.len() {
+        log::warn!("raw image bytes too small for {rect_w}x{rect_h} texture rect");
+        return None;
+    }
+
+    let copy_rows = |dst: &mut [u8]| {
+        for ry in 0..rect_h {
+            let src_off = (rect_y + ry) * stride + rect_x * bpp;
+            let dst_off = ry * row_bytes;
+            dst[dst_off..dst_off + row_bytes].copy_from_slice(&bytes[src_off..src_off + row_bytes]);
+        }
+    };
+
+    let width = rect_w as u32;
+    let height = rect_h as u32;
+    match &archived.pixel_format {
+        ArchivedPixelFormat::Rgb => {
+            let mut buffer = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
+            copy_rows(buffer.make_mut_bytes());
+            Some(Image::from_rgb8(buffer))
+        }
+        ArchivedPixelFormat::Rgba => {
+            let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+            copy_rows(buffer.make_mut_bytes());
+            Some(Image::from_rgba8(buffer))
+        }
+        ArchivedPixelFormat::RgbaPremultiplied => {
+            let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+            copy_rows(buffer.make_mut_bytes());
+            Some(Image::from_rgba8_premultiplied(buffer))
+        }
+        ArchivedPixelFormat::AlphaMap => None,
+    }
+}
+
+#[cfg(keyos)]
+fn load_archive_from_location<T, P>(
+    fs: &fs::FileSystem<P>,
+    location: fs::Location,
+    path: &str,
+) -> Option<&'static T::Archived>
+where
+    T: rkyv::Archive,
+    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
+    P: server::MessageAllowed<fs::messages::CloseFile>,
+    P: server::MessageAllowed<fs::messages::ReadFile>,
+    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+{
+    if location == fs::Location::AppResources {
+        read_archive_from_location::<T, P>(fs, location, path)
+    } else {
+        map_archive_from_location::<T, P>(fs, location, path)
+    }
+}
+
+#[cfg(keyos)]
+fn read_archive_from_location<T, P>(
+    fs: &fs::FileSystem<P>,
+    location: fs::Location,
+    path: &str,
+) -> Option<&'static T::Archived>
+where
+    T: rkyv::Archive,
+    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
+    P: server::MessageAllowed<fs::messages::CloseFile>,
+    P: server::MessageAllowed<fs::messages::ReadFile>,
+{
+    log::debug!("Reading file {path}");
+    let mut file = match fs.open_file(path, location, fs::OpenFlags::READ_ONLY) {
+        Ok(file) => file,
+        Err(e) => {
+            log::warn!("Error opening file at {location:?}:\"{path}\": {e:?}");
+            return None;
+        }
+    };
+    let mut bytes: rkyv::util::AlignedVec = rkyv::util::AlignedVec::new();
+    if let Err(e) = bytes.extend_from_reader(&mut file) {
+        log::warn!("Error reading file at {location:?}:\"{path}\": {e:?}");
+        return None;
+    }
+    let bytes = Box::leak(Box::new(bytes));
+    let archived = rkyv::access::<T::Archived, rkyv::rancor::Error>(bytes.as_slice()).ok()?;
+    Some(archived)
+}
+
+#[cfg(keyos)]
 fn map_archive<T, P>(fs: &fs::FileSystem<P>, path: &str) -> Option<&'static T::Archived>
 where
     T: rkyv::Archive,
@@ -129,11 +366,26 @@ where
     P: server::CheckedPermissions,
     P: server::MessageAllowed<fs::messages::MapFileMessage>,
 {
+    map_archive_from_location::<T, P>(fs, fs::Location::CommonAssets, path)
+}
+
+#[cfg(keyos)]
+fn map_archive_from_location<T, P>(
+    fs: &fs::FileSystem<P>,
+    location: fs::Location,
+    path: &str,
+) -> Option<&'static T::Archived>
+where
+    T: rkyv::Archive,
+    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    P: server::CheckedPermissions,
+    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+{
     log::debug!("Mapping file {path}");
-    let mapping = match fs.map_file(fs::Location::CommonAssets, path) {
+    let mapping = match fs.map_file(location, path) {
         Ok(mapping) => mapping,
         Err(e) => {
-            log::warn!("Error loading file at path \"{path}\": {e:?}");
+            log::warn!("Error loading file at {location:?}:\"{path}\": {e:?}");
             return None;
         }
     };
@@ -154,7 +406,14 @@ fn try_load_image_with_name(
             continue;
         };
         let path = entry.path();
-        if !path.extension().map(|e| e == "svg" || e == "png").unwrap_or(false) {
+        let supported = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|extension| {
+                matches!(extension.as_str(), "svg" | "png" | "jpg" | "jpeg" | "webp" | "bmp")
+            });
+        if !supported {
             continue;
         }
 
@@ -185,6 +444,23 @@ fn try_load_image_with_name(
 }
 
 #[cfg(not(keyos))]
+fn image_base_dirs(name: &str) -> Vec<std::path::PathBuf> {
+    let mut roots = std::env::var_os("FOUNDATION_APP_RESOURCES_DIR")
+        .map(std::path::PathBuf::from)
+        .into_iter()
+        .collect::<Vec<_>>();
+    roots.extend(["../../resources", "../../ui/ui"].into_iter().map(std::path::PathBuf::from));
+
+    roots
+        .into_iter()
+        .filter_map(|root| {
+            let candidate = root.join(name);
+            candidate.parent().map(std::path::Path::to_path_buf)
+        })
+        .collect()
+}
+
+#[cfg(not(keyos))]
 pub fn load_raw_image<FS>(
     _fs: &FS,
     _cache: &(),
@@ -193,34 +469,77 @@ pub fn load_raw_image<FS>(
     is_dark: bool,
 ) -> Image {
     let image_name = name.split("/").last().unwrap();
-    let base_dir = std::path::Path::new("../../ui/ui").join(name.to_string()).parent().unwrap().to_path_buf();
+    let search_dirs = image_base_dirs(&name);
 
-    // Try dark variant first if in dark mode
-    if is_dark {
-        let dark_image_name = format!("{}-dark", image_name);
-        if let Some(image) = try_load_image_with_name(&base_dir, &dark_image_name, nine_slice) {
-            log::debug!("Using dark variant: {}", dark_image_name);
+    for base_dir in &search_dirs {
+        if is_dark {
+            let dark_image_name = format!("{}-dark", image_name);
+            if let Some(image) = try_load_image_with_name(base_dir, &dark_image_name, nine_slice) {
+                log::debug!("Using dark variant: {}", dark_image_name);
+                return image;
+            }
+        }
+
+        if let Some(image) = try_load_image_with_name(base_dir, image_name, nine_slice) {
             return image;
         }
     }
 
-    // Load regular image
-    if let Some(image) = try_load_image_with_name(&base_dir, image_name, nine_slice) {
-        return image;
-    }
-
-    log::warn!("Could not find image: \"{name}\"");
+    log::warn!("Could not find image: \"{name}\". Tried {:?}", search_dirs);
     Image::from(ImageInner::None)
 }
 
 #[cfg(not(keyos))]
-pub fn load_icon<FS>(_fs: &FS, _cache: &(), name: SharedString, _requested_size: f32) -> Image {
-    let path = std::path::PathBuf::from(format!("../../ui/ui/icons/{name}.svg"));
-    match Image::load_from_path(&path) {
-        Ok(img) => img,
-        Err(e) => {
-            log::warn!("Error loading image at path \"{path:?}\": {e:?}");
-            Image::from(ImageInner::None)
+pub fn load_raw_image_file<FS>(_fs: &FS, _cache: &(), _location: fs::Location, path: SharedString) -> Image {
+    let path = std::path::PathBuf::from(path.as_str());
+    let mut last_error = None;
+
+    for candidate in hosted_image_file_candidates(&path) {
+        match Image::load_from_path(&candidate) {
+            Ok(image) => return image,
+            Err(e) => last_error = Some((candidate, e)),
         }
     }
+
+    if let Some((candidate, error)) = last_error {
+        log::warn!("Could not load image file at path \"{candidate:?}\": {error:?}");
+    } else {
+        log::warn!("Could not load image file at path \"{path:?}\"");
+    }
+    Image::from(ImageInner::None)
+}
+
+#[cfg(not(keyos))]
+fn hosted_image_file_candidates(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut candidates = vec![path.to_path_buf()];
+    if path.extension().and_then(|extension| extension.to_str()) == Some("raw") {
+        candidates.extend(
+            ["svg", "png", "jpg", "jpeg", "webp", "bmp"]
+                .into_iter()
+                .map(|extension| path.with_extension(extension)),
+        );
+    }
+    candidates
+}
+
+#[cfg(not(keyos))]
+pub fn load_icon<FS>(_fs: &FS, _cache: &(), name: SharedString, _requested_size: f32) -> Image {
+    let mut candidate_paths = std::env::var_os("FOUNDATION_APP_RESOURCES_DIR")
+        .map(|root| std::path::PathBuf::from(root).join("icons").join(format!("{name}.svg")))
+        .into_iter()
+        .collect::<Vec<_>>();
+    candidate_paths.extend([
+        std::path::PathBuf::from(format!("../../resources/icons/{name}.svg")),
+        std::path::PathBuf::from(format!("../../ui/ui/icons/{name}.svg")),
+    ]);
+
+    for path in &candidate_paths {
+        match Image::load_from_path(&path) {
+            Ok(img) => return img,
+            Err(e) => log::debug!("Error loading image at path \"{path:?}\": {e:?}"),
+        }
+    }
+
+    log::warn!("Could not find icon: \"{name}\". Tried {:?}", candidate_paths);
+    Image::from(ImageInner::None)
 }

@@ -1,0 +1,186 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Theme System
+// Provides enums, structs, and the Theme global for component theming
+
+// ===== ENUMS =====
+
+export enum ButtonVariant {
+    primary,
+    secondary,
+    tertiary,
+    ghost,
+    danger,
+}
+
+export enum ButtonState {
+    normal,
+    focused,
+    loading,
+    pressed,
+    disabled,
+}
+
+export enum ControlSize {
+    sm,
+    md,
+    lg,
+}
+
+export global UISize {
+    out property <length> screen-width: 480px;
+    out property <length> screen-height: 800px;
+    out property <length> control-center-status-bar-height: 40px;
+    out property <length> control-center-expanded-height: 400px;
+    out property <length> app-window-height: screen-height - control-center-status-bar-height;
+}
+
+// Button style/size structs are generated into button_theme.slint
+// (ButtonVariantProps / ButtonSizeProps) from defaults/plugins/button.json.
+
+export global Images {
+    pure callback common(string) -> image;
+    pure callback nine-slice(string) -> image;
+    pure callback icon(string, length) -> image;
+}
+
+// ===== THEME GLOBAL =====
+
+export global Theme {
+    // Button variant/size props now live in the generated ButtonTheme global
+    // (button_theme.slint), whose entries cascade from the color-* + token
+    // surface below — no per-prop push needed at runtime.
+
+    // ===== SHARED GEOMETRY / TYPOGRAPHY TOKENS =====
+    // Centralized so components don't bake numbers into per-file math (M26
+    // in the code review). Override these once and every consuming component
+    // picks up the change instead of needing per-file edits.
+
+    /// Multiplier used to derive a text line-height from the active font size.
+    /// Components compute `actual-font-size * Theme.line-height-ratio`.
+    in-out property <float> line-height-ratio: 1.2;
+
+    /// Pill / capsule controls use `min(border-radius, height / capsule-radius-divisor)`
+    /// so the corner radius can't exceed half the height. Setting this to a
+    /// large value effectively disables the cap.
+    in-out property <float> capsule-radius-divisor: 2.0;
+
+    // ===== NAMED TEXT ROLES (M23 in the code review) =====
+    // Components used to compute secondary text sizes with per-file math like
+    // `max(11px, actual-font-size - 2px)`. Each role now resolves to a single
+    // token; overriding one of these in the active theme changes every
+    // component that uses that role.
+
+    /// Largest text — dialog and sheet titles, prominent headers.
+    in-out property <length> font-size-title: 24px;
+    /// Normal reading text. Body text in inputs, accordions, cards.
+    in-out property <length> font-size-body: 18px;
+    /// Secondary descriptive text under a title (accordion subtitles, card
+    /// subtitles, checkbox descriptions). Smaller than body, larger than helper.
+    in-out property <length> font-size-subtitle: 16px;
+    /// Labels above form controls (dropdown / input labels).
+    in-out property <length> font-size-label: 14px;
+    /// Helper / hint text below an input or alongside a checkbox.
+    in-out property <length> font-size-helper: 14px;
+
+    // ===== SHARED SEMANTIC PALETTE =====
+    in-out property <bool> is-dark: false;
+    in-out property <color> palette-primary: #009db9;
+    in-out property <color> palette-primary-pressed: #006f83;
+    in-out property <color> palette-secondary: #d5d4d5;
+    in-out property <color> palette-secondary-pressed: #e3e2e2;
+    in-out property <color> palette-danger: #ff3333;
+    in-out property <color> palette-surface: #ffffff;
+    in-out property <color> palette-card: #ffffff;
+    in-out property <color> palette-background: #ffffff;
+    in-out property <color> palette-foreground: #231f20;
+    in-out property <color> palette-muted: #959394;
+    in-out property <color> palette-border: #d5d4d5;
+
+    // ===== FULL COLOR TOKENS (color.*) — for per-component variant styling =====
+    // palette-* above is the semantic subset; these expose every color.* token so
+    // generated per-component variantProps can reference them (e.g. button's
+    // primary-pressed background -> Theme.color-primary-dark). Rust resolves each
+    // for the active scheme at apply time; defaults mirror the built-in light theme.
+    in-out property <color> color-primary: #009db9;
+    in-out property <color> color-primary-light: #33b1c7;
+    in-out property <color> color-primary-dark: #006f83;
+    in-out property <color> color-secondary: #d5d4d5;
+    in-out property <color> color-secondary-dark: #e3e2e2;
+    in-out property <color> color-foreground: #231f20;
+    in-out property <color> color-foreground-light: #231f201a;
+    in-out property <color> color-muted: #959394;
+    in-out property <color> color-border: #d5d4d5;
+    in-out property <color> color-surface: #ffffff;
+    in-out property <color> color-background: #ffffff;
+    in-out property <color> color-danger: #ff3333;
+    in-out property <color> color-danger-light: #ff5c5c;
+    in-out property <color> color-danger-dark: #b52424;
+    in-out property <color> color-success: #16a34a;
+    in-out property <color> color-warning: #d97706;
+    in-out property <color> color-info: #2563eb;
+    in-out property <color> color-white: #ffffff;
+    in-out property <color> color-transparent: #00000000;
+
+    // ===== SHARED DESIGN TOKENS (carried from the theme definition) =====
+    // These mirror the global token set (font.*, fontSize.*, controlSize.*,
+    // iconSize.*, radius.*, spacing.*, ...) from the active theme. Rust pushes
+    // the resolved (active-scheme) values at startup; the defaults below match
+    // the built-in default theme so the global is sensible before the first
+    // apply. Per-component values (e.g. checkbox's own control-size literal)
+    // come from per-component size structs, NOT from these shared tokens.
+
+    // Font families (font.primary / .secondary / .tertiary)
+    in-out property <string> font-primary: "Montserrat";
+    in-out property <string> font-secondary: "Montserrat";
+    in-out property <string> font-tertiary: "Montserrat";
+
+    // Font scale (fontSize.sm/md/lg) — distinct from the role-based
+    // font-size-{title,body,subtitle,label,helper} above.
+    in-out property <length> font-size-sm: 20px;
+    in-out property <length> font-size-md: 22px;
+    in-out property <length> font-size-lg: 24px;
+
+    // Font weights (fontWeight.normal/medium/bold)
+    in-out property <int> font-weight-normal: 400;
+    in-out property <int> font-weight-medium: 500;
+    in-out property <int> font-weight-bold: 700;
+
+    // Control sizing — row / touch-target heights (controlSize.sm/md/lg)
+    in-out property <length> control-size-sm: 48px;
+    in-out property <length> control-size-md: 56px;
+    in-out property <length> control-size-lg: 64px;
+
+    // Icon sizing (iconSize.sm/md/lg)
+    in-out property <length> icon-size-sm: 20px;
+    in-out property <length> icon-size-md: 24px;
+    in-out property <length> icon-size-lg: 28px;
+
+    // Corner radius (radius.sm/md/lg/default/full)
+    in-out property <length> radius-sm: 8px;
+    in-out property <length> radius-md: 16px;
+    in-out property <length> radius-lg: 24px;
+    in-out property <length> radius-default: 24px;
+    in-out property <length> radius-full: 9999px;
+
+    // Control radius — pill controls (controlRadius.sm/md/lg)
+    in-out property <length> control-radius-sm: 20px;
+    in-out property <length> control-radius-md: 24px;
+    in-out property <length> control-radius-lg: 28px;
+
+    // Control inline padding (controlPaddingInline.sm/md/lg)
+    in-out property <length> control-padding-inline-sm: 14px;
+    in-out property <length> control-padding-inline-md: 16px;
+    in-out property <length> control-padding-inline-lg: 20px;
+
+    // Spacing scale (spacing.xs/sm/md/lg/xl)
+    in-out property <length> spacing-xs: 4px;
+    in-out property <length> spacing-sm: 8px;
+    in-out property <length> spacing-md: 12px;
+    in-out property <length> spacing-lg: 16px;
+    in-out property <length> spacing-xl: 24px;
+
+    // Button lookups (get-button-style / get-button-size) moved to the
+    // generated ButtonTheme global in button_theme.slint (style() / size-*).
+}

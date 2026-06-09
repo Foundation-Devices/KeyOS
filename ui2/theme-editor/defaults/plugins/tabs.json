@@ -1,0 +1,142 @@
+{
+  "component": "Tabs",
+  "variants": [
+    "solid",
+    "bordered",
+    "light",
+    "underlined"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "control-height",
+      "displayName": "Control Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "tab-padding-horizontal",
+      "displayName": "Tab Padding H",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlPaddingInline.md",
+        "sm": "controlPaddingInline.sm",
+        "lg": "controlPaddingInline.lg"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 48.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0,
+        "sm": 18.0,
+        "lg": 24.0
+      }
+    },
+    {
+      "name": "tab-gap",
+      "displayName": "Tab Gap",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 2.0
+      }
+    },
+    {
+      "name": "list-padding",
+      "displayName": "List Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 4.0
+      }
+    },
+    {
+      "name": "panel-padding",
+      "displayName": "Panel Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 48.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0,
+        "sm": 16.0,
+        "lg": 24.0
+      }
+    },
+    {
+      "name": "panel-min-height",
+      "displayName": "Panel Min Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 240.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 104.0,
+        "sm": 88.0,
+        "lg": 120.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.default"
+      }
+    }
+  ]
+}

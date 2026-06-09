@@ -1,0 +1,141 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { CardTheme } from "card_theme.slint";
+
+export component Card {
+    in property <string> eyebrow: "";
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    in property <string> body: "";
+    in property <string> footer: "";
+    in property <image> icon;
+    in property <ControlSize> size: ControlSize.md;
+    in property <color> accent-color: Theme.palette-primary;
+    in property <bool> interactive: false;
+    in property <bool> selected: false;
+    in property <string> font-family: CardTheme.size-default.font-family;
+    in property <length> font-size: CardTheme.size-default.font-size;
+    in property <length> card-padding: CardTheme.size-default.card-padding;
+    in property <length> icon-size: CardTheme.size-default.icon-size;
+    in property <length> border-radius: CardTheme.size-default.border-radius;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <color> background: root.selected ? root.accent-color.with-alpha(Theme.is-dark ? 0.14 : 0.08) : Theme.palette-surface;
+    in property <color> border-color: root.selected ? root.accent-color : Theme.palette-border;
+    in property <length> border-width: 1px;
+    in property <length> eyebrow-font-size: Theme.font-size-label;
+    in property <int> eyebrow-font-weight: 700;
+    in property <color> title-color: Theme.palette-foreground;
+    in property <length> title-font-size: Theme.font-size-title;
+    in property <int> title-font-weight: 600;
+    in property <color> subtitle-color: Theme.palette-muted;
+    in property <length> subtitle-font-size: Theme.font-size-subtitle;
+    in property <color> body-color: Theme.palette-foreground;
+    in property <color> footer-divider-color: Theme.palette-border;
+    in property <color> footer-color: Theme.palette-muted;
+    in property <length> footer-font-size: Theme.font-size-helper;
+
+    callback clicked();
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-padding: root.card-padding;
+    property <length> actual-icon-size: root.icon-size;
+    property <length> actual-border-radius: root.border-radius;
+
+    preferred-width: 320px;
+    preferred-height: content.preferred-height;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.background;
+        border-color: root.border-color;
+        border-width: root.border-width;
+        border-radius: root.actual-border-radius;
+        clip: true;
+
+        content := VerticalLayout {
+            padding-left: root.actual-padding;
+            padding-right: root.actual-padding;
+            padding-top: root.actual-padding;
+            padding-bottom: root.actual-padding;
+            spacing: 10px;
+
+            if root.icon.width > 0 || root.eyebrow != "": HorizontalLayout {
+                spacing: 10px;
+
+                if root.icon.width > 0: Rectangle {
+                    width: root.actual-icon-size;
+                    height: root.actual-icon-size;
+
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.icon;
+                        colorize: root.accent-color;
+                    }
+                }
+
+                if root.eyebrow != "": Text {
+                    text: root.eyebrow;
+                    color: root.accent-color;
+                    font-family: root.actual-font-family;
+                    font-size: root.eyebrow-font-size;
+                    font-weight: root.eyebrow-font-weight;
+                }
+            }
+
+            if root.title != "": Text {
+                text: root.title;
+                color: root.title-color;
+                font-family: root.actual-font-family;
+                font-size: root.title-font-size;
+                font-weight: root.title-font-weight;
+            }
+
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: root.subtitle-color;
+                font-family: root.actual-font-family;
+                font-size: root.subtitle-font-size;
+            }
+
+            if root.body != "": Text {
+                text: root.body;
+                color: root.body-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                wrap: word-wrap;
+            }
+
+            if root.footer != "": VerticalLayout {
+                spacing: 8px;
+
+                Rectangle {
+                    height: 1px;
+                    background: root.footer-divider-color;
+                }
+
+                Text {
+                    text: root.footer;
+                    color: root.footer-color;
+                    font-family: root.actual-font-family;
+                    font-size: root.footer-font-size;
+                }
+            }
+        }
+    }
+
+    card-touch := TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: root.interactive;
+        clicked => {
+            root.clicked();
+        }
+    }
+}

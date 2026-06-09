@@ -140,7 +140,7 @@ impl persist::Persister for QuantumLinkState {
         };
 
         let paired_device: Option<PairedDevice> = map.get("paired_device");
-        log::info!("Quantum link state restored from file. paired_device found {}", paired_device.is_some());
+        log::info!("QuantumLink state restored from file. paired_device found {}", paired_device.is_some());
 
         Ok(QuantumLinkState {
             system_identity: map
@@ -162,7 +162,7 @@ impl persist::Persister for QuantumLinkState {
 
 fn new_state() -> QuantumLinkState {
     let identity = QuantumLinkIdentity::generate();
-    log::info!("Initializing quantum link state");
+    log::info!("Initializing QuantumLink state");
     QuantumLinkState {
         system_identity: SystemIdentity {
             xid_document: identity.xid_document,

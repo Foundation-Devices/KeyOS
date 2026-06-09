@@ -103,8 +103,8 @@ impl BlockingArchiveHandler<AtomicCopy> for Server {
     ) -> <AtomicCopy as server::BlockingArchive>::Response {
         self.check_read_access(sender, msg.location)?;
         self.check_write_access(sender, msg.location)?;
-        let src = crate::path_of(msg.location, &msg.src, sender);
-        let dest_dir = crate::path_of(msg.location, &msg.dest_dir, sender);
+        let src = self.path_of(msg.location, &msg.src, sender)?;
+        let dest_dir = self.path_of(msg.location, &msg.dest_dir, sender)?;
 
         if self.mount(msg.location).ok_or(Error::NoMedia)?.path_in_use(&src)? {
             return Err(Error::FileInUse);

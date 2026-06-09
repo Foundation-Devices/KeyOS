@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+
+/dist
+/target
+/crates/cli/target
+/external/slint/
+/resources/
+/ui/
+/result
+/.direnv
+/.last_pos
+/disk.dat
+/hosted_security_data.json
+/simulator-files/
+.DS_Store

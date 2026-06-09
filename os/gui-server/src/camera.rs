@@ -9,6 +9,8 @@ use {
 
 camera::use_api!();
 
+// Owned by `Gui` and accessed through the GUI server's mutable message
+// handlers, so the subscription state is kept as ordinary local state.
 #[derive(Default)]
 pub(crate) struct CameraWindow {
     #[allow(dead_code)]
@@ -33,6 +35,13 @@ pub(crate) enum CameraVisibilityState {
 impl AppWindow {
     pub(crate) fn is_camera_visible(&self) -> bool {
         matches!(self.camera_state.state, CameraVisibilityState::Showing)
+    }
+}
+
+impl CameraWindow {
+    fn notify_visible(&mut self, visible: bool) {
+        self.api.notify_visible(visible);
+        self.notified_visible = visible;
     }
 }
 
@@ -65,15 +74,13 @@ impl Gui {
 
         let visible = window.is_camera_visible();
         if visible != self.camera_window.notified_visible {
-            self.camera_window.api.notify_visible(visible);
-            self.camera_window.notified_visible = visible;
+            self.camera_window.notify_visible(visible);
         }
     }
 
     pub(crate) fn camera_window_notify_hidden(&mut self) {
         if self.camera_window.notified_visible {
-            self.camera_window.api.notify_visible(false);
-            self.camera_window.notified_visible = false;
+            self.camera_window.notify_visible(false);
         }
     }
 }

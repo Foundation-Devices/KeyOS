@@ -1,0 +1,118 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { Theme, ControlSize } from "theme.slint";
+import { CheckboxTheme } from "checkbox_theme.slint";
+
+export component Checkbox {
+    in property <string> label: "";
+    in property <string> description: "";
+    in property <ControlSize> size: ControlSize.md;
+    in-out property <bool> checked: false;
+    in-out property <bool> indeterminate: false;
+    in property <bool> disabled: false;
+
+    // ===== THEMEABLE PROPS =====
+    // Defaults follow the active theme; callers only set values they override.
+    in property <string> font-family: CheckboxTheme.size(root.size).font-family;
+    in property <length> font-size: CheckboxTheme.size(root.size).font-size;
+    in property <length> control-size: CheckboxTheme.size(root.size).control-size;
+    in property <length> row-height: CheckboxTheme.size(root.size).row-height;
+    in property <length> description-font-size: Theme.font-size-helper;
+    in property <color> accent-color: root.disabled ? Theme.palette-muted : Theme.palette-primary;
+    in property <color> box-background: root.active ? root.accent-color : Theme.palette-surface;
+    in property <color> box-border-color: root.active ? root.accent-color : Theme.palette-border;
+    in property <length> box-border-width: root.active ? 0px : 1px;
+    in property <color> mark-color: Theme.palette-background;
+    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
+    in property <color> description-color: Theme.palette-muted;
+
+    callback changed(bool);
+
+    property <string> actual-font-family: root.font-family;
+    property <length> actual-font-size: root.font-size;
+    property <length> actual-box-size: root.control-size;
+    property <length> actual-row-height: root.row-height;
+    property <bool> active: root.checked || root.indeterminate;
+
+    preferred-width: content-row.preferred-width;
+    preferred-height: max(actual-row-height, text-column.preferred-height);
+    width: self.preferred-width;
+    height: self.preferred-height;
+
+    content-row := HorizontalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: 10px;
+        alignment: center;
+
+        // Center the box within the (taller) touch row so it lines up with the label.
+        VerticalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: root.actual-box-size;
+                height: root.actual-box-size;
+                border-radius: max(4px, root.actual-box-size / 4);
+                background: root.box-background;
+                border-color: root.box-border-color;
+                border-width: root.box-border-width;
+
+                if root.indeterminate: Rectangle {
+                    x: max(3px, parent.width * 0.22);
+                    y: (parent.height - self.height) / 2;
+                    width: max(6px, parent.width * 0.56);
+                    height: max(2px, parent.height * 0.12);
+                    border-radius: 1px;
+                    background: root.mark-color;
+                }
+
+                if root.checked && !root.indeterminate: Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: max(10px, parent.width * 0.66);
+                    height: max(10px, parent.height * 0.66);
+                    source: @image-url("../../resources/icons/check.svg");
+                    colorize: root.mark-color;
+                }
+            }
+        }
+
+        text-column := VerticalLayout {
+            alignment: center;
+            spacing: root.description != "" ? 2px : 0px;
+
+            if root.label != "": Text {
+                text: root.label;
+                color: root.label-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                vertical-alignment: center;
+            }
+
+            if root.description != "": Text {
+                text: root.description;
+                color: root.description-color;
+                font-family: root.actual-font-family;
+                font-size: root.description-font-size;
+                overflow: elide;
+            }
+        }
+    }
+
+    TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: !root.disabled;
+
+        clicked => {
+            if (root.indeterminate) {
+                root.indeterminate = false;
+                root.checked = true;
+            } else {
+                root.checked = !root.checked;
+            }
+            root.changed(root.checked);
+        }
+    }
+}
