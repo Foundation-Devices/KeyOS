@@ -435,11 +435,16 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
                 Ok(Result::MemoryRange(range))
             })
         }
-        SysCall::UnmapMemory(range) => MemoryManager::with_mut(|mm| {
-            mm.check_range_accessible(range)?;
-            mm.unmap_range(range.as_ptr(), range.len())?;
+        SysCall::UnmapMemory(range) => {
+            MemoryManager::with_mut(|mm| {
+                mm.check_range_accessible(range)?;
+                mm.unmap_range(range.as_ptr(), range.len())
+            })?;
+            SystemServices::with_mut(|ss| {
+                ss.current_process_mut().release_allocation_hint(range.as_ptr() as usize)
+            });
             Ok(Result::Ok)
-        }),
+        }
         SysCall::ClaimInterrupt(no, callback, arg) => {
             if let Ok(no) = no.try_into() {
                 interrupt_claim_user(no, current_pid(), callback, arg).map(|_| Result::Ok)
@@ -693,7 +698,7 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             let start = (buffer.as_ptr() as usize) & !(PAGE_SIZE - 1);
             let end = ((buffer.as_ptr() as usize) + buffer.len()).next_multiple_of(PAGE_SIZE);
             for addr in (start..end).step_by(PAGE_SIZE) {
-                mm.ensure_page_exists(addr as _)?;
+                mm.ensure_backed(addr as _)?;
             }
             let mut buffer = crate::debug::BufStr::from(&mut buffer);
             crate::debug::commands::debug_command(cmd, &mut buffer);

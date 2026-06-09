@@ -82,5 +82,5 @@ impl MemoryMapping {
 
     pub fn invalidate_page(&self, _virt: *mut usize, _phys: usize) {}
 
-    pub fn address_available(&self, _virt: *const usize) -> bool { true }
+    pub fn find_free_run(&self, from: usize, _end: usize, _needed: usize) -> Option<usize> { Some(from) }
 }

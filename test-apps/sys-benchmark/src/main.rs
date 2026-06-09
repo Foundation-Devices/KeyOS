@@ -316,6 +316,7 @@ fn measure_message_ipc() {
     log::info!("== IPC ==");
     let buf_1 = allocate(0x1000, MemoryFlags::W);
     let buf_128 = allocate(128 * 0x1000, MemoryFlags::W);
+    let buf_512 = allocate(512 * 0x1000, MemoryFlags::W);
 
     measure(|| conn.try_send_blocking_scalar(Ping).unwrap(), 100000, "Blocking scalar    ");
     measure(
@@ -339,10 +340,18 @@ fn measure_message_ipc() {
         2000,
         "LendMut(128 pages) ",
     );
+    measure(
+        || {
+            conn.lend_mut(MemPing(buf_512));
+        },
+        1000,
+        "LendMut(512 pages) ",
+    );
 
     conn.try_send_scalar(Shutdown).unwrap();
     unmap_memory(buf_1).unwrap();
     unmap_memory(buf_128).unwrap();
+    unmap_memory(buf_512).unwrap();
 }
 
 fn measure_sleep_accuracy() {

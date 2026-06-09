@@ -91,6 +91,9 @@ pub fn print_l2cache_stats() {
 /// Cleans and/or invalidates the L1 data cache.
 pub fn clean_cache_l1() { l1cache::clean_dcache() }
 
+/// Cleans and invalidates the entire L1 data cache.
+pub fn clean_invalidate_cache_l1() { l1cache::clean_invalidate_dcache() }
+
 /// Cleans and/or invalidates the L1 instruction cache.
 pub fn invalidate_instruction_cache() { l1cache::invalidate_icache() }
 
@@ -108,6 +111,13 @@ pub fn flush_cache_region_l1(virt_start: u32, virt_end: u32, op: CacheOperation)
 pub fn clean_cache_l2() {
     if let Some(l2cc) = unsafe { (&mut *core::ptr::addr_of_mut!(L2CC_KERNEL)).as_mut() } {
         l2cc.cache_clean()
+    }
+}
+
+/// Cleans and invalidates the entire L2 cache.
+pub fn clean_invalidate_cache_l2() {
+    if let Some(l2cc) = unsafe { (&mut *core::ptr::addr_of_mut!(L2CC_KERNEL)).as_mut() } {
+        l2cc.cache_clean_invalidate()
     }
 }
 

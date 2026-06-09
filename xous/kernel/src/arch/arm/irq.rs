@@ -270,7 +270,7 @@ pub extern "C" fn abort_handler() {
                 // Page-level translation fault: may be an on-demand page awaiting backing.
                 0b0111 => {
                     let ensure = MemoryManager::with_mut(|mm| {
-                        mm.ensure_page_exists((dfar & !(PAGE_SIZE - 1)) as *mut usize)
+                        mm.ensure_backed((dfar & !(PAGE_SIZE - 1)) as *mut usize)
                     });
                     match ensure {
                         Ok(()) => {

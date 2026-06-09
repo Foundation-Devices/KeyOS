@@ -111,7 +111,11 @@ _branch_loader_main:
 .thumb
 .global start_kernel
 start_kernel:
-  # Set TTBR0 and TTBR1 to point to the kernel page table stored in arg #2 (r1)
+  # Set TTBR0 and TTBR1 to point to the kernel page table stored in arg #2 (r1).
+  # Mark the translation-table walks inner+outer Write-Back Write-Allocate,
+  # Non-shareable (IRGN=WB-WA bit6, RGN=WB-WA bit3, S=0). Non-shareable is
+  # required: with ACTLR.SMP=0 the A5 treats shareable WB-WA as Non-cacheable.
+  orr r1, r1, #0x48
   mcr p15, 0, r1, c2, c0, 0
   mcr p15, 0, r1, c2, c0, 1
 

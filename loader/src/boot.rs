@@ -178,17 +178,27 @@ impl BootConfig {
         if tt[vpn1].get_type() == TranslationTableType::Invalid {
             dprintln!("Previously unmapped L1 entry");
 
+            // Pack four 1KiB L2 tables into one 4KiB page by backing the whole
+            // aligned 4-section group, rather than burning a page per section.
+            // Keeping every group all-Invalid or all-Page lets the kernel grow
+            // L2 tables without checking siblings; the only map_section region
+            // (the RAM window) is 4MiB-group-aligned, so a group is never
+            // part-section, part-page.
+            const L2_TABLE_BYTES: u32 = 256 * 4;
             let na = self.alloc();
-            let phys = PhysicalAddress::from_ptr(na);
+            self.mark_as_owned(na as usize);
+            let page_phys = PhysicalAddress::from_ptr(na).as_u32();
             let entry_flags =
                 u32::from(PAGE_TABLE_FLAGS::VALID::Enable) | u32::from(PAGE_TABLE_FLAGS::DOMAIN.val(0xf));
-            let descriptor = TranslationTableDescriptor::new(TranslationTableType::Page, phys, entry_flags)
-                .expect("tt descriptor");
-            dprintln!("New TT descriptor: {:032b}", descriptor);
-            tt[vpn1] = descriptor;
-
+            let group_base = vpn1 & !0b11;
+            for k in 0..4u32 {
+                let sub_table = PhysicalAddress::new(page_phys + k * L2_TABLE_BYTES);
+                let descriptor =
+                    TranslationTableDescriptor::new(TranslationTableType::Page, sub_table, entry_flags)
+                        .expect("tt descriptor");
+                tt[group_base + k as usize] = descriptor;
+            }
             dprintln!("new tt[{:08x}] = {:032b}", vpn1, tt[vpn1]);
-            self.mark_as_owned(na as usize);
         }
 
         let existing_entry = tt[vpn1];
@@ -419,11 +429,14 @@ pub fn map_peripherals(cfg: &mut BootConfig) {
 pub fn map_physical_ram(cfg: &mut BootConfig) {
     let tt = cfg.pid1.ttbr0 as *mut TranslationTableMemory;
     for section in (0..RAM_SIZE).step_by(0x100000) {
+        // Normal Write-Back Write-Allocate (C:1, B:0), non-shareable, so the
+        // kernel's page-table accesses through this window cache and stay
+        // coherent with the cacheable MMU table walks.
         cfg.map_section(
             tt,
             ENCRYPTED_DRAM_BASE + section,
             MAPPED_PHYSICAL_RAM + section,
-            FLG_VALID | FLG_R | FLG_W | FLG_DEV | FLG_NO_CACHE,
+            FLG_VALID | FLG_R | FLG_W,
         );
     }
 }

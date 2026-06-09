@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2020 Sean Cross <sean@xobs.io>
 // SPDX-License-Identifier: Apache-2.0
 
-use keyos::{MEMORY_MIRROR_AREA_VIRT, MMAP_AREA_VIRT};
+use keyos::{MEMORY_MIRROR_AREA_VIRT, MMAP_AREA_VIRT, MMAP_AREA_VIRT_END, PAGE_SIZE};
 #[cfg(keyos)]
 use xous::arch::MAX_PROCESS_NAME_LEN;
 use xous::{AppId, Error, MessageId, SystemEvent, ThreadPriority, CID, NUM_SYSTEM_EVENTS, PID, SID, TID};
@@ -142,6 +142,44 @@ impl Process {
     pub fn activate(&self) {
         crate::arch::process::set_current_pid(self.pid);
         self.mapping.activate();
+    }
+
+    /// Lower the allocation hint to `virt` when a MMAP-area range is freed, so
+    /// the next allocation reuses it instead of marching ever forward.
+    pub fn release_allocation_hint(&mut self, virt: usize) {
+        if (MMAP_AREA_VIRT..MMAP_AREA_VIRT_END).contains(&virt) {
+            self.allocation_hint = self.allocation_hint.min(virt);
+        }
+    }
+
+    /// Find a virtual address in this process big enough for `size` bytes, advancing the
+    /// process's allocation hint past the returned region. A non-null `virt_ptr` is returned as-is.
+    pub fn find_virtual_address(&mut self, virt_ptr: *mut usize, size: usize) -> Result<*mut usize, Error> {
+        if !virt_ptr.is_null() {
+            return Ok(virt_ptr);
+        }
+
+        if size > MMAP_AREA_VIRT_END - MMAP_AREA_VIRT {
+            return Err(Error::OutOfMemory);
+        }
+
+        let needed = size / PAGE_SIZE;
+
+        // Search forward from the hint, then wrap to the area below it.
+        let start = self
+            .mapping
+            .find_free_run(self.allocation_hint, MMAP_AREA_VIRT_END, needed)
+            .or_else(|| {
+                self.mapping.find_free_run(
+                    MMAP_AREA_VIRT,
+                    self.allocation_hint.saturating_add(size).min(MMAP_AREA_VIRT_END),
+                    needed,
+                )
+            })
+            .ok_or(Error::BadAddress)?;
+
+        self.allocation_hint = (start + size).min(MMAP_AREA_VIRT_END);
+        Ok(start as *mut usize)
     }
 
     pub fn terminate(&mut self, _ret: u32) -> Result<(), Error> {

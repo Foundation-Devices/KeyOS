@@ -361,17 +361,16 @@ impl SystemServices {
         let src_mapping = &mut self.process_mut(current_pid)?.mapping;
         // Opt out of the borrow checker, because we know these are two different mappings.
         let src_mapping = unsafe { &mut *(src_mapping as *mut _) };
-        let dest_mapping = &mut self.process_mut(dest_pid)?.mapping;
-        crate::mem::MemoryManager::with_mut(|mm| {
-            let dest_virt = mm.find_virtual_address(dest_mapping, dest_virt, len)?;
-
+        let dest_process = self.process_mut(dest_pid)?;
+        let dest_virt = dest_process.find_virtual_address(dest_virt, len)?;
+        let dest_mapping = &mut dest_process.mapping;
+        let dest_virt = crate::mem::MemoryManager::with_mut(|mm| {
             let mut error = None;
 
-            // Move each subsequent page.
+            // Move each subsequent page; move_page backs on-demand sources itself.
             for offset in (0..usize_len).step_by(usize_page) {
                 assert_eq!(((src_virt.wrapping_add(offset) as usize) & 0xfff), 0);
                 assert_eq!(((dest_virt.wrapping_add(offset) as usize) & 0xfff), 0);
-                mm.ensure_page_exists(src_virt.wrapping_add(offset))?;
                 mm.move_page(
                     src_mapping,
                     src_virt.wrapping_add(offset),
@@ -380,8 +379,18 @@ impl SystemServices {
                 )
                 .unwrap_or_else(|e| error = Some(e));
             }
+            // TODO: several errors can reach here (OOM allocating a destination page table, an
+            // on-demand source that cannot be backed, ...), and by now part of the range may
+            // already have moved. Reverting a partial move is very tricky and would make all the
+            // involved code much more complicated, so for now we panic.
             error.map_or_else(|| Ok(dest_virt), |e| panic!("unable to send: {:?}", e))
-        })
+        })?;
+
+        // The source pages have left this (the sender's) space; let its next
+        // allocation reuse the freed range instead of marching past it.
+        self.process_mut(current_pid)?.release_allocation_hint(src_virt as usize);
+
+        Ok(dest_virt)
     }
 
     #[cfg(not(keyos))]
@@ -452,7 +461,7 @@ impl SystemServices {
             MemoryManager::with_mut(|mm| {
                 for offset in (0..usize_len).step_by(usize_page) {
                     assert!(((src_virt.wrapping_add(offset) as usize) & 0xfff) == 0);
-                    mm.ensure_page_exists(src_virt.wrapping_add(offset))?;
+                    mm.ensure_backed(src_virt.wrapping_add(offset))?;
                 }
                 Ok(())
             })?;
@@ -461,18 +470,17 @@ impl SystemServices {
         let src_mapping = &mut self.process_mut(current_pid)?.mapping;
         // Opt out of the borrow checker, because we know these are two different mappings.
         let src_mapping = unsafe { &mut *(src_mapping as *mut _) };
-        let dest_mapping = &mut self.process_mut(dest_pid)?.mapping;
+        let dest_process = self.process_mut(dest_pid)?;
+        let dest_virt = dest_process.find_virtual_address(dest_virt, len)?;
+        let dest_mapping = &mut dest_process.mapping;
         use crate::mem::MemoryManager;
         MemoryManager::with_mut(|mm| {
-            let dest_virt = mm.find_virtual_address(dest_mapping, dest_virt, len)?;
-
             let mut error = None;
 
-            // Lend each subsequent page.
+            // Lend each subsequent page; lend_page backs on-demand sources itself.
             for offset in (0..usize_len).step_by(usize_page) {
                 assert!(((src_virt.wrapping_add(offset) as usize) & 0xfff) == 0);
                 assert!(((dest_virt.wrapping_add(offset) as usize) & 0xfff) == 0);
-                mm.ensure_page_exists(src_virt.wrapping_add(offset))?;
                 mm.lend_page(
                     src_mapping,
                     src_virt.wrapping_add(offset),
@@ -480,10 +488,12 @@ impl SystemServices {
                     dest_virt.wrapping_add(offset),
                     mutable,
                 )
-                .unwrap_or_else(|e| {
-                    error = Some(e);
-                });
+                .unwrap_or_else(|e| error = Some(e));
             }
+            // TODO: several errors can reach here (OOM allocating a destination page table, an
+            // on-demand source that cannot be backed, ...), and by now part of the range may
+            // already have been lent. Reverting a partial lend is very tricky and would make all
+            // the involved code much more complicated, so for now we panic.
             error.map_or_else(
                 || Ok(dest_virt),
                 |e| {

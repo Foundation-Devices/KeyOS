@@ -12,7 +12,6 @@ use keyos::{
     to_plaintext_phys_addr, ENCRYPTED_DRAM_BASE, ENCRYPTED_DRAM_END, PLAINTEXT_DRAM_BASE, PLAINTEXT_DRAM_END,
     RAM_PAGES,
 };
-use keyos::{MMAP_AREA_VIRT, MMAP_AREA_VIRT_END};
 use xous::{Error, MemoryFlags, MemoryRange, PID};
 
 pub use crate::arch::mem::MemoryMapping;
@@ -391,43 +390,6 @@ impl MemoryManager {
         self.free_pages_zeroed[offset..offset + pages].fill(true);
     }
 
-    /// Find a virtual address in the current process that is big enough
-    /// to fit `size` bytes.
-    pub fn find_virtual_address(
-        &mut self,
-        mapping: &MemoryMapping,
-        virt_ptr: *mut usize,
-        size: usize,
-    ) -> Result<*mut usize, Error> {
-        // If we were supplied a perfectly good address, return that.
-        if !virt_ptr.is_null() {
-            return Ok(virt_ptr);
-        }
-
-        if size > MMAP_AREA_VIRT_END - MMAP_AREA_VIRT {
-            return Err(Error::OutOfMemory);
-        }
-
-        SystemServices::with_mut(|ss| {
-            let process = &mut ss.current_process_mut();
-
-            // Look for a sequence of `size` pages that are free.
-            for potential_start in (process.allocation_hint..MMAP_AREA_VIRT_END - size)
-                .chain(MMAP_AREA_VIRT..process.allocation_hint)
-                .step_by(PAGE_SIZE)
-            {
-                let all_free = (potential_start..potential_start + size)
-                    .step_by(PAGE_SIZE)
-                    .all(|page| mapping.address_available(page as *const usize));
-                if all_free {
-                    process.allocation_hint = (potential_start + size).min(MMAP_AREA_VIRT_END);
-                    return Ok(potential_start as *mut usize);
-                }
-            }
-            Err(Error::BadAddress)
-        })
-    }
-
     /// Attempt to map the given physical address into the virtual address space
     /// of this process.
     ///
@@ -444,7 +406,8 @@ impl MemoryManager {
         map_user: bool,
     ) -> Result<MemoryRange, Error> {
         let mut current_mapping = crate::arch::mem::MemoryMapping::current();
-        let virt = self.find_virtual_address(&current_mapping, virt_ptr, size)?;
+        let virt =
+            SystemServices::with_mut(|ss| ss.current_process_mut().find_virtual_address(virt_ptr, size))?;
         #[cfg(keyos)]
         let mut zero_after_alloc =
             keyos::is_address_in_plaintext_dram(phys) || keyos::is_address_encrypted(phys);
@@ -576,28 +539,37 @@ impl MemoryManager {
         if cfg!(keyos) && (virt & (PAGE_SIZE - 1) != 0 || len & (PAGE_SIZE - 1) != 0) {
             return Err(Error::BadAlignment);
         }
+        // For large regions, one whole-cache clean+invalidate is far cheaper
+        // than per-page, per-cache-line maintenance (a 2MB buffer would be
+        // ~64k L2 MMIO writes; this collapses it to a single by-way pass).
+        // When it fires, skip the per-page invalidate below.
+        #[cfg(keyos)]
+        let bulk_flushed = crate::arch::mem::MemoryMapping::current()
+            .try_whole_cache_flush(len, xous::CacheOperation::CleanAndInvalidate);
+        #[cfg(not(keyos))]
+        let bulk_flushed = false;
+
+        let mapping = crate::arch::mem::MemoryMapping::current();
         let mut result = Ok(());
         for addr in (virt..(virt + len)).step_by(PAGE_SIZE) {
-            if let Err(e) = self.unmap_page(addr as *mut usize) {
+            let addr = addr as *mut usize;
+            if let Ok(phys) = mapping.virt_to_phys(addr) {
+                // Invalidate the page's cache lines so the controller can't commit them later, once the
+                // page has been handed to another process as non-cached. Skipped when the whole cache was
+                // already flushed above.
+                if !bulk_flushed {
+                    mapping.invalidate_page(addr, phys);
+                }
+                self.release_page(phys, mapping.get_pid()).ok();
+            }
+            // Free the virtual address.
+            if let Err(e) = mapping.unmap_page(addr) {
                 if result.is_ok() {
                     result = Err(e);
                 }
             }
         }
         result
-    }
-
-    fn unmap_page(&mut self, virt: *mut usize) -> Result<(), Error> {
-        let mapping = crate::arch::mem::MemoryMapping::current();
-        if let Ok(phys) = mapping.virt_to_phys(virt) {
-            // Invalidate the cache for the page, so the cache controller doesn't decide to commit data later
-            // in time when we gave out this page to a different process as non-cached.
-            mapping.invalidate_page(virt, phys);
-            self.release_page(phys, mapping.get_pid()).ok();
-        };
-
-        // Free the virtual address.
-        mapping.unmap_page(virt)
     }
 
     /// Check if memory range is user accessible or not. Does not need to be aligned.
@@ -708,8 +680,8 @@ impl MemoryManager {
 
     /// Allocate a backing page for a page that was mapped on-demand beforehand.
     #[cfg(keyos)]
-    pub fn ensure_page_exists(&mut self, address: *mut usize) -> Result<(), Error> {
-        MemoryMapping::ensure_page_exists(self, address)
+    pub fn ensure_backed(&mut self, address: *mut usize) -> Result<(), Error> {
+        MemoryMapping::ensure_backed(self, address)
     }
 
     /// Claim the given memory for the given process, or release the memory
@@ -731,24 +703,31 @@ impl MemoryManager {
             return Err(Error::BadAlignment);
         }
 
-        if let Err(e) = SystemServices::with(|ss| ss.process(pid)?.check_memory_permission(addr)) {
-            println!("[!] PID {pid} was denied access to hw address {addr:08x}");
-            return Err(e);
-        }
+        // RAM is ownable by any process and is never a shared peripheral, so the
+        // permission check and peripheral scan are both no-ops for it. Skip them
+        // -- this is the hot path (every moved/claimed RAM page), and the per-page
+        // process lookup + scans otherwise dominate bulk moves.
+        let is_ram = keyos::is_address_encrypted(addr) || keyos::is_address_in_plaintext_dram(addr);
+        if !is_ram {
+            if let Err(e) = SystemServices::with(|ss| ss.process(pid)?.check_memory_permission(addr)) {
+                println!("[!] PID {pid} was denied access to hw address {addr:08x}");
+                return Err(e);
+            }
 
-        // FIXME: workaround to allow to share the same peripherals
-        //        between the kernel and user processes
-        #[cfg(keyos)]
-        {
-            for base in crate::arch::mem::SHARED_PERIPHERALS.iter() {
-                if pid.get() != 1
-                    && (addr == *base
-                        || addr == *base + 0x1000
-                        || addr == *base + 0x2000
-                        || addr == *base + 0x3000)
-                {
-                    klog!("[!] Peripheral sharing workaround used for {:08x} address", addr);
-                    return Ok(());
+            // FIXME: workaround to allow to share the same peripherals
+            //        between the kernel and user processes
+            #[cfg(keyos)]
+            {
+                for base in crate::arch::mem::SHARED_PERIPHERALS.iter() {
+                    if pid.get() != 1
+                        && (addr == *base
+                            || addr == *base + 0x1000
+                            || addr == *base + 0x2000
+                            || addr == *base + 0x3000)
+                    {
+                        klog!("[!] Peripheral sharing workaround used for {:08x} address", addr);
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -862,12 +841,12 @@ impl MemoryManager {
         }
         #[cfg(keyos)]
         {
-            // After unmapping memory we invalidate caches so that the cache controller doesn't decide to
-            // commit random data after we gave the pages to another process (if it is mapped non-cached
-            // there), but in this case it's faster to just flush everything, because a whole process' worth
-            // of memory is much bigger than the L2 cache.
-            crate::platform::atsama5d2::cache::clean_cache_l1();
-            crate::platform::atsama5d2::cache::clean_cache_l2();
+            // Clean and invalidate (not just clean) before these pages return to the
+            // free pool to be DMA-zeroed and reused: a freed page must leave no cache
+            // lines behind, or a later read would hit stale cached data instead of the
+            // zeroer's DRAM writes. Whole-cache because a process' memory dwarfs the L2.
+            crate::platform::atsama5d2::cache::clean_invalidate_cache_l1();
+            crate::platform::atsama5d2::cache::clean_invalidate_cache_l2();
             // And we need to start zeroing the deallocated pages
             crate::platform::page_zeroer::start(self);
         }

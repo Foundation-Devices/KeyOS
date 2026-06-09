@@ -44,6 +44,12 @@ pub const SHARED_PERIPHERALS: [usize; 7] = [
 // instead of going page by page, line by line.
 const FULL_CACHE_FLUSH_THRESHOLD: usize = 128 * 1024;
 
+// TTBR translation-table-walk attributes: inner+outer Write-Back Write-Allocate,
+// Non-shareable (IRGN bit6, RGN bit3, S=0). Must match the page-table window's
+// memory type. Non-shareable because ACTLR.SMP=0 (shareable WB-WA would be
+// treated as Non-cacheable on this A5). Keep in sync with loader/src/asm.S.
+const TTBR_WALK_ATTRS: u32 = 0x48;
+
 #[derive(Debug)]
 pub struct MemoryMapping {
     ttbr0: PhysicalAddress,
@@ -118,7 +124,9 @@ impl MemoryMapping {
         assert_ne!(pid, 0, "Hardware PID is zero");
 
         MemoryMapping {
-            ttbr0: PhysicalAddress::new(ttbr0),
+            // Strip the TTBR cacheability/shareability attribute bits; the table
+            // base is 16KiB-aligned so the low 14 bits are ours to mask.
+            ttbr0: PhysicalAddress::new(ttbr0 & !0x3fff),
             pid: unsafe { NonZeroU8::new_unchecked((pid & 0xff) as u8) },
         }
     }
@@ -143,7 +151,7 @@ impl MemoryMapping {
               "mcr p15, 0, {contextidr}, c13, c0, 1",
               "isb",
               zero = in(reg) zero,
-              ttbr0 = in(reg) self.ttbr0.as_u32(),
+              ttbr0 = in(reg) self.ttbr0.as_u32() | TTBR_WALK_ATTRS,
               contextidr = in(reg) contextidr,
             );
         }
@@ -163,6 +171,12 @@ impl MemoryMapping {
         self.ttbr0 = PhysicalAddress::new(0);
     }
 
+    /// Pointer to the L1 translation-table descriptor for section index `vpn1`.
+    fn l1_entry_ptr(&self, vpn1: usize) -> *mut TranslationTableDescriptor {
+        let l1_pt_addr = transparent_phys_to_virt(self.ttbr0);
+        unsafe { l1_pt_addr.add(vpn1) as *mut TranslationTableDescriptor }
+    }
+
     /// Get the L2 pagetable entry for a given address, or `Err()` if the address is not mapped in L1
     /// The entry itself may be empty.
     fn get_l2_entry(&self, addr: *const usize) -> Result<*mut u32, Error> {
@@ -180,10 +194,7 @@ impl MemoryMapping {
             return Err(Error::AccessDenied);
         }
 
-        let l1_pt_addr = transparent_phys_to_virt(self.ttbr0);
-
-        let existing_l1_entry =
-            unsafe { (l1_pt_addr.add(vpn1) as *mut TranslationTableDescriptor).read_volatile() };
+        let existing_l1_entry = unsafe { self.l1_entry_ptr(vpn1).read_volatile() };
         if existing_l1_entry.get_type() == TranslationTableType::Invalid {
             return Err(Error::BadAddress);
         }
@@ -200,9 +211,9 @@ impl MemoryMapping {
             )
         };
         slice.fill(0);
-        // Strict ordering is guaranteed by the DEV flag on the transparent mapping, just make sure
-        // the rust compiler also doesn't try to do anything fancy.
-        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        // The transparent mapping is cacheable, so the zero-fill sits in the
+        // cache; order it before anything points the walker at this table.
+        unsafe { core::arch::asm!("dsb") };
     }
 
     /// Create an L2 table entry (and L2 table if necessary).
@@ -222,29 +233,38 @@ impl MemoryMapping {
             return Err(Error::AccessDenied);
         }
 
-        let l1_pt_addr = transparent_phys_to_virt(self.ttbr0);
-
-        let existing_l1_entry =
-            unsafe { ((l1_pt_addr).add(vpn1) as *mut TranslationTableDescriptor).read_volatile() };
+        let existing_l1_entry = unsafe { self.l1_entry_ptr(vpn1).read_volatile() };
 
         let l2_pt_phys = match existing_l1_entry.get_type() {
             TranslationTableType::Invalid => {
-                let (l2_pt_phys, zeroed) = mm.alloc_range(1, self.pid)?;
-                klog!("Allocated a new page for a new L2 table: phys={:08x?}", l2_pt_phys,);
-                let l2_pt_phys = PhysicalAddress::new(l2_pt_phys as u32);
+                // Pack four 1KiB L2 tables into one 4KiB page by backing the whole
+                // aligned 4-section group, rather than wasting 3KiB per section. The
+                // loader and this function only ever create L2 tables a full group at
+                // a time, so an Invalid entry guarantees its siblings are Invalid too;
+                // no need to check them.
+                const L2_TABLE_BYTES: u32 = 256 * 4;
+                let (page_phys, zeroed) = mm.alloc_range(1, self.pid)?;
+                klog!("Allocated a new page for four L2 tables: phys={:08x?}", page_phys);
+                let page_phys = page_phys as u32;
 
                 if !zeroed {
-                    Self::zero_newly_allocated_tt_pages(l2_pt_phys, 1);
+                    Self::zero_newly_allocated_tt_pages(PhysicalAddress::new(page_phys), 1);
                 }
 
                 let attributes =
                     u32::from(PAGE_TABLE_FLAGS::VALID::Enable) | u32::from(PAGE_TABLE_FLAGS::DOMAIN.val(0xf));
-                let descriptor =
-                    TranslationTableDescriptor::new(TranslationTableType::Page, l2_pt_phys, attributes)
-                        .expect("tt descriptor");
-                unsafe { l1_pt_addr.add(vpn1).write_volatile(descriptor.as_u32()) };
+                let group_base = vpn1 & !0b11;
+                for k in 0..4u32 {
+                    let sub_table = PhysicalAddress::new(page_phys + k * L2_TABLE_BYTES);
+                    let descriptor =
+                        TranslationTableDescriptor::new(TranslationTableType::Page, sub_table, attributes)
+                            .expect("tt descriptor");
+                    unsafe { self.l1_entry_ptr(group_base + k as usize).write_volatile(descriptor) };
+                }
+                // Make the new L1 descriptors visible to the table walker.
+                unsafe { core::arch::asm!("dsb") };
 
-                l2_pt_phys
+                PhysicalAddress::new(page_phys + (vpn1 & 0b11) as u32 * L2_TABLE_BYTES)
             }
             TranslationTableType::Page => existing_l1_entry.get_addr().unwrap(),
             _ => return Err(Error::MemoryInUse),
@@ -266,7 +286,7 @@ impl MemoryMapping {
 
     /// Map the given page to the specified process table.
     /// Does not allocate actual physical pages to back the mapping.
-    /// Use existing physical addresses, or phys=0 and [`MemoryMapping::ensure_page_exists`]
+    /// Use existing physical addresses, or phys=0 and [`MemoryMapping::ensure_backed`]
     /// to make sure there is a page behind the entry.
     pub fn map_page(
         &mut self,
@@ -323,7 +343,13 @@ impl MemoryMapping {
     ) -> Result<usize, Error> {
         klog!("***move - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
-        let entry_data = L2TableEntry::read_from(src_entry);
+        let mut entry_data = L2TableEntry::read_from(src_entry);
+        // An on-demand source must be backed before it can be moved; back it
+        // from the walk we already did.
+        if entry_data.is_on_demand() {
+            self.allocate_backing_page(mm, src_addr, src_entry, entry_data)?;
+            entry_data = L2TableEntry::read_from(src_entry);
+        }
         if !entry_data.is_mapped() && entry_data.phys()? != 0 {
             return Err(Error::BadAddress);
         }
@@ -349,7 +375,13 @@ impl MemoryMapping {
     ) -> Result<usize, Error> {
         klog!("***lend - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
-        let entry_data = L2TableEntry::read_from(src_entry);
+        let mut entry_data = L2TableEntry::read_from(src_entry);
+        // Lending requires a backed source, so back the on-demand page from
+        // the walk we already did.
+        if entry_data.is_on_demand() {
+            self.allocate_backing_page(mm, src_addr, src_entry, entry_data)?;
+            entry_data = L2TableEntry::read_from(src_entry);
+        }
         // Note: we could probably get away with "moving" unmapped pages here,
         //       but some code might depend on moved and lent pages being actually
         //       backed.
@@ -410,12 +442,38 @@ impl MemoryMapping {
         }
     }
 
+    /// Perform `op` on the whole cache when `len` is large enough that the
+    /// per-page, per-cache-line path would be slower than a single by-way
+    /// pass, returning whether it did. Callers should fall back to per-page
+    /// work when this returns false.
+    ///
+    /// Whole-cache Invalidate is deliberately not handled: it would discard
+    /// other processes' dirty lines. Callers needing invalidate semantics on
+    /// a large region should pass CleanAndInvalidate, which writes those lines back.
+    pub fn try_whole_cache_flush(&self, len: usize, op: CacheOperation) -> bool {
+        if len <= FULL_CACHE_FLUSH_THRESHOLD {
+            return false;
+        }
+        use crate::platform::atsama5d2::cache;
+        match op {
+            CacheOperation::Clean => {
+                cache::clean_cache_l1();
+                cache::clean_cache_l2();
+                true
+            }
+            CacheOperation::CleanAndInvalidate => {
+                cache::clean_invalidate_cache_l1();
+                cache::clean_invalidate_cache_l2();
+                true
+            }
+            CacheOperation::Invalidate => false,
+        }
+    }
+
     /// Flush L1 and L2 caches.
     /// Start and size don't need to be aligned to anything.
     pub fn flush_cache(&self, mem: MemoryRange, op: CacheOperation) -> Result<(), Error> {
-        if op == CacheOperation::Clean && mem.len() > FULL_CACHE_FLUSH_THRESHOLD {
-            crate::platform::atsama5d2::cache::clean_cache_l1();
-            crate::platform::atsama5d2::cache::clean_cache_l2();
+        if self.try_whole_cache_flush(mem.len(), op) {
             return Ok(());
         }
 
@@ -461,13 +519,58 @@ impl MemoryMapping {
         );
     }
 
-    /// Determine whether a virtual address has been mapped
-    pub fn address_available(&self, virt: *const usize) -> bool {
-        if let Ok(entry) = self.get_l2_entry(virt) {
-            L2TableEntry::read_from(entry).is_empty()
-        } else {
-            true
+    /// Start of the first run of `needed` free (unmapped) pages in `[from, end)`,
+    /// or `None`. One forward pass: each L1 descriptor is read once per section,
+    /// each L2 entry at most once, and a section with no L2 table contributes its
+    /// whole span with no L2 reads.
+    pub fn find_free_run(&self, from: usize, end: usize, needed: usize) -> Option<usize> {
+        let mut addr = from;
+        let mut run_start = from;
+        let mut run_len = 0;
+
+        while addr < end {
+            let vpn1 = VirtualAddress::new(addr as u32).translation_table_index();
+            let section_end =
+                (VirtualAddress::from_indices(vpn1 + 1, 0, 0).unwrap().as_u32() as usize).min(end);
+            let l1 = unsafe { self.l1_entry_ptr(vpn1).read_volatile() };
+            match l1.get_type() {
+                // No L2 table: the whole rest of the section is free.
+                TranslationTableType::Invalid => {
+                    if run_len == 0 {
+                        run_start = addr;
+                    }
+                    run_len += (section_end - addr) / PAGE_SIZE;
+                    if run_len >= needed {
+                        return Some(run_start);
+                    }
+                    addr = section_end;
+                }
+                TranslationTableType::Page => {
+                    let l2_base = transparent_phys_to_virt(l1.get_addr().unwrap());
+                    while addr < section_end {
+                        let vpn2 = VirtualAddress::new(addr as u32).page_table_index();
+                        if L2TableEntry::read_from(unsafe { l2_base.add(vpn2) }).is_empty() {
+                            if run_len == 0 {
+                                run_start = addr;
+                            }
+                            run_len += 1;
+                            if run_len >= needed {
+                                return Some(run_start);
+                            }
+                        } else {
+                            run_len = 0;
+                        }
+                        addr += PAGE_SIZE;
+                    }
+                }
+                // Section/supersection mapping: occupied, breaks the run.
+                _ => {
+                    run_len = 0;
+                    addr = section_end;
+                }
+            }
         }
+        None
     }
 
     /// Determine whether a virtual address has been mapped
@@ -494,7 +597,7 @@ impl MemoryMapping {
     /// Allocate a backing page for a page that is marked on-demand (allocated but unmapped).
     /// Can only work with the currently activated MemoryMapping (hence no &self)
     /// because it needs to be able to zero the new page.
-    pub fn ensure_page_exists(mm: &mut MemoryManager, virt: *mut usize) -> Result<(), Error> {
+    pub fn ensure_backed(mm: &mut MemoryManager, virt: *mut usize) -> Result<(), Error> {
         let this = Self::current();
 
         let entry = this.get_l2_entry(virt)?;
@@ -508,13 +611,26 @@ impl MemoryMapping {
         if !entry_data.is_on_demand() {
             return Err(Error::MemoryInUse);
         }
+        this.allocate_backing_page(mm, virt, entry, entry_data)
+    }
+
+    /// Give an on-demand entry a freshly allocated, zeroed backing page. Takes
+    /// `entry` and `entry_data` from a prior get_l2_entry so it adds no walk of
+    /// its own; `entry_data` must already be on-demand.
+    fn allocate_backing_page(
+        &self,
+        mm: &mut MemoryManager,
+        virt: *mut usize,
+        entry: *mut u32,
+        entry_data: L2TableEntry,
+    ) -> Result<(), Error> {
         let flags = entry_data.flags()?;
         // We need the page to be writeable to be able to zero it.
         // A read-only page full of 0s don't really make much sense anyway.
         if !flags.is_set(MemoryFlags::W) {
             return Err(Error::AccessDenied);
         }
-        let (mut phys, mut zeroed) = mm.alloc_range(1, this.pid)?;
+        let (mut phys, mut zeroed) = mm.alloc_range(1, self.pid)?;
         if flags.is_set(MemoryFlags::PLAINTEXT)
             || flags.is_set(MemoryFlags::NO_CACHE)
             || flags.is_set(MemoryFlags::DEV)
@@ -529,7 +645,7 @@ impl MemoryMapping {
             let page_slice =
                 unsafe { core::slice::from_raw_parts_mut(virt, PAGE_SIZE / core::mem::size_of::<usize>()) };
             page_slice.fill(0);
-            this.flush_cache(
+            self.flush_cache(
                 unsafe { MemoryRange::new(virt as usize, PAGE_SIZE).unwrap() },
                 xous::CacheOperation::Clean,
             )?;
@@ -793,7 +909,12 @@ impl L2TableEntry {
         };
         unsafe { pt_entry.write_volatile(value) };
         if self.is_empty() {
+            // Removing a mapping: order the write, invalidate the stale TLB entry.
             flush_tlb_entry(virt_addr);
+        } else {
+            // New mapping: order the (cacheable) descriptor write before the
+            // walker can fetch it. No prior entry, so nothing to invalidate.
+            unsafe { core::arch::asm!("dsb") };
         }
     }
 
