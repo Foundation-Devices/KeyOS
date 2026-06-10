@@ -9,11 +9,12 @@ use std::{
 
 use app_flux_build_support::{
     append_generated_glyphs_c, apply_common_hosted_includes, apply_hosted_base_flag_defines,
-    apply_hosted_io_value_defines, apply_hosted_value_defines, ar_add, base_arm_cflags, base_hosted_cc_build,
-    base_hosted_skip_paths, base_hosted_source_dirs, collect_c_files, compile_nbgl_arm_objects,
-    emit_app_link_directives, generate_ledger_glyphs, libapp_path, prepare_ledger_app, prepare_ledger_sdk,
-    replace_in_file, run_make_libapp, strip_libapp_objects, ArmToolchain, LedgerAppOptions,
-    LedgerGlyphOptions, LedgerSdkOptions, BASE_HOSTED_SKIP_FILES, BASE_STRIP_OBJS,
+    apply_hosted_io_value_defines, apply_hosted_value_defines, ar_add, arm_include_flags, base_arm_cflags,
+    base_hosted_cc_build, base_hosted_skip_paths, base_hosted_source_dirs, collect_c_files,
+    compile_nbgl_arm_objects, emit_app_link_directives, generate_ledger_glyphs, libapp_path,
+    prepare_ledger_app, prepare_ledger_sdk, replace_in_file, run_make_libapp, strip_libapp_objects,
+    ArmToolchain, LedgerAppOptions, LedgerGlyphOptions, LedgerSdkOptions, BASE_HOSTED_SKIP_FILES,
+    BASE_STRIP_OBJS,
 };
 
 const APP_NAME: &str = "app-monero";
@@ -740,8 +741,7 @@ end:
         .arg("-fshort-enums")
         .arg("-Os")
         .arg("-c")
-        .args(toolchain.sysroot.as_ref().map(|s| format!("--sysroot={s}")).iter())
-        .args(toolchain.gcc_include.as_ref().map(|s| format!("-isystem{s}")).iter())
+        .args(arm_include_flags(&toolchain))
         .arg("-o")
         .arg(&cx_bn_wrappers_obj)
         .arg(&cx_bn_wrappers_src)

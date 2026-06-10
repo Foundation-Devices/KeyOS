@@ -24,6 +24,7 @@ pub struct ArmToolchain {
     pub gccpath: String,
     pub sysroot: Option<String>,
     pub gcc_include: Option<String>,
+    pub libc_include: Option<String>,
 }
 
 impl ArmToolchain {
@@ -67,7 +68,11 @@ impl ArmToolchain {
         let sysroot = command_stdout("arm-none-eabi-gcc", &["-print-sysroot"]);
         let gcc_include = command_stdout("arm-none-eabi-gcc", &["-print-file-name=include"]);
 
-        Self { bash, cc, gccpath, sysroot, gcc_include }
+        // A sysroot-less toolchain (Ubuntu's gcc-arm-none-eabi) leaves clang
+        // without the C library's headers, or the SDK build fails on <stdio.h>.
+        let libc_include = sysroot.is_none().then(libc_include_dir).flatten();
+
+        Self { bash, cc, gccpath, sysroot, gcc_include, libc_include }
     }
 }
 
@@ -452,19 +457,40 @@ pub fn apply_common_hosted_includes(build: &mut cc::Build, sdk_path: &Path, app_
         .include(app_path.join("build/flex/gen_src"));
 }
 
+/// `--sysroot`/`-isystem` flags for the C library and compiler headers; every
+/// ARM C compile must apply them. The libc dir comes before GCC's so its own
+/// stdint.h wins, or inttypes.h macros like PRId64 break.
+pub fn arm_include_flags(toolchain: &ArmToolchain) -> Vec<String> {
+    let mut flags = Vec::new();
+    if let Some(sysroot) = &toolchain.sysroot {
+        flags.push(format!("--sysroot={sysroot}"));
+    }
+    if let Some(include) = &toolchain.libc_include {
+        flags.push(format!("-isystem{include}"));
+    }
+    if let Some(include) = &toolchain.gcc_include {
+        flags.push(format!("-isystem{include}"));
+    }
+    flags
+}
+
 pub fn base_arm_cflags(toolchain: &ArmToolchain, sdk_path: &Path, appname: &str) -> Vec<String> {
-    let mut cflags: Vec<String> =
-        ["--target=arm-none-eabi", "-march=armv7-a", "-mthumb", "-mfloat-abi=soft", "-fPIC", "-fshort-enums"]
-            .into_iter()
-            .map(str::to_string)
-            .collect();
+    let mut cflags: Vec<String> = [
+        "--target=arm-none-eabi",
+        "-march=armv7-a",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-fPIC",
+        "-fshort-enums",
+        "-Oz",
+        "-ffunction-sections",
+        "-fdata-sections",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
     cflags.push(format!("-DAPPNAME=\\\"{appname}\\\""));
-    if let Some(sysroot) = toolchain.sysroot.as_ref() {
-        cflags.push(format!("--sysroot={sysroot}"));
-    }
-    if let Some(include) = toolchain.gcc_include.as_ref() {
-        cflags.push(format!("-isystem{include}"));
-    }
+    cflags.extend(arm_include_flags(toolchain));
     for include in [
         sdk_path.join("lib_nbgl/include/fonts"),
         sdk_path.join("lib_alloc"),
@@ -487,7 +513,7 @@ pub fn run_make_libapp(app_path: &Path, sdk_path: &Path, toolchain: &ArmToolchai
         .arg(format!("SHELL={}", toolchain.bash))
         .arg(format!("GCCPATH={}", toolchain.gccpath))
         .arg(format!("CC={}", toolchain.cc))
-        .arg(format!("CFLAGS+={cflags}"))
+        .arg(format!("CFLAGS={cflags}"))
         .arg("libapp")
         .output()
         .unwrap_or_else(|e| panic!("Failed to run make libapp in {}: {e}", app_path.display()));
@@ -574,8 +600,7 @@ pub fn compile_nbgl_arm_objects(
             .arg("-c")
             .args(&nbgl_defines)
             .args(&include_args)
-            .args(toolchain.sysroot.as_ref().map(|s| format!("--sysroot={s}")).iter())
-            .args(toolchain.gcc_include.as_ref().map(|s| format!("-isystem{s}")).iter())
+            .args(arm_include_flags(toolchain))
             .arg("-o")
             .arg(&obj)
             .arg(&src)
@@ -611,6 +636,34 @@ fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
     } else {
         Some(stdout)
     }
+}
+
+fn command_stderr(command: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(command).args(args).output().ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (!stderr.is_empty()).then_some(stderr)
+}
+
+/// The C library's header dir, read from the compiler's own `<...>` include
+/// search so it holds across distro layouts. Returns the first dir with `stdio.h`.
+fn libc_include_dir() -> Option<String> {
+    let search = command_stderr("arm-none-eabi-gcc", &["-E", "-Wp,-v", "-xc", "/dev/null"])?;
+    let mut in_list = false;
+    for line in search.lines() {
+        if line.starts_with("#include <...> search starts here:") {
+            in_list = true;
+        } else if line.starts_with("End of search list.") {
+            break;
+        } else if in_list {
+            let dir = Path::new(line.trim());
+            if dir.join("stdio.h").exists() {
+                return Some(
+                    dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).to_string_lossy().into_owned(),
+                );
+            }
+        }
+    }
+    None
 }
 
 fn collect_c_dirs_inner(dir: &Path, dirs: &mut Vec<PathBuf>) {
