@@ -30,9 +30,30 @@ pub use platform::*;
 pub use runtime::*;
 pub use window::*;
 
+/// Performs the registration named by `app!`'s `role`: a plain app (`app`), the
+/// dedicated `keyboard`/`control_center` windows, or an ordinary app that also
+/// claims a role (any claim message type). Expands inside `app!` where `GuiApi`
+/// is in scope.
+#[macro_export]
+macro_rules! _internal_register_app {
+    (app, $name:expr, $height:expr) => {
+        GuiApi::register($name, $height).expect("can't register app UI")
+    };
+    (keyboard, $name:expr, $height:expr) => {
+        GuiApi::register_keyboard($height).expect("can't register app UI")
+    };
+    (control_center, $name:expr, $height:expr) => {
+        GuiApi::register_control_center($height).expect("can't register app UI")
+    };
+    ($claim:ident, $name:expr, $height:expr) => {
+        GuiApi::register_with_role::<$crate::gui_server_api::msg::$claim>($name, $height)
+            .expect("can't register app UI")
+    };
+}
+
 #[macro_export]
 macro_rules! app {
-    ($name:expr,kind = $kind:ident,height = $height:expr) => {
+    ($name:expr, role = $role:ident, height = $height:expr) => {
         use $crate::slint;
         slint::include_modules!();
         include!(concat!(env!("OUT_DIR"), "/router_init.rs"));
@@ -50,12 +71,7 @@ macro_rules! app {
             const HEIGHT: usize = $height;
             const NAME: &str = $name;
 
-            let gui_api = GuiApi::register(
-                $crate::gui_server_api::AppKind::$kind,
-                NAME,
-                HEIGHT,
-            )
-            .expect("can't register app UI");
+            let gui_api = $crate::_internal_register_app!($role, NAME, HEIGHT);
             let gui_api = std::sync::Arc::new(gui_api);
 
             $crate::Runtime::unsafe_init({
@@ -89,12 +105,12 @@ macro_rules! app {
         }
     };
 
-    ($name:expr,kind = $kind:ident) => {
-        $crate::app!($name, kind = $kind, height = $crate::gui_server_api::consts::SCREEN_HEIGHT);
+    ($name:expr, role = $role:ident) => {
+        $crate::app!($name, role = $role, height = $crate::gui_server_api::consts::SCREEN_HEIGHT);
     };
 
     ($name:expr) => {
-        $crate::app!($name, kind = App);
+        $crate::app!($name, role = app);
     };
 }
 
@@ -105,7 +121,7 @@ macro_rules! app {
 /// their generated UI surface and initialize any globals they export explicitly.
 #[macro_export]
 macro_rules! app_minimal {
-    ($name:expr,kind = $kind:ident,height = $height:expr) => {
+    ($name:expr,height = $height:expr) => {
         use $crate::slint;
         slint::include_modules!();
         include!(concat!(env!("OUT_DIR"), "/router_init.rs"));
@@ -122,12 +138,7 @@ macro_rules! app_minimal {
             const HEIGHT: usize = $height;
             const NAME: &str = $name;
 
-            let gui_api = GuiApi::register(
-                $crate::gui_server_api::AppKind::$kind,
-                NAME,
-                HEIGHT,
-            )
-            .expect("can't register app UI");
+            let gui_api = GuiApi::register(NAME, HEIGHT).expect("can't register app UI");
             let gui_api = std::sync::Arc::new(gui_api);
 
             $crate::Runtime::unsafe_init({
@@ -149,16 +160,8 @@ macro_rules! app_minimal {
         }
     };
 
-    ($name:expr,kind = $kind:ident) => {
-        $crate::app_minimal!(
-            $name,
-            kind = $kind,
-            height = $crate::gui_server_api::consts::SCREEN_HEIGHT
-        );
-    };
-
     ($name:expr) => {
-        $crate::app_minimal!($name, kind = App);
+        $crate::app_minimal!($name, height = $crate::gui_server_api::consts::SCREEN_HEIGHT);
     };
 }
 

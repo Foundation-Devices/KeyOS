@@ -13,7 +13,7 @@ template = ["gui-app", "fs-generic"]
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
 ]
-"os/gui-server" = ["SwitchTo", "Shutdown", "NavigateTo", "UpdateKioskPolicy"]
+"os/gui-server" = ["SwitchTo", "Shutdown", "NavigateTo", "UpdateKioskPolicy", "ClaimLauncherRole"]
 "os/haptics" = ["Vibrate"]
 "os/quantum-link" = ["SubscribeExchangeRate", "SubscribeExchangeRateHistory", "SubscribeConnectionStatus"]
 "os/settings" = ["SetOnboardingStatus", "GetUseStandardTimeFormat", "GetTimeZone"]

@@ -32,7 +32,7 @@ impl Gui {
 
         #[cfg(keyos)]
         {
-            use crate::layers::SourceType;
+            use crate::layers::{LayerPixelFormat, SourceType};
 
             out[..SCREEN_HEIGHT * STRIDE].fill(0);
 
@@ -46,6 +46,11 @@ impl Gui {
 
                 match layer.src() {
                     SourceType::Dma { range, .. } => {
+                        // TODO: compositing assumes 4-byte BPP, so the camera (Rgb565) layer
+                        // won't appear in the capture until that's handled.
+                        if layer.pixel_format() != LayerPixelFormat::Argb8888 {
+                            continue;
+                        }
                         let (src_w, src_h) = layer.src_dimensions();
                         let src_bytes = src_w * src_h * BPP;
                         debug_assert!(range.len() >= src_bytes);

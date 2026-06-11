@@ -45,7 +45,7 @@ impl AppState {
     }
 }
 
-app!("Lock Screen", kind = LockScreen);
+app!("Lock Screen", role = ClaimLockScreenRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

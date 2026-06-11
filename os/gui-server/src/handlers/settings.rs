@@ -3,6 +3,7 @@
 
 use server::{ArchiveEventHandler, Owned, ScalarEventHandler, ServerContext};
 
+use crate::registry::AppRole;
 use crate::{Gui, StartupState};
 
 const BRIGHTNESS_LEVEL_PERCENT_MIN: u8 = 5;
@@ -46,7 +47,7 @@ impl ArchiveEventHandler<settings::global::OnboardingStatus> for Gui {
         log::info!("Got onboarding state {:?} with startup state {:?}", msg, self.startup_state);
         if self.startup_state == StartupState::InitialLockScreen {
             if msg.is_complete() {
-                if let Some(pid) = self.app_registry.launcher_app_pid() {
+                if let Some(pid) = self.app_registry.pid(AppRole::Launcher) {
                     self.switch_to_window(pid);
                     self.reset_auto_lock();
                     self.notify_lockscreen_unlocked();
@@ -54,7 +55,7 @@ impl ArchiveEventHandler<settings::global::OnboardingStatus> for Gui {
                 } else {
                     self.startup_state = StartupState::WaitingForLauncherPID;
                 }
-            } else if let Some(pid) = self.app_registry.onboarding_app_pid() {
+            } else if let Some(pid) = self.app_registry.pid(AppRole::Onboarding) {
                 self.switch_to_window(pid);
                 self.startup_state = StartupState::Started;
             } else {
@@ -75,7 +76,7 @@ impl ScalarEventHandler<fs::FileSystemEvent> for Gui {
             && msg.location == fs::Location::AppData
             && msg.event_type == fs::FileSystemEventType::Error
         {
-            if let Some(pid) = self.app_registry.launcher_app_pid() {
+            if let Some(pid) = self.app_registry.pid(AppRole::Launcher) {
                 self.switch_to_window(pid);
                 self.startup_state = StartupState::Started;
             } else {

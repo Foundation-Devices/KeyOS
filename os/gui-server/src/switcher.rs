@@ -12,6 +12,7 @@ use gui_server_api::{
     InputMessage,
 };
 
+use crate::registry::AppRole;
 use crate::{touch::TouchGestureOrigin, Gui};
 
 const VIRT_BUTTON_TO_SCREEN_GAP: usize = VIRT_BUTTON_PHYS_ORIGIN_Y - SCREEN_HEIGHT;
@@ -151,7 +152,7 @@ impl Gui {
         pid: xous::PID,
         create_message: impl FnOnce(xous::PID) -> Option<xous::Message>,
     ) {
-        let Some(switcher_pid) = self.app_registry.switcher_app_pid() else { return };
+        let Some(switcher_pid) = self.app_registry.pid(AppRole::Switcher) else { return };
         let Some(switcher_window) = self.windows.get(&switcher_pid) else { return };
         // Don't update the switcher on the apps that aren't supposed to be shown there
         if self.app_registry.is_essential_app(pid) {
@@ -170,6 +171,13 @@ impl Gui {
             let Ok(mut name_page) = xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W) else {
                 log::error!("Couldn't allocate switcher app started message");
                 return None;
+            };
+            let truncated;
+            let name = if name.chars().count() > 64 {
+                truncated = format!("{}...", name.chars().take(64).collect::<String>());
+                truncated.as_str()
+            } else {
+                name
             };
             let name_bytes = name.as_bytes();
             name_page.as_slice_mut()[..name_bytes.len()].copy_from_slice(name_bytes);

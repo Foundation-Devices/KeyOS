@@ -30,3 +30,13 @@ InjectTouch = { id = 55, type = "scalar" }
 InjectKey = { id = 56, type = "scalar" }
 RunApp = { id = 57, type = "blockingArchive" }
 UpdateKioskPolicy = { id = 58, type = "scalar" }
+
+# Privileged registrations
+RegisterControlCenter = { id = 127, type = "blockingArchive" }
+RegisterKeyboard = { id = 126, type = "blockingArchive" }
+ClaimLauncherRole = { id = 125, type = "blockingScalar" }
+ClaimSettingsRole = { id = 124, type = "blockingScalar" }
+ClaimOnboardingRole = { id = 123, type = "blockingScalar" }
+ClaimSwitcherRole = { id = 122, type = "blockingScalar" }
+ClaimLockScreenRole = { id = 121, type = "blockingScalar" }
+ClaimAlertsRole = { id = 120, type = "blockingScalar" }

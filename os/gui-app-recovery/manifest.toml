@@ -12,7 +12,7 @@ template = ["gui-app", "fs-generic"]
     "GetSystemReadAccess",
     "GetSystemWriteAccess",
 ]
-"os/gui-server" = ["Shutdown"]
+"os/gui-server" = ["Shutdown", "ClaimLauncherRole"]
 "os/power-manager" = ["Reboot"]
 "os/power-manager-ext" = ["GetStatus"]
 "os/recovery-worker" = [

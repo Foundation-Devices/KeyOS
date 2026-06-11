@@ -16,7 +16,7 @@ pub struct AppState {
     pub gui: Arc<GuiApi>,
 }
 
-app!("Alerts", kind = Alerts);
+app!("Alerts", role = ClaimAlertsRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

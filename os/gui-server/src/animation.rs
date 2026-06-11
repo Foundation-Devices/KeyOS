@@ -7,6 +7,7 @@ use gui_server_api::{
 };
 use xous::PID;
 
+use crate::registry::AppRole;
 use crate::{
     layers::{Layer, LayerStack},
     Gui, GuiState,
@@ -117,30 +118,18 @@ pub(crate) enum NextFrameAnimationState {
 
 impl Gui {
     pub(crate) fn switching_animation(&self, from: PID, to: PID) -> SwitchingAnimation {
-        if Some(from) == self.app_registry.switcher_app_pid() {
-            if Some(to) == self.app_registry.launcher_app_pid() {
-                SwitchingAnimation::FadeIn
-            } else {
-                SwitchingAnimation::FromSwitcher
-            }
-        } else if Some(to) == self.app_registry.switcher_app_pid() {
-            if Some(from) == self.app_registry.launcher_app_pid() {
-                SwitchingAnimation::FadeOut
-            } else {
-                SwitchingAnimation::ToSwitcher(ProgressControl::Manual)
-            }
-        } else if Some(from) == self.app_registry.lock_screen_pid() {
-            SwitchingAnimation::SlideOutTop
-        } else if Some(to) == self.app_registry.lock_screen_pid() {
-            SwitchingAnimation::SlideInTop
-        } else if Some(to) == self.app_registry.settings_app_pid() {
-            SwitchingAnimation::SlideIn
-        } else if Some(from) == self.app_registry.settings_app_pid() {
-            SwitchingAnimation::SlideOut
-        } else if Some(to) == self.app_registry.launcher_app_pid() {
-            SwitchingAnimation::ZoomOut
-        } else {
-            SwitchingAnimation::ZoomIn
+        use AppRole::*;
+        match (self.app_registry.role(from), self.app_registry.role(to)) {
+            (Some(Switcher), Some(Launcher)) => SwitchingAnimation::FadeIn,
+            (Some(Switcher), _) => SwitchingAnimation::FromSwitcher,
+            (Some(Launcher), Some(Switcher)) => SwitchingAnimation::FadeOut,
+            (_, Some(Switcher)) => SwitchingAnimation::ToSwitcher(ProgressControl::Manual),
+            (Some(LockScreen), _) => SwitchingAnimation::SlideOutTop,
+            (_, Some(LockScreen)) => SwitchingAnimation::SlideInTop,
+            (_, Some(Settings)) => SwitchingAnimation::SlideIn,
+            (Some(Settings), _) => SwitchingAnimation::SlideOut,
+            (_, Some(Launcher)) => SwitchingAnimation::ZoomOut,
+            _ => SwitchingAnimation::ZoomIn,
         }
     }
 

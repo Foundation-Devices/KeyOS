@@ -157,7 +157,7 @@ impl AppState {
     pub fn ui(&self) -> AppWindow { self.ui.unwrap() }
 }
 
-app!("Launcher", kind = Launcher);
+app!("Launcher", role = ClaimLauncherRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

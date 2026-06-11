@@ -37,7 +37,7 @@ const STATUS_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
 app!(
     "Control Center",
-    kind = ControlCenter,
+    role = control_center,
     height = gui_server_api::consts::CONTROL_CENTER_HEIGHT_EXPANDED_PX
 );
 

@@ -40,22 +40,8 @@ macro_rules! use_api {
 
 pub type AppName = String;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum AppKind {
-    App,
-    ControlCenter,
-    Keyboard,
-    Launcher,
-    Settings,
-    Onboarding,
-    Switcher,
-    LockScreen,
-    Alerts,
-}
-
 #[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct RegisterApp {
-    pub app_kind: AppKind,
     pub cid: CID,
     pub name: AppName,
     pub height: usize,
@@ -186,10 +172,60 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
 }
 
 impl<P: CheckedPermissions> GuiApi<P> {
-    pub fn register(app_kind: AppKind, name: &str, height: usize) -> Result<Self, GuiServerError>
+    /// Registers an ordinary app window.
+    pub fn register(name: &str, height: usize) -> Result<Self, GuiServerError>
     where
         P: MessageAllowed<msg::RegisterAppMessage>,
     {
+        let (api, cid) = Self::register_inner()?;
+        api.inner.conn.send_blocking_archive(msg::RegisterAppMessage(RegisterApp {
+            cid,
+            name: name.into(),
+            height,
+        }))?;
+        Ok(api)
+    }
+
+    /// Registers as the control center, which gui-server tracks as a dedicated
+    /// overlay window rather than an ordinary app.
+    pub fn register_control_center(height: usize) -> Result<Self, GuiServerError>
+    where
+        P: MessageAllowed<msg::RegisterControlCenter>,
+    {
+        let (api, cid) = Self::register_inner()?;
+        api.inner.conn.send_blocking_archive(msg::RegisterControlCenter { cid, height })?;
+        Ok(api)
+    }
+
+    /// Registers as the keyboard, which gui-server tracks as a dedicated overlay
+    /// window rather than an ordinary app.
+    pub fn register_keyboard(height: usize) -> Result<Self, GuiServerError>
+    where
+        P: MessageAllowed<msg::RegisterKeyboard>,
+    {
+        let (api, cid) = Self::register_inner()?;
+        api.inner.conn.send_blocking_archive(msg::RegisterKeyboard { cid, height })?;
+        Ok(api)
+    }
+
+    /// Claims a privileged role, then registers an ordinary app window. The role is
+    /// granted per message type, so an app can only claim a role its manifest permits.
+    pub fn register_with_role<M>(name: &str, height: usize) -> Result<Self, GuiServerError>
+    where
+        M: msg::RoleClaim,
+        P: MessageAllowed<msg::RegisterAppMessage> + MessageAllowed<M>,
+    {
+        let (api, cid) = Self::register_inner()?;
+        api.inner.conn.send_blocking_scalar(M::default());
+        api.inner.conn.send_blocking_archive(msg::RegisterAppMessage(RegisterApp {
+            cid,
+            name: name.into(),
+            height,
+        }))?;
+        Ok(api)
+    }
+
+    fn register_inner() -> Result<(Self, CID), GuiServerError> {
         let sid = xous::create_server()?;
         let cid_self = xous::connect(sid)?;
         let inner = GuiApiLight::connect();
@@ -199,11 +235,7 @@ impl<P: CheckedPermissions> GuiApi<P> {
         let gui_server_cid = xous::connect_for_process(gui_server_pid, api.sid)?;
         xous::allow_messages_on_connection(gui_server_pid, gui_server_cid, 0..64)?;
 
-        let registration = RegisterApp { app_kind, cid: gui_server_cid, name: name.into(), height };
-
-        api.inner.conn.send_blocking_archive(msg::RegisterAppMessage(registration))?;
-
-        Ok(api)
+        Ok((api, gui_server_cid))
     }
 
     pub fn sid(&self) -> SID { self.sid }

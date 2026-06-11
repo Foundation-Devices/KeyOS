@@ -9,6 +9,7 @@ use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext
 use xous::PID;
 
 use super::{BlurDone, CloseAppTimeout, ForceShutdownTimeout, OnFreeMemoryBelowThreshold};
+use crate::registry::AppRole;
 use crate::{
     handlers::{DisconnectHandlerMessage, OnVsyncMessage, PowerButtonTimerCallback},
     Gui,
@@ -18,19 +19,10 @@ impl ScalarHandler<SwitchTo> for Gui {
     fn handle(
         &mut self,
         SwitchTo { next_pid, x, y }: SwitchTo,
-        sender: PID,
+        _sender: PID,
         _context: &mut ServerContext<Self>,
     ) {
         if let Some(pid) = PID::new(next_pid as u8) {
-            let called_from_launcher = self.app_registry.is_launcher_app(sender);
-            let called_from_switcher = self.app_registry.is_switcher_app(sender);
-            if !called_from_launcher && !called_from_switcher {
-                warn!(
-                    "PID {} tried to call SwitchTo while not being registered as a launcher or switcher app (PIDs {:?} and {:?} respectively)",
-                    sender, self.app_registry.launcher_app_pid(), self.app_registry.switcher_app_pid()
-                );
-                return;
-            }
             // TODO
             let _ = x;
             let _ = y;
@@ -58,7 +50,7 @@ impl BlockingScalarHandler<SwitchToLauncher> for Gui {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> <SwitchToLauncher as BlockingScalar>::Response {
-        if self.app_registry.launcher_app_pid().is_some() {
+        if self.app_registry.pid(AppRole::Launcher).is_some() {
             self.switch_to_launcher();
             return true;
         }

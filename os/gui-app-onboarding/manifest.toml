@@ -10,7 +10,7 @@ template = ["gui-app", "fs-generic"]
 "os/bt" = ["GetBtAddr", "SubscribeBleState"]
 "os/haptics" = ["Vibrate"]
 "os/fs" = ["FormatEncryptedVolume", "Remove", "GetSystemWriteAccess", "GetUsbReadAccess", "GetSystemReadAccess"]
-"os/gui-server" = ["SwitchToLauncher"]
+"os/gui-server" = ["SwitchToLauncher", "ClaimOnboardingRole"]
 "os/keycard" = [
     "IdentifyKeycard",
     "GenerateShards",

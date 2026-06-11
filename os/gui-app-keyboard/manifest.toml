@@ -9,5 +9,6 @@ template = ["gui-app"]
 "os/gui-server" = [
     "KeyPressed",
     "KeyReleased",
+    "RegisterKeyboard",
 ]
 "os/haptics" = ["Vibrate"]

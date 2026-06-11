@@ -18,7 +18,7 @@ use slint_keyos_platform::{
 mod state;
 use state::AppState;
 
-app!("Switcher", kind = Switcher);
+app!("Switcher", role = ClaimSwitcherRole);
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);

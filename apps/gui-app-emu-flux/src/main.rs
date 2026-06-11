@@ -95,7 +95,7 @@ fn kill_running_children(state: &Rc<RefCell<LegacyState>>, reason: &str) {
     state.borrow_mut().running_children.clear();
 }
 
-app!("Flux Emulator", kind = App);
+app!("Flux Emulator");
 
 /// Apply a saved seed config: retrieve or decode the seed bytes and push them
 /// into the global APP_SEED so key derivation works immediately.

@@ -57,7 +57,7 @@ update::use_api!();
 
 const PERIODIC_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
-app!("Settings", kind = Settings);
+app!("Settings", role = ClaimSettingsRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

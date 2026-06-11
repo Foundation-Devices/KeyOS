@@ -10,11 +10,12 @@ use log::{debug, error, warn};
 use server::ArchiveRequest;
 use xous::{AppId, PID};
 
+use crate::registry::AppRole;
 use crate::{AppManagerApi, Gui, GuiState, StartupState};
 
 impl Gui {
     pub(crate) fn handle_show_modal_request(&mut self, request: ArchiveRequest<ShowModal>) {
-        if self.active_app_pid() == self.app_registry.lock_screen_pid() {
+        if self.is_locked() {
             request.response.respond(Err(NavigationError::Locked)).ok();
             return;
         }
@@ -30,7 +31,7 @@ impl Gui {
     }
 
     pub(crate) fn handle_navigate_to_request(&mut self, mut request: ArchiveRequest<NavigateTo>) {
-        if self.active_app_pid() == self.app_registry.lock_screen_pid() {
+        if self.is_locked() {
             request.response.respond(Err(NavigationError::Locked)).ok();
             return;
         }
@@ -52,7 +53,7 @@ impl Gui {
         }
 
         #[cfg(not(feature = "recovery-os"))]
-        if self.is_locked() || self.active_app_pid() == self.app_registry.onboarding_app_pid() {
+        if self.is_locked() || self.active_app_role() == Some(AppRole::Onboarding) {
             return RunAppResponse::Locked;
         }
 

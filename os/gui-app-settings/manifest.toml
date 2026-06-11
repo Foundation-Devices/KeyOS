@@ -39,7 +39,7 @@ template = ["gui-app", "fs-generic"]
     "GetUsbReadAccess",
     "GetUsbWriteAccess",
 ]
-"os/gui-server" = ["SwitchToLauncher", "UpdateKioskPolicy"]
+"os/gui-server" = ["SwitchToLauncher", "UpdateKioskPolicy", "ClaimSettingsRole"]
 "os/settings" = [
     "GetTimeZone",
     "SetTimeZone",

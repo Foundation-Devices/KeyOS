@@ -35,7 +35,7 @@ use {
         keyboard::{KeyboardState, KeyboardWindow},
         modal::ModalState,
         pwrbutton::PowerButtonState,
-        registry::AppRegistry,
+        registry::{AppRegistry, AppRole},
         rgbled::RgbLedState,
         touch::TouchState,
     },
@@ -355,6 +355,17 @@ impl Gui {
             log::error!("App tried to register with invalid height: {} != {}", msg.height, SCREEN_HEIGHT);
             return Err(GuiServerError::InternalError);
         }
+        match (self.app_registry.role(pid), self.startup_state) {
+            (Some(AppRole::Launcher), StartupState::WaitingForLauncherPID)
+            | (Some(AppRole::Onboarding), StartupState::WaitingForOnboardingPID) => {
+                self.waiting_for_pid = Some((pid, None));
+                self.startup_state = StartupState::Started;
+            }
+            (Some(AppRole::LockScreen), StartupState::InitialLockScreen) => {
+                self.waiting_for_pid = Some((pid, None));
+            }
+            _ => {}
+        }
         self.windows.insert(
             pid,
             AppWindow {
@@ -391,33 +402,39 @@ impl Gui {
     fn handle_register_control_center_app(
         &mut self,
         pid: PID,
-        msg: RegisterApp,
+        cid: CID,
+        height: usize,
     ) -> Result<(), GuiServerError> {
-        if msg.height != CONTROL_CENTER_HEIGHT_EXPANDED_PX {
+        if height != CONTROL_CENTER_HEIGHT_EXPANDED_PX {
             log::error!(
                 "Control Center tried to register with invalid height: {} != {}",
-                msg.height,
+                height,
                 CONTROL_CENTER_HEIGHT_EXPANDED_PX
             );
             return Err(GuiServerError::InternalError);
         }
-        self.control_center_window = Some(ControlCenterWindow::new(msg.cid, pid)?);
+        self.control_center_window = Some(ControlCenterWindow::new(cid, pid)?);
         Ok(())
     }
 
-    fn handle_register_keyboard_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        if msg.height != DEFAULT_KEYBOARD_HEIGHT {
+    fn handle_register_keyboard_app(
+        &mut self,
+        pid: PID,
+        cid: CID,
+        height: usize,
+    ) -> Result<(), GuiServerError> {
+        if height != DEFAULT_KEYBOARD_HEIGHT {
             log::error!(
                 "Keyboard tried to register with invalid height: {} != {}",
-                msg.height,
+                height,
                 DEFAULT_KEYBOARD_HEIGHT
             );
             return Err(GuiServerError::InternalError);
         }
         self.keyboard_window = Some(KeyboardWindow {
-            input_cid: msg.cid,
+            input_cid: cid,
             pid,
-            buffers: BufferChain::new(msg.cid, u16::try_from(DEFAULT_KEYBOARD_HEIGHT).unwrap()),
+            buffers: BufferChain::new(cid, u16::try_from(DEFAULT_KEYBOARD_HEIGHT).unwrap()),
             blur_state: BlurBufferState::default(),
             last_update_args: Vec::new(),
             last_drawn_args: Vec::new(),
@@ -427,53 +444,8 @@ impl Gui {
         Ok(())
     }
 
-    fn handle_register_launcher_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        self.app_registry.set_launcher_app_pid(pid);
-        if self.startup_state == StartupState::WaitingForLauncherPID {
-            self.waiting_for_pid = Some((pid, None));
-            self.startup_state = StartupState::Started;
-        }
-        self.handle_register_app(pid, msg)
-    }
-
-    fn handle_register_settings_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        self.app_registry.set_settings_app_pid(pid);
-        self.handle_register_app(pid, msg)
-    }
-
-    fn handle_register_onboarding_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        self.app_registry.set_onboarding_app_pid(pid);
-        if self.startup_state == StartupState::WaitingForOnboardingPID {
-            self.waiting_for_pid = Some((pid, None));
-            self.startup_state = StartupState::Started;
-        }
-        self.handle_register_app(pid, msg)
-    }
-
-    fn handle_register_lock_screen_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        self.app_registry.set_lock_screen_pid(pid);
-        if self.startup_state == StartupState::InitialLockScreen {
-            self.waiting_for_pid = Some((pid, None));
-        }
-        self.handle_register_app(pid, msg)
-    }
-
-    fn handle_register_switcher_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        log::info!("Registering switcher app with PID={pid}");
-
-        self.app_registry.set_switcher_app_pid(pid);
-        self.handle_register_app(pid, msg)
-    }
-
-    fn handle_register_alerts_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
-        log::info!("Registering alerts app with PID={pid}");
-
-        self.app_registry.set_alerts_app_pid(Some(pid));
-        self.handle_register_app(pid, msg)
-    }
-
     fn switch_to_launcher(&mut self) {
-        if let Some(launcher_app_pid) = self.app_registry.launcher_app_pid() {
+        if let Some(launcher_app_pid) = self.app_registry.pid(AppRole::Launcher) {
             match &mut self.state {
                 // Special case: we are already displaying the launcher, but it's in a modal state:
                 GuiState::Modal(modal_state) if modal_state.background_pid() == launcher_app_pid => {
@@ -487,7 +459,7 @@ impl Gui {
     }
 
     fn switch_to_app_switcher(&mut self) {
-        if let Some(switcher_app_pid) = self.app_registry.switcher_app_pid() {
+        if let Some(switcher_app_pid) = self.app_registry.pid(AppRole::Switcher) {
             self.switch_to_window(switcher_app_pid);
         } else {
             warn!("Tried to switch to switcher while no switcher is registered");
@@ -687,12 +659,12 @@ impl Gui {
             #[cfg(not(feature = "recovery-os"))]
             if self.is_locked() {
                 // Not strictly visible, but let it pre-render so unlock is quicker.
-                self.app_registry.pre_lock_app_id().or(self.app_registry.launcher_app_pid())
+                self.app_registry.pre_lock_app_id().or(self.app_registry.pid(AppRole::Launcher))
             } else {
                 None
             },
             // Also not visible but needed for quick reaction to locking
-            self.app_registry.lock_screen_pid(),
+            self.app_registry.pid(AppRole::LockScreen),
         ];
 
         let mut update_switcher_fb_pids = Vec::new();
@@ -854,6 +826,11 @@ impl Gui {
         }
     }
 
+    /// The special-app kind of the active window, if it is a registered special app.
+    fn active_app_role(&self) -> Option<AppRole> {
+        self.active_app_pid().and_then(|pid| self.app_registry.role(pid))
+    }
+
     fn background_pid(&self) -> Option<PID> {
         match &self.state {
             GuiState::Switching { from, .. } => Some(*from),
@@ -863,7 +840,7 @@ impl Gui {
     }
 
     pub(crate) fn is_onboarding_running(&self) -> bool {
-        let onboarding_pid = self.app_registry.onboarding_app_pid();
+        let onboarding_pid = self.app_registry.pid(AppRole::Onboarding);
 
         onboarding_pid.is_some()
             && (self.active_app_pid() == onboarding_pid || self.background_pid() == onboarding_pid)
@@ -871,7 +848,7 @@ impl Gui {
 
     #[cfg(not(feature = "recovery-os"))]
     fn lock(&mut self) {
-        let Some(lock_screen_pid) = self.app_registry.lock_screen_pid() else {
+        let Some(lock_screen_pid) = self.app_registry.pid(AppRole::LockScreen) else {
             error!("No lock screen app PID found");
             return;
         };
@@ -880,14 +857,14 @@ impl Gui {
             GuiState::Switching { to, .. } => Some(*to),
             _ => self.background_pid().or_else(|| self.active_app_pid()),
         };
-        if current_app == self.app_registry.onboarding_app_pid() {
+        if current_app == self.app_registry.pid(AppRole::Onboarding) {
             debug!("Not locking during onboarding");
             return;
         }
 
         // If the switcher is focused during the locking, show the launcher after unlocking
-        let pre_lock_app = if self.active_app_pid() == self.app_registry.switcher_app_pid() {
-            self.app_registry.pre_lock_app_id().or_else(|| self.app_registry.launcher_app_pid())
+        let pre_lock_app = if self.active_app_role() == Some(AppRole::Switcher) {
+            self.app_registry.pre_lock_app_id().or_else(|| self.app_registry.pid(AppRole::Launcher))
         } else {
             current_app
         };
@@ -907,7 +884,7 @@ impl Gui {
             return;
         }
         self.notify_lockscreen_unlocked();
-        let app_id = self.app_registry.pre_lock_app_id().or(self.app_registry.launcher_app_pid());
+        let app_id = self.app_registry.pre_lock_app_id().or(self.app_registry.pid(AppRole::Launcher));
         self.app_registry.set_pre_lock_app_pid(None);
         if let Some(pid) = app_id {
             self.switch_to_window(pid);
@@ -917,7 +894,7 @@ impl Gui {
     }
 
     fn notify_lockscreen_unlocked(&self) {
-        let Some(lock_screen_pid) = self.app_registry.lock_screen_pid() else {
+        let Some(lock_screen_pid) = self.app_registry.pid(AppRole::LockScreen) else {
             error!("No lock screen app PID found");
             return;
         };
@@ -933,7 +910,7 @@ impl Gui {
 
     #[cfg(not(feature = "recovery-os"))]
     fn notify_lockscreen_locked(&self) {
-        let Some(lock_screen_pid) = self.app_registry.lock_screen_pid() else {
+        let Some(lock_screen_pid) = self.app_registry.pid(AppRole::LockScreen) else {
             error!("No lock screen app PID found");
             return;
         };
@@ -947,10 +924,7 @@ impl Gui {
         }
     }
 
-    #[cfg(not(feature = "recovery-os"))]
-    fn is_locked(&self) -> bool {
-        self.active_app_pid().is_some() && self.active_app_pid() == self.app_registry.lock_screen_pid()
-    }
+    fn is_locked(&self) -> bool { self.active_app_role() == Some(AppRole::LockScreen) }
 
     fn home_button_enabled(&self) -> bool { self.control_enabled(|policy| policy.home_button_enabled, false) }
 

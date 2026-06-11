@@ -11,4 +11,5 @@ template = ["gui-app"]
     "CloseApp",
     "SwitchToLauncher",
     "SwitchTo",
+    "ClaimSwitcherRole",
 ]

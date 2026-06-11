@@ -59,7 +59,7 @@ quantum_link::use_prestart_api!();
 security::use_api!();
 update::use_api!();
 
-app!("Onboarding", kind = Onboarding);
+app!("Onboarding", role = ClaimOnboardingRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

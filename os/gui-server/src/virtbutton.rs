@@ -8,6 +8,7 @@ use gui_server_api::{
     InputMessage,
 };
 
+use crate::registry::AppRole;
 use crate::Gui;
 
 impl Gui {
@@ -68,7 +69,7 @@ impl Gui {
     }
 
     fn notify_onboarding_home_button_pressed(&self) {
-        let Some(onboarding_pid) = self.app_registry.onboarding_app_pid() else {
+        let Some(onboarding_pid) = self.app_registry.pid(AppRole::Onboarding) else {
             log::error!("No onboarding app PID found");
             return;
         };

@@ -84,11 +84,7 @@ impl BlockingArchiveHandler<RunApp> for Gui {
 }
 
 impl ScalarHandler<LoginSuccess> for Gui {
-    fn handle(&mut self, _msg: LoginSuccess, sender: PID, _context: &mut ServerContext<Self>) {
-        if !self.app_registry.is_lock_screen_app(sender) {
-            return;
-        }
-
+    fn handle(&mut self, _msg: LoginSuccess, _sender: PID, _context: &mut ServerContext<Self>) {
         self.unlock();
     }
 }

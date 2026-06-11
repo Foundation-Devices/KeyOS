@@ -38,8 +38,7 @@ fn main() -> ! {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    let gui = GuiApi::register(gui_server_api::AppKind::Keyboard, "keyboard", DEFAULT_KEYBOARD_HEIGHT)
-        .expect("can't register app UI");
+    let gui = GuiApi::register_keyboard(DEFAULT_KEYBOARD_HEIGHT).expect("can't register app UI");
 
     let haptics_api = Rc::new(HapticsApi::default());
     let long_press_callback = TicktimerCallback::new(gui.sid()).unwrap();

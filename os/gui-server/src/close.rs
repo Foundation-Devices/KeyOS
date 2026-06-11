@@ -6,6 +6,7 @@ use log::{debug, error, info, warn};
 use server::MessageId as _;
 use xous::PID;
 
+use crate::registry::AppRole;
 use crate::{
     handlers::{CloseAppTimeout, ForceShutdownTimeout},
     AppCloseState, AppWindow, Gui, GuiState,
@@ -18,6 +19,8 @@ impl Gui {
     /// Removes an app window from the GUI and frees associated resources.
     pub(crate) fn on_app_disconnected(&mut self, pid: PID) {
         info!("App with PID={pid} disconnected");
+
+        self.app_registry.close_app(pid);
 
         let Some(window) = self.windows.remove(&pid) else {
             debug!("No app with PID={pid} is registered");
@@ -46,7 +49,7 @@ impl Gui {
                 } else if pid == modal_state.background_pid() {
                     self.change_state_single_window(
                         self.app_registry
-                            .launcher_app_pid()
+                            .pid(AppRole::Launcher)
                             .expect("Closed an app when the launcher has not even started"),
                         None,
                     );
@@ -61,7 +64,7 @@ impl Gui {
                 }
                 self.change_state_single_window(
                     self.app_registry
-                        .launcher_app_pid()
+                        .pid(AppRole::Launcher)
                         .expect("Closed an app when the launcher has not even started"),
                     None,
                 );
@@ -89,7 +92,6 @@ impl Gui {
         }
 
         self.notify_switcher_app_closed(pid);
-        self.app_registry.close_app(pid);
     }
 
     pub(crate) fn close_app(&mut self, pid: PID) {

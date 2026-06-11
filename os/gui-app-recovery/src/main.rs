@@ -29,7 +29,7 @@ mod securam;
 #[cfg(keyos)]
 mod worker;
 
-app!("Firmware Recovery", kind = Launcher);
+app!("Firmware Recovery", role = ClaimLauncherRole);
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).expect("init log");
