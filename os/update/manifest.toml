@@ -15,6 +15,7 @@ ApplyDownloadedUpdate = { id = 5, type = "archive" }
 GetUpdateApplied = { id = 6, type = "blockingScalar" }
 ClearUpdateApplied = { id = 7, type = "scalar" }
 GetUpdateStatus = { id = 8, type = "blockingArchive" }
+FirmwareInstallWorkerEvent = { id = 9, type = "archive", cfg = "keyos" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]

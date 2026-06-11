@@ -31,7 +31,7 @@ pub enum AppEvent {
 
     AppCrashed { app_id: [u32; 4], pid: PID, launched_by: PID, exit_code: u32, panic_message: Option<String> },
 
-    LaunchError(LaunchError),
+    LaunchError { app_id: [u32; 4], error: LaunchError },
 }
 
 #[derive(Debug, server::Message)]

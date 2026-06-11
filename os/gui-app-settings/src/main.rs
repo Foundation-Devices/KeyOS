@@ -19,9 +19,12 @@ use security::{messages::Lockout, OsVersionInfo, PinEntryMode};
 use slint_keyos_platform::{
     app, async_archive,
     futures_lite::StreamExt as _,
-    gui_server_api::navigation::{
-        filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
-        lockscreen::{VerifyPinOptions, VerifyPinResult},
+    gui_server_api::{
+        msg::UpdateKioskPolicy,
+        navigation::{
+            filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
+            lockscreen::{VerifyPinOptions, VerifyPinResult},
+        },
     },
     navigation::select_file,
     navigation::verify_pin,
@@ -87,6 +90,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     setup_update_global(state);
     setup_callbacks(state);
     setup_save_settings_global(state);
+    resume_update_if_needed(state);
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, PERIODIC_UPDATE_INTERVAL, move || {
@@ -1071,6 +1075,20 @@ fn setup_update_global(state: StoredValue<AppState>) {
         let mut disconnect_monitor: Option<TaskHandle<()>> = None;
 
         while let Some(event) = update_events.next().await {
+            // Keep auto-lock disabled until the user leaves the update page.
+            let restore_update_exit_controls = || {
+                let state = state.borrow();
+                state
+                    .gui
+                    .update_kiosk_policy(
+                        UpdateKioskPolicy::default()
+                            .set_home_button(true)
+                            .set_power_button(true)
+                            .set_control_center(true),
+                    )
+                    .ok();
+                state.platform_config.enable_swipe_back.set(true);
+            };
             let ui = state.borrow().ui();
             let update_global = ui.global::<UpdateGlobal>();
 
@@ -1079,9 +1097,13 @@ fn setup_update_global(state: StoredValue<AppState>) {
                     update_global.set_fw_update_state(FwUpdateState::Receiving);
                     update_global.set_fw_update_progress(progress.completion_percentage() as f32);
 
-                    // Acquire the wake lock and start monitoring for disconnection when download starts
+                    // Disable auto-lock and start monitoring for disconnection when download starts
                     if progress.is_start() {
-                        state.borrow().gui.set_wake_lock(true).ok();
+                        state
+                            .borrow()
+                            .gui
+                            .update_kiosk_policy(UpdateKioskPolicy::default().set_auto_lock(false))
+                            .ok();
                         state.borrow().platform_config.enable_swipe_back.set(false);
                         let status = ql_status.clone().into_inner().into_stream();
                         let _ = disconnect_monitor.insert(spawn_local(async move {
@@ -1125,16 +1147,12 @@ fn setup_update_global(state: StoredValue<AppState>) {
                     log::info!("update complete. rebooting...");
                     update_global.set_fw_update_state(FwUpdateState::Restarting);
                     notify_update_progress(state, FirmwareInstallEvent::Rebooting);
-
-                    state.borrow().gui.set_wake_lock(false).ok();
-                    state.borrow().platform_config.enable_swipe_back.set(true);
+                    state.borrow().set_update_kiosk_enabled(true);
                 }
                 ProgressUpdate::InstallError(error) => {
                     disconnect_monitor = None;
                     log::error!("failed to apply update {error:?}");
-                    // Re-enable swipe back so the user can navigate away,
-                    // but keep the wake lock until they do.
-                    state.borrow().platform_config.enable_swipe_back.set(true);
+                    restore_update_exit_controls();
                     handle_update_error(
                         state,
                         error.to_string(),
@@ -1145,9 +1163,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 ProgressUpdate::DownloadError(error) => {
                     disconnect_monitor = None;
                     log::error!("failed to download update {error:?}");
-                    // Re-enable swipe back so the user can navigate away,
-                    // but keep the wake lock until they do.
-                    state.borrow().platform_config.enable_swipe_back.set(true);
+                    restore_update_exit_controls();
                     handle_update_error(
                         state,
                         error.to_string(),
@@ -1159,6 +1175,29 @@ fn setup_update_global(state: StoredValue<AppState>) {
         }
     })
     .detach();
+}
+
+fn resume_update_if_needed(state: StoredValue<AppState>) {
+    let state = state.borrow();
+    if !state.update.update_status().needs_continue {
+        return;
+    }
+
+    let ui = state.ui();
+    let update_global = ui.global::<UpdateGlobal>();
+    if update_global.get_fw_update_state() == FwUpdateState::Installing {
+        return;
+    }
+
+    log::info!("continuing interrupted update");
+    state.set_update_kiosk_enabled(false);
+
+    update_global.set_fw_update_state(FwUpdateState::Installing);
+    update_global.set_fw_update_progress(0.0);
+    update_global.set_fw_update_eta(SharedString::default());
+
+    ui.global::<Navigate>().invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
+    state.update.continue_update();
 }
 
 fn setup_save_settings_global(state: StoredValue<AppState>) {

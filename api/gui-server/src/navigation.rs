@@ -26,6 +26,7 @@ pub const LOCK_SCREEN_APP_ID: AppId = AppId(hex!("0a0000000000000000000000000000
 pub const ONBOARDING_APP_ID: AppId = AppId(hex!("dac5321775d449c11bc9c90f38067f8f"));
 pub const ALERTS_APP_ID: AppId = AppId(hex!("32defc0867555fe8002759667000b22a"));
 pub const BITCOIN_APP_ID: AppId = AppId(hex!("426974636f696e2057616c6c65740000"));
+pub const SETTINGS_APP_ID: AppId = AppId(hex!("c192b79230473875f159d4423d74d00f"));
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
     /// Shows a modal of the app, giving it a navigation object

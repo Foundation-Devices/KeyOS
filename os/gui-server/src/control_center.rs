@@ -120,7 +120,7 @@ impl Gui {
     pub(crate) fn is_control_center_visible(&self) -> bool {
         !matches!(self.state, GuiState::Splash | GuiState::SplashFade { .. })
             && (self.control_center_window.as_ref().map(|cw| cw.in_shutdown_mode).unwrap_or(false)
-                || self.with_active_app(|w| w.display_control_center).unwrap_or(true))
+                || self.control_center_enabled())
     }
 
     pub(crate) fn control_center_process_touch(&mut self, touch: Touch) {

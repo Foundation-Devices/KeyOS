@@ -36,7 +36,7 @@ pub const MANIFEST_FILE_PATH: &str = "/release/manifest.json";
 pub const FIRMWARE_FILE_PATH: &str = "/keyos/app.bin";
 
 /// The outcome of applying updates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum UpdateOutcome {
     /// All releases were applied successfully.
     Done,

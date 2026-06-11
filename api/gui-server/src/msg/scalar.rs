@@ -87,10 +87,87 @@ pub struct AnimateNextFrame {
     pub animation_kind: NextFrameAnimationKind,
 }
 
-/// Prevents the device from auto-locking and auto-shutting down while active
-/// Screen dimming is still allowed
-#[derive(Debug, Copy, Clone, server::Message)]
-pub struct SetWakeLock(pub bool);
+#[derive(Debug, Copy, Clone, Default, server::Message)]
+pub struct UpdateKioskPolicy {
+    pub auto_lock_enabled: Option<bool>,
+    pub control_center_enabled: Option<bool>,
+    pub home_button_enabled: Option<bool>,
+    pub power_button_enabled: Option<bool>,
+}
+
+impl UpdateKioskPolicy {
+    const AUTO_LOCK: u32 = 1 << 0;
+    const CONTROL_CENTER: u32 = 1 << 1;
+    const HOME_BUTTON: u32 = 1 << 2;
+    const POWER_BUTTON: u32 = 1 << 3;
+
+    pub fn all(enabled: bool) -> Self {
+        Self::default()
+            .set_auto_lock(enabled)
+            .set_control_center(enabled)
+            .set_home_button(enabled)
+            .set_power_button(enabled)
+    }
+
+    #[inline]
+    pub fn set_auto_lock(mut self, enabled: bool) -> Self {
+        self.auto_lock_enabled = Some(enabled);
+        self
+    }
+
+    #[inline]
+    pub fn set_control_center(mut self, enabled: bool) -> Self {
+        self.control_center_enabled = Some(enabled);
+        self
+    }
+
+    #[inline]
+    pub fn set_home_button(mut self, enabled: bool) -> Self {
+        self.home_button_enabled = Some(enabled);
+        self
+    }
+
+    #[inline]
+    pub fn set_power_button(mut self, enabled: bool) -> Self {
+        self.power_button_enabled = Some(enabled);
+        self
+    }
+}
+
+impl FromScalar<1> for UpdateKioskPolicy {
+    fn from_scalar([flags]: [u32; 1]) -> Self {
+        let present_flags = flags >> 16;
+        let value_flags = flags & u16::MAX as u32;
+        let read_flag = |flag| (present_flags & flag != 0).then_some(value_flags & flag != 0);
+        Self {
+            auto_lock_enabled: read_flag(Self::AUTO_LOCK),
+            control_center_enabled: read_flag(Self::CONTROL_CENTER),
+            home_button_enabled: read_flag(Self::HOME_BUTTON),
+            power_button_enabled: read_flag(Self::POWER_BUTTON),
+        }
+    }
+}
+
+impl AsScalar<1> for UpdateKioskPolicy {
+    fn as_scalar(&self) -> [u32; 1] {
+        let mut present_flags = 0;
+        let mut value_flags = 0;
+        for (flag, value) in [
+            (Self::AUTO_LOCK, self.auto_lock_enabled),
+            (Self::CONTROL_CENTER, self.control_center_enabled),
+            (Self::HOME_BUTTON, self.home_button_enabled),
+            (Self::POWER_BUTTON, self.power_button_enabled),
+        ] {
+            if let Some(enabled) = value {
+                present_flags |= flag;
+                if enabled {
+                    value_flags |= flag;
+                }
+            }
+        }
+        [(present_flags << 16) | value_flags]
+    }
+}
 
 impl FromScalar<1> for AnimateNextFrame {
     fn from_scalar([animation_kind]: [u32; 1]) -> Self {

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::io::Read;
+use std::thread;
 use std::time::Duration;
 
 use file_backed::JsonBacked;
 use foundation_api::firmware::FirmwareFetchEvent;
-use security::FirmwareTimestamp;
-use server::{xous, MessageId as _, Owned};
+use server::{xous, ArchiveSubList, MessageId as _, Owned};
 use update::messages::InstallProgress;
 use update::{messages::*, Error, MIN_UPDATE_BATTERY_PERCENT};
 use whence::WhenceExt;
@@ -27,16 +27,15 @@ const DOWNLOAD_STALL_TICK_INTERVAL: Duration = Duration::from_secs(1);
 #[name = "os/update"]
 pub struct Server {
     fs: FileSystem,
-    crypto: CryptoApi,
     gui: GuiApiLight,
     ql: QuantumLinkApi,
-    security: Security,
-
     power_manager: PowerManagerExtApi,
     state: JsonBacked<UpdateState, FileSystemPermissions>,
     downloader: UpdateDownloader<FileSystem>,
-    progress_subscribers: Vec<server::ArchiveEventSubscriber<ProgressUpdate>>,
+    progress_subscribers: ArchiveSubList<ProgressUpdate>,
     download_stall_cb: TicktimerCallback,
+    install_running: bool,
+    sender: ServerSender,
 }
 
 impl Server {
@@ -47,17 +46,46 @@ impl Server {
         let download_stall_cb = TicktimerCallback::new(sid).expect("could not register callback");
         Self {
             fs,
-            crypto: CryptoApi::default(),
             gui: GuiApiLight::default(),
             ql: QuantumLinkApi::default(),
-            security: Security::default(),
 
             power_manager: Default::default(),
             state,
             downloader,
-            progress_subscribers: Vec::new(),
+            progress_subscribers: Default::default(),
             download_stall_cb,
+            install_running: false,
+            sender: ServerSender::new(sid),
         }
+    }
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+enum FirmwareInstallWorkerEvent {
+    Progress(ProgressUpdate),
+    Complete(UpdateOutcome),
+    Error(Error),
+}
+
+#[derive(Clone)]
+struct ServerSender {
+    conn: server::CheckedConn<server::AllPermissions>,
+}
+
+impl ServerSender {
+    fn new(sid: xous::SID) -> Self { Self { conn: xous::connect(sid).unwrap().into() } }
+
+    fn progress(&self, event: ProgressUpdate) { self.event(FirmwareInstallWorkerEvent::Progress(event)); }
+
+    fn outcome(&self, outcome: UpdateOutcome) { self.event(FirmwareInstallWorkerEvent::Complete(outcome)); }
+
+    fn error(&self, error: Error) { self.event(FirmwareInstallWorkerEvent::Error(error)); }
+
+    fn event(&self, event: FirmwareInstallWorkerEvent) {
+        self.conn
+            .try_send_archive(event)
+            .inspect_err(|e| log::warn!("failed to send install event {e:?}"))
+            .ok();
     }
 }
 
@@ -167,9 +195,10 @@ impl server::BlockingArchiveHandler<GetUpdateStatus> for Server {
     ) -> <GetUpdateStatus as server::BlockingArchive>::Response {
         let downloaded_update = self.state.downloaded.is_some();
         let needs_continue = !self.state.pending_apply.is_empty();
+        let installing = self.install_running;
         let sufficient_battery = self.has_sufficient_battery();
 
-        UpdateStatus { downloaded_update, needs_continue, sufficient_battery }
+        UpdateStatus { downloaded_update, needs_continue, installing, sufficient_battery }
     }
 }
 
@@ -180,6 +209,11 @@ impl server::ArchiveEventHandler<FirmwareFetchEvent> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
+        if self.install_running {
+            log::info!("ignoring firmware fetch event while firmware install is in progress");
+            return;
+        }
+
         let result = self.downloader.handle_event(&*event);
         self.refresh_download_stall_tick();
 
@@ -228,6 +262,51 @@ impl server::ScalarHandler<DownloadStallTick> for Server {
     }
 }
 
+impl server::ArchiveHandler<FirmwareInstallWorkerEvent> for Server {
+    fn handle(
+        &mut self,
+        event: Owned<FirmwareInstallWorkerEvent>,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        let Ok(event) = event.deserialize() else { return };
+        match event {
+            FirmwareInstallWorkerEvent::Progress(event) => {
+                self.notify(event);
+            }
+            FirmwareInstallWorkerEvent::Complete(outcome) => {
+                self.install_running = false;
+                let result: whence::Result<(), Error> = (|| {
+                    match outcome {
+                        UpdateOutcome::Done => {
+                            core::finalize_update(&mut self.fs)?;
+                            self.notify_and_reboot(ProgressUpdate::Done)?;
+                        }
+                        UpdateOutcome::Partial(remaining_release_paths) => {
+                            log::info!("release requires a reboot, saving remaining releases and rebooting");
+                            self.state.guard().pending_apply = remaining_release_paths;
+                            core::finalize_update(&mut self.fs)?;
+                            self.notify_and_reboot(ProgressUpdate::Rebooting)?;
+                        }
+                    }
+
+                    Ok(())
+                })();
+
+                if let Err(e) = result {
+                    log::error!("finish_update failed: {e:?}");
+                    let error = e.into_inner();
+                    self.notify(ProgressUpdate::InstallError(error));
+                }
+            }
+            FirmwareInstallWorkerEvent::Error(error) => {
+                self.install_running = false;
+                self.notify(ProgressUpdate::InstallError(error));
+            }
+        }
+    }
+}
+
 impl Server {
     fn request_resume(&mut self, chunk_offset: u64) -> Result<(), update::DownloadError> {
         log::info!("requesting firmware download resume from chunk offset {chunk_offset}");
@@ -248,14 +327,13 @@ impl Server {
     }
 
     fn start_update(&mut self, release_paths: Vec<String>) -> whence::Result<(), Error> {
-        if !self.state.pending_apply.is_empty() {
-            log::error!("previous update was interrupted by a reboot and should be continued before starting another one");
-            return Err(Error::StartButShouldContinue).whence();
+        if !self.can_start_new_update("start_update")? {
+            return Ok(());
         }
 
         log::info!("starting firmware update procedure");
 
-        self.apply_releases(release_paths)?;
+        self.spawn_apply_releases(release_paths);
 
         Ok(())
     }
@@ -263,16 +341,24 @@ impl Server {
     /// Continue an update that was interrupted by a reboot. This function assumes that
     /// pending_apply is non-empty.
     fn continue_update(&mut self) -> whence::Result<(), Error> {
+        if !self.can_start_install("continue_update")? {
+            return Ok(());
+        }
+
         log::info!("continuing previous firmware update procedure");
 
         let remaining_release_paths = std::mem::take(&mut self.state.guard().pending_apply);
 
-        self.apply_releases(remaining_release_paths)?;
+        self.spawn_apply_releases(remaining_release_paths);
 
         Ok(())
     }
 
     fn apply_downloaded_update(&mut self) -> whence::Result<(), Error> {
+        if !self.can_start_new_update("apply_downloaded_update")? {
+            return Ok(());
+        }
+
         let Some(downloaded) = self.state.guard().downloaded.take() else {
             log::error!("no downloaded update to apply");
             return Err(Error::NoUpdateDownloaded).whence();
@@ -280,7 +366,9 @@ impl Server {
 
         log::info!("applying downloaded update with {} patches", downloaded.paths.len());
 
-        self.start_update(downloaded.paths)
+        self.spawn_apply_releases(downloaded.paths);
+
+        Ok(())
     }
 
     fn firmware_version(&self) -> whence::Result<String, Error> {
@@ -296,15 +384,87 @@ impl Server {
         Ok(header.version().to_owned())
     }
 
-    /// Applies a series of releases to the update directory.
-    ///
-    /// If a release requires a reboot, the remaining releases will be saved
-    /// and a system reboot will be initiated.
-    fn apply_releases(&mut self, release_paths: Vec<String>) -> whence::Result<(), Error> {
+    fn spawn_apply_releases(&mut self, release_paths: Vec<String>) {
+        self.install_running = true;
+        self.downloader.reset_state();
+        self.refresh_download_stall_tick();
+
+        let sender = self.sender.clone();
+        let task = InstallTask {
+            fs: self.fs.clone(),
+            crypto: CryptoApi::default(),
+            security: Security::default(),
+            sender: sender.clone(),
+        };
+
+        thread::spawn(move || match task.apply_releases(release_paths) {
+            Ok(outcome) => sender.outcome(outcome),
+            Err(e) => {
+                log::error!("apply_releases failed: {e:?}");
+                let error = e.into_inner();
+                sender.error(error);
+            }
+        });
+    }
+
+    fn notify_and_reboot(&mut self, update: ProgressUpdate) -> whence::Result<(), Error> {
+        if matches!(update, ProgressUpdate::Done) {
+            self.state.guard().update_applied = true;
+        }
+        self.notify(update);
+        // give subscribers time to process event
+        std::thread::sleep(Duration::from_secs(3));
+
+        self.gui.reboot().map_err(|_| Error::Reboot).whence()?;
+        Ok(())
+    }
+
+    fn notify(&mut self, event: ProgressUpdate) { self.progress_subscribers.send_nowait(&event); }
+
+    fn can_start_new_update(&self, operation: &str) -> whence::Result<bool, Error> {
+        if !self.can_start_install(operation)? {
+            return Ok(false);
+        }
+
+        if !self.state.pending_apply.is_empty() {
+            log::warn!("{operation} ignored: previous update should be continued");
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    fn can_start_install(&self, operation: &str) -> whence::Result<bool, Error> {
+        if self.install_running {
+            log::warn!("{operation} ignored: update already in progress");
+            return Ok(false);
+        }
+
         if !self.has_sufficient_battery() {
             return Err(Error::InsufficientBattery.into());
         }
 
+        Ok(true)
+    }
+
+    fn has_sufficient_battery(&self) -> bool {
+        self.power_manager.status().map(|s| s.battery_percent >= MIN_UPDATE_BATTERY_PERCENT).unwrap_or(false)
+    }
+}
+
+struct InstallTask {
+    fs: FileSystem,
+    crypto: CryptoApi,
+    security: Security,
+    sender: ServerSender,
+}
+
+impl InstallTask {
+    /// Applies a series of releases to the update directory.
+    ///
+    /// If a release requires a reboot, the remaining releases will be saved
+    /// and a system reboot will be initiated.
+    fn apply_releases(&self, release_paths: Vec<String>) -> whence::Result<UpdateOutcome, Error> {
         let current_fw_timestamp: u32 =
             self.security.firmware_timestamp().map(u32::from).map_err(|_| Error::SecurityError).whence()?;
         let mut min_allowed_update_timestamp = current_fw_timestamp;
@@ -314,23 +474,20 @@ impl Server {
 
         let mut progress =
             InstallProgress { patches, firmware_copy: FirmwareCopyProgress { copied_bytes: 0, total_bytes } };
-        self.notify(ProgressUpdate::InstallProgress(progress.clone()));
+        self.sender.progress(ProgressUpdate::InstallProgress(progress.clone()));
 
-        core::make_firmware_copy(&self.fs, {
-            let subscribers = &mut self.progress_subscribers;
-            |copied| {
-                progress.firmware_copy.copied_bytes = copied;
-                let event = ProgressUpdate::InstallProgress(progress.clone());
-                notify_progress(subscribers, event);
-            }
+        core::make_firmware_copy(&self.fs, |copied| {
+            progress.firmware_copy.copied_bytes = copied;
+            let event = ProgressUpdate::InstallProgress(progress.clone());
+            self.sender.progress(event);
         })?;
 
         progress.set_firmware_copy(FirmwareCopyProgress { copied_bytes: total_bytes, total_bytes });
-        self.notify(ProgressUpdate::InstallProgress(progress.clone()));
+        self.sender.progress(ProgressUpdate::InstallProgress(progress.clone()));
 
-        let subscribers = &mut self.progress_subscribers;
         let fs = &self.fs;
         let crypto = &self.crypto;
+        let sender = &self.sender;
 
         let mut fw_timestamp = None;
 
@@ -374,7 +531,7 @@ impl Server {
                     UpdateEvent::PatchCompleted { .. } => {}
                 }
                 let event = ProgressUpdate::InstallProgress(progress.clone());
-                notify_progress(subscribers, event);
+                sender.progress(event);
             },
         )?;
 
@@ -383,56 +540,10 @@ impl Server {
             return Err(Error::Cosign2HeaderMissing).whence();
         };
 
-        self.update_firmware_timestamp(fw_timestamp)?;
+        self.security.set_firmware_timestamp(fw_timestamp).map_err(|_| Error::SecurityError)?;
 
-        match outcome {
-            UpdateOutcome::Done => {
-                core::finalize_update(&mut self.fs)?;
-                self.notify_and_reboot(ProgressUpdate::Done)?;
-            }
-            UpdateOutcome::Partial(remaining_releases) => {
-                log::info!("release requires a reboot, saving remaining releases and rebooting");
-                self.state.guard().pending_apply = remaining_releases;
-                core::finalize_update(&mut self.fs)?;
-                self.notify_and_reboot(ProgressUpdate::Rebooting)?;
-            }
-        }
-
-        Ok(())
+        Ok(outcome)
     }
-
-    fn notify_and_reboot(&mut self, update: ProgressUpdate) -> whence::Result<(), Error> {
-        if matches!(update, ProgressUpdate::Done) {
-            self.state.guard().update_applied = true;
-        }
-        self.notify(update);
-        // give subscribers time to process event
-        std::thread::sleep(Duration::from_secs(3));
-
-        self.gui.reboot().map_err(|_| Error::Reboot).whence()?;
-        Ok(())
-    }
-
-    fn notify(&mut self, event: ProgressUpdate) { notify_progress(&mut self.progress_subscribers, event); }
-
-    fn has_sufficient_battery(&self) -> bool {
-        self.power_manager.status().map(|s| s.battery_percent >= MIN_UPDATE_BATTERY_PERCENT).unwrap_or(false)
-    }
-
-    fn update_firmware_timestamp(&mut self, timestamp: FirmwareTimestamp) -> whence::Result<(), Error> {
-        Ok(self.security.set_firmware_timestamp(timestamp).map_err(|_| Error::SecurityError)?)
-    }
-}
-
-fn notify_progress(
-    subscribers: &mut Vec<server::ArchiveEventSubscriber<ProgressUpdate>>,
-    progress: ProgressUpdate,
-) {
-    subscribers.retain(|s| match s.send_nowait(&progress) {
-        Ok(_) => true,
-        Err(xous::Error::ServerQueueFull) => true,
-        Err(_) => false,
-    });
 }
 
 fn hash_error_to_error(e: fw_utils::hash::HashError) -> Error {

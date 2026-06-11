@@ -97,7 +97,7 @@ pub struct AppWindow {
     buffers: BufferChain,
     blur_state: BlurBufferState,
     keyboard_state: KeyboardState,
-    display_control_center: bool,
+    kiosk_policy: KioskPolicy,
     #[cfg(not(feature = "recovery-os"))]
     camera_state: crate::camera::CameraState,
     notified_shown: bool,
@@ -107,6 +107,25 @@ impl Drop for AppWindow {
     fn drop(&mut self) {
         if let Err(err) = xous::disconnect(self.input_cid) {
             log::error!("failed to disconnect input CID {:?} for {:?}: {:?}", self.input_cid, self.name, err);
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct KioskPolicy {
+    home_button_enabled: bool,
+    power_button_enabled: bool,
+    control_center_enabled: bool,
+    auto_lock_enabled: bool,
+}
+
+impl Default for KioskPolicy {
+    fn default() -> Self {
+        Self {
+            home_button_enabled: true,
+            power_button_enabled: true,
+            control_center_enabled: true,
+            auto_lock_enabled: true,
         }
     }
 }
@@ -344,10 +363,10 @@ impl Gui {
                 last_active: Instant::now(),
                 blur_state: BlurBufferState::default(),
                 keyboard_state: KeyboardState::default(),
+                kiosk_policy: KioskPolicy::default(),
                 #[cfg(not(feature = "recovery-os"))]
                 camera_state: crate::camera::CameraState::default(),
                 input_cid: msg.cid,
-                display_control_center: true,
                 buffers: BufferChain::new(msg.cid, u16::try_from(SCREEN_HEIGHT).unwrap()),
                 notified_shown: false,
             },
@@ -933,19 +952,29 @@ impl Gui {
         self.active_app_pid().is_some() && self.active_app_pid() == self.app_registry.lock_screen_pid()
     }
 
-    fn home_button_enabled(&self) -> bool {
-        let modal_allows =
-            self.modal_background_pid().map(|pid| self.home_button_allowed_for_app(pid)).unwrap_or(true);
+    fn home_button_enabled(&self) -> bool { self.control_enabled(|policy| policy.home_button_enabled, false) }
+
+    fn power_button_enabled(&self) -> bool {
+        self.control_enabled(|policy| policy.power_button_enabled, true)
+    }
+
+    fn control_center_enabled(&self) -> bool {
+        self.control_enabled(|policy| policy.control_center_enabled, true)
+    }
+
+    #[cfg(all(keyos, not(feature = "recovery-os")))]
+    fn auto_lock_enabled(&self) -> bool { self.control_enabled(|policy| policy.auto_lock_enabled, true) }
+
+    fn control_enabled(&self, enabled: fn(KioskPolicy) -> bool, active_default: bool) -> bool {
+        let modal_allows = self.modal_background_pid().map_or(true, |pid| enabled(self.kiosk_policy(pid)));
         let active_allows =
-            self.active_app_pid().map(|pid| self.home_button_allowed_for_app(pid)).unwrap_or(false);
+            self.active_app_pid().map_or(active_default, |pid| enabled(self.kiosk_policy(pid)));
 
         modal_allows && active_allows
     }
 
-    fn home_button_allowed_for_app(&self, pid: PID) -> bool {
-        Some(pid) != self.app_registry.lock_screen_pid()
-            && Some(pid) != self.app_registry.onboarding_app_pid()
-            && Some(pid) != self.app_registry.alerts_app_pid()
+    fn kiosk_policy(&self, pid: PID) -> KioskPolicy {
+        self.windows.get(&pid).map(|window| window.kiosk_policy).unwrap_or_default()
     }
 
     #[cfg(not(feature = "recovery-os"))]

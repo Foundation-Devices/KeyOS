@@ -14,6 +14,7 @@ use ngwallet::bdk_wallet::bitcoin::secp256k1::{All, Secp256k1};
 use quantum_link::SendMessageError;
 use slint_keyos_platform::{
     file_backed::JsonBacked,
+    gui_server_api::msg::UpdateKioskPolicy,
     gui_server_api::navigation::filepicker::{AllowedExtensions, Location, SelectFileOptions},
     navigation::select_file,
     settings::global,
@@ -276,10 +277,14 @@ impl AppState {
             log::info!("Cancelled keycard backup flow {active_route:?}");
         }
 
-        // Ensure swipe back is available and wake lock is released when an update page is left
+        // Ensure swipe back is available and auto-lock is restored when an update page is left
         if active_route != RouteOption::UpdateProgress {
-            self.gui.set_wake_lock(false).ok();
-            self.platform_config.enable_swipe_back.set(true);
+            self.set_update_kiosk_enabled(true);
         }
+    }
+
+    pub fn set_update_kiosk_enabled(&self, enabled: bool) {
+        self.gui.update_kiosk_policy(UpdateKioskPolicy::all(enabled)).ok();
+        self.platform_config.enable_swipe_back.set(enabled);
     }
 }

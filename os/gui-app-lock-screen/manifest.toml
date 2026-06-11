@@ -6,7 +6,7 @@ en = "Lock Screen"
 
 [permissions]
 template = ["gui-app", "navigable"]
-"os/gui-server" = ["ShowControlCenter", "LoginSuccess"]
+"os/gui-server" = ["LoginSuccess", "UpdateKioskPolicy"]
 "os/security" = [
     "Login",
     "GetAttemptsRemaining",

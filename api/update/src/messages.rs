@@ -38,6 +38,8 @@ pub struct UpdateStatus {
     pub downloaded_update: bool,
     /// Whether there is an update that was interrupted by reboot and needs to continue.
     pub needs_continue: bool,
+    /// Whether a firmware update is currently being installed.
+    pub installing: bool,
     /// Whether the battery level is sufficient for an update.
     pub sufficient_battery: bool,
 }

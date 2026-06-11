@@ -4,7 +4,6 @@
 use std::time::Duration;
 
 use server::{ScalarEventHandler, ScalarHandler, ServerContext};
-use xous::PID;
 use xous_ticktimer::TicktimerCallback;
 
 #[cfg(not(feature = "recovery-os"))]
@@ -40,13 +39,10 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(24 * 3600);
 pub struct AutoLockState {
     lock_timeout: Duration,
     callback: Option<TicktimerCallback>,
-    wake_lock_holder: Option<PID>,
 }
 
 impl Default for AutoLockState {
-    fn default() -> Self {
-        Self { lock_timeout: DEFAULT_LOCK_TIMEOUT, callback: None, wake_lock_holder: None }
-    }
+    fn default() -> Self { Self { lock_timeout: DEFAULT_LOCK_TIMEOUT, callback: None } }
 }
 
 impl Gui {
@@ -106,38 +102,6 @@ impl ScalarEventHandler<settings::global::AutoLock> for Gui {
     }
 }
 
-impl ScalarHandler<gui_server_api::msg::SetWakeLock> for Gui {
-    fn handle(
-        &mut self,
-        msg: gui_server_api::msg::SetWakeLock,
-        sender: xous::PID,
-        _context: &mut ServerContext<Self>,
-    ) {
-        if msg.0 {
-            log::info!("Wake lock acquired by PID={sender}");
-            self.auto_lock.wake_lock_holder = Some(sender);
-        } else {
-            self.release_wake_lock_for(sender);
-        }
-    }
-}
-
-impl Gui {
-    /// Releases the wake lock if it is currently held by `pid`
-    pub(crate) fn release_wake_lock_for(&mut self, pid: PID) {
-        if self.auto_lock.wake_lock_holder == Some(pid) {
-            log::info!("Wake lock released by PID={pid}");
-            self.auto_lock.wake_lock_holder = None;
-            self.reset_auto_lock();
-        } else {
-            log::debug!(
-                "Attempted to release wake lock by PID={pid} while the lock was {:?}",
-                self.auto_lock.wake_lock_holder
-            );
-        }
-    }
-}
-
 impl ScalarHandler<AutoLockTimerCallback> for Gui {
     fn handle(&mut self, msg: AutoLockTimerCallback, _sender: xous::PID, _context: &mut ServerContext<Self>) {
         #[cfg(not(keyos))]
@@ -167,8 +131,8 @@ impl ScalarHandler<AutoLockTimerCallback> for Gui {
                 self.auto_lock.request_callback(timeout, AutoLockStep::LcdOff);
             }
             AutoLockStep::LcdOff => {
-                if self.auto_lock.wake_lock_holder.is_some() {
-                    log::debug!("Auto-lock skipped (wake lock active)");
+                if !self.auto_lock_enabled() {
+                    log::debug!("Auto-lock skipped (kiosk policy)");
                 } else if self.display.is_lcd_on() {
                     log::info!("Turning LCD off (no activity)");
                     self.lock();
@@ -180,8 +144,8 @@ impl ScalarHandler<AutoLockTimerCallback> for Gui {
                 );
             }
             AutoLockStep::PowerOff => {
-                if self.auto_lock.wake_lock_holder.is_some() {
-                    log::debug!("Auto-shutdown skipped (wake lock active)");
+                if !self.auto_lock_enabled() {
+                    log::debug!("Auto-shutdown skipped (kiosk policy)");
                     self.auto_lock.request_callback(self.auto_lock_timeout(), AutoLockStep::PowerOff);
                     return;
                 }

@@ -4748,6 +4748,7 @@ dependencies = [
  "slint-keyos-platform",
  "slint-keyos-platform-build",
  "thiserror 2.0.11",
+ "update",
  "xous",
  "xous-api-log",
 ]

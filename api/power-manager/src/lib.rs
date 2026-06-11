@@ -35,7 +35,7 @@ macro_rules! use_ext_api {
     };
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PowerManagerApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
 }
@@ -72,7 +72,7 @@ impl<P: CheckedPermissions> PowerManagerApi<P> {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PowerManagerExtApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
 }

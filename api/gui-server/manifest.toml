@@ -23,11 +23,10 @@ FinishResponse = { id = 45, type = "blockingArchive" }
 NavigationCancel = { id = 46, type = "scalar" }
 GetPendingNavRequest = { id = 47, type = "blockingArchive" }
 LoginSuccess = { id = 48, type = "scalar" }
-ShowControlCenter = { id = 49, type = "scalar" }
-SetWakeLock = { id = 51, type = "scalar" }
 SimulateKey = { id = 52, type = "scalar", cfg = "not(keyos)" }
 SimulateScroll = { id = 53, type = "scalar", cfg = "not(keyos)" }
 CaptureScreen = { id = 54, type = "lendMut" }
 InjectTouch = { id = 55, type = "scalar" }
 InjectKey = { id = 56, type = "scalar" }
 RunApp = { id = 57, type = "blockingArchive" }
+UpdateKioskPolicy = { id = 58, type = "scalar" }
