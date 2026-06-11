@@ -59,10 +59,3 @@ pub(super) fn read_app_header(elf_path: &str) -> anyhow::Result<Option<cosign2::
 }
 
 pub(super) fn read_app_bytes(elf_path: &str) -> anyhow::Result<Vec<u8>> { Ok(std::fs::read(elf_path)?) }
-
-pub(super) fn verify_third_party_app_header(
-    bytes: &[u8],
-    public_key: [u8; 33],
-) -> anyhow::Result<cosign2::Header> {
-    Ok(fw_utils::hash::verify_cosign2_mem_with_third_party_keys(bytes, &[public_key], true)?)
-}

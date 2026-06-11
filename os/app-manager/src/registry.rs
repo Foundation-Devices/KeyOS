@@ -23,7 +23,7 @@ mod platform;
 
 use platform::{
     app_binary_metadata, app_binary_size, app_icon_exists, read_app_bytes, read_app_header,
-    read_app_icon_bytes, verify_third_party_app_header,
+    read_app_icon_bytes,
 };
 
 const FOUNDATION_PUBLISHER: &str = "Foundation Devices, Inc.";
@@ -544,6 +544,15 @@ fn app_verified_third_party_header(elf_path: &str, public_key: [u8; 33]) -> Opti
     }
 
     app_verified_third_party_header_after_prefilter(elf_path, public_key)
+}
+
+fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::Result<cosign2::Header> {
+    Ok(fw_utils::hash::verify_cosign2_mem_with_third_party_keys(
+        &crate::CryptoApi::default(),
+        bytes,
+        &[public_key],
+        true,
+    )?)
 }
 
 fn app_verified_third_party_header_after_prefilter(

@@ -189,7 +189,7 @@ impl ScalarHandler<CopyArchive> for RecoveryWorkerServer {
         self.os_binary_state = RecoveryState::None;
 
         self.fs.remove(TEMP_ARCHIVE_PATH, TEMP_ARCHIVE_LOCATION).ok();
-        let is_ok = fw_utils::hash::copy_file_progress(
+        let is_ok = fw_utils::copy_file_progress(
             &self.fs,
             path,
             *location,
@@ -532,7 +532,7 @@ impl RecoveryWorkerServer {
             )?;
         } else {
             // Copy the entire file as-is
-            fw_utils::hash::copy_file_progress(
+            fw_utils::copy_file_progress(
                 &self.fs,
                 temp_file_path,
                 *temp_file_location,
@@ -980,7 +980,7 @@ impl RecoveryWorkerServer {
             self.fs.remove(fs_elf_path, Location::System).ok();
 
             // Copy the app ELF file
-            fw_utils::hash::write_file_progress(
+            fw_utils::write_file_progress(
                 &self.fs,
                 fs_elf_path,
                 Location::System,
@@ -991,7 +991,7 @@ impl RecoveryWorkerServer {
 
             // Read and verify the app ELF file
             let (file_mem, file_size) =
-                fw_utils::hash::read_file_progress(&self.fs, fs_elf_path, Location::System, |_| ())
+                fw_utils::read_file_progress(&self.fs, fs_elf_path, Location::System, |_| ())
                     .context("couldn't read the app ELF file back")?;
             let header = fw_utils::hash::verify_cosign2_mem(
                 &self.crypto,
@@ -1012,7 +1012,7 @@ impl RecoveryWorkerServer {
             let fs_manifest_path = &format!("{fs_app_dir}/manifest.json");
 
             self.fs.remove(fs_manifest_path, Location::System).ok();
-            fw_utils::hash::write_file_progress(
+            fw_utils::write_file_progress(
                 &self.fs,
                 fs_manifest_path,
                 Location::System,
@@ -1023,7 +1023,7 @@ impl RecoveryWorkerServer {
 
             // Read and verify the app manifest file
             let (mem, size) =
-                fw_utils::hash::read_file_progress(&self.fs, fs_manifest_path, Location::System, |_| ())
+                fw_utils::read_file_progress(&self.fs, fs_manifest_path, Location::System, |_| ())
                     .context("couldn't read the manifest file back")?;
             let manifest_hash = self
                 .crypto
@@ -1070,7 +1070,7 @@ impl RecoveryWorkerServer {
 
             // Copy the asset file
             log::debug!("Copying asset file: {tar_asset_path} -> {fs_asset_path} @ {asset_location:?}");
-            fw_utils::hash::write_file_progress(
+            fw_utils::write_file_progress(
                 &self.fs,
                 &fs_asset_path,
                 *asset_location,
@@ -1080,9 +1080,8 @@ impl RecoveryWorkerServer {
             )?;
 
             // Read and verify the asset file
-            let (mem, size) =
-                fw_utils::hash::read_file_progress(&self.fs, fs_asset_path, *asset_location, |_| ())
-                    .context("couldn't read the asset file back")?;
+            let (mem, size) = fw_utils::read_file_progress(&self.fs, fs_asset_path, *asset_location, |_| ())
+                .context("couldn't read the asset file back")?;
             let asset_hash = self
                 .crypto
                 .sha256(&mem.as_slice::<u8>()[..size])
@@ -1215,8 +1214,7 @@ impl RecoveryWorkerServer {
             bail!("Manifest file is too small to contain a valid cosign2 header");
         }
 
-        let (mem, _) =
-            fw_utils::hash::read_progress(entry, size, |_| ()).context("read manifest file from tar")?;
+        let (mem, _) = fw_utils::read_progress(entry, size, |_| ()).context("read manifest file from tar")?;
 
         let manifest_bytes_without_cosign2 = &mem.as_slice::<u8>()[cosign2::Header::DEFAULT_SIZE..].to_vec();
         let json = std::ffi::CStr::from_bytes_until_nul(manifest_bytes_without_cosign2)?.to_bytes();
@@ -1276,7 +1274,7 @@ impl RecoveryWorkerServer {
 
             let archive_file_name = entry.path()?.to_string_lossy().to_string();
             if archive_file_name == file_name {
-                return Ok(fw_utils::hash::read_progress(entry, size, progress_fn)?);
+                return Ok(fw_utils::read_progress(entry, size, progress_fn)?);
             }
         }
 
@@ -1309,7 +1307,7 @@ impl RecoveryWorkerServer {
 
             let archive_file_name = entry.path()?.to_string_lossy().to_string();
             if archive_file_name == tar_file_name {
-                fw_utils::hash::stream_to_file_progress(
+                fw_utils::stream_to_file_progress(
                     &self.fs,
                     entry,
                     size,

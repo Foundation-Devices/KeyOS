@@ -4,7 +4,7 @@
 use std::io::Read;
 
 use super::{read_cosign2_header_from_reader, read_cosign2_version_from_reader, AppBinaryMetadata};
-use crate::{CryptoApi, FileSystem};
+use crate::FileSystem;
 
 pub(super) fn app_icon_exists(path: &str) -> bool {
     FileSystem::default().metadata(path, fs::Location::System).is_ok()
@@ -69,16 +69,4 @@ pub(super) fn read_app_bytes(elf_path: &str) -> anyhow::Result<Vec<u8>> {
     let mut bytes = vec![0; metadata.size as usize];
     elf_file.read_exact(&mut bytes)?;
     Ok(bytes)
-}
-
-pub(super) fn verify_third_party_app_header(
-    bytes: &[u8],
-    public_key: [u8; 33],
-) -> anyhow::Result<cosign2::Header> {
-    Ok(fw_utils::hash::verify_cosign2_mem_with_third_party_keys(
-        &CryptoApi::default(),
-        bytes,
-        &[public_key],
-        true,
-    )?)
 }

@@ -25,7 +25,6 @@ use app_manager::{
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
 
-#[cfg(keyos)]
 crypto::use_api!();
 fs::use_api!();
 

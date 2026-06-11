@@ -4176,24 +4176,14 @@ checksum = "e88dd42064af55b9bd19ea350a7b94f0a5377d334b03d790a26cfd43855e8049"
 name = "fw-utils"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "app-manifest",
- "atsama5d27",
  "cosign2",
  "crypto",
  "fs",
- "hex",
  "log 0.4.27",
- "micro-ecc-sys",
  "secp256k1 0.29.1",
- "serde",
- "serde_json",
  "server",
- "sha2",
  "thiserror 1.0.64",
- "utralib",
  "xous",
- "xous-ipc",
 ]
 
 [[package]]
@@ -9702,6 +9692,7 @@ dependencies = [
  "server",
  "tar",
  "thiserror 1.0.64",
+ "utralib",
  "xous",
  "xous-api-log",
 ]

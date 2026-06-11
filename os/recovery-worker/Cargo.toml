@@ -33,6 +33,7 @@ serde_json = "1.0"
 rand = "0.8"
 security = { workspace = true }
 tar = { path = "../../imports/tar-rs" }
+utralib = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

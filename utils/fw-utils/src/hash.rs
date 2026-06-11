@@ -1,22 +1,15 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#[cfg(keyos)]
 use std::io::Read;
-#[cfg(keyos)]
-use std::num::NonZero;
 
-#[cfg(keyos)]
 use crypto::CryptoApi;
-#[cfg(keyos)]
 use fs::{FileSystem, Location, OpenFlags};
-#[cfg(keyos)]
-use micro_ecc_sys::{uECC_decompress, uECC_secp256k1, uECC_valid_public_key, uECC_verify};
-#[cfg(keyos)]
 use server::{CheckedPermissions, MessageAllowed};
 use thiserror::Error;
-#[cfg(keyos)]
-use xous::{keyos::PAGE_SIZE, DropDeallocate, MemoryFlags, MemoryRange};
+use xous::{DropDeallocate, MemoryFlags, PAGE_SIZE};
+
+use crate::CHUNK_SIZE_BYTES;
 
 // Well-known public keys
 const KNOWN_SIGNERS: [[u8; 33]; 4] = [
@@ -44,11 +37,9 @@ const KNOWN_SIGNERS: [[u8; 33]; 4] = [
 
 #[derive(Debug, Error)]
 pub enum HashError {
-    #[cfg(keyos)]
     #[error("xous error: {0:?}")]
     XousError(xous::Error),
 
-    #[cfg(keyos)]
     #[error("{0}")]
     CryptoError(#[from] crypto::error::CryptoError),
 
@@ -58,7 +49,6 @@ pub enum HashError {
     #[error("cosign2 header is missing")]
     MissingCosign2Header,
 
-    #[cfg(keyos)]
     #[error("fs error: {0:?}")]
     FsError(#[from] fs::Error),
 
@@ -69,68 +59,12 @@ pub enum HashError {
     NotTrusted,
 }
 
-#[cfg(keyos)]
 impl From<xous::Error> for HashError {
     fn from(value: xous::Error) -> Self { HashError::XousError(value) }
 }
 
 impl From<cosign2::Error> for HashError {
     fn from(value: cosign2::Error) -> Self { HashError::Cosign2Error(value) }
-}
-
-#[cfg(keyos)]
-pub fn read_file<P>(
-    fs: &FileSystem<P>,
-    path: impl Into<String>,
-    location: Location,
-) -> Result<(DropDeallocate, usize), HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<fs::messages::GetMetadata>,
-    P: MessageAllowed<fs::messages::OpenFileMessage>,
-    P: MessageAllowed<fs::messages::ReadFile>,
-    P: MessageAllowed<fs::messages::CloseFile>,
-{
-    let path_str = path.into();
-    let metadata = fs.metadata(path_str.clone(), location)?;
-
-    let mut file =
-        fs.open_file(path_str.clone(), location, OpenFlags { read: true, write: false, create: false })?;
-    let size_aligned =
-        if metadata.size == 0 { PAGE_SIZE as u64 } else { metadata.size.next_multiple_of(PAGE_SIZE as u64) };
-    let total_size = metadata.size as usize;
-
-    let mut file_mem =
-        DropDeallocate::new(xous::map_memory(None, None, size_aligned as usize, xous::MemoryFlags::W)?);
-
-    file.read_exact(&mut file_mem.as_slice_mut()[..total_size])?;
-
-    Ok((file_mem, total_size))
-}
-
-/// Calculate the SHA256 hash of the bootloader plaintext in SRAM.
-#[cfg(keyos)]
-pub fn hash_bootloader<P: crypto::ShaPermissions>(crypto: &CryptoApi<P>) -> Result<[u8; 32], HashError> {
-    const BOOTLOADER_MAX_SIZE: usize = 1024 * 64; // 64KB
-    const BOOTLOADER_SIZE_IDX: usize = 5; // bootloader actual size is stored in its vector table at this location
-    let sram = DropDeallocate::new(xous::map_memory(
-        Some(NonZero::new(utralib::HW_SRAM0_MEM).expect("non-zero")),
-        None,
-        BOOTLOADER_MAX_SIZE,
-        xous::MemoryFlags::DEV,
-    )?);
-
-    let bootloader_size = sram.as_slice::<usize>()[BOOTLOADER_SIZE_IDX];
-    if bootloader_size > BOOTLOADER_MAX_SIZE {
-        return Err(HashError::XousError(xous::Error::InternalError));
-    }
-
-    let mut bootloader_mem =
-        DropDeallocate::new(xous::map_memory(None, None, BOOTLOADER_MAX_SIZE, MemoryFlags::W)?);
-    bootloader_mem.as_slice_mut::<u8>()[..bootloader_size]
-        .copy_from_slice(&sram.as_slice::<u8>()[..bootloader_size]);
-
-    Ok(crypto.sha256(&bootloader_mem.as_slice::<u8>()[..bootloader_size])?)
 }
 
 fn verify_cosign2_mem_with_backends(
@@ -152,18 +86,12 @@ fn verify_cosign2_mem_with_backends(
     Ok(header)
 }
 
-#[cfg(keyos)]
 pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
     crypto: &CryptoApi<P>,
     data: &[u8],
     check_trust: bool,
 ) -> Result<cosign2::Header, HashError> {
-    verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &Sha256 { crypto }, &EccVerifier {}, check_trust)
-}
-
-#[cfg(not(keyos))]
-pub fn verify_cosign2_mem(data: &[u8], check_trust: bool) -> Result<cosign2::Header, HashError> {
-    verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &HostSha256, &HostEccVerifier, check_trust)
+    verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &Sha256 { crypto }, &EccVerifier, check_trust)
 }
 
 fn verify_cosign2_mem_with_third_party_keys_inner(
@@ -208,7 +136,6 @@ fn verify_cosign2_mem_with_third_party_keys_inner(
 /// slot 2 has a real signature, and slot 2's pubkey is in the trusted list.
 /// On miss we return the original official_result error, since that's what the
 /// caller's user is trying to debug.
-#[cfg(keyos)]
 pub fn verify_cosign2_mem_with_third_party_keys<P: crypto::ShaPermissions>(
     crypto: &CryptoApi<P>,
     data: &[u8],
@@ -222,34 +149,11 @@ pub fn verify_cosign2_mem_with_third_party_keys<P: crypto::ShaPermissions>(
         trusted_third_party_pubkeys,
         check_trust,
         &Sha256 { crypto },
-        &EccVerifier {},
+        &EccVerifier,
     )
 }
-
-#[cfg(not(keyos))]
-pub fn verify_cosign2_mem_with_third_party_keys(
-    data: &[u8],
-    trusted_third_party_pubkeys: &[[u8; 33]],
-    check_trust: bool,
-) -> Result<cosign2::Header, HashError> {
-    let official_result = verify_cosign2_mem(data, check_trust);
-    verify_cosign2_mem_with_third_party_keys_inner(
-        official_result,
-        data,
-        trusted_third_party_pubkeys,
-        check_trust,
-        &HostSha256,
-        &HostEccVerifier,
-    )
-}
-
-/// Buffer size for file reads during cosign2 verification
-/// Must be a multiple of `PAGE_SIZE` and `SHA_DMA_ALIGNMENT`
-#[cfg(keyos)]
-const CHUNK_SIZE_BYTES: usize = 32 * 64 * 512; // 1 mb
 
 /// Verifies the `cosign2` header of a file
-#[cfg(keyos)]
 pub fn verify_cosign2<P, PC>(
     fs: &FileSystem<P>,
     crypto: &CryptoApi<PC>,
@@ -291,7 +195,7 @@ where
         &KNOWN_SIGNERS,
         &Sha256 { crypto },
         &sha256_streaming,
-        &EccVerifier {},
+        &EccVerifier,
         header_size,
         file,
     )?
@@ -308,203 +212,10 @@ where
     Ok(header)
 }
 
-#[cfg(keyos)]
-pub fn write_file_progress<P>(
-    fs: &FileSystem<P>,
-    path: impl Into<String>,
-    location: Location,
-    mem: &MemoryRange,
-    total_size: usize,
-    progress_fn: impl Fn(f32),
-) -> Result<(), HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<fs::messages::GetMetadata>,
-    P: MessageAllowed<fs::messages::OpenFileMessage>,
-    P: MessageAllowed<fs::messages::WriteFile>,
-    P: MessageAllowed<fs::messages::Flush>,
-    P: MessageAllowed<fs::messages::CloseFile>,
-    P: MessageAllowed<fs::messages::TruncateFile>,
-{
-    use std::io::Write;
-
-    let path_str = path.into();
-
-    let mut file =
-        fs.open_file(path_str.clone(), location, OpenFlags { read: false, write: true, create: true })?;
-
-    progress_fn(0.0);
-    for (chunk_num, chunk) in mem.as_slice()[..total_size].chunks(CHUNK_SIZE_BYTES).enumerate() {
-        file.write_all(chunk)?;
-
-        let progress = (CHUNK_SIZE_BYTES as f32 * chunk_num as f32) / total_size as f32;
-        progress_fn(progress);
-    }
-
-    file.truncate()?;
-
-    progress_fn(1.0);
-    Ok(())
-}
-
-#[cfg(keyos)]
-pub fn read_progress<R: std::io::Read>(
-    mut reader: R,
-    size: usize,
-    progress_fn: impl Fn(f32),
-) -> Result<(DropDeallocate, usize), HashError> {
-    let size_aligned = if size == 0 { PAGE_SIZE } else { size.next_multiple_of(PAGE_SIZE) };
-    let total_size = size;
-
-    let mut file_mem = DropDeallocate::new(xous::map_memory(None, None, size_aligned, xous::MemoryFlags::W)?);
-
-    progress_fn(0.0);
-
-    for (chunk_num, chunk) in file_mem.as_slice_mut()[..total_size].chunks_mut(CHUNK_SIZE_BYTES).enumerate() {
-        reader.read_exact(chunk)?;
-
-        let progress = (CHUNK_SIZE_BYTES as f32 * chunk_num as f32) / total_size as f32;
-        progress_fn(progress);
-    }
-
-    progress_fn(1.0);
-    Ok((file_mem, total_size))
-}
-
-#[cfg(keyos)]
-pub fn read_file_progress<P>(
-    fs: &FileSystem<P>,
-    path: impl Into<String>,
-    location: Location,
-    progress_fn: impl Fn(f32),
-) -> Result<(DropDeallocate, usize), HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<fs::messages::GetMetadata>,
-    P: MessageAllowed<fs::messages::OpenFileMessage>,
-    P: MessageAllowed<fs::messages::ReadFile>,
-    P: MessageAllowed<fs::messages::CloseFile>,
-{
-    let path_str = path.into();
-    let metadata = fs.metadata(path_str.clone(), location)?;
-
-    let file =
-        fs.open_file(path_str.clone(), location, OpenFlags { read: true, write: false, create: false })?;
-
-    read_progress(file, metadata.size as usize, progress_fn)
-}
-
-#[cfg(keyos)]
-pub fn copy_file_progress<P>(
-    fs: &FileSystem<P>,
-    path_src: impl Into<String>,
-    location_src: Location,
-    path_dst: impl Into<String>,
-    location_dst: Location,
-    progress_fn: impl Fn(f32),
-) -> Result<(), HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<fs::messages::GetMetadata>,
-    P: MessageAllowed<fs::messages::OpenFileMessage>,
-    P: MessageAllowed<fs::messages::ReadFile>,
-    P: MessageAllowed<fs::messages::WriteFile>,
-    P: MessageAllowed<fs::messages::Flush>,
-    P: MessageAllowed<fs::messages::CloseFile>,
-    P: MessageAllowed<fs::messages::TruncateFile>,
-{
-    use std::io::Write;
-
-    let path_src_str = path_src.into();
-    let metadata = fs.metadata(path_src_str.clone(), location_src)?;
-
-    let mut file_src = fs.open_file(
-        path_src_str.clone(),
-        location_src,
-        OpenFlags { read: true, write: false, create: false },
-    )?;
-
-    let path_dst_str = path_dst.into();
-    let mut file_dst =
-        fs.open_file(path_dst_str, location_dst, OpenFlags { read: false, write: true, create: true })?;
-
-    let total_size = metadata.size as usize;
-    let mut buffer = vec![0u8; CHUNK_SIZE_BYTES];
-
-    progress_fn(0.0);
-
-    let mut bytes_copied = 0;
-    while bytes_copied < total_size {
-        let bytes_remaining = total_size - bytes_copied;
-        let chunk_size = bytes_remaining.min(CHUNK_SIZE_BYTES);
-
-        file_src.read_exact(&mut buffer[..chunk_size])?;
-        file_dst.write_all(&buffer[..chunk_size])?;
-
-        bytes_copied += chunk_size;
-        progress_fn(bytes_copied as f32 / total_size as f32);
-    }
-
-    file_dst.truncate()?;
-    progress_fn(1.0);
-
-    Ok(())
-}
-
-/// Copies from any reader to a file without loading it entirely into memory.
-/// If the destination file already exists and is larger than `total_size`,
-/// it will be truncated to the new size.
-#[cfg(keyos)]
-pub fn stream_to_file_progress<P, R: Read>(
-    fs: &FileSystem<P>,
-    mut reader: R,
-    total_size: usize,
-    path_dst: impl Into<String>,
-    location_dst: Location,
-    progress_fn: impl Fn(f32),
-) -> Result<(), HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<fs::messages::OpenFileMessage>,
-    P: MessageAllowed<fs::messages::WriteFile>,
-    P: MessageAllowed<fs::messages::Flush>,
-    P: MessageAllowed<fs::messages::CloseFile>,
-    P: MessageAllowed<fs::messages::TruncateFile>,
-{
-    use std::io::Write;
-
-    let path_dst_str = path_dst.into();
-    let mut file_dst =
-        fs.open_file(path_dst_str, location_dst, OpenFlags { read: false, write: true, create: true })?;
-
-    let mut buffer = vec![0u8; CHUNK_SIZE_BYTES];
-
-    progress_fn(0.0);
-
-    let mut bytes_written = 0;
-    while bytes_written < total_size {
-        let bytes_remaining = total_size - bytes_written;
-        let chunk_size = bytes_remaining.min(CHUNK_SIZE_BYTES);
-
-        reader.read_exact(&mut buffer[..chunk_size])?;
-        file_dst.write_all(&buffer[..chunk_size])?;
-
-        bytes_written += chunk_size;
-        progress_fn(bytes_written as f32 / total_size as f32);
-    }
-
-    file_dst.truncate()?;
-    progress_fn(1.0);
-
-    Ok(())
-}
-
-#[cfg(keyos)]
 struct Sha256<'a, P: crypto::ShaPermissions> {
     crypto: &'a CryptoApi<P>,
 }
 
-#[cfg(keyos)]
 impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
     fn hash(&self, data: &[u8]) -> [u8; 32] {
         // The cosign2::Sha256 trait returns [u8; 32] unconditionally — there's
@@ -527,14 +238,12 @@ impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
 }
 
 /// Streaming SHA-256 implementation to allow hashing of large files
-#[cfg(keyos)]
 struct Sha256Streaming<'a, P: crypto::ShaPermissions, F: Fn(f32)> {
     crypto: &'a CryptoApi<P>,
     progress_fn: &'a F,
     binary_size: usize,
 }
 
-#[cfg(keyos)]
 impl<'a, P: crypto::ShaPermissions, F: Fn(f32)> cosign2::Sha256Streaming for Sha256Streaming<'a, P, F> {
     type Error = HashError;
 
@@ -568,66 +277,9 @@ impl<'a, P: crypto::ShaPermissions, F: Fn(f32)> cosign2::Sha256Streaming for Sha
     }
 }
 
-#[cfg(keyos)]
-struct EccVerifier {}
+struct EccVerifier;
 
-#[cfg(keyos)]
-impl EccVerifier {
-    #[allow(dead_code)]
-    pub fn new() -> Self { EccVerifier {} }
-}
-
-#[cfg(keyos)]
 impl cosign2::Secp256k1Verify for EccVerifier {
-    fn verify_ecdsa(
-        &self,
-        msg: [u8; 32],
-        signature: [u8; 64],
-        pubkey: [u8; 33],
-    ) -> cosign2::VerificationResult {
-        const UECC_SUCCESS: i32 = 1;
-        let mut uncompressed_pk = [0; 64];
-
-        unsafe { uECC_decompress(pubkey.as_ptr(), uncompressed_pk.as_mut_ptr(), uECC_secp256k1()) };
-
-        let res = unsafe { uECC_valid_public_key(uncompressed_pk.as_ptr(), micro_ecc_sys::uECC_secp256k1()) };
-        if res == UECC_SUCCESS {
-            let res = unsafe {
-                uECC_verify(
-                    uncompressed_pk.as_ptr(),
-                    msg.as_ptr(),
-                    msg.len() as u32,
-                    signature.as_ptr(),
-                    uECC_secp256k1(),
-                )
-            };
-
-            if res == UECC_SUCCESS {
-                return cosign2::VerificationResult::Valid;
-            }
-        }
-
-        cosign2::VerificationResult::Invalid
-    }
-}
-
-#[cfg(not(keyos))]
-struct HostSha256;
-
-#[cfg(not(keyos))]
-impl cosign2::Sha256 for HostSha256 {
-    fn hash(&self, data: &[u8]) -> [u8; 32] {
-        use sha2::Digest as _;
-
-        sha2::Sha256::digest(data).into()
-    }
-}
-
-#[cfg(not(keyos))]
-struct HostEccVerifier;
-
-#[cfg(not(keyos))]
-impl cosign2::Secp256k1Verify for HostEccVerifier {
     fn verify_ecdsa(
         &self,
         msg: [u8; 32],
