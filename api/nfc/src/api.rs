@@ -22,31 +22,25 @@ macro_rules! use_api {
 
 pub struct NfcApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
-    buf: xous_ipc::Buffer<'static>,
 }
 
 impl<P: CheckedPermissions> Default for NfcApi<P> {
-    fn default() -> Self { Self { conn: Default::default(), buf: xous_ipc::Buffer::new(872) } }
+    fn default() -> Self { Self { conn: Default::default() } }
 }
 
 impl<P: CheckedPermissions> NfcApi<P> {
-    pub fn read_ndef_raw_msg(&mut self, timeout: Duration) -> Result<(Vec<u8>, Vec<u8>), NfcError>
+    pub fn read_ndef_raw_msg(&self, timeout: Duration) -> Result<(Vec<u8>, Vec<u8>), NfcError>
     where
         P: MessageAllowed<ReadNdefRawMsg>,
     {
-        self.conn.send_blocking_archive_buf(&mut self.buf, ReadNdefRawMsg(timeout))
+        self.conn.send_blocking_archive(ReadNdefRawMsg(timeout))
     }
 
-    pub fn write_ndef_raw_msg(
-        &mut self,
-        uid: Vec<u8>,
-        msg: Vec<u8>,
-        timeout: Duration,
-    ) -> Result<(), NfcError>
+    pub fn write_ndef_raw_msg(&self, uid: Vec<u8>, msg: Vec<u8>, timeout: Duration) -> Result<(), NfcError>
     where
         P: MessageAllowed<WriteNdefRawMsg>,
     {
-        self.conn.send_blocking_archive_buf(&mut self.buf, WriteNdefRawMsg((uid, msg, timeout)))
+        self.conn.send_blocking_archive(WriteNdefRawMsg((uid, msg, timeout)))
     }
 
     pub fn set_enabled(&mut self, enabled: bool) -> Result<(), NfcError>

@@ -1,5 +1,5 @@
 use super::{Message, MessageId, MessageSender};
-use crate::CID;
+use crate::{MemoryAddress, MemoryRange, MemorySize};
 
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -41,86 +41,27 @@ impl Envelope {
 
     pub fn id(&self) -> MessageId { self.body.id() }
 
-    /// Take this message and forward it to another server.
+    /// Set the buffer a `BlockingMove` moves back to its sender, with its offset and
+    /// valid, and return the range that was set before. Nothing is freed: the prior
+    /// range is the caller's to reuse or drop, so it can hand back the same buffer, a
+    /// fresh one, or a sub-range and free the rest.
     ///
-    /// **Note**: For blocking messages, this will block until the other server responds to
-    /// the message. In the future, this may be turned into a nonblocking operation where
-    /// this will return immediately and allow the target Server to respond directly.
-    ///
-    /// ## Result
-    ///
-    /// If the result is successful, then nothing is returned.
-    ///
-    /// If there is an error, then the original Envelope is returned along with the resulting
-    /// error.
-    pub fn forward(mut self, connection: CID, id: MessageId) -> Result<(), (Envelope, crate::Error)> {
-        use core::mem::ManuallyDrop;
-
-        // Update our ID to match the newly-sent message. Reuse the same message struct.
-        self.body.set_id(id);
-
-        // Convert `Self` into something that won't have its "Drop" method called
-        let manual_self = ManuallyDrop::new(self);
-
-        // Unsafe because there are now two things that are pointing at "self.body". However,
-        // this is fine since these two pointers are never used at the same time.
-        let body = unsafe { core::ptr::read(&manual_self.body) };
-        let sender = unsafe { core::ptr::read(&manual_self.sender) };
-
-        // Different messages have different kinds of lifetimes, so they must all be
-        // handled differently.
-        match body {
-            Message::Move(_) => {
-                let result = crate::send_message(connection, body);
-
-                // If the Move was successful, return so.
-                if let Ok(crate::Result::Ok) = result {
-                    // `self` goes out of scope here without having `Drop` called on it
-                    return Ok(());
-                }
-
-                // If there's an error, reconstitute ourselves and return.
-                if let Err(e) = result {
-                    return Err((ManuallyDrop::into_inner(manual_self), e));
-                }
-
-                Err((ManuallyDrop::into_inner(manual_self), crate::Error::MemoryInUse))
-            }
-            Message::BlockingScalar(_) => {
-                let result = crate::send_message(connection, body);
-
-                // If there's an error, reconstitute ourselves and return.
-                if let Err(e) = result {
-                    return Err((ManuallyDrop::into_inner(manual_self), e));
-                } else if let Ok(crate::Result::Scalar1(v)) = result {
-                    if let Err(e) = crate::return_scalar(sender, v) {
-                        return Err((ManuallyDrop::into_inner(manual_self), e));
-                    }
-                    return Ok(());
-                } else if let Ok(crate::Result::Scalar2(v1, v2)) = result {
-                    if let Err(e) = crate::return_scalar2(sender, v1, v2) {
-                        return Err((ManuallyDrop::into_inner(manual_self), e));
-                    }
-                    return Ok(());
-                }
-                Err((ManuallyDrop::into_inner(manual_self), crate::Error::MemoryInUse))
-            }
-
-            Message::Borrow(_) | Message::MutableBorrow(_) | Message::Scalar(_) => {
-                let result = crate::send_message(connection, body);
-                let new_self = ManuallyDrop::into_inner(manual_self);
-                match result {
-                    // `new_self` will have its Drop() called
-                    Ok(crate::Result::Ok) | Ok(crate::Result::MemoryReturned(_, _)) => Ok(()),
-
-                    // If there's an error, reconstitute ourselves and return.
-                    Err(e) => Err((new_self, e)),
-
-                    // Any other value is a bug in the kernel
-                    o => panic!("unrecognized return from send_message: {:?}", o),
-                }
-            }
-        }
+    /// Callers must only use this on a `BlockingMove`; it panics otherwise, since
+    /// there is no buffer to swap.
+    pub fn set_response(
+        &mut self,
+        buf: MemoryRange,
+        offset: Option<MemoryAddress>,
+        valid: Option<MemorySize>,
+    ) -> MemoryRange {
+        let Message::BlockingMove(mem) = &mut self.body else {
+            panic!("set_response requires a BlockingMove");
+        };
+        let previous = mem.buf;
+        mem.buf = buf;
+        mem.offset = offset;
+        mem.valid = valid;
+        previous
     }
 }
 
@@ -133,6 +74,11 @@ impl Drop for Envelope {
         match &self.body {
             Message::Borrow(x) | Message::MutableBorrow(x) => {
                 crate::syscall::return_memory_offset_valid(self.sender, x.buf, x.offset, x.valid).ok(); // avoid panicking if the process is gone before returning memory
+            }
+            // Move whatever buffer is currently set back to the sender: the reply that
+            // set_response swapped in, or else the moved-in buffer echoed back.
+            Message::BlockingMove(x) => {
+                crate::syscall::return_memory_offset_valid(self.sender, x.buf, x.offset, x.valid).ok();
             }
             Message::Move(msg) => {
                 crate::syscall::unmap_memory(msg.buf).expect("couldn't free memory message")

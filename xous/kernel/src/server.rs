@@ -9,7 +9,7 @@ use xous::{
 };
 
 use crate::{
-    mem::MemoryManager,
+    mem::{ClearShared, MemoryManager},
     process::{current_pid, ThreadState},
     services::SystemServices,
 };
@@ -101,6 +101,11 @@ pub enum WaitingMessage {
     /// The memory was borrowed and should be returned to the given process.
     BorrowedMemory { pid: PID, tid: TID, client_addr: MemoryAddress },
 
+    /// The buffer answering a `BlockingMove` should be moved to the given process,
+    /// unblocking it. `client_addr`/`buf_size` are the range it reserved on send, freed
+    /// once the reply lands elsewhere.
+    MovedMemory { pid: PID, tid: TID, client_addr: MemoryAddress, buf_size: MemorySize },
+
     /// The message was a scalar message, so you should return the result to the process
     ScalarMessage { pid: PID, tid: TID },
 
@@ -133,6 +138,20 @@ enum QueuedMessage {
         pid: PID,
         idx: u8,
         msg_id: usize,
+        server_addr: MemoryAddress,
+        buf_size: MemorySize,
+        offset: usize,
+        valid: usize,
+    },
+    /// A `Move` whose sender blocks until the server moves a buffer back. Keeps the
+    /// sender's tid to unblock it, and `client_addr` to re-back its range if the server
+    /// dies before responding.
+    MemoryMessageBlockingSend {
+        pid: PID,
+        tid: u8,
+        idx: u8,
+        msg_id: usize,
+        client_addr: MemoryAddress,
         server_addr: MemoryAddress,
         buf_size: MemorySize,
         offset: usize,
@@ -182,6 +201,17 @@ enum QueuedMessage {
         valid: usize,
     },
 
+    /// The sender of a `BlockingMove` terminated before we could receive it. The
+    /// buffer it moved in is delivered anyway, but its eventual response is forgotten.
+    MemoryMessageBlockingSendTerminated {
+        idx: u8,
+        msg_id: usize,
+        server_addr: MemoryAddress,
+        buf_size: MemorySize,
+        offset: usize,
+        valid: usize,
+    },
+
     /// The process waiting for the response terminated before
     /// we could receive the message.
     BlockingScalarTerminated {
@@ -201,6 +231,21 @@ enum QueuedMessage {
         client_addr: MemoryAddress,
         buf_size: MemorySize,
     },
+
+    /// A delivered `BlockingMove` whose sender is parked until the server returns a
+    /// buffer. Keeps the sender's original address and size so its range can be re-backed
+    /// if the server dies first; the moved-in buffer itself is the server's now and is
+    /// not tracked.
+    WaitingReturnMoved {
+        pid: PID,
+        tid: u8,
+        client_addr: MemoryAddress,
+        buf_size: MemorySize,
+    },
+
+    /// A `WaitingReturnMoved` whose sender terminated; the returned buffer is forgotten
+    /// rather than moved to a process that no longer exists.
+    WaitingReturnMovedTerminated,
 
     /// When a server goes away, its memory must be forgotten instead of being returned
     /// to the previous process.
@@ -338,11 +383,13 @@ impl Server {
                 QueuedMessage::Empty
                 | QueuedMessage::ScalarMessage { .. }
                 | QueuedMessage::BlockingScalarTerminated { .. }
-                | QueuedMessage::WaitingReturnScalarTerminated => {}
+                | QueuedMessage::WaitingReturnScalarTerminated
+                | QueuedMessage::WaitingReturnMovedTerminated => {}
 
                 // For `Send` messages, the Server has not yet seen these messages. Simply free it.
                 // For lend and lendmut where the client disappeared, also just free the memory
                 QueuedMessage::MemoryMessageSend { server_addr, buf_size, .. }
+                | QueuedMessage::MemoryMessageBlockingSendTerminated { server_addr, buf_size, .. }
                 | QueuedMessage::WaitingForget { server_addr, buf_size, .. }
                 | QueuedMessage::MemoryMessageROLendTerminated { server_addr, buf_size, .. }
                 | QueuedMessage::MemoryMessageRWLendTerminated { server_addr, buf_size, .. } => {
@@ -350,9 +397,8 @@ impl Server {
                         .unwrap();
                 }
 
-                // For BlockingScalar messages, the client is waiting for a response.
-                // Unblock the client and return an error indicating the server does
-                // not exist.
+                // For messages where the client is waiting for a response, unblock the
+                // client and return an error indicating the server does not exist.
                 QueuedMessage::BlockingScalarMessage { pid, tid, .. }
                 | QueuedMessage::WaitingReturnScalar { pid, tid, .. } => {
                     let tid = tid as _;
@@ -375,18 +421,49 @@ impl Server {
                 } => {
                     let client_pid = pid;
                     let client_tid = tid as _;
-                    // Return the memory to the calling process
-                    ss.return_memory(
-                        server_addr.get() as *mut usize,
-                        client_pid,
-                        client_tid,
-                        client_addr.get() as _,
-                        buf_size.get(),
-                    )
-                    .unwrap();
+                    // Pages the borrower already freed can't be returned; re-back those as
+                    // on-demand so the sender's range stays mappable.
+                    if ss
+                        .return_memory(
+                            server_addr.get() as *mut usize,
+                            client_pid,
+                            client_tid,
+                            client_addr.get() as _,
+                            buf_size.get(),
+                        )
+                        .is_err()
+                    {
+                        ss.clear_shared_range(client_pid, client_addr, buf_size, ClearShared::OnDemand);
+                    }
                     ss.process_mut(client_pid).unwrap().set_thread_state(client_tid, ThreadState::Ready);
                     ss.set_thread_result(client_pid, client_tid, xous::Result::Error(Error::ServerNotFound))
                         .unwrap();
+                }
+
+                // The server never took this buffer, so it is ours to free.
+                QueuedMessage::MemoryMessageBlockingSend {
+                    pid,
+                    tid,
+                    client_addr,
+                    server_addr,
+                    buf_size,
+                    ..
+                } => {
+                    let tid = tid as _;
+                    MemoryManager::with_mut(|mm| mm.unmap_range(server_addr.get() as _, buf_size.get()))
+                        .unwrap();
+                    ss.clear_shared_range(pid, client_addr, buf_size, ClearShared::OnDemand);
+                    ss.set_thread_result(pid, tid, xous::Result::Error(Error::ServerNotFound)).unwrap();
+                    ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
+                }
+
+                // The buffer is the server's now and may already be freed or resized, so
+                // leave it; only the sender's reserved range needs releasing to on-demand.
+                QueuedMessage::WaitingReturnMoved { pid, tid, client_addr, buf_size } => {
+                    let tid = tid as _;
+                    ss.clear_shared_range(pid, client_addr, buf_size, ClearShared::OnDemand);
+                    ss.set_thread_result(pid, tid, xous::Result::Error(Error::ServerNotFound)).unwrap();
+                    ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
                 }
             }
             *entry = QueuedMessage::Empty;
@@ -453,6 +530,25 @@ impl Server {
                         valid,
                     }
                 }
+                QueuedMessage::MemoryMessageBlockingSend {
+                    pid: msg_pid,
+                    idx,
+                    msg_id,
+                    server_addr,
+                    buf_size,
+                    offset,
+                    valid,
+                    ..
+                } if msg_pid == pid => {
+                    *entry = QueuedMessage::MemoryMessageBlockingSendTerminated {
+                        idx,
+                        msg_id,
+                        server_addr,
+                        buf_size,
+                        offset,
+                        valid,
+                    }
+                }
                 QueuedMessage::BlockingScalarMessage { pid: msg_pid, idx, msg_id, args, .. }
                     if msg_pid == pid =>
                 {
@@ -462,6 +558,9 @@ impl Server {
                     if msg_pid == pid =>
                 {
                     *entry = QueuedMessage::WaitingForget { server_addr, buf_size }
+                }
+                QueuedMessage::WaitingReturnMoved { pid: msg_pid, .. } if msg_pid == pid => {
+                    *entry = QueuedMessage::WaitingReturnMovedTerminated
                 }
                 QueuedMessage::WaitingReturnScalar { pid: msg_pid, .. } if msg_pid == pid => {
                     *entry = QueuedMessage::WaitingReturnScalarTerminated
@@ -510,6 +609,13 @@ impl Server {
                     }
                 }
                 WaitingMessage::ForgetMemory(MemoryRange::from_parts(server_addr, buf_size))
+            }
+            QueuedMessage::WaitingReturnMoved { pid, tid, client_addr, buf_size } => {
+                WaitingMessage::MovedMemory { pid, tid: tid as _, client_addr, buf_size }
+            }
+            QueuedMessage::WaitingReturnMovedTerminated => {
+                // The sender is gone, so its returned buffer goes back to the system.
+                WaitingMessage::ForgetMemory(*buf.ok_or(Error::BadAddress)?)
             }
             QueuedMessage::WaitingReturnScalar { pid, tid } => {
                 WaitingMessage::ScalarMessage { pid, tid: tid as _ }
@@ -666,6 +772,47 @@ impl Server {
                     },
                     QueuedMessage::Empty,
                 ),
+                QueuedMessage::MemoryMessageBlockingSend {
+                    pid,
+                    tid,
+                    idx,
+                    msg_id,
+                    client_addr,
+                    server_addr,
+                    buf_size,
+                    offset,
+                    valid,
+                } if idx == self.head_generation => (
+                    MessageEnvelope {
+                        sender: SenderID::new(sidx, queue_idx, Some(pid)).into(),
+                        body: Message::BlockingMove(MemoryMessage {
+                            id: msg_id,
+                            buf: MemoryRange::from_parts(server_addr, buf_size),
+                            offset: MemorySize::new(offset),
+                            valid: MemorySize::new(valid),
+                        }),
+                    },
+                    QueuedMessage::WaitingReturnMoved { pid, tid, client_addr, buf_size },
+                ),
+                QueuedMessage::MemoryMessageBlockingSendTerminated {
+                    idx,
+                    msg_id,
+                    server_addr,
+                    buf_size,
+                    offset,
+                    valid,
+                } if idx == self.head_generation => (
+                    MessageEnvelope {
+                        sender: SenderID::new(sidx, queue_idx, PID::new(255)).into(),
+                        body: Message::BlockingMove(MemoryMessage {
+                            id: msg_id,
+                            buf: MemoryRange::from_parts(server_addr, buf_size),
+                            offset: MemorySize::new(offset),
+                            valid: MemorySize::new(valid),
+                        }),
+                    },
+                    QueuedMessage::WaitingReturnMovedTerminated,
+                ),
 
                 // Scalar messages have nothing to return, so they can go straight to the `Free` state
                 QueuedMessage::ScalarMessage { pid, idx, msg_id, args } if idx == self.head_generation => (
@@ -773,6 +920,17 @@ impl Server {
                 offset: msg.offset.map(|x| x.get()).unwrap_or(0),
                 valid: msg.valid.map(|x| x.get()).unwrap_or(0),
             },
+            Message::BlockingMove(msg) => QueuedMessage::MemoryMessageBlockingSend {
+                pid,
+                tid: tid as _,
+                idx,
+                msg_id: msg.id,
+                client_addr: original_address.ok_or(Error::InvalidArguments)?,
+                server_addr: MemoryAddress::new(msg.buf.as_ptr() as _).ok_or(Error::BadAddress)?,
+                buf_size: MemorySize::new(msg.buf.len()).ok_or(Error::InvalidArguments)?,
+                offset: msg.offset.map(|x| x.get()).unwrap_or(0),
+                valid: msg.valid.map(|x| x.get()).unwrap_or(0),
+            },
             Message::MutableBorrow(msg) => QueuedMessage::MemoryMessageRWLend {
                 pid,
                 tid: tid as _,
@@ -821,6 +979,12 @@ impl Server {
             }
             Message::Move(msg) => QueuedMessage::WaitingForget {
                 server_addr: MemoryAddress::new(msg.buf.as_ptr() as _).ok_or(Error::BadAddress)?,
+                buf_size: MemorySize::new(msg.buf.len()).ok_or(Error::InvalidArguments)?,
+            },
+            Message::BlockingMove(msg) => QueuedMessage::WaitingReturnMoved {
+                pid,
+                tid: tid as _,
+                client_addr: client_address.ok_or(Error::InvalidArguments)?,
                 buf_size: MemorySize::new(msg.buf.len()).ok_or(Error::InvalidArguments)?,
             },
             Message::MutableBorrow(msg) | Message::Borrow(msg) => QueuedMessage::WaitingReturnMemory {

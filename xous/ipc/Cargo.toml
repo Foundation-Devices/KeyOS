@@ -13,3 +13,6 @@ homepage = "https://betrusted.io/"
 bitflags = { version = "1" }
 rkyv = { workspace = true }
 xous = { path = "../xous-rs" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

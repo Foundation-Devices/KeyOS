@@ -99,7 +99,7 @@ pub fn lend_mut<M: LendMut>(cid: xous::CID, msg: M) -> M::Response {
         }),
     );
     match result {
-        Ok(xous::Result::MemoryReturned(arg1, arg2)) => M::Response::from_usize_pair(
+        Ok(xous::Result::MemoryReturned(_range, arg1, arg2)) => M::Response::from_usize_pair(
             arg1.map(|v| v.get()).unwrap_or_default(),
             arg2.map(|v| v.get()).unwrap_or_default(),
         ),

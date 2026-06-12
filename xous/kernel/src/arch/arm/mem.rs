@@ -25,7 +25,10 @@ use {
     },
 };
 
-use crate::{arch::arm::asm::flush_tlb_entry, mem::MemoryManager};
+use crate::{
+    arch::arm::asm::flush_tlb_entry,
+    mem::{ClearShared, MemoryManager},
+};
 
 pub const DEFAULT_MEMORY_MAPPING: MemoryMapping =
     MemoryMapping { ttbr0: PhysicalAddress::new(0), pid: PID::new(1).unwrap() };
@@ -344,6 +347,9 @@ impl MemoryMapping {
         klog!("***move - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let mut entry_data = L2TableEntry::read_from(src_entry);
+        if !entry_data.is_user_accessible() {
+            return Err(Error::AccessDenied);
+        }
         // An on-demand source must be backed before it can be moved; back it
         // from the walk we already did.
         if entry_data.is_on_demand() {
@@ -376,6 +382,9 @@ impl MemoryMapping {
         klog!("***lend - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let mut entry_data = L2TableEntry::read_from(src_entry);
+        if !entry_data.is_user_accessible() {
+            return Err(Error::AccessDenied);
+        }
         // Lending requires a backed source, so back the on-demand page from
         // the walk we already did.
         if entry_data.is_on_demand() {
@@ -423,6 +432,22 @@ impl MemoryMapping {
 
         dest_data.to_mapped(dest_addr)?.write_to(dest_addr, dest_entry);
         dest_data.phys()
+    }
+
+    /// Drop a lent (shared) reservation, freeing the slot or leaving an unbacked on-demand
+    /// entry the lender can still unmap. The physical page belongs to the borrower now, so
+    /// it is never freed here.
+    pub fn clear_shared(&mut self, addr: *mut usize, mode: ClearShared) -> Result<(), Error> {
+        let entry = self.get_l2_entry(addr)?;
+        let data = L2TableEntry::read_from(entry);
+        if !data.is_shared() {
+            return Ok(());
+        }
+        match mode {
+            ClearShared::Free => L2TableEntry::Empty.write_to(addr, entry),
+            ClearShared::OnDemand => data.with_phys(0)?.write_to(addr, entry),
+        }
+        Ok(())
     }
 
     /// Get the physical address of a virtual one.

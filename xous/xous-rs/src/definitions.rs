@@ -356,8 +356,10 @@ pub enum Result {
     /// The message was successful but no value was returned.
     None,
 
-    /// Memory was returned, and more information is available.
-    MemoryReturned(Option<MemorySize> /* offset */, Option<MemorySize> /* valid */),
+    /// Memory was returned, and more information is available. The range is where the
+    /// buffer now lives in the sender: the same range it lent for a borrow, or the
+    /// (possibly resized) range moved back for a `BlockingMove`.
+    MemoryReturned(MemoryRange, Option<MemorySize> /* offset */, Option<MemorySize> /* valid */),
 
     /// Returned when a process has started. This describes the new process to
     /// the caller.
@@ -409,12 +411,12 @@ impl Result {
             }
             Result::RetryCall => [16, 0, 0, 0, 0, 0, 0, 0],
             Result::None => [17, 0, 0, 0, 0, 0, 0, 0],
-            Result::MemoryReturned(offset, valid) => [
+            Result::MemoryReturned(range, offset, valid) => [
                 18,
                 offset.map(|o| o.get()).unwrap_or_default(),
                 valid.map(|v| v.get()).unwrap_or_default(),
-                0,
-                0,
+                range.addr.get(),
+                range.size.get(),
                 0,
                 0,
                 0,
@@ -476,6 +478,10 @@ impl Result {
                     4 => Message::BlockingScalar(ScalarMessage::from_usize(
                         src[3], src[4], src[5], src[6], src[7],
                     )),
+                    5 => match MemoryMessage::from_usize(src[3], src[4], src[5], src[6], src[7]) {
+                        None => return Result::Error(Error::InternalError),
+                        Some(s) => Message::BlockingMove(s),
+                    },
                     _ => return Result::Error(Error::InternalError),
                 };
                 Result::MessageEnvelope(MessageEnvelope {
@@ -491,7 +497,21 @@ impl Result {
             15 => Result::Scalar2(src[1], src[2]),
             16 => Result::RetryCall,
             17 => Result::None,
-            18 => Result::MemoryReturned(MemorySize::new(src[1]), MemorySize::new(src[2])),
+            18 => {
+                let addr = match MemoryAddress::new(src[3]) {
+                    None => return Result::Error(Error::InternalError),
+                    Some(s) => s,
+                };
+                let size = match MemorySize::new(src[4]) {
+                    None => return Result::Error(Error::InternalError),
+                    Some(s) => s,
+                };
+                Result::MemoryReturned(
+                    MemoryRange { addr, size },
+                    MemorySize::new(src[1]),
+                    MemorySize::new(src[2]),
+                )
+            }
             19 => Result::NewProcess(src.into()),
             20 => Result::Scalar5(src[1], src[2], src[3], src[4], src[5]),
             21 => Result::Message(match src[1] {
@@ -511,6 +531,10 @@ impl Result {
                 4 => {
                     Message::BlockingScalar(ScalarMessage::from_usize(src[2], src[3], src[4], src[5], src[6]))
                 }
+                5 => match MemoryMessage::from_usize(src[2], src[3], src[4], src[5], src[6]) {
+                    None => return Result::Error(Error::InternalError),
+                    Some(s) => Message::BlockingMove(s),
+                },
                 _ => return Result::Error(Error::InternalError),
             }),
             _ => Result::UnknownResult(src[0], src[1], src[2], src[3], src[4], src[5], src[6]),

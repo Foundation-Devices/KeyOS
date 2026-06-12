@@ -114,6 +114,7 @@ pub enum Message {
     Move(MemoryMessage),
     Scalar(ScalarMessage),
     BlockingScalar(ScalarMessage),
+    BlockingMove(MemoryMessage),
 }
 
 impl Message {
@@ -158,10 +159,22 @@ impl Message {
         Message::Move(crate::MemoryMessage { id, buf, offset, valid })
     }
 
+    pub fn new_blocking_move(
+        id: usize,
+        buf: MemoryRange,
+        offset: Option<MemoryAddress>,
+        valid: Option<MemorySize>,
+    ) -> crate::Message {
+        Message::BlockingMove(crate::MemoryMessage { id, buf, offset, valid })
+    }
+
     /// Determine whether the specified Message will block
     pub fn is_blocking(&self) -> bool {
         match *self {
-            Message::MutableBorrow(_) | Message::Borrow(_) | Message::BlockingScalar(_) => true,
+            Message::MutableBorrow(_)
+            | Message::Borrow(_)
+            | Message::BlockingScalar(_)
+            | Message::BlockingMove(_) => true,
             Message::Move(_) | Message::Scalar(_) => false,
         }
     }
@@ -169,7 +182,9 @@ impl Message {
     /// Determine whether the specified message has data attached
     pub fn has_memory(&self) -> bool {
         match *self {
-            Message::MutableBorrow(_) | Message::Borrow(_) | Message::Move(_) => true,
+            Message::MutableBorrow(_) | Message::Borrow(_) | Message::Move(_) | Message::BlockingMove(_) => {
+                true
+            }
             Message::BlockingScalar(_) | Message::Scalar(_) => false,
         }
     }
@@ -180,28 +195,37 @@ impl Message {
 
     pub fn memory_message(&self) -> Option<&MemoryMessage> {
         match self {
-            Message::MutableBorrow(mem) | Message::Borrow(mem) | Message::Move(mem) => Some(mem),
+            Message::MutableBorrow(mem)
+            | Message::Borrow(mem)
+            | Message::Move(mem)
+            | Message::BlockingMove(mem) => Some(mem),
             Message::BlockingScalar(_) | Message::Scalar(_) => None,
         }
     }
 
     pub fn memory_message_mut(&mut self) -> Option<&mut MemoryMessage> {
         match self {
-            Message::MutableBorrow(mem) | Message::Move(mem) => Some(mem),
+            Message::MutableBorrow(mem) | Message::Move(mem) | Message::BlockingMove(mem) => Some(mem),
             Message::BlockingScalar(_) | Message::Scalar(_) | Message::Borrow(_) => None,
         }
     }
 
     pub fn scalar_message(&self) -> Option<&ScalarMessage> {
         match self {
-            Message::MutableBorrow(_) | Message::Borrow(_) | Message::Move(_) => None,
+            Message::MutableBorrow(_) | Message::Borrow(_) | Message::Move(_) | Message::BlockingMove(_) => {
+                None
+            }
             Message::BlockingScalar(scalar) | Message::Scalar(scalar) => Some(scalar),
         }
     }
 
     pub fn scalar_message_mut(&mut self) -> Option<&mut ScalarMessage> {
         match self {
-            Message::MutableBorrow(_) | Message::Borrow(_) | Message::Move(_) | Message::Scalar(_) => None,
+            Message::MutableBorrow(_)
+            | Message::Borrow(_)
+            | Message::Move(_)
+            | Message::Scalar(_)
+            | Message::BlockingMove(_) => None,
             Message::BlockingScalar(scalar) => Some(scalar),
         }
     }
@@ -213,13 +237,17 @@ impl Message {
             Message::Move(_) => 3,
             Message::Scalar(_) => 4,
             Message::BlockingScalar(_) => 5,
+            Message::BlockingMove(_) => 6,
         }
     }
 
     /// Return the ID of this message
     pub fn id(&self) -> MessageId {
         match self {
-            Message::MutableBorrow(mem) | Message::Borrow(mem) | Message::Move(mem) => mem.id,
+            Message::MutableBorrow(mem)
+            | Message::Borrow(mem)
+            | Message::Move(mem)
+            | Message::BlockingMove(mem) => mem.id,
             Message::Scalar(s) | Message::BlockingScalar(s) => s.id,
         }
     }
@@ -227,7 +255,10 @@ impl Message {
     /// Set the ID or opcode of this message
     pub fn set_id(&mut self, id: MessageId) {
         match self {
-            Message::MutableBorrow(mem) | Message::Borrow(mem) | Message::Move(mem) => mem.id = id,
+            Message::MutableBorrow(mem)
+            | Message::Borrow(mem)
+            | Message::Move(mem)
+            | Message::BlockingMove(mem) => mem.id = id,
             Message::Scalar(s) | Message::BlockingScalar(s) => s.id = id,
         }
     }
@@ -239,6 +270,7 @@ impl Message {
             Message::Move(m) => (2, m.to_usize()),
             Message::Scalar(m) => (3, m.to_usize()),
             Message::BlockingScalar(m) => (4, m.to_usize()),
+            Message::BlockingMove(m) => (5, m.to_usize()),
         };
         [ret.0, ret.1[0], ret.1[1], ret.1[2], ret.1[3], ret.1[4]]
     }
@@ -282,6 +314,12 @@ impl TryFrom<(usize, usize, usize, usize, usize, usize)> for Message {
                 arg2: value.3,
                 arg3: value.4,
                 arg4: value.5,
+            })),
+            6 => Ok(Message::BlockingMove(MemoryMessage {
+                id: value.1,
+                buf: unsafe { MemoryRange::new(value.2, value.3).map_err(|_| ()) }?,
+                offset: MemoryAddress::new(value.4),
+                valid: MemorySize::new(value.5),
             })),
             _ => Err(()),
         }

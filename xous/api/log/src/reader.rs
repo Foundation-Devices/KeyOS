@@ -17,7 +17,7 @@ impl LogReader {
             xous::Message::new_lend_mut(crate::api::Opcode::ReadLogs.to_usize().unwrap(), buffer, None, None),
         )
         .unwrap();
-        if let xous::Result::MemoryReturned(_offset, valid) = result {
+        if let xous::Result::MemoryReturned(_range, _offset, valid) = result {
             valid.map(|v| v.get()).unwrap_or_default()
         } else {
             0

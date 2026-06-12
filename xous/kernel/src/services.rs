@@ -8,8 +8,8 @@ use core::ptr::{addr_of, addr_of_mut};
 use xous::arch::MAX_PROCESS_NAME_LEN;
 use xous::ServerEvent;
 use xous::{
-    arch::ProcessStartup, pid_from_usize, AppId, Error, MemoryAddress, MemoryRange, Message, ProcessInit,
-    SystemEvent, ThreadInit, CID, PID, SID, TID,
+    arch::ProcessStartup, pid_from_usize, AppId, Error, MemoryAddress, MemoryRange, MemorySize, Message,
+    ProcessInit, SystemEvent, ThreadInit, CID, PID, SID, TID,
 };
 
 use crate::arch::mem::MemoryMapping;
@@ -17,6 +17,7 @@ pub use crate::arch::process::Process as ArchProcess;
 pub use crate::arch::process::MAX_PROCESS_COUNT;
 pub use crate::arch::process::MAX_THREAD_COUNT;
 use crate::debug::BufStr;
+use crate::mem::ClearShared;
 use crate::platform;
 use crate::process::{current_pid, ConnectionSlot, Process, ThreadState, INITIAL_TID, PANIC_MESSAGE_SIZE};
 use crate::scheduler::Scheduler;
@@ -365,25 +366,30 @@ impl SystemServices {
         let dest_virt = dest_process.find_virtual_address(dest_virt, len)?;
         let dest_mapping = &mut dest_process.mapping;
         let dest_virt = crate::mem::MemoryManager::with_mut(|mm| {
-            let mut error = None;
-
             // Move each subsequent page; move_page backs on-demand sources itself.
             for offset in (0..usize_len).step_by(usize_page) {
                 assert_eq!(((src_virt.wrapping_add(offset) as usize) & 0xfff), 0);
                 assert_eq!(((dest_virt.wrapping_add(offset) as usize) & 0xfff), 0);
-                mm.move_page(
+                if let Err(e) = mm.move_page(
                     src_mapping,
                     src_virt.wrapping_add(offset),
                     dest_mapping,
                     dest_virt.wrapping_add(offset),
-                )
-                .unwrap_or_else(|e| error = Some(e));
+                ) {
+                    // Move the earlier pages back so the range stays wholly in the sender.
+                    for undo in (0..offset).step_by(usize_page) {
+                        mm.move_page(
+                            dest_mapping,
+                            dest_virt.wrapping_add(undo),
+                            src_mapping,
+                            src_virt.wrapping_add(undo),
+                        )
+                        .expect("reverting a partial move must not fail");
+                    }
+                    return Err(e);
+                }
             }
-            // TODO: several errors can reach here (OOM allocating a destination page table, an
-            // on-demand source that cannot be backed, ...), and by now part of the range may
-            // already have moved. Reverting a partial move is very tricky and would make all the
-            // involved code much more complicated, so for now we panic.
-            error.map_or_else(|| Ok(dest_virt), |e| panic!("unable to send: {:?}", e))
+            Ok(dest_virt)
         })?;
 
         // The source pages have left this (the sender's) space; let its next
@@ -475,34 +481,31 @@ impl SystemServices {
         let dest_mapping = &mut dest_process.mapping;
         use crate::mem::MemoryManager;
         MemoryManager::with_mut(|mm| {
-            let mut error = None;
-
             // Lend each subsequent page; lend_page backs on-demand sources itself.
             for offset in (0..usize_len).step_by(usize_page) {
                 assert!(((src_virt.wrapping_add(offset) as usize) & 0xfff) == 0);
                 assert!(((dest_virt.wrapping_add(offset) as usize) & 0xfff) == 0);
-                mm.lend_page(
+                if let Err(e) = mm.lend_page(
                     src_mapping,
                     src_virt.wrapping_add(offset),
                     dest_mapping,
                     dest_virt.wrapping_add(offset),
                     mutable,
-                )
-                .unwrap_or_else(|e| error = Some(e));
+                ) {
+                    // Unlend the earlier pages so the range stays wholly in the sender.
+                    for undo in (0..offset).step_by(usize_page) {
+                        mm.unlend_page(
+                            dest_mapping,
+                            dest_virt.wrapping_add(undo),
+                            src_mapping,
+                            src_virt.wrapping_add(undo),
+                        )
+                        .expect("reverting a partial lend must not fail");
+                    }
+                    return Err(e);
+                }
             }
-            // TODO: several errors can reach here (OOM allocating a destination page table, an
-            // on-demand source that cannot be backed, ...), and by now part of the range may
-            // already have been lent. Reverting a partial lend is very tricky and would make all
-            // the involved code much more complicated, so for now we panic.
-            error.map_or_else(
-                || Ok(dest_virt),
-                |e| {
-                    panic!(
-                        "unable to lend {:08x} in pid {} to {:08x} in pid {}: {:?}",
-                        src_virt as usize, current_pid, dest_virt as usize, dest_pid, e
-                    )
-                },
-            )
+            Ok(dest_virt)
         })
     }
 
@@ -614,6 +617,26 @@ impl SystemServices {
         target_process.activate();
 
         Ok(src_virt as *mut usize)
+    }
+
+    /// Drop the lent (shared) reservation over `[addr, addr + len)` in `pid`'s space; see
+    /// [`crate::arch::mem::MemoryMapping::clear_shared`].
+    #[cfg(keyos)]
+    pub fn clear_shared_range(&mut self, pid: PID, addr: MemoryAddress, len: MemorySize, mode: ClearShared) {
+        let mapping = &mut self.process_mut(pid).expect("client process gone").mapping;
+        for offset in (0..len.get()).step_by(crate::mem::PAGE_SIZE) {
+            mapping.clear_shared((addr.get() + offset) as *mut usize, mode).unwrap();
+        }
+    }
+
+    #[cfg(not(keyos))]
+    pub fn clear_shared_range(
+        &mut self,
+        _pid: PID,
+        _addr: MemoryAddress,
+        _len: MemorySize,
+        _mode: ClearShared,
+    ) {
     }
 
     /// Create a new thread in the current process.  Execution begins at

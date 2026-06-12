@@ -4,15 +4,13 @@
 use std::sync::Arc;
 
 use crate::{
-    archive_async_response_handler, archive_event_handler, lend_mut, scalar_async_response_handler,
-    scalar_event_handler, send_archive, send_archive_nowait, send_blocking_archive,
-    send_blocking_archive_async, send_blocking_archive_buf, send_blocking_scalar, send_move,
-    send_move_nowait, send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive,
-    subscribe_scalar, try_send_blocking_archive, try_send_blocking_archive_buf, try_send_blocking_scalar,
-    try_send_move, try_send_scalar, try_send_scalar_async, Archive, ArchiveEventHandler,
-    ArchiveResponseHandler, ArchiveSubscription, BlockingArchive, BlockingScalar,
-    BlockingScalarResponseHandler, LendMut, Move, Scalar, ScalarEventHandler, ScalarSubscription, Server,
-    ServerContext,
+    archive_event_handler, lend_mut, scalar_async_response_handler, scalar_event_handler, send_archive,
+    send_archive_nowait, send_blocking_archive, send_blocking_scalar, send_move, send_move_nowait,
+    send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive, subscribe_scalar,
+    try_send_blocking_archive, try_send_blocking_scalar, try_send_move, try_send_scalar,
+    try_send_scalar_async, Archive, ArchiveEventHandler, ArchiveSubscription, BlockingArchive,
+    BlockingScalar, BlockingScalarResponseHandler, LendMut, Move, Scalar, ScalarEventHandler,
+    ScalarSubscription, Server, ServerContext,
 };
 
 /// A typed connection to a running KeyOS server.
@@ -27,7 +25,7 @@ use crate::{
 /// | --- | --- | --- |
 /// | [`BlockingScalar`] | [`send_blocking_scalar`](Self::send_blocking_scalar) or [`try_send_blocking_scalar`](Self::try_send_blocking_scalar) | The message fits in scalar registers and returns a response. |
 /// | [`Scalar`] | [`send_scalar`](Self::send_scalar), [`try_send_scalar`](Self::try_send_scalar), or [`send_scalar_nowait`](Self::send_scalar_nowait) | The message fits in scalar registers and has no response. |
-/// | [`BlockingArchive`] | [`send_blocking_archive`](Self::send_blocking_archive), [`try_send_blocking_archive`](Self::try_send_blocking_archive), or [`try_send_blocking_archive_buf`](Self::try_send_blocking_archive_buf) | The message is serialized with `rkyv` and returns a response. |
+/// | [`BlockingArchive`] | [`send_blocking_archive`](Self::send_blocking_archive) or [`try_send_blocking_archive`](Self::try_send_blocking_archive) | The message is serialized with `rkyv` and returns a response. |
 /// | [`Archive`] | [`send_archive`](Self::send_archive), [`try_send_archive`](Self::try_send_archive), or [`send_archive_nowait`](Self::send_archive_nowait) | The message is serialized with `rkyv` and has no response. |
 /// | [`LendMut`] | [`lend_mut`](Self::lend_mut) | The caller lends a mutable memory range to the server and waits for the server to finish with it. |
 /// | [`Move`] | [`send_move`](Self::send_move), [`try_send_move`](Self::try_send_move), or [`send_move_nowait`](Self::send_move_nowait) | The caller transfers ownership of a memory range to the server. |
@@ -266,46 +264,6 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         P: MessageAllowed<M>,
     {
         try_send_blocking_archive(self.cid.0, msg).map_err(|e| e.into_inner().into_xous())
-    }
-
-    /// Send a [`BlockingArchive`] message using an existing IPC buffer.
-    ///
-    /// Reusing a buffer avoids repeated large allocations in API methods that
-    /// may return large payloads.
-    pub fn send_blocking_archive_buf<M>(&self, buf: &mut xous_ipc::Buffer, msg: M) -> M::Response
-    where
-        M: BlockingArchive,
-        P: MessageAllowed<M>,
-    {
-        send_blocking_archive_buf(self.cid.0, buf, msg)
-    }
-
-    /// Send a [`BlockingArchive`] message using an existing IPC buffer.
-    ///
-    /// Returns the underlying transport error if the message cannot be
-    /// delivered or decoded.
-    pub fn try_send_blocking_archive_buf<M>(
-        &self,
-        buf: &mut xous_ipc::Buffer,
-        msg: M,
-    ) -> Result<M::Response, xous::Error>
-    where
-        M: BlockingArchive,
-        P: MessageAllowed<M>,
-    {
-        try_send_blocking_archive_buf(self.cid.0, buf, msg).map_err(|e| e.into_inner().into_xous())
-    }
-
-    /// Send a [`BlockingArchive`] message and handle its response later on the
-    /// supplied [`ServerContext`].
-    pub fn send_blocking_archive_async<M, SR>(&self, msg: M, context: &mut ServerContext<SR>)
-    where
-        M: BlockingArchive,
-        P: MessageAllowed<M>,
-        SR: ArchiveResponseHandler<M::Response>,
-    {
-        let msg_id = send_blocking_archive_async(self.cid.0, msg, context.sid);
-        context.handlers.push((msg_id, archive_async_response_handler::<M, SR>));
     }
 
     // ==================== Archive Messages (fire-and-forget) ====================

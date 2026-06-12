@@ -37,6 +37,15 @@ enum ClaimReleaseMove {
     Move(PID /* from */),
 }
 
+/// What a lent (shared) entry becomes when its reservation is cleared.
+#[derive(Debug, Clone, Copy)]
+pub enum ClearShared {
+    /// Leave an unbacked on-demand entry the owner can still unmap.
+    OnDemand,
+    /// Free the slot outright.
+    Free,
+}
+
 #[cfg(keyos)]
 fn additional_regions() -> impl Iterator<Item = (&'static str, &'static core::ops::Range<usize>)> {
     utralib::map::MEMORY_REGIONS

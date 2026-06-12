@@ -141,11 +141,35 @@ impl<'buf> Buffer<'buf> {
 
         // Update the offset pointer if the server modified it.
         let result = send_message(connection, Message::MutableBorrow(msg));
-        if let Ok(Result::MemoryReturned(offset, _valid)) = result {
+        if let Ok(Result::MemoryReturned(_range, offset, _valid)) = result {
             self.used = offset.map_or(0, |v| v.get()).min(self.pages.len());
         }
 
         result
+    }
+
+    /// Send the buffer as a `BlockingMove`: ownership moves to the server and the call
+    /// blocks until the server moves a (possibly resized) buffer back, which this buffer
+    /// adopts. Unlike `lend_mut`, the reply need not match the sent buffer: it may outgrow
+    /// it, or come back trimmed when a huge request yields a tiny response.
+    pub fn blocking_move(&mut self, connection: CID, id: u32) -> core::result::Result<Result, Error> {
+        let msg = MemoryMessage {
+            id: id as usize,
+            buf: self.pages,
+            offset: MemoryAddress::new(self.used),
+            valid: MemorySize::new(self.pages.len()),
+        };
+        // The kernel keeps this range reserved (lent) while we block, and on a server
+        // death leaves it as on-demand rather than freeing it. So on any error the range
+        // is still ours and mapped here, and `pages`/`should_drop` stay valid.
+        let result = send_message(connection, Message::BlockingMove(msg))?;
+        if let Result::MemoryReturned(range, offset, _valid) = result {
+            self.pages = range;
+            self.slice = unsafe { core::slice::from_raw_parts_mut(range.as_mut_ptr(), range.len()) };
+            self.used = offset.map_or(0, |v| v.get()).min(range.len());
+            self.should_drop = true;
+        }
+        Ok(result)
     }
 
     pub fn lend(&self, connection: CID, id: u32) -> core::result::Result<Result, Error> {
@@ -217,6 +241,50 @@ impl<'buf> Buffer<'buf> {
             xous_buf.used = serializer.pos();
 
             Ok(xous_buf)
+        })
+    }
+
+    /// Serialize `src` into a buffer to move back as a `BlockingMove` reply, reusing
+    /// the front of `existing` when it is large enough or else allocating a fresh one.
+    /// `src` is sized once. Returns the reply range and its used length; the caller
+    /// owns that range (it is not freed here) and must free whatever of `existing` the
+    /// reply does not cover.
+    pub fn serialize_reply<T>(
+        existing: MemoryRange,
+        src: &T,
+    ) -> core::result::Result<(MemoryRange, usize), rkyv::rancor::Error>
+    where
+        T: for<'a, 'b> rkyv::Serialize<XousSerializer<'a, 'b>>
+            + for<'a> rkyv::Serialize<SizeOfSerializer<'a>>,
+    {
+        with_arena(|arena| {
+            let mut size_serializer = Serializer::new(SizeOfWriter::new(), arena, ());
+            rkyv::api::serialize_using(src, &mut size_serializer)?;
+            let size = size_serializer.writer.pos();
+            let (_, arena, _) = size_serializer.into_raw_parts();
+
+            let needed = core::cmp::max(size.next_multiple_of(0x1000), 0x1000);
+            let serialize_into = |range: MemoryRange| -> core::result::Result<usize, rkyv::rancor::Error> {
+                let slice = unsafe { core::slice::from_raw_parts_mut(range.as_mut_ptr(), range.len()) };
+                let writer = RkyvBuffer::from(&mut slice[..]);
+                let mut serializer = Serializer::new(writer, arena, ());
+                rkyv::api::serialize_using(src, &mut serializer)?;
+                Ok(serializer.pos())
+            };
+
+            // Reuse the front of the moved-in buffer only on hardware; on hosted it is a
+            // single host allocation that can't be freed in pieces, so always allocate fresh.
+            if cfg!(keyos) && existing.len() >= needed {
+                let range = unsafe { MemoryRange::new(existing.as_ptr() as usize, needed) }
+                    .expect("page-aligned subrange of a mapped buffer");
+                let used = serialize_into(range)?;
+                Ok((range, used))
+            } else {
+                let buf = Self::new(size);
+                let used = serialize_into(buf.pages)?;
+                let range = buf.into_inner().expect("freshly mapped buffer is ownable").0;
+                Ok((range, used))
+            }
         })
     }
 

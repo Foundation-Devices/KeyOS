@@ -305,10 +305,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     // size formatting below) are honored instead of always asking for English.
     let locale = state.borrow().settings.get_locale();
     let lang = locale.lang();
-    let apps = state.borrow().app_manager.try_get_installed_apps(lang).unwrap_or_else(|e| {
-        log::error!("failed to load installed apps: {e:?}");
-        Vec::new()
-    });
+    let apps = state.borrow().app_manager.get_installed_apps(lang);
 
     let installed_apps = apps
         .into_iter()
@@ -404,11 +401,7 @@ fn refresh_trusted_publishers(state: StoredValue<AppState>) {
     let trusted_publishers = state
         .borrow()
         .app_manager
-        .try_get_third_party_certificates()
-        .unwrap_or_else(|e| {
-            log::error!("failed to load third-party certificates: {e:?}");
-            Vec::new()
-        })
+        .get_third_party_certificates()
         .into_iter()
         .map(|cert| TrustedPublisher {
             name: cert.name.into(),

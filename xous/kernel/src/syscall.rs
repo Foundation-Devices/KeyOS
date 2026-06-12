@@ -9,7 +9,7 @@ use xous::{
 };
 
 use crate::irq::{interrupt_claim_user, interrupt_free};
-use crate::mem::{MemoryManager, PAGE_SIZE};
+use crate::mem::{ClearShared, MemoryManager, PAGE_SIZE};
 use crate::process::{current_pid, ConnectionSlot, ThreadState, IRQ_TID};
 use crate::scheduler::Scheduler;
 use crate::server::{SenderID, WaitingMessage};
@@ -71,9 +71,10 @@ pub(crate) fn send_message_inner(
     // return it after the borrow is through.
     let client_address = match &message {
         Message::Scalar(_) | Message::BlockingScalar(_) => None,
-        Message::Move(msg) | Message::MutableBorrow(msg) | Message::Borrow(msg) => {
-            MemoryAddress::new(msg.buf.as_ptr() as _)
-        }
+        Message::Move(msg)
+        | Message::MutableBorrow(msg)
+        | Message::Borrow(msg)
+        | Message::BlockingMove(msg) => MemoryAddress::new(msg.buf.as_ptr() as _),
     };
 
     // Translate memory messages from the client process to the server
@@ -89,6 +90,23 @@ pub(crate) fn send_message_inner(
                 msg.buf.len(),
             )?;
             Message::Move(MemoryMessage {
+                id: msg.id,
+                buf: unsafe { MemoryRange::new(new_virt as usize, msg.buf.len()) }?,
+                offset: msg.offset,
+                valid: msg.valid,
+            })
+        }
+        Message::BlockingMove(msg) => {
+            // Lend rather than move, so the sender's VA stays reserved (shared) while it
+            // blocks; another thread mapping a freed range would corrupt the re-back.
+            let new_virt = ss.lend_memory(
+                msg.buf.as_mut_ptr() as *mut usize,
+                server_pid,
+                core::ptr::null_mut(),
+                msg.buf.len(),
+                true,
+            )?;
+            Message::BlockingMove(MemoryMessage {
                 id: msg.id,
                 buf: unsafe { MemoryRange::new(new_virt as usize, msg.buf.len()) }?,
                 offset: msg.offset,
@@ -197,7 +215,23 @@ fn return_memory(
                 // Return the memory to the calling process
                 ss.return_memory(buf.as_ptr() as _, pid, tid, client_addr.get() as _, buf.len())?;
 
-                let return_value = Result::MemoryReturned(offset, valid);
+                let client_range = unsafe { MemoryRange::new(client_addr.get(), buf.len()) }?;
+                let return_value = Result::MemoryReturned(client_range, offset, valid);
+                ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
+                ss.set_thread_result(pid, tid, return_value)?;
+            }
+            WaitingMessage::MovedMemory { pid, tid, client_addr, buf_size } => {
+                // The server owns `buf`; move it into the client at a fresh address.
+                let new_virt =
+                    ss.send_memory(buf.as_mut_ptr() as *mut usize, pid, core::ptr::null_mut(), buf.len())?;
+                let new_range = unsafe { MemoryRange::new(new_virt as usize, buf.len()) }?;
+                // Hosted mode doesn't move pages, so ship the bytes to the client's return slot.
+                #[cfg(not(keyos))]
+                ss.return_memory(buf.as_mut_ptr() as _, pid, tid, new_virt, buf.len())?;
+                // The reply landed elsewhere, so free the range the sender reserved on send.
+                ss.clear_shared_range(pid, client_addr, buf_size, ClearShared::Free);
+
+                let return_value = Result::MemoryReturned(new_range, offset, valid);
                 ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
                 ss.set_thread_result(pid, tid, return_value)?;
             }
@@ -242,8 +276,8 @@ fn return_result(server_tid: TID, sender: MessageSender, return_value: Result) -
                 klog!("WARNING: Tried to wait on a scalar message that was actually forgettingmemory");
                 return Err(Error::DoubleFree);
             }
-            WaitingMessage::BorrowedMemory { .. } => {
-                klog!("WARNING: Tried to wait on a scalar message that was actually borrowed memory");
+            WaitingMessage::BorrowedMemory { .. } | WaitingMessage::MovedMemory { .. } => {
+                klog!("WARNING: Tried to wait on a scalar message that was actually memory");
                 return Err(Error::DoubleFree);
             }
             WaitingMessage::None => {

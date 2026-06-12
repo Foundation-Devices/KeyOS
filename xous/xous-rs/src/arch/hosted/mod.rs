@@ -120,6 +120,7 @@ enum CallMemoryKind {
     Borrow,
     MutableBorrow,
     Move,
+    BlockingMove,
     ReturnMemory,
 }
 
@@ -150,6 +151,8 @@ pub fn syscall(call: SysCall) -> SysCallResult {
             CallMemoryKind::MutableBorrow
         } else if call.is_move() {
             CallMemoryKind::Move
+        } else if call.is_blocking_move() {
+            CallMemoryKind::BlockingMove
         } else if call.is_return_memory() {
             CallMemoryKind::ReturnMemory
         } else {
@@ -230,7 +233,8 @@ fn read_next_syscall_result(
         match &mut msg.body {
             crate::Message::Move(ref mut memory_message)
             | crate::Message::Borrow(ref mut memory_message)
-            | crate::Message::MutableBorrow(ref mut memory_message) => {
+            | crate::Message::MutableBorrow(ref mut memory_message)
+            | crate::Message::BlockingMove(ref mut memory_message) => {
                 memory_message.buf =
                     mem::alloc_message_buf(memory_message.buf.len()).expect("couldn't allocate range");
                 if let Err(e) = stream.read_exact(memory_message.buf.as_slice_mut()) {
@@ -246,6 +250,20 @@ fn read_next_syscall_result(
     // buffer back to us. Ensure the memory we get back is correct.
     if let Some((mem, kind)) = call_mem_tracker.lock().unwrap().remove(&msg_thread_id) {
         if response == Result::RetryCall {
+        } else if kind == CallMemoryKind::BlockingMove {
+            if let Result::MemoryReturned(ref mut range, _, _) = response {
+                // The server moved a (possibly resized) buffer back; take it and free
+                // the one we sent.
+                let mut buf = mem::alloc_message_buf(range.len()).expect("couldn't allocate range");
+                if let Err(e) = stream.read_exact(buf.as_slice_mut()) {
+                    eprintln!("Server shut down: {}", e);
+                    std::process::exit(0);
+                }
+                *range = buf;
+                mem::free_message_buf(mem).unwrap();
+            }
+            // Otherwise the server died mid-call: our buffer never moved, so keep it for
+            // the Buffer to drop. The kernel sends no bytes back, so read nothing.
         } else if kind == CallMemoryKind::Borrow || kind == CallMemoryKind::MutableBorrow {
             // Read the buffer back from the remote host.
             use core::slice;

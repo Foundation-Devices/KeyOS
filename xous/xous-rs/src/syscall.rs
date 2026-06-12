@@ -637,7 +637,10 @@ impl SysCall {
                 [SysCallNumber::Connect as usize, s.0 as _, s.1 as _, s.2 as _, s.3 as _, 0, 0, 0]
             }
             SysCall::SendMessage(a1, ref a2) => match a2 {
-                Message::MutableBorrow(mm) | Message::Borrow(mm) | Message::Move(mm) => [
+                Message::MutableBorrow(mm)
+                | Message::Borrow(mm)
+                | Message::Move(mm)
+                | Message::BlockingMove(mm) => [
                     SysCallNumber::SendMessage as usize,
                     *a1 as usize,
                     a2.message_type(),
@@ -683,7 +686,10 @@ impl SysCall {
                 [SysCallNumber::TryConnect as usize, s.0 as _, s.1 as _, s.2 as _, s.3 as _, 0, 0, 0]
             }
             SysCall::TrySendMessage(a1, ref a2) => match a2 {
-                Message::MutableBorrow(mm) | Message::Borrow(mm) | Message::Move(mm) => [
+                Message::MutableBorrow(mm)
+                | Message::Borrow(mm)
+                | Message::Move(mm)
+                | Message::BlockingMove(mm) => [
                     SysCallNumber::TrySendMessage as usize,
                     *a1 as usize,
                     a2.message_type(),
@@ -968,6 +974,15 @@ impl SysCall {
                     a1.try_into().unwrap(),
                     Message::BlockingScalar(ScalarMessage { id: a3, arg1: a4, arg2: a5, arg3: a6, arg4: a7 }),
                 ),
+                6 => SysCall::TrySendMessage(
+                    a1 as u32,
+                    Message::BlockingMove(MemoryMessage {
+                        id: a3,
+                        buf: unsafe { MemoryRange::new(a4, a5) }?,
+                        offset: MemoryAddress::new(a6),
+                        valid: MemorySize::new(a7),
+                    }),
+                ),
                 _ => SysCall::Invalid(a1, a2, a3, a4, a5, a6, a7),
             },
             SysCallNumber::ReturnScalar1 => SysCall::ReturnScalar1(MessageSender::from_usize(a1), a2),
@@ -1052,7 +1067,13 @@ impl SysCall {
     pub fn has_memory(&self) -> bool {
         match self {
             SysCall::TrySendMessage(_, msg) | SysCall::SendMessage(_, msg) => {
-                matches!(msg, Message::Move(_) | Message::Borrow(_) | Message::MutableBorrow(_))
+                matches!(
+                    msg,
+                    Message::Move(_)
+                        | Message::Borrow(_)
+                        | Message::MutableBorrow(_)
+                        | Message::BlockingMove(_)
+                )
             }
             SysCall::ReturnMemory(_, _, _, _) => true,
             _ => false,
@@ -1065,6 +1086,17 @@ impl SysCall {
         match self {
             SysCall::TrySendMessage(_, msg) | SysCall::SendMessage(_, msg) => {
                 matches!(msg, Message::Move(_))
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if the associated syscall is a message that is a BlockingMove
+    #[inline(always)]
+    pub fn is_blocking_move(&self) -> bool {
+        match self {
+            SysCall::TrySendMessage(_, msg) | SysCall::SendMessage(_, msg) => {
+                matches!(msg, Message::BlockingMove(_))
             }
             _ => false,
         }
@@ -1103,7 +1135,8 @@ impl SysCall {
             SysCall::TrySendMessage(_, msg) | SysCall::SendMessage(_, msg) => match msg {
                 Message::Move(memory_message)
                 | Message::Borrow(memory_message)
-                | Message::MutableBorrow(memory_message) => Some(memory_message.buf),
+                | Message::MutableBorrow(memory_message)
+                | Message::BlockingMove(memory_message) => Some(memory_message.buf),
                 _ => None,
             },
             SysCall::ReturnMemory(_, range, _, _) => Some(*range),
@@ -1125,7 +1158,8 @@ impl SysCall {
             SysCall::TrySendMessage(_, msg) | SysCall::SendMessage(_, msg) => match msg {
                 Message::Move(memory_message)
                 | Message::Borrow(memory_message)
-                | Message::MutableBorrow(memory_message) => memory_message.buf = new,
+                | Message::MutableBorrow(memory_message)
+                | Message::BlockingMove(memory_message) => memory_message.buf = new,
                 _ => (),
             },
             SysCall::ReturnMemory(_, range, _, _) => *range = new,
@@ -1536,7 +1570,7 @@ pub fn try_send_message(connection: CID, message: Message) -> core::result::Resu
         Ok(Result::Scalar1(a)) => Ok(Result::Scalar1(a)),
         Ok(Result::Scalar2(a, b)) => Ok(Result::Scalar2(a, b)),
         Ok(Result::Scalar5(a, b, c, d, e)) => Ok(Result::Scalar5(a, b, c, d, e)),
-        Ok(Result::MemoryReturned(offset, valid)) => Ok(Result::MemoryReturned(offset, valid)),
+        Ok(Result::MemoryReturned(range, offset, valid)) => Ok(Result::MemoryReturned(range, offset, valid)),
         Ok(Result::MessageEnvelope(msg)) => Ok(Result::MessageEnvelope(msg)),
         Err(e) => Err(e),
         v => panic!("Unexpected return value: {:?}", v),
@@ -1593,7 +1627,7 @@ pub fn send_message(connection: CID, message: Message) -> core::result::Result<R
         Ok(Result::Scalar1(a)) => Ok(Result::Scalar1(a)),
         Ok(Result::Scalar2(a, b)) => Ok(Result::Scalar2(a, b)),
         Ok(Result::Scalar5(a, b, c, d, e)) => Ok(Result::Scalar5(a, b, c, d, e)),
-        Ok(Result::MemoryReturned(offset, valid)) => Ok(Result::MemoryReturned(offset, valid)),
+        Ok(Result::MemoryReturned(range, offset, valid)) => Ok(Result::MemoryReturned(range, offset, valid)),
         Err(e) => Err(e),
         v => panic!("Unexpected return value: {:?}", v),
     }

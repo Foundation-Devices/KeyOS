@@ -16,11 +16,10 @@ mod third_party_certs;
 use app_manager::{
     AppEvent, GetThirdPartyCertificates, ImportThirdPartyCertificate, ImportThirdPartyCertificateResult,
     LaunchError, RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, ThirdPartyCertificateInfo,
-    ThirdPartyCertificatesPage,
 };
 use app_manager::{
-    GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, InstalledAppsPage,
-    LaunchApp, LaunchAppBlocking, ListApps, SubscribeAppEvents,
+    GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, LaunchApp,
+    LaunchAppBlocking, ListApps, SubscribeAppEvents,
 };
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
@@ -31,9 +30,6 @@ fs::use_api!();
 #[cfg(not(keyos))]
 use crate::launch::launch_app;
 use crate::registry::AppRegistry;
-
-const THIRD_PARTY_CERTIFICATE_PAGE_ITEMS: usize = 8;
-const INSTALLED_APP_PAGE_ITEMS: usize = 8;
 
 pub fn listen() { server::listen(AppManagerServer::new().unwrap()) }
 
@@ -78,16 +74,12 @@ impl BlockingArchiveHandler<GetInstalledApps> for AppManagerServer {
         msg: GetInstalledApps,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> InstalledAppsPage {
+    ) -> Vec<InstalledAppInfo> {
         // Apps can change on flash independently of app-manager, so reload before listing.
         if let Err(e) = self.app_registry.refresh_installed_apps() {
             log::warn!("GetInstalledApps: failed to refresh app registry, returning cached list: {e:?}");
         }
-        installed_apps_page(
-            self.app_registry.installed_apps(&msg.locale, &self.third_party_cert_store.trusted_publishers()),
-            msg.offset,
-            msg.limit,
-        )
+        self.app_registry.installed_apps(&msg.locale, &self.third_party_cert_store.trusted_publishers())
     }
 }
 
@@ -112,36 +104,11 @@ impl BlockingArchiveHandler<GetAppIcon> for AppManagerServer {
 impl BlockingArchiveHandler<GetThirdPartyCertificates> for AppManagerServer {
     fn handle(
         &mut self,
-        msg: GetThirdPartyCertificates,
+        _msg: GetThirdPartyCertificates,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> ThirdPartyCertificatesPage {
-        third_party_certificate_page(self.third_party_cert_store.list(), msg.offset, msg.limit)
-    }
-}
-
-fn installed_apps_page(apps: Vec<InstalledAppInfo>, offset: usize, limit: usize) -> InstalledAppsPage {
-    let total = apps.len();
-    let offset = offset.min(total);
-    let limit = limit.clamp(1, INSTALLED_APP_PAGE_ITEMS);
-    let end = offset.saturating_add(limit).min(total);
-
-    InstalledAppsPage { apps: apps[offset..end].to_vec(), next_offset: (end < total).then_some(end) }
-}
-
-fn third_party_certificate_page(
-    certificates: Vec<ThirdPartyCertificateInfo>,
-    offset: usize,
-    limit: usize,
-) -> ThirdPartyCertificatesPage {
-    let total = certificates.len();
-    let offset = offset.min(total);
-    let limit = limit.clamp(1, THIRD_PARTY_CERTIFICATE_PAGE_ITEMS);
-    let end = offset.saturating_add(limit).min(total);
-
-    ThirdPartyCertificatesPage {
-        certificates: certificates[offset..end].to_vec(),
-        next_offset: (end < total).then_some(end),
+    ) -> Vec<ThirdPartyCertificateInfo> {
+        self.third_party_cert_store.list()
     }
 }
 
@@ -391,83 +358,5 @@ impl AppManagerServer {
             log::debug!("Panic message PID mismatch: expected {child_pid}, got {panic_pid}");
         }
         None
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cert(index: usize) -> ThirdPartyCertificateInfo {
-        ThirdPartyCertificateInfo {
-            name: format!("Publisher {index}"),
-            company: "Example Company".to_string(),
-            contact_email: "hello@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            public_key: format!("{index:066x}"),
-            not_before_unix_seconds: Some(0),
-            not_after_unix_seconds: Some(u64::MAX),
-            serial_number: index.to_string(),
-            issuer: "issuer".to_string(),
-            subject: "subject".to_string(),
-            basic_constraints: "CA:FALSE".to_string(),
-            key_usage: "Digital Signature".to_string(),
-            extended_key_usage: "Code Signing".to_string(),
-        }
-    }
-
-    fn installed_app(index: usize) -> InstalledAppInfo {
-        InstalledAppInfo {
-            app_id: format!("0x{index:032x}"),
-            name: format!("App {index}"),
-            bundled_icon_path: None,
-            publisher: String::new(),
-            version: String::new(),
-            size_bytes: 0,
-            description: String::new(),
-            permissions: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn installed_apps_page_caps_requested_limit() {
-        let apps = (0..10).map(installed_app).collect::<Vec<_>>();
-
-        let page = installed_apps_page(apps, 0, usize::MAX);
-
-        assert_eq!(page.apps.len(), INSTALLED_APP_PAGE_ITEMS);
-        assert_eq!(page.next_offset, Some(INSTALLED_APP_PAGE_ITEMS));
-    }
-
-    #[test]
-    fn installed_apps_page_returns_tail() {
-        let apps = (0..10).map(installed_app).collect::<Vec<_>>();
-
-        let page = installed_apps_page(apps, 8, 8);
-
-        assert_eq!(page.apps.len(), 2);
-        assert_eq!(page.apps[0].name, "App 8");
-        assert_eq!(page.next_offset, None);
-    }
-
-    #[test]
-    fn third_party_certificate_page_caps_requested_limit() {
-        let certificates = (0..10).map(cert).collect::<Vec<_>>();
-
-        let page = third_party_certificate_page(certificates, 0, usize::MAX);
-
-        assert_eq!(page.certificates.len(), THIRD_PARTY_CERTIFICATE_PAGE_ITEMS);
-        assert_eq!(page.next_offset, Some(THIRD_PARTY_CERTIFICATE_PAGE_ITEMS));
-    }
-
-    #[test]
-    fn third_party_certificate_page_returns_tail() {
-        let certificates = (0..10).map(cert).collect::<Vec<_>>();
-
-        let page = third_party_certificate_page(certificates, 8, 8);
-
-        assert_eq!(page.certificates.len(), 2);
-        assert_eq!(page.certificates[0].name, "Publisher 8");
-        assert_eq!(page.next_offset, None);
     }
 }

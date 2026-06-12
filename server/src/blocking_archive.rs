@@ -160,57 +160,8 @@ where
     M: BlockingArchive,
 {
     let mut buf = xous_ipc::Buffer::into_buf(&msg).whence()?;
-    buf.lend_mut(cid, M::ID as u32).whence()?;
+    buf.blocking_move(cid, M::ID as u32).whence()?;
     buf.to_original().whence()
-}
-
-/// send archive message reusing existing buffer
-pub fn send_blocking_archive_buf<M>(cid: xous::CID, buf: &mut xous_ipc::Buffer, msg: M) -> M::Response
-where
-    M: BlockingArchive,
-{
-    try_send_blocking_archive_buf(cid, buf, msg).unwrap()
-}
-
-pub fn try_send_blocking_archive_buf<M>(
-    cid: xous::CID,
-    buf: &mut xous_ipc::Buffer,
-    msg: M,
-) -> whence::Result<M::Response, Error>
-where
-    M: BlockingArchive,
-{
-    buf.replace(&msg).whence()?;
-    buf.lend_mut(cid, M::ID as u32).whence()?;
-    buf.to_original().whence()
-}
-
-/// send archive message without blocking
-/// returns the [`xous::MessageId`] used for the reply
-pub fn send_blocking_archive_async<M>(cid: xous::CID, msg: M, sid: xous::SID) -> xous::MessageId
-where
-    M: BlockingArchive,
-{
-    try_send_blocking_archive_async(cid, msg, sid).unwrap()
-}
-
-/// send async archive message, returns error instead of panic
-/// returns the [`xous::MessageId`] used for the reply
-pub fn try_send_blocking_archive_async<M>(
-    cid: xous::CID,
-    msg: M,
-    sid: xous::SID,
-) -> whence::Result<xous::MessageId, Error>
-where
-    M: BlockingArchive,
-{
-    let msg_id = crate::next_dynamic_message_id();
-    let pid = xous::get_remote_pid(cid).whence()?;
-    let cid_remote = xous::connect_for_process(pid, sid).whence()?;
-    xous::allow_messages_on_connection(pid, cid_remote, msg_id..(msg_id + 1)).whence()?;
-    let msg = AsyncMessageInit { cid: cid_remote, msg_id, msg };
-    msg.send_blocking_archive(cid)?;
-    Ok(msg_id)
 }
 
 /// Message handler, used by ServerMessages::messages()
@@ -244,7 +195,7 @@ where
     let pid = raw.sender.pid().unwrap();
 
     match &mut raw.body {
-        xous::Message::MutableBorrow(mem) => {
+        xous::Message::BlockingMove(mem) => {
             // sync case - extract message directly (no AsyncMessageInit wrapper)
             let message: M = {
                 let buf = unsafe { xous_ipc::Buffer::from_memory_message_mut(mem) };
@@ -294,28 +245,6 @@ where
 
 // ==================== internal ====================
 
-// internal: handle async responses
-pub(crate) fn archive_async_response_handler<M, S>(
-    handler: &mut S,
-    raw: xous::MessageEnvelope,
-    context: &mut ServerContext<S>,
-) where
-    M: BlockingArchive,
-    S: ArchiveResponseHandler<M::Response>,
-{
-    let msg_id = raw.id();
-    let sender = raw.sender.pid().unwrap();
-
-    match try_decode_archive_async_response(raw) {
-        Ok(response) => {
-            handler.handle_response(response, sender, context);
-        }
-        Err(e) => log::warn!("invalid async message response {e}"),
-    }
-
-    context.remove_handler(msg_id);
-}
-
 #[derive(Debug)]
 enum Responder {
     /// response goes back in same buffer (blocking call)
@@ -331,8 +260,26 @@ impl Responder {
     {
         match self {
             Responder::Sync(mut envelope) => {
-                let mut buf = Self::unwrap_buffer(&mut envelope);
-                buf.replace(response).whence()?;
+                let existing = envelope.body.memory_message_mut().expect("blocking move carries memory").buf;
+                let (reply, used) = xous_ipc::Buffer::serialize_reply(existing, response).whence()?;
+                let old = envelope.set_response(
+                    reply,
+                    xous::MemoryAddress::new(used),
+                    xous::MemorySize::new(reply.len()),
+                );
+                // Free whatever of the moved-in buffer the reply doesn't cover: the tail
+                // when we reused the front, or all of it when we allocated a new buffer.
+                if reply.as_ptr() == old.as_ptr() {
+                    let tail_len = old.len() - reply.len();
+                    if tail_len > 0 {
+                        let tail =
+                            unsafe { xous::MemoryRange::new(old.as_ptr() as usize + reply.len(), tail_len) }
+                                .whence()?;
+                        xous::unmap_memory(tail).whence()?;
+                    }
+                } else {
+                    xous::unmap_memory(old).whence()?;
+                }
                 Ok(())
             }
             Responder::Async { cid, msg_id } => {
@@ -343,9 +290,5 @@ impl Responder {
                 Ok(())
             }
         }
-    }
-
-    fn unwrap_buffer(envelope: &mut xous::MessageEnvelope) -> xous_ipc::Buffer<'_> {
-        unsafe { xous_ipc::Buffer::from_memory_message_mut(envelope.body.memory_message_mut().unwrap()) }
     }
 }

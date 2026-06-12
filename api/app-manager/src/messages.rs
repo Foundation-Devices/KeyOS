@@ -150,17 +150,9 @@ pub struct ListApps {
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(InstalledAppsPage)]
+#[response(Vec<InstalledAppInfo>)]
 pub struct GetInstalledApps {
     pub locale: String,
-    pub offset: usize,
-    pub limit: usize,
-}
-
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct InstalledAppsPage {
-    pub apps: Vec<InstalledAppInfo>,
-    pub next_offset: Option<usize>,
 }
 
 /// Fetch the raw bytes of a single app's bundled icon, keyed by its hex app id
@@ -173,17 +165,8 @@ pub struct GetAppIcon {
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(ThirdPartyCertificatesPage)]
-pub struct GetThirdPartyCertificates {
-    pub offset: usize,
-    pub limit: usize,
-}
-
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ThirdPartyCertificatesPage {
-    pub certificates: Vec<ThirdPartyCertificateInfo>,
-    pub next_offset: Option<usize>,
-}
+#[response(Vec<ThirdPartyCertificateInfo>)]
+pub struct GetThirdPartyCertificates;
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(ImportThirdPartyCertificateResult)]
