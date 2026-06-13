@@ -22,8 +22,11 @@ use {
     image::ImageBuffer,
     std::{
         num::NonZeroU32,
-        sync::Arc,
-        time::{Duration, Instant},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        time::Duration,
     },
     winit::{
         application::ApplicationHandler,
@@ -56,7 +59,8 @@ struct EmulatorApp {
     resizer: fast_image_resize::Resizer,
     surface: Option<softbuffer::Surface>,
     raised: bool,
-    drop_level_at: Option<Instant>,
+    // Set when focus arrives; read by the grace thread.
+    focus_seen: Arc<AtomicBool>,
 }
 
 impl EmulatorApp {
@@ -129,10 +133,6 @@ impl ApplicationHandler for EmulatorApp {
         // outer position would shift the window up by the title bar height each
         // time. Reading the content position keeps save and restore symmetric.
         self.last_window_pos = window.inner_position().ok();
-        VIRTUAL_VSYNC_EVENTS.lock().unwrap().push(Box::new({
-            let window = window.clone();
-            move || window.request_redraw()
-        }));
 
         let context = unsafe { softbuffer::Context::new(&*window) }.unwrap();
         let mut surface = unsafe { softbuffer::Surface::new(&context, &*window) }.unwrap();
@@ -150,6 +150,19 @@ impl ApplicationHandler for EmulatorApp {
             return;
         }
         self.surface = Some(surface);
+        // A new surface has never been painted; repaint it even when static.
+        PlatformDisplay::mark_display_dirty();
+
+        // Register the hook only once a surface exists, or else a redraw with no
+        // surface clears the dirty gate and leaves the screen stale.
+        VIRTUAL_VSYNC_EVENTS.lock().unwrap().push(Box::new({
+            let window = window.clone();
+            move || {
+                if crate::display::PlatformDisplay::take_display_dirty() {
+                    window.request_redraw()
+                }
+            }
+        }));
     }
 
     fn window_event(
@@ -179,26 +192,28 @@ impl ApplicationHandler for EmulatorApp {
         match event {
             WindowEvent::RedrawRequested => {
                 if !self.raised {
-                    // First frame: the window is on screen now (winit's focus is a
-                    // no-op before then). Launched from the `foundation` CLI it can
-                    // open behind the terminal on macOS, where programmatic
-                    // activation is throttled and only works intermittently. Pin the
-                    // window above others via the window server (not subject to that
-                    // throttling) so it reliably shows in front. It is dropped back
-                    // to a normal level once it actually gains focus (see the Focused
-                    // arm), which keeps it in front rather than falling behind the
-                    // terminal as a blind timed drop would.
-                    window.focus_window();
-                    window.set_window_level(WindowLevel::AlwaysOnTop);
-                    self.drop_level_at = Some(Instant::now() + Duration::from_secs(2));
                     self.raised = true;
-                } else if let Some(deadline) = self.drop_level_at {
-                    if Instant::now() >= deadline {
-                        // Focus never arrived (activation throttled); drop the level
-                        // and re-assert front order as a best effort.
-                        window.set_window_level(WindowLevel::Normal);
+                    // First frame: winit focus is a no-op until the window is on
+                    // screen, and macOS throttles programmatic activation, so pin it
+                    // above others. Skip it when focus already arrived, or else the
+                    // window floats over the user's other windows for the grace period.
+                    if !self.focus_seen.load(Ordering::Relaxed) {
                         window.focus_window();
-                        self.drop_level_at = None;
+                        window.set_window_level(WindowLevel::AlwaysOnTop);
+                        std::thread::spawn({
+                            let window = window.clone();
+                            let focus_seen = Arc::clone(&self.focus_seen);
+                            move || {
+                                std::thread::sleep(Duration::from_secs(2));
+                                window.set_window_level(WindowLevel::Normal);
+                                // Re-assert front order only if focus never arrived,
+                                // or else it steals focus from whatever the user
+                                // switched to.
+                                if !focus_seen.load(Ordering::Relaxed) {
+                                    window.focus_window();
+                                }
+                            }
+                        });
                     }
                 }
                 //let measure = std::time::Instant::now();
@@ -212,11 +227,13 @@ impl ApplicationHandler for EmulatorApp {
                     fast_image_resize::PixelType::U8x4,
                 ) else {
                     log::warn!("Failed to create hosted simulator source frame buffer");
+                    PlatformDisplay::mark_display_dirty();
                     return;
                 };
                 let Some(surface) = &mut self.surface else { return };
                 let Ok(mut surface_buffer) = surface.buffer_mut() else {
                     log::warn!("Failed to acquire hosted simulator surface buffer");
+                    PlatformDisplay::mark_display_dirty();
                     return;
                 };
                 let Ok(mut dst) = fast_image_resize::images::Image::from_slice_u8(
@@ -226,6 +243,7 @@ impl ApplicationHandler for EmulatorApp {
                     fast_image_resize::PixelType::U8x4,
                 ) else {
                     log::warn!("Failed to create hosted simulator destination frame buffer");
+                    PlatformDisplay::mark_display_dirty();
                     return;
                 };
 
@@ -236,6 +254,8 @@ impl ApplicationHandler for EmulatorApp {
                 //println!("Frame time: {:?}", measure.elapsed());
                 if let Err(err) = surface_buffer.present() {
                     log::warn!("Failed to present hosted simulator frame: {err:?}");
+                    // Re-arm, or else a static screen never retries the paint.
+                    PlatformDisplay::mark_display_dirty();
                 }
             }
 
@@ -404,11 +424,9 @@ impl ApplicationHandler for EmulatorApp {
             }
 
             WindowEvent::Focused(true) => {
-                // The window became active, so dropping it back to a normal level now
-                // keeps it in front of the terminal instead of falling behind it.
-                if self.drop_level_at.take().is_some() {
-                    window.set_window_level(WindowLevel::Normal);
-                }
+                // Focus arrived: record it and drop the pin (a no-op if unpinned).
+                self.focus_seen.store(true, Ordering::Relaxed);
+                window.set_window_level(WindowLevel::Normal);
             }
 
             _ => (),
@@ -443,7 +461,7 @@ pub(crate) fn run_window() {
         resizer: fast_image_resize::Resizer::new(),
         surface: None,
         raised: false,
-        drop_level_at: None,
+        focus_seen: Arc::new(AtomicBool::new(false)),
     };
     event_loop.run_app(&mut app).unwrap();
     // The loop exited (e.g. Cmd-Q routed as a loop-exit rather than a per-window

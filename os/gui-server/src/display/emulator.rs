@@ -30,6 +30,8 @@ static SCALE_FACTOR: AtomicUsize = AtomicUsize::new(0x100);
 
 static VIRTUAL_VSYNC_EVENTS: Mutex<Vec<Box<dyn FnMut() + Send>>> = Mutex::new(Vec::new());
 
+static DISPLAY_DIRTY: AtomicBool = AtomicBool::new(true);
+
 static VSYNC_HAPPENED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) struct PlatformDisplay {
@@ -70,7 +72,13 @@ impl PlatformDisplay {
         }));
     }
 
-    pub(crate) fn setup_layers(&mut self, layers: LayerStack) { *LAYER_STACK.lock().unwrap() = layers; }
+    pub(crate) fn setup_layers(&mut self, layers: LayerStack) {
+        let mut current = LAYER_STACK.lock().unwrap();
+        if *current != layers {
+            *current = layers;
+            DISPLAY_DIRTY.store(true, Ordering::Relaxed);
+        }
+    }
 
     pub(crate) fn turn_lcd_on(&mut self) { self.lcd_on = true; }
 
@@ -90,14 +98,23 @@ impl PlatformDisplay {
     pub(crate) fn backlight_level() -> u8 { LCD_BACKLIGHT_LEVEL.load(Ordering::SeqCst) }
 
     pub(crate) fn set_scale_factor(scale_factor: usize) {
-        SCALE_FACTOR.store(scale_factor, Ordering::Relaxed);
+        if SCALE_FACTOR.swap(scale_factor, Ordering::Relaxed) != scale_factor {
+            DISPLAY_DIRTY.store(true, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn scale_factor() -> f64 { SCALE_FACTOR.load(Ordering::Relaxed) as f64 / 256.0 }
 
     pub(crate) fn set_backlight_level_pct(&mut self, percent: u8) {
-        LCD_BACKLIGHT_LEVEL.store((percent.clamp(0, 100) as u32 * 0xFF / 100) as u8, Ordering::SeqCst);
+        let level = (percent.clamp(0, 100) as u32 * 0xFF / 100) as u8;
+        if LCD_BACKLIGHT_LEVEL.swap(level, Ordering::SeqCst) != level {
+            DISPLAY_DIRTY.store(true, Ordering::Relaxed);
+        }
     }
+
+    pub(crate) fn take_display_dirty() -> bool { DISPLAY_DIRTY.swap(false, Ordering::Relaxed) }
+
+    pub(crate) fn mark_display_dirty() { DISPLAY_DIRTY.store(true, Ordering::Relaxed); }
 
     pub fn vsync_happened() -> bool { VSYNC_HAPPENED.swap(false, std::sync::atomic::Ordering::Relaxed) }
 }

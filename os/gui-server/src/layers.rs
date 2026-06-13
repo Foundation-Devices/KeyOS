@@ -6,7 +6,7 @@ use xous::MemoryRange;
 
 use crate::{control_center::ControlCenterWindowState, display::MAX_LAYERS, AppWindow, Gui};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layer {
     src: SourceType,
     src_width: usize,
@@ -25,7 +25,7 @@ pub struct Layer {
     low_priority: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SourceType {
     /// DMA range plus physical address on hardware
     Dma {
@@ -48,7 +48,7 @@ pub enum LayerPixelFormat {
     Rgb565,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct LayerStack {
     pub layers: [Option<Layer>; MAX_LAYERS],
 }
