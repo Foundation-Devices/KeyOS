@@ -347,7 +347,7 @@ impl MemoryMapping {
         klog!("***move - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let mut entry_data = L2TableEntry::read_from(src_entry);
-        if !entry_data.is_user_accessible() {
+        if !self.is_kernel() && !entry_data.is_user_accessible() {
             return Err(Error::AccessDenied);
         }
         // An on-demand source must be backed before it can be moved; back it
@@ -382,7 +382,7 @@ impl MemoryMapping {
         klog!("***lend - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let mut entry_data = L2TableEntry::read_from(src_entry);
-        if !entry_data.is_user_accessible() {
+        if !self.is_kernel() && !entry_data.is_user_accessible() {
             return Err(Error::AccessDenied);
         }
         // Lending requires a backed source, so back the on-demand page from
