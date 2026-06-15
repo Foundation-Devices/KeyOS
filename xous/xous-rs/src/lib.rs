@@ -17,6 +17,3 @@ pub use drop_deallocate::*;
 pub use keyos;
 pub use string::*;
 pub use syscall::*;
-
-#[cfg(feature = "processes-as-threads")]
-pub use crate::arch::ProcessArgsAsThread;

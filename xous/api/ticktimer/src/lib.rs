@@ -27,7 +27,7 @@ impl Ticktimer {
     ///
     /// # Returns:
     ///
-    ///     * A `u64` that is the number of nanoseconds elapsed since boot.
+    /// * A `u64` that is the number of nanoseconds elapsed since boot.
     pub fn elapsed_ns(&self) -> u64 {
         let response = send_message(
             self.conn,
@@ -47,7 +47,7 @@ impl Ticktimer {
     ///
     /// # Arguments:
     ///
-    ///     * ms: how many nnaoseconds to sleep for
+    /// * ns: how many nanoseconds to sleep for
     pub fn sleep_ns(&self, ns: u64) -> Result<(), Error> {
         send_message(
             self.conn,

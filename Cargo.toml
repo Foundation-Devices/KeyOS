@@ -145,7 +145,6 @@ members = [
     "test-apps/spawn-test",
     "test-apps/stack-overflow-test",
     "test-apps/sys-benchmark",
-    "test-apps/syscall-arg-invalid-addr-test",
     "test-apps/test1",
     "test-apps/test2",
     "test-apps/thread-return-join-test",

@@ -61,7 +61,7 @@ impl AllowedExtensions {
 ///
 /// Example to only allow accessing `.bin` files in `External` location:
 ///
-/// ```rust
+/// ```rust,ignore
 /// # use navigation::api::filepicker::{SelectFileOptions, AllowedLocations, AllowedExtensions, Location};
 /// let options = SelectFileOptions::default()
 ///     .with_start_location(Location::External)

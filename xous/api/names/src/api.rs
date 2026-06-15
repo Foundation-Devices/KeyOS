@@ -10,7 +10,7 @@ pub enum Opcode {
     ///
     /// # Message Types
     ///
-    ///     * MutableLend
+    /// * MutableLend
     ///
     /// # Arguments
     ///
@@ -23,7 +23,7 @@ pub enum Opcode {
     ///
     /// # Message Types
     ///
-    ///     * MutableLend
+    /// * MutableLend
     ///
     /// # Arguments
     ///
@@ -36,7 +36,7 @@ pub enum Opcode {
     ///
     /// # Message Types
     ///
-    ///     * MutableLend
+    /// * MutableLend
     ///
     /// # Arguments
     ///

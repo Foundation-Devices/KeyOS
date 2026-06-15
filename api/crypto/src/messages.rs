@@ -78,7 +78,6 @@ pub struct AesGcmTag {
     pub transfer_id: u8,
 }
 
-#[cfg(keyos)]
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<(), CryptoError>)]
 pub struct DiskEncryptUnsafe {

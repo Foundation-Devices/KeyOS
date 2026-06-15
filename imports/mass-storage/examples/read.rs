@@ -24,17 +24,12 @@ struct UsbWrapper {
 }
 
 impl UsbHostCommands for UsbWrapper {
-    fn bulk_in(&mut self, data_len: usize) -> core::result::Result<Vec<u8>, UsbError> {
-        debug!("Bulk in on EP={}, data_len={data_len}", self.ep_out);
-        let mut buffer = vec![0; data_len];
-        match self
-            .device
-            .read_bulk(self.ep_in, &mut buffer, Duration::from_secs(5))
-        {
+    fn bulk_in(&mut self, data: &mut [u8]) -> core::result::Result<usize, UsbError> {
+        debug!("Bulk in on EP={}, data_len={}", self.ep_out, data.len());
+        match self.device.read_bulk(self.ep_in, data, Duration::from_secs(5)) {
             Ok(len) => {
-                buffer.truncate(len);
-                debug!("Bulk in data={buffer:x?}");
-                Ok(buffer)
+                debug!("Bulk in data={:x?}", &data[..len]);
+                Ok(len)
             }
             Err(e) => {
                 error!("Yusb error: {e}");
@@ -96,5 +91,7 @@ fn main() {
         device,
     };
     let mut mass_storage = MassStorageHost::new(usb).unwrap();
-    println!("{:x?}", mass_storage.read(0, 1).unwrap());
+    let mut buffer = vec![0u8; 512];
+    let len = mass_storage.read(0, &mut buffer).unwrap();
+    println!("{:x?}", &buffer[..len]);
 }

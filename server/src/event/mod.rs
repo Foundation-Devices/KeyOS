@@ -113,5 +113,5 @@ mod infallible {
 #[test]
 fn cancellation_msg() {
     let msg = cancellation_message(1, 2);
-    assert_eq!(unwrap_cancellation_message(&msg).unwrap(), (1, 2));
+    assert_eq!(extract_cancellation_message(&msg).unwrap(), (1, 2));
 }

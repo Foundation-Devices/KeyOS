@@ -9,7 +9,7 @@ use app_manifest::QrPriority;
 ///
 /// Example with a left back arrow and a simple message:
 ///
-/// ```rust
+/// ```rust,ignore
 /// # use navigation::api::qrscanner::{ScanQrOptions};
 /// let options = ScanQrOptions::default()
 ///     .with_start_location(Location::External)

@@ -2,8 +2,6 @@ use core::convert::{TryFrom, TryInto};
 #[cfg(keyos)]
 use core::sync::atomic::AtomicUsize;
 
-#[cfg(feature = "processes-as-threads")]
-pub use crate::arch::ProcessArgsAsThread;
 #[cfg(keyos)]
 use crate::pid_from_usize;
 use crate::{
@@ -1812,30 +1810,6 @@ where
 #[inline]
 pub fn wait_thread<T>(joiner: crate::arch::WaitHandle<T>) -> SysCallResult {
     crate::arch::wait_thread(joiner)
-}
-
-/// Create a new process by running it in its own thread
-#[cfg(feature = "processes-as-threads")]
-pub fn create_process_as_thread<F>(
-    args: ProcessArgsAsThread<F>,
-) -> core::result::Result<crate::arch::ProcessHandleAsThread, Error>
-where
-    F: FnOnce() + Send + 'static,
-{
-    let process_init = crate::arch::create_process_pre_as_thread(&args)?;
-    rsyscall(SysCall::CreateProcess(process_init)).and_then(|result| {
-        if let Result::NewProcess(startup) = result {
-            crate::arch::create_process_post_as_thread(args, process_init, startup)
-        } else {
-            Err(Error::InternalError)
-        }
-    })
-}
-
-/// Wait for a thread to finish
-#[cfg(feature = "processes-as-threads")]
-pub fn wait_process_as_thread(joiner: crate::arch::ProcessHandleAsThread) -> SysCallResult {
-    crate::arch::wait_process_as_thread(joiner)
 }
 
 #[inline]

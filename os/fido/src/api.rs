@@ -27,6 +27,17 @@ macro_rules! use_api {
 #[derive(Debug, Default)]
 pub struct FidoApi<P: CheckedPermissions>(CheckedConn<P>);
 
+/// Stands in for `FidoApi` in unit tests, which run without a fido server to
+/// connect to. Only the ctap-hid/nfc entry points are stubbed.
+#[derive(Debug, Default)]
+pub struct FidoApiStub;
+
+impl FidoApiStub {
+    pub fn u2f_process_apdu(&self, _msg: Vec<u8>, _transport: Transport) -> Vec<u8> { Vec::new() }
+
+    pub fn ctap_process_cbor(&self, _cmd: u8, _raw: Vec<u8>) -> Vec<u8> { Vec::new() }
+}
+
 impl<P: CheckedPermissions> FidoApi<P> {
     /* API for gui-app-security-keys application */
     // Note: To subscribe to key changes, use:

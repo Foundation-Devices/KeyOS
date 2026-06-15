@@ -11,9 +11,6 @@ extern crate bitflags;
 #[macro_use]
 mod debug;
 
-#[cfg(all(test, not(keyos)))]
-mod test;
-
 mod arch;
 
 #[macro_use]

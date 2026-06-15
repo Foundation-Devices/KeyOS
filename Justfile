@@ -10,6 +10,36 @@
 docker_image := 'keyos'
 api_doc_packages := 'server app-manager backup camera crypto fs gui-server-api haptics keycard nfc power-manager quantum-link rgb-led security settings update usb fido'
 
+# Crates excluded from host builds, shared by `unit-test` and `check-workspace`.
+
+# Target-only: hardware registers, bootloader, ELF loader, hardware logging.
+target_excludes := '--exclude atsama5d27 ' + \
+    '--exclude boot-common ' + \
+    '--exclude charge-boot ' + \
+    '--exclude keyos-boot ' + \
+    '--exclude loader ' + \
+    '--exclude cryptoauthlib ' + \
+    '--exclude log-serial ' + \
+    '--exclude log-usb-serial ' + \
+    '--exclude usb-debug'
+
+# Apps that link the ledger C SDK; they do not link on the host.
+flux_excludes := '--exclude app-flux-ethereum ' + \
+    '--exclude app-flux-monero ' + \
+    '--exclude app-flux-solana ' + \
+    '--exclude app-flux-zcash'
+
+check_excludes := target_excludes + ' ' + flux_excludes
+
+# Excluded from the test run only: the flux emulator (doesn't link on the host),
+# softbuffer's windowing test (needs a display), tar's vendored integration test,
+# and qbsdiff whose test rewrites a tracked asset.
+test_only_excludes := '--exclude gui-app-emu-flux ' + \
+    '--exclude gui-app-emu-flux-server ' + \
+    '--exclude softbuffer ' + \
+    '--exclude tar ' + \
+    '--exclude qbsdiff'
+
 # Format the codebase.
 fmt:
     just slint-fmt
@@ -45,21 +75,9 @@ nix-fmt *args:
 slint-fmt:
     ./scripts/format-slint.sh
 
-# Run tests.
-test:
-    cargo test --workspace \
-            --exclude gui-app-control-center \
-            --exclude gui-app-example-logo \
-            --exclude gui-app-keyboard \
-            --exclude gui-app-test \
-            --exclude gui-server \
-            --exclude loader \
-            --exclude llio \
-            --exclude perflib \
-            --exclude skeleton \
-            --exclude syscall-arg-invalid-addr-test \
-            --exclude xous-api-names \
-            --exclude xous-api-ticktimer
+# Run host tests. See check_excludes and test_only_excludes for what is skipped.
+unit-test:
+    cargo test --workspace {{check_excludes}} {{test_only_excludes}}
 
 # Lint the codebase.
 lint:
@@ -76,28 +94,8 @@ lint:
     cargo xtask build sys-benchmark
     cargo audit
 
-check-workspace:
-    cargo check --workspace \
-      --exclude curve25519-dalek-loader \
-      --exclude ed25519-dalek-loader \
-      --exclude loader \
-      --exclude sha2-loader \
-      --exclude syscall-arg-invalid-addr-test \
-      --exclude cryptoauthlib \
-      --exclude atsama5d27 \
-      --exclude keyos-boot \
-      --exclude boot-common \
-      --exclude charge-boot \
-      --exclude crypto-client \
-      --exclude log-serial \
-      --exclude log-usb-serial \
-      --exclude usb-debug \
-      --exclude libblur \
-      --exclude app-flux-monero \
-      --exclude app-flux-zcash \
-      --exclude tar-rs \
-      --exclude recovery-worker \
-      --exclude gui-app-recovery
+check-workspace *args:
+    cargo check --workspace {{check_excludes}} {{args}}
 
 check-recovery:
     cargo check \
@@ -323,21 +321,6 @@ panic-lint:
 
 flash *args:
     cargo xtask flash {{args}}
-
-unit-test:
-    cargo test \
-        -p ordered-table \
-        -p worker \
-        -p gui-app-authenticator \
-        -p slint-keyos-platform-build \
-        -p slint-keyos-platform-common \
-        -p slint-keyos-platform \
-        -p gui-app-control-center \
-        -p quantum-link-server \
-        -p backup-server \
-        -p update-server \
-        -p update \
-        -p emmc
 
 one-int-test +args:
     cargo xtask run --hosted --integration-test {{args}}

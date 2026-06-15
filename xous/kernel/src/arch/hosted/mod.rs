@@ -36,21 +36,7 @@ enum ExitMessage {
     Exit,
 }
 
-thread_local!(static NETWORK_LISTEN_ADDRESS: RefCell<SocketAddr> = RefCell::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0)));
 thread_local!(static SEND_ADDR: RefCell<Option<Sender<SocketAddr>>> = RefCell::new(None));
-thread_local!(static PID1_KEY: RefCell<[u8; 16]> = RefCell::new([0u8; 16]));
-
-#[cfg(test)]
-pub fn set_pid1_key(new_key: [u8; 16]) { PID1_KEY.with(|p1k| *p1k.borrow_mut() = new_key); }
-
-/// Set the network address for this particular thread.
-#[cfg(test)]
-pub fn set_listen_address(new_address: &SocketAddr) {
-    NETWORK_LISTEN_ADDRESS.with(|nla| {
-        let mut address = nla.borrow_mut();
-        *address = *new_address;
-    });
-}
 
 /// Set the network address for this particular thread.
 #[allow(dead_code)]
@@ -80,12 +66,9 @@ fn handle_connection(
             // Read bytes from the connection. This will fail when the connection closes,
             // so send a `Termination` message across the channel.
             if let Err(e) = conn.read_exact(&mut raw_data) {
-                #[cfg(not(test))]
                 if e.kind() != std::io::ErrorKind::UnexpectedEof {
                     eprintln!("KERNEL: PID {pid} client disconnected: {e} -- shutting down virtual process");
                 }
-                #[cfg(test)]
-                let _ = e;
                 return;
             }
 
@@ -171,7 +154,6 @@ fn handle_connection(
         .unwrap();
 
     conn_thread.join().unwrap();
-    #[cfg(not(test))]
     eprintln!("KERNEL: PID {pid} exited");
     chn.send(ThreadMessage::SysCall(pid, 1, xous::SysCall::TerminateProcess(0))).unwrap();
 }
@@ -331,9 +313,7 @@ pub fn idle() -> bool {
     let mut process_specs: std::collections::HashMap<String, (AppId, String)> = Default::default();
     let mut pending_reloads: std::collections::HashSet<PID> = Default::default();
 
-    // Allocate PID1 with the key we were passed.
-    let pid1_key = PID1_KEY.with(|p1k| *p1k.borrow());
-    let pid1_init = ProcessInit { app_id: AppId(pid1_key) };
+    let pid1_init = ProcessInit { app_id: AppId([0u8; 16]) };
     let process_1 = SystemServices::with_mut(|ss| ss.create_process(pid1_init)).unwrap();
     assert_eq!(process_1.pid().get(), 1);
     crate::arch::process::set_current_pid(process_1.pid());
@@ -345,9 +325,8 @@ pub fn idle() -> bool {
                 .next()
                 .expect("unable to resolve server address")
         })
-        .unwrap_or_else(|_| NETWORK_LISTEN_ADDRESS.with(|nla| *nla.borrow()));
+        .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0));
 
-    #[cfg(not(test))]
     let address_receiver = {
         let (sender, receiver) = unbounded();
         set_send_addr(sender);
@@ -363,80 +342,77 @@ pub fn idle() -> bool {
             .expect("couldn't spawn listen thread")
     });
 
-    #[cfg(not(test))]
-    {
-        let address = address_receiver.recv().unwrap();
-        xous::arch::set_xous_address(address);
-        println!("KERNEL: Xous server listening on {address}");
-        println!("KERNEL: Starting initial processes:");
+    let address = address_receiver.recv().unwrap();
+    xous::arch::set_xous_address(address);
+    println!("KERNEL: Xous server listening on {address}");
+    println!("KERNEL: Starting initial processes:");
 
-        let mut args = std::env::args();
-        let argv0 = args.next().unwrap_or_else(|| "keyos-kernel".to_owned());
-        let services_path = args.next().unwrap_or_else(|| {
-            eprintln!("Usage: {argv0} <services.json>");
-            std::process::exit(1);
-        });
-        let services: Vec<app_manifest::HostedService> = serde_json::from_reader(
-            std::fs::File::open(&services_path)
-                .unwrap_or_else(|e| panic!("couldn't open hosted-services manifest {services_path}: {e}")),
-        )
-        .unwrap_or_else(|e| panic!("couldn't parse hosted-services manifest {services_path}: {e}"));
+    let mut args = std::env::args();
+    let argv0 = args.next().unwrap_or_else(|| "keyos-kernel".to_owned());
+    let services_path = args.next().unwrap_or_else(|| {
+        eprintln!("Usage: {argv0} <services.json>");
+        std::process::exit(1);
+    });
+    let services: Vec<app_manifest::HostedService> = serde_json::from_reader(
+        std::fs::File::open(&services_path)
+            .unwrap_or_else(|e| panic!("couldn't open hosted-services manifest {services_path}: {e}")),
+    )
+    .unwrap_or_else(|e| panic!("couldn't parse hosted-services manifest {services_path}: {e}"));
 
-        // Set the current PID to 1, which was created above. This ensures all init processes
-        // are owned by PID1.
-        crate::arch::process::set_current_pid(process_1.pid());
+    // Set the current PID to 1, which was created above. This ensures all init processes
+    // are owned by PID1.
+    crate::arch::process::set_current_pid(process_1.pid());
 
-        // Spawn each service. Failures here will halt the entire system.
-        println!("  PID  |  App ID  |  Command");
-        println!("-------+----------+-------");
-        for service in services {
-            let app_id = AppId(service.app_id);
-            let init = xous::ProcessInit { app_id };
-            let new_process = SystemServices::with_mut(|ss| ss.create_process(init)).unwrap();
-            println!(" {new_process:2} |  {app_id}  |  {0}", service.path);
-            let process_args = xous::ProcessArgs::new(app_id, "program", &service.path);
-            let (pid, handle) =
-                xous::arch::create_process_post(process_args, init, new_process).expect("couldn't spawn");
-            if let Some(name) = std::path::Path::new(&service.path).file_name() {
-                process_specs.insert(name.to_string_lossy().into_owned(), (app_id, service.path.clone()));
-            }
-            process_registry.insert(pid, (app_id, service.path.clone(), handle));
-            if service.syscalls != 0 {
-                SystemServices::with_mut(|ss| {
-                    ss.process_mut(pid).unwrap().set_syscall_permissions(service.syscalls)
-                });
-            }
+    // Spawn each service. Failures here will halt the entire system.
+    println!("  PID  |  App ID  |  Command");
+    println!("-------+----------+-------");
+    for service in services {
+        let app_id = AppId(service.app_id);
+        let init = xous::ProcessInit { app_id };
+        let new_process = SystemServices::with_mut(|ss| ss.create_process(init)).unwrap();
+        println!(" {new_process:2} |  {app_id}  |  {0}", service.path);
+        let process_args = xous::ProcessArgs::new(app_id, "program", &service.path);
+        let (pid, handle) =
+            xous::arch::create_process_post(process_args, init, new_process).expect("couldn't spawn");
+        if let Some(name) = std::path::Path::new(&service.path).file_name() {
+            process_specs.insert(name.to_string_lossy().into_owned(), (app_id, service.path.clone()));
         }
+        process_registry.insert(pid, (app_id, service.path.clone(), handle));
+        if service.syscalls != 0 {
+            SystemServices::with_mut(|ss| {
+                ss.process_mut(pid).unwrap().set_syscall_permissions(service.syscalls)
+            });
+        }
+    }
 
-        // Hot-reload socket: accepts crate names and triggers kill+relaunch
-        #[cfg(unix)]
-        {
-            let socket_path = "/tmp/keyos-sim-reload.sock";
-            let _ = std::fs::remove_file(socket_path);
-            match std::os::unix::net::UnixListener::bind(socket_path) {
-                Ok(listener) => {
-                    eprintln!("KERNEL: Hot-reload socket at {}", socket_path);
-                    std::thread::Builder::new()
-                        .name("hot-reload listener".to_owned())
-                        .spawn(move || {
-                            use std::io::BufRead;
-                            for stream in listener.incoming() {
-                                if let Ok(stream) = stream {
-                                    let mut reader = std::io::BufReader::new(stream);
-                                    let mut line = String::new();
-                                    if reader.read_line(&mut line).is_ok() {
-                                        let name = line.trim().to_owned();
-                                        if !name.is_empty() {
-                                            reload_sender.send(ThreadMessage::ReloadApp(name)).ok();
-                                        }
+    // Hot-reload socket: accepts crate names and triggers kill+relaunch
+    #[cfg(unix)]
+    {
+        let socket_path = "/tmp/keyos-sim-reload.sock";
+        let _ = std::fs::remove_file(socket_path);
+        match std::os::unix::net::UnixListener::bind(socket_path) {
+            Ok(listener) => {
+                eprintln!("KERNEL: Hot-reload socket at {}", socket_path);
+                std::thread::Builder::new()
+                    .name("hot-reload listener".to_owned())
+                    .spawn(move || {
+                        use std::io::BufRead;
+                        for stream in listener.incoming() {
+                            if let Ok(stream) = stream {
+                                let mut reader = std::io::BufReader::new(stream);
+                                let mut line = String::new();
+                                if reader.read_line(&mut line).is_ok() {
+                                    let name = line.trim().to_owned();
+                                    if !name.is_empty() {
+                                        reload_sender.send(ThreadMessage::ReloadApp(name)).ok();
                                     }
                                 }
                             }
-                        })
-                        .unwrap();
-                }
-                Err(e) => eprintln!("KERNEL: Could not bind reload socket: {}", e),
+                        }
+                    })
+                    .unwrap();
             }
+            Err(e) => eprintln!("KERNEL: Could not bind reload socket: {}", e),
         }
     }
 

@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::{collections::BTreeMap, time::Instant};
 
 use fido::messages::Transport;
+#[cfg(not(test))]
 use rgb_led::{RgbAnimation, RgbColor};
 #[cfg(feature = "test-app")]
 use server::{send_blocking_archive, BlockingScalarHandler};
@@ -27,8 +28,13 @@ use crate::{
     messages::ProcessHidPacket,
 };
 
+#[cfg(not(test))]
 fido::use_api!();
 rgb_led::use_api!();
+
+// Unit tests have no fido server to connect to, so use the stub in its place.
+#[cfg(test)]
+use fido::api::FidoApiStub as FidoApi;
 
 #[cfg(all(keyos, not(feature = "test-app")))]
 usb::use_device_api!();
@@ -199,6 +205,7 @@ impl Channel {
             Command::Wink => {
                 log::debug!("CTAPHID_WINK");
                 if self.payload_len == 0 {
+                    #[cfg(not(test))]
                     RgbApi::default().animate_all(RgbAnimation::new(
                         RgbColor::new(0xF1, 0xD0, 0x00),
                         RgbColor::new(0x00, 0xF1, 0xD0),

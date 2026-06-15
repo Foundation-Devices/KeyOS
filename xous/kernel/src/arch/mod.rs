@@ -10,8 +10,3 @@ pub use crate::arch::arm::*;
 mod hosted;
 #[cfg(any(windows, unix))]
 pub use hosted::*;
-
-#[cfg(all(target_arch = "x86_64", not(any(windows, unix))))]
-mod x86_64;
-#[cfg(all(target_arch = "x86_64", not(any(windows, unix))))]
-pub use x86_64::*;

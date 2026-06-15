@@ -27,6 +27,7 @@ fn main() {
     test_gcm_correctness(&crypto, data);
     test_unaligned_gcm_tag(&crypto, data);
     test_large_gcm(&crypto);
+    #[cfg(keyos)]
     test_aes_xts_correctness(&crypto, data);
     test_aes_speed(&crypto, data);
 
@@ -424,6 +425,7 @@ fn test_large_gcm(crypto: &CryptoApi) {
     assert!(tag == tag2);
 }
 
+#[cfg(keyos)]
 fn test_aes_xts_correctness(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
     log::info!("Testing XTS mode j correctness");
     data.as_slice_mut().fill(b'a');

@@ -3,4 +3,4 @@
 
 #[rustfmt::skip]
 mod system_manifests;
-pub use system_manifests::SYSTEM_MANIFESTS;
+pub use crate::system_manifests::SYSTEM_MANIFESTS;

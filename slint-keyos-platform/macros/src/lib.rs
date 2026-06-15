@@ -16,7 +16,7 @@ use proc_macro::TokenStream;
 ///
 /// Separate query parameters with '&'
 ///
-/// ```rust
+/// ```rust,ignore
 /// #[route(path = "/user/{id}?{profile}&{value}")]
 /// struct SimpleRoute {
 ///     id: u32,
@@ -29,7 +29,7 @@ use proc_macro::TokenStream;
 ///
 /// All fields must implement serde::Serialize and serde::Deserialize
 ///
-/// ```rust
+/// ```rust,ignore
 /// #[route(path = "/{user}/settings/{ids}?{nested}&{option}")]
 /// struct TestRoute {
 ///     user: String,

@@ -69,8 +69,8 @@ impl<CT: TransferContext> AsyncQueue<CT> {
     }
 
     /// Get the QueueHead that has the H bit set
-    /// # Safety: this pointer is only alive as long as this
-    ///           object is alive (in any form)
+    /// # Safety: this pointer is only alive as long as this object is alive
+    /// (in any form)
     pub unsafe fn head(&self) -> QueueHeadPointer { self.heads[0].head.to_controller_ptr() }
 
     pub fn open_endpoint(
