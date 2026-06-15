@@ -134,6 +134,7 @@ fn on_startup(state: StoredValue<AppState>) {
 
     if matches!(master_key_state, MasterKeyState::Erased) {
         log::info!("master key erased, prioritizing master key recovery flow");
+        ui.global::<SeedGlobal>().set_is_master_key_recovery(true);
         nav.invoke_master_key_deleted_main(NavigateOptions { animate: Animate::None, replace: true });
         return;
     }
