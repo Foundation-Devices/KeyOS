@@ -40,7 +40,7 @@ impl server::MessageId for SetupPacketCallback {
 // === External messages ===
 
 #[derive(Debug, server::Message, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(Result<Vec<u8>, UsbError>)]
+#[response(Result<RegisteredInterfaceInfo, UsbError>)]
 pub struct RegisterInterface {
     pub interface_number: u8,
     pub if_class: u8,
@@ -49,6 +49,13 @@ pub struct RegisterInterface {
     pub endpoints: Vec<EndpointProperties>,
     pub interface_functional_descriptors: Vec<u8>,
     pub associated_interface_count: u8,
+    pub capabilities: Vec<DeviceCapability>,
+    pub setup_responder: Option<xous::CID>,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct RegisteredInterfaceInfo {
+    pub endpoints: Vec<u8>,
 }
 
 #[derive(Debug, server::Message)]
@@ -66,6 +73,14 @@ pub struct EndpointProperties {
     /// uses FIFO mode where each read/write operates on a single packet only — the caller must
     /// ensure the buffer fits within `max_packet_len`.
     pub use_dma: bool,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct DeviceCapability {
+    pub cap_type: u8,
+    pub cap_subtype: u8,
+    pub cap_uuid: Vec<u8>,
+    pub capability_functional_descriptors: Vec<u8>,
 }
 
 #[derive(Debug, server::Message, Clone)]
@@ -134,10 +149,6 @@ impl From<WriteEndpoint> for server::SimpleMemoryMessage {
 }
 
 #[derive(Debug, server::Message, Clone)]
-#[response(Result<(), UsbError>)]
-pub struct RegisterSetupResponder(pub xous::CID);
-
-#[derive(Debug, server::Message, Clone)]
 #[response(bool)]
 pub struct IsDeviceEmulationEnabled;
 
@@ -152,15 +163,6 @@ pub struct IsCableConnected;
 #[derive(Debug, server::Message, Clone)]
 #[response(bool)]
 pub struct IsDeviceMode;
-
-#[derive(Debug, server::Message, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(Result<(), UsbError>)]
-pub struct RegisterCapability {
-    pub cap_type: u8,
-    pub cap_subtype: u8,
-    pub cap_uuid: Vec<u8>,
-    pub capability_functional_descriptors: Vec<u8>,
-}
 
 #[derive(Debug, server::Message, Clone)]
 #[response(Result<(), UsbError>)]
@@ -185,6 +187,23 @@ impl AsScalar<4> for SetVidPid {
 #[derive(Debug, server::Message, Clone)]
 #[response(Result<(), UsbError>)]
 pub struct ResetController;
+
+#[derive(Debug, server::Message, Clone)]
+#[response(Result<(), UsbError>)]
+pub struct SetInterfaceEnabled {
+    pub interface_number: u8,
+    pub enabled: bool,
+}
+
+impl FromScalar<2> for SetInterfaceEnabled {
+    fn from_scalar(value: [u32; 2]) -> Self {
+        Self { interface_number: value[0] as u8, enabled: value[1] != 0 }
+    }
+}
+
+impl AsScalar<2> for SetInterfaceEnabled {
+    fn as_scalar(&self) -> [u32; 2] { [self.interface_number as u32, self.enabled as u32] }
+}
 
 impl AsScalar<4> for SetupPacket {
     fn as_scalar(&self) -> [u32; 4] {

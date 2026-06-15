@@ -91,7 +91,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     pub fn connect() -> Self { Self { conn: CheckedConn::default() } }
 
     /// Switches the focus to the app window of the given PID and the app zoom-in start position.
-    /// Used by the app launcher and app switcher.
+    /// Used by the app launcher, app switcher, and usb-debug protocol.
     pub fn switch_to(&self, next_pid: PID, x: usize, y: usize) -> Result<(), GuiServerError>
     where
         P: MessageAllowed<msg::SwitchTo>,
@@ -106,6 +106,13 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         P: MessageAllowed<msg::SwitchToLauncher>,
     {
         Ok(self.conn.try_send_blocking_scalar(msg::SwitchToLauncher)?)
+    }
+
+    pub fn is_locked(&self) -> Result<bool, GuiServerError>
+    where
+        P: MessageAllowed<msg::IsLocked>,
+    {
+        Ok(self.conn.try_send_blocking_scalar(msg::IsLocked)?)
     }
 
     pub fn shutdown(&self) -> Result<(), GuiServerError>
@@ -128,8 +135,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     where
         P: MessageAllowed<msg::CloseApp>,
     {
-        self.conn.try_send_scalar(msg::CloseApp { pid: pid.get() as usize })?;
-        Ok(())
+        Ok(self.conn.try_send_blocking_scalar(msg::CloseApp { pid: pid.get() as usize })??)
     }
 
     /// Captures the current composited screen as raw pixel data.
@@ -159,6 +165,15 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         P: MessageAllowed<msg::InjectKey>,
     {
         self.conn.try_send_scalar(msg::InjectKey { is_pressed, key })?;
+        Ok(())
+    }
+
+    /// Injects a power button press or release into gui-server's power-button state machine.
+    pub fn inject_power_button(&self, is_pressed: bool) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::InjectPowerButton>,
+    {
+        self.conn.try_send_scalar(msg::InjectPowerButton(is_pressed))?;
         Ok(())
     }
 

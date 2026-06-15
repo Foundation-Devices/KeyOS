@@ -59,9 +59,7 @@ const ENDPOINTS: [EndpointProperties; 2] = [
 ];
 
 #[derive(Default)]
-pub(crate) struct SetupResponder {
-    pub(crate) interface_num: u16,
-}
+pub(crate) struct SetupResponder;
 impl ServerMessages for SetupResponder {
     const NAME: &'static str = "";
 
@@ -79,13 +77,9 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _context: &mut server::ServerContext<Self>,
     ) -> Option<Vec<u8>> {
         log::debug!("Setup packet: {msg:02x?}");
-        if msg.index == self.interface_num {
-            // Get Max LUN (see Universal Serial Bus Mass Storage Class Bulk-Only Transport Table 3.2)
-            if msg.request_type == 0b10100001 && msg.request == 0b11111110 {
-                Some(vec![MAX_LUN.load(std::sync::atomic::Ordering::SeqCst)])
-            } else {
-                None
-            }
+        // Get Max LUN (see Universal Serial Bus Mass Storage Class Bulk-Only Transport Table 3.2)
+        if msg.request_type == 0b10100001 && msg.request == 0b11111110 {
+            Some(vec![MAX_LUN.load(std::sync::atomic::Ordering::SeqCst)])
         } else {
             None
         }
@@ -294,15 +288,15 @@ fn run_emulation(
 pub fn start() -> Result<(), crate::error::MassStorageEmulationError> {
     FileSystem::default().wait_for_filesystem(Location::User);
     let mut usb_api = UsbDeviceEmulation::default();
-    usb_api.register_setup_responder(SetupResponder { interface_num: INTERFACE_NUMBER as u16 })?;
-    let [mut ep_in, mut ep_out] = usb_api.register_interface(
-        INTERFACE_NUMBER,
-        INTERFACE_CLASS,
-        INTERFACE_SUBCLASS,
-        INTERFACE_PROTOCOL,
-        &ENDPOINTS,
-        &[],
-        0,
+    let (usb_interface, [mut ep_in, mut ep_out]) = usb_api.register_interface(
+        UsbInterfaceConfig::new(
+            INTERFACE_NUMBER,
+            INTERFACE_CLASS,
+            INTERFACE_SUBCLASS,
+            INTERFACE_PROTOCOL,
+            &ENDPOINTS,
+        )
+        .with_setup_responder(Some(SetupResponder)),
     )?;
 
     let mut fs = FileSystem::default();
@@ -333,6 +327,7 @@ pub fn start() -> Result<(), crate::error::MassStorageEmulationError> {
     let settings = SettingsApi::default();
 
     let dummy_disk_image = prepare_dummy_disk_image();
+    usb_interface.set_enabled(true)?;
 
     loop {
         log::info!("Waiting for connection");

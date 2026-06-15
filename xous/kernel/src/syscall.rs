@@ -726,7 +726,6 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             Ok(Result::MemoryRange(mirror_range))
         }
         #[cfg(keyos)]
-        #[cfg(not(feature = "production"))]
         SysCall::DebugCommand(mut buffer, cmd) => MemoryManager::with_mut(|mm| {
             mm.check_range_accessible(buffer)?;
             let start = (buffer.as_ptr() as usize) & !(PAGE_SIZE - 1);

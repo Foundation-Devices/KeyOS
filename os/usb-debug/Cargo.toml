@@ -9,10 +9,12 @@ edition = "2021"
 [features]
 default = []
 ## Set by the build system for production firmware builds.
-## Produces a compile error to prevent this crate from being included in production.
+## Restricts usb-debug protocol commands to the production allow-list.
 production = []
 
 [dependencies]
+app-manager = { workspace = true }
+fs = { workspace = true }
 gui-server-api = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }

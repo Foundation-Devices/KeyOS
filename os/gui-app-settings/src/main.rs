@@ -134,6 +134,21 @@ fn setup_settings_global(state: StoredValue<AppState>) {
     })
     .detach();
 
+    spawn_local({
+        let state = state.clone();
+        async move {
+            let mut sub = subscribe_scalar::<settings_permissions::SettingsPermissions, _>(
+                settings::messages::SubscribeDeveloperMode,
+            );
+            while let Some(developer_mode) = sub.next().await {
+                let state = state.borrow();
+                let ui = state.ui();
+                ui.global::<SettingGlobal>().set_developer_mode(developer_mode.0);
+            }
+        }
+    })
+    .detach();
+
     let ui = state.borrow().ui();
     let globals = ui.global::<SettingGlobal>();
 
@@ -198,13 +213,10 @@ fn setup_settings_global(state: StoredValue<AppState>) {
         state.settings.set_show_security_words(show_security_words);
     });
 
-    let developer_mode = state.borrow().settings.get_developer_mode().0;
-    globals.set_developer_mode(developer_mode);
     globals.on_set_developer_mode(move |developer_mode| {
         let state = state.borrow();
         let ui = state.ui();
         ui.global::<SettingGlobal>().set_developer_mode(developer_mode);
-
         state.settings.set_developer_mode(developer_mode);
     });
 
@@ -290,6 +302,24 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     globals.on_refresh_installed_apps(move || {
         refresh_installed_apps(state);
     });
+    globals.on_launch_installed_app(move |app_id| {
+        let requested_app_id = app_id.to_string();
+        let Ok(app_id) = app_manager::decode_app_id_str(&requested_app_id) else {
+            log::error!("invalid app id for manual launch: {requested_app_id}");
+            return;
+        };
+
+        let state = state.borrow();
+        match state.app_manager.launch_app_blocking(&app_id) {
+            Ok(pid) => {
+                log::info!("launched app {requested_app_id}: {pid:?}");
+                if let Err(e) = state.gui.switch_to(pid, 0, 0) {
+                    log::error!("failed to switch to launched app {requested_app_id}: {e:?}");
+                }
+            }
+            Err(e) => log::error!("failed to launch app {requested_app_id}: {e:?}"),
+        }
+    });
 
     refresh_trusted_publishers(state);
     globals.on_refresh_trusted_publishers(move || {
@@ -327,6 +357,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
                 name: app.name.into(),
                 icon_key: icon_key.into(),
                 publisher: app.publisher.into(),
+                can_launch: app.can_launch,
                 version: app.version.into(),
                 size: format_app_size(app.size_bytes, lang).into(),
                 description: app.description.into(),

@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+app-manifest = { path = "../../os/app-manifest" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 hex = "0.4"

@@ -1,5 +1,5 @@
 manifestVersion = "0"
-appId = "0x6c6f672d7573622d73657269616c0000"
+appId = "0x01ba4719c80b6fe911b091a7c05124b6"
 memory = ["BUREG", "RSTC"]
 syscall = ["DebugCommand"]
 
@@ -7,21 +7,23 @@ syscall = ["DebugCommand"]
 en = "USB Debug Protocol"
 
 [permissions]
+template = ["fs-generic"]
 "os/usbdev" = [
     "ReadEndpoint",
     "WriteEndpoint",
-    "RegisterSetupResponder",
     "RegisterInterface",
-    "RegisterCapability",
     "WaitForConnection",
+    "SetInterfaceEnabled",
 ]
 "os/log" = ["ReadLogs"]
 "os/gui-server" = [
     "CaptureScreen",
     "InjectTouch",
     "InjectKey",
+    "InjectPowerButton",
     "CloseApp",
     "RunApp",
+    "IsLocked",
 ]
 "os/power-manager" = [
     "Reboot",
@@ -29,6 +31,13 @@ en = "USB Debug Protocol"
 "os/security" = [
     "GetOsVersionInfo",
 ]
+"os/fs" = [
+    "GetSystemWriteAccess",
+]
 "os/settings" = [
     "GetDeveloperMode",
+    "SubscribeDeveloperMode",
+]
+"os/app-manager" = [
+    "RefreshInstalledApps",
 ]

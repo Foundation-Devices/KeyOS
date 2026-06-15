@@ -193,6 +193,8 @@ impl Gui {
 
     /// Sends the key press/release event to the currently active app.
     pub(crate) fn dispatch_key_event(&mut self, is_pressed: bool, key: Key) {
+        self.reset_auto_lock();
+
         let [arg1, arg2] = key.as_scalar();
 
         let input_msg_kind = if is_pressed { InputMessage::KeyPress } else { InputMessage::KeyRelease };

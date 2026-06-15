@@ -14,11 +14,11 @@ DeliverHidApdu = { id = 3, type = "archive" }
 
 [permissions]
 "os/usbdev" = [
-    "RegisterSetupResponder",
     "RegisterInterface",
     "WaitForConnection",
     "ReadEndpoint",
     "WriteEndpoint",
+    "SetInterfaceEnabled",
     "IsDeviceEmulationEnabled",
     "IsDeviceEmulationConnected",
     "SetVidPid",

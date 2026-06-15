@@ -28,6 +28,8 @@ pub enum UsbError {
     HostDisconnected,
     #[error("One of the parameters had a wrong value")]
     InvalidParameter,
+    #[error("The USB interface is disabled")]
+    InterfaceDisabled,
 }
 
 impl From<xous::Error> for UsbError {
@@ -65,6 +67,7 @@ impl AsScalar<2> for UsbError {
             UsbError::Busy => [9, 0],
             UsbError::HostDisconnected => [10, 0],
             UsbError::InvalidParameter => [11, 0],
+            UsbError::InterfaceDisabled => [12, 0],
         }
     }
 }
@@ -94,6 +97,7 @@ impl FromScalar<2> for UsbError {
             9 => UsbError::Busy,
             10 => UsbError::HostDisconnected,
             11 => UsbError::InvalidParameter,
+            12 => UsbError::InterfaceDisabled,
             _ => UsbError::Other,
         }
     }

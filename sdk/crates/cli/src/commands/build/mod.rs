@@ -4,7 +4,7 @@
 //! Build KeyOS application for hardware
 
 use std::fs;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -82,6 +82,7 @@ pub fn execute(release: bool) -> Result<()> {
     println!("Signing application...");
     let cosign2_config_path = get_cosign2_config(config, project_root)?;
     sign_application(&stripped_path, &cosign2_config_path, &config.version.to_string())?;
+    ensure_cosign2_header(&stripped_path)?;
 
     // Success message
     println!();
@@ -337,6 +338,23 @@ fn sign_application(elf_path: &Path, cosign2_config: &Path, version: &str) -> Re
     Ok(())
 }
 
+fn ensure_cosign2_header(elf_path: &Path) -> Result<()> {
+    let mut file = fs::File::open(elf_path)
+        .with_context(|| format!("Failed to inspect signed application {}", elf_path.display()))?;
+    let mut header = vec![0; cosign2::Header::DEFAULT_SIZE];
+    file.read_exact(&mut header).with_context(|| {
+        format!("Signed application {} is too small to contain a cosign2 header", elf_path.display())
+    })?;
+
+    match cosign2::Header::parse_unverified(&header, cosign2::Header::DEFAULT_SIZE, false) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => anyhow::bail!("Signed application {} is missing a cosign2 header", elf_path.display()),
+        Err(e) => {
+            anyhow::bail!("Signed application {} has an invalid cosign2 header: {e:?}", elf_path.display())
+        }
+    }
+}
+
 fn find_in_path(command: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).find_map(|dir| {
@@ -423,5 +441,19 @@ warning: `i-slint-core` (lib) generated 1 warning
         let filtered = filter_cargo_stderr(stderr, Path::new("/tmp/project"), Path::new("/tmp/sdk"));
 
         assert!(filtered.contains("app warning"));
+    }
+
+    #[test]
+    fn cosign2_header_guard_rejects_unsigned_artifact() {
+        let artifact = std::env::temp_dir().join(format!(
+            "foundation-unsigned-app-{}.elf",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::write(&artifact, b"unsigned app").unwrap();
+
+        let error = super::ensure_cosign2_header(&artifact).unwrap_err().to_string();
+
+        assert!(error.contains("too small to contain a cosign2 header"));
+        let _ = std::fs::remove_file(artifact);
     }
 }

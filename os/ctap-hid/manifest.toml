@@ -14,8 +14,8 @@ RegisterSimuUsbReceiver = { id = 64, type = "blockingScalar", cfg = "feature = \
 "os/usbdev" = [
     "ReadEndpoint",
     "WriteEndpoint",
-    "RegisterSetupResponder",
     "RegisterInterface",
+    "SetInterfaceEnabled",
     "WaitForConnection",
     "ResetController",
 ]

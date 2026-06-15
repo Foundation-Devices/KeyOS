@@ -124,7 +124,7 @@ export component MenuItemLayout inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
     in property <length> label-font-size: Font.text-sm.size;
-    in property <brush> label-color: Palette.content-primary;
+    in property <brush> label-color: enabled ? Palette.content-primary : Palette.content-disabled;
 
     in property <bool> first;
     in property <bool> last;
@@ -216,6 +216,7 @@ export component MenuBooleanItem inherits MenuItemLayout {
 
     s := SwitchControlled {
         checked: root.checked;
+        enabled: root.enabled;
         changed(checked) => {
             root.changed(checked);
         }

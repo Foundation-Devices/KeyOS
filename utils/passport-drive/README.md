@@ -29,24 +29,30 @@ Rust CLI and MCP server for driving Passport Prime over USB and SAM-BA bootloade
 Normal log records flow as UTF-8 text terminated by `0x1E` (ASCII record
 separator). The test protocol is multiplexed on the same port:
 
-**Host → Device** (test command frame):
+**Host → Device** (command frame):
 ```
-[0xFF][CMD][LEN_LO][LEN_HI][PAYLOAD...]
+[CMD][PAYLOAD...]
 ```
 
-**Device → Host** (response frame):
+**Device → Host** (multiplexed frame):
 ```
-[0xFE][CMD][STATUS][LEN_0][LEN_1][LEN_2][LEN_3][PAYLOAD...]
+[FRAME_TYPE][LEN_0][LEN_1][LEN_2][LEN_3][PAYLOAD...]
+FRAME_TYPE: 0x01 = log, 0x02 = response
+LEN: u32 little-endian payload length
+```
+
+Response payloads start with a status byte:
+```
+[STATUS][DATA...]
 STATUS: 0x00 = OK, 0x01 = ERR
-LEN: u32 little-endian
 ```
 
 Commands:
 | CMD  | Name       | Payload (host→device)            | Response payload            |
 |------|------------|----------------------------------|-----------------------------|
-| 0x01 | SCREENSHOT | none                             | ARGB8888 raw (480×800×4 B)  |
-| 0x02 | TAP        | x_lo x_hi y_lo y_hi kind (5 B)  | none                        |
-| 0x03 | POWER_BTN  | 1 byte (1=pressed, 0=released)   | none                        |
+| 0x01 | SCREENSHOT | none                             | BGRA8888 raw (480×800×4 B)  |
+| 0x02 | SWIPE      | start/end coords, duration, steps | none                       |
+| 0x03 | POWER_BTN  | 1 byte (1=long, 0=short)         | none                        |
 | 0x04 | REBOOT_SAM | none                             | none (device reboots)       |
 | 0x05 | CLOSE_APP  | pid_lo pid_hi (2 B)              | none                        |
 | 0x06 | KERNEL_CMD | 1 byte command character         | kernel debug output         |
@@ -78,8 +84,8 @@ passport-drive screenshot -o /tmp/screen.png
 # Tap at coordinates
 passport-drive tap 240 400
 
-# Swipe from (240,600) to (240,200)
-passport-drive swipe 240 600 240 200
+# Swipe from (240,600) to (240,200) over 300ms
+passport-drive swipe 240 600 240 200 --duration-ms 300 --steps 15
 
 # Press power button (press + release)
 passport-drive power
@@ -206,8 +212,8 @@ This speaks JSON-RPC 2.0 (newline-delimited JSON) on stdin/stdout and exposes
 |------|-------------|
 | `screenshot` | Capture screen as base64 PNG (480×800) |
 | `tap` | Tap at coordinates (params: `x`, `y`, optional `timeout_ms`) |
-| `touch` | Raw touch event (params: `x`, `y`, `kind`: 0=Press/1=Release/2=Drag) |
-| `power_button` | Press/release power button (params: `pressed`) |
+| `swipe` | Timed swipe gesture using physical touch coordinates (params: `start_x`, `start_y`, `end_x`, `end_y`, optional `duration_ms`, `steps`) |
+| `power_button` | Simulate short/long power button press (params: `long`) |
 | `send_debug_command` | Send single-char kernel debug command |
 | `reboot_to_samba` | Reboot device into SAM-BA bootloader mode |
 | `close_app` | Close/kill an app by PID via gui-server (params: `pid`) |

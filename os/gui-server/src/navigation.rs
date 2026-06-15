@@ -20,7 +20,7 @@ impl Gui {
             return;
         }
 
-        let Some(pid) = self.launch_app(AppId(request.message.app_id)).ok().map(|(pid, _)| pid) else {
+        let Some(pid) = self.launch_app(AppId(request.message.app_id)) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -37,7 +37,7 @@ impl Gui {
         }
         let NavigateTo { app_id, .. } = &request.message;
 
-        let Some(pid) = self.launch_app(AppId(*app_id)).ok().map(|(pid, _)| pid) else {
+        let Some(pid) = self.launch_app(AppId(*app_id)) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -58,7 +58,7 @@ impl Gui {
         }
 
         let app_id = AppId(request.app_id);
-        let (pid, already_running) = match self.launch_app(app_id) {
+        let (pid, already_running) = match self.launch_app_with_state(app_id) {
             Ok(result) => result,
             Err(error) => return error,
         };
@@ -72,7 +72,11 @@ impl Gui {
         }
     }
 
-    fn launch_app(&self, app_id: AppId) -> Result<(PID, bool), RunAppResponse> {
+    fn launch_app(&self, app_id: AppId) -> Option<PID> {
+        self.launch_app_with_state(app_id).ok().map(|(pid, _)| pid)
+    }
+
+    fn launch_app_with_state(&self, app_id: AppId) -> Result<(PID, bool), RunAppResponse> {
         let mut pid_res = xous::app_id_to_pid(&app_id)
             .map_err(|_| RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal })?;
         if let Some(pid) = pid_res {

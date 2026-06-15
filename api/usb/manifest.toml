@@ -15,12 +15,11 @@ WaitForConnection = { id = 1, type = "blockingScalar" }
 SetEndpointStalled = { id = 2, type = "scalar" }
 ReadEndpoint = { id = 3, type = "deferredLendMut" }
 WriteEndpoint = { id = 4, type = "deferredLendMut" }
-RegisterSetupResponder = { id = 8, type = "blockingScalar" }
 IsDeviceEmulationEnabled = { id = 9, type = "blockingScalar" }
 IsDeviceEmulationConnected = { id = 10, type = "blockingScalar" }
-RegisterCapability = { id = 11, type = "blockingArchive" }
 SetVidPid = { id = 12, type = "blockingScalar" }
 ResetController = { id = 13, type = "blockingScalar" }
 IsCableConnected = { id = 14, type = "blockingScalar" }
 IsDeviceMode = { id = 15, type = "blockingScalar" }
 SetupPacket = { id = 17, type = "scalar" }
+SetInterfaceEnabled = { id = 20, type = "blockingScalar" }

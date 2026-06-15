@@ -6,6 +6,7 @@ export struct InstalledApp {
     name: string,
     icon_key: string,
     publisher: string,
+    can_launch: bool,
     version: string,
     size: string,
     description: string,
@@ -57,6 +58,7 @@ export enum TrustedPublisherImportResult {
 export global AppManagementGlobal {
     in property <[AppsListRow]> apps-list-rows: [];
     callback refresh-installed-apps();
+    callback launch-installed-app(string);
     pure callback app-icon(string) -> image;
 
     in property <[TrustedPublisher]> trusted-publishers: [];

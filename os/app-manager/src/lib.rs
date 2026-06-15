@@ -19,7 +19,7 @@ use app_manager::{
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, LaunchApp,
-    LaunchAppBlocking, ListApps, SubscribeAppEvents,
+    LaunchAppBlocking, ListApps, RefreshInstalledApps, SubscribeAppEvents,
 };
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
@@ -75,11 +75,21 @@ impl BlockingArchiveHandler<GetInstalledApps> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<InstalledAppInfo> {
-        // Apps can change on flash independently of app-manager, so reload before listing.
-        if let Err(e) = self.app_registry.refresh_installed_apps() {
-            log::warn!("GetInstalledApps: failed to refresh app registry, returning cached list: {e:?}");
-        }
         self.app_registry.installed_apps(&msg.locale, &self.third_party_cert_store.trusted_publishers())
+    }
+}
+
+impl BlockingScalarHandler<RefreshInstalledApps> for AppManagerServer {
+    fn handle(
+        &mut self,
+        _msg: RefreshInstalledApps,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<(), app_manager::AppManagerError> {
+        self.app_registry.scan_installed_apps().map_err(|e| {
+            error!("failed to refresh installed apps: {e:?}");
+            app_manager::AppManagerError::InternalError
+        })
     }
 }
 
@@ -133,10 +143,6 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> RemoveThirdPartyCertificateResult {
-        if let Err(e) = self.app_registry.refresh_installed_apps() {
-            error!("failed to refresh installed apps before removing third-party certificate: {e:?}");
-        }
-
         // Only block removal while the certificate is still trusted. An expired cert can
         // no longer launch the app that was signed with it, so the user must be able to
         // delete the stale entry even though an installed app still references that key.
@@ -289,14 +295,6 @@ impl AppManagerServer {
             self.notify_app_launched(app_id, pid, sender);
             return Ok(pid);
         }
-
-        // The app bundle may have been overwritten on disk while app-manager
-        // stayed alive. Rescan before launch so the ELF path, manifest metadata,
-        // resource root, and nameserver permissions all reflect the copied bundle.
-        self.app_registry.refresh_installed_apps().map_err(|e| {
-            log::error!("Failed to refresh installed apps before launching 0x{app_id_str}: {e:?}");
-            LaunchError::InternalError
-        })?;
 
         #[cfg(keyos)]
         let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;

@@ -11,9 +11,7 @@ use xous::debug_command;
 usb::use_device_api!();
 
 #[derive(Default)]
-pub(crate) struct SetupResponder {
-    pub(crate) interface_num: u16,
-}
+pub(crate) struct SetupResponder;
 impl ServerMessages for SetupResponder {
     const NAME: &str = "";
 
@@ -33,16 +31,12 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _context: &mut server::ServerContext<Self>,
     ) -> Option<Vec<u8>> {
         log::debug!("Setup packet: {msg:02x?}");
-        if msg.index == self.interface_num {
-            // SetControlLineState
-            if msg.request_type == 0x21 && msg.request == 0x22 {
-                Some(Vec::new())
-            // SetLineConfig
-            } else if msg.request_type == 0x21 && msg.request == 0x20 {
-                Some(Vec::new())
-            } else {
-                None
-            }
+        // SetControlLineState
+        if msg.request_type == 0x21 && msg.request == 0x22 {
+            Some(Vec::new())
+        // SetLineConfig
+        } else if msg.request_type == 0x21 && msg.request == 0x20 {
+            Some(Vec::new())
         } else {
             None
         }
@@ -95,23 +89,22 @@ fn main() -> ! {
     let mut usb_api = UsbDeviceEmulation::default();
     let interface_num = usb::device::interface_numbers::LOG_USB_SERIAL_CONTROL;
     let data_interface_num = usb::device::interface_numbers::LOG_USB_SERIAL_DATA;
-    usb_api
-        .register_setup_responder(SetupResponder { interface_num: interface_num as u16 })
-        .expect("Could not register setup responder");
-    let [_ep_ctrl] = usb_api
+    let (control_interface, [_ep_ctrl]) = usb_api
         .register_interface(
-            interface_num,
-            0x02, // Class: CDC
-            0x02, // Subclass: ACM
-            0x00, // Protocol: Nothing special
-            &[EndpointProperties {
-                ep_type: EndpointType::Interrupt,
-                ep_direction: EndpointDirection::In,
-                max_packet_len: 64,
-                interval: 16,
-                use_dma: false,
-            }],
-            &[
+            UsbInterfaceConfig::new(
+                interface_num,
+                0x02, // Class: CDC
+                0x02, // Subclass: ACM
+                0x00, // Protocol: Nothing special
+                &[EndpointProperties {
+                    ep_type: EndpointType::Interrupt,
+                    ep_direction: EndpointDirection::In,
+                    max_packet_len: 64,
+                    interval: 16,
+                    use_dma: false,
+                }],
+            )
+            .with_functional_descriptors(&[
                 // Additional descriptors
                 0x05, // Len
                 0x24, // Type: Interface functional
@@ -135,12 +128,13 @@ fn main() -> ! {
                 0x06,               // Subtype: Union
                 interface_num,      // Control interface
                 data_interface_num, // Data interface
-            ],
-            2,
+            ])
+            .with_associated_interface_count(2)
+            .with_setup_responder(Some(SetupResponder)),
         )
         .expect("Error registering USB interface");
-    let [ep_out, mut ep_in] = usb_api
-        .register_interface(
+    let (data_interface, [ep_out, mut ep_in]) = usb_api
+        .register_interface(UsbInterfaceConfig::new(
             data_interface_num,
             0x0A, // Class: CDC Data
             0x00, // Subclass: unused
@@ -161,11 +155,11 @@ fn main() -> ! {
                     use_dma: true,
                 },
             ],
-            &[],
-            0,
-        )
+        ))
         .expect("Error registering USB interface");
 
+    data_interface.set_enabled(true).expect("Error enabling USB data interface");
+    control_interface.set_enabled(true).expect("Error enabling USB control interface");
     std::thread::spawn(move || out_drain_thread(ep_out));
 
     let mut len = 0;

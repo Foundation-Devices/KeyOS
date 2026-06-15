@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gui_server_api::msg::{
-    AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher, UpdateKioskPolicy,
+    AnimateNextFrame, CloseApp, IsLocked, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher,
+    UpdateKioskPolicy,
 };
 use log::{error, info, warn};
 use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
@@ -56,6 +57,17 @@ impl BlockingScalarHandler<SwitchToLauncher> for Gui {
         }
 
         false
+    }
+}
+
+impl BlockingScalarHandler<IsLocked> for Gui {
+    fn handle(
+        &mut self,
+        _msg: IsLocked,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> <IsLocked as BlockingScalar>::Response {
+        self.is_locked()
     }
 }
 
@@ -118,12 +130,18 @@ impl BlockingScalarHandler<Shutdown> for Gui {
     }
 }
 
-impl ScalarHandler<CloseApp> for Gui {
-    fn handle(&mut self, CloseApp { pid }: CloseApp, _sender: PID, _context: &mut ServerContext<Self>) {
-        if let Some(pid) = PID::new(pid as u8) {
-            self.close_app(pid);
+impl BlockingScalarHandler<CloseApp> for Gui {
+    fn handle(
+        &mut self,
+        CloseApp { pid }: CloseApp,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> <CloseApp as BlockingScalar>::Response {
+        if let Some(pid) = u8::try_from(pid).ok().and_then(PID::new) {
+            self.close_app(pid)
         } else {
             error!("Invalid PID={pid}");
+            Err(gui_server_api::GuiServerError::AppNotFound)
         }
     }
 }

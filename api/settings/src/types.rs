@@ -291,7 +291,7 @@ global_scalar! {
 }
 
 global_scalar! {
-    system,
+    encrypted,
     pub struct DeveloperMode(pub bool);
 }
 

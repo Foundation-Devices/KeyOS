@@ -25,9 +25,6 @@ approval_mode = "approve"
 [mcp_servers.passport-drive.tools.disconnect]
 approval_mode = "approve"
 
-[mcp_servers.passport-drive.tools.tap]
-approval_mode = "approve"
-
 [mcp_servers.passport-drive.tools.input_text]
 approval_mode = "approve"
 
@@ -38,4 +35,31 @@ approval_mode = "approve"
 approval_mode = "approve"
 
 [mcp_servers.passport-drive.tools.send_kernel_command]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.get_version]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.get_developer_mode]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.load_app]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.launch_app]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.clear_logs]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.close_app]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.tap]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.power_button]
+approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.swipe]
 approval_mode = "approve"

@@ -10,7 +10,7 @@ pub const FOUNDATION_DIR_NAME: &str = ".foundation";
 pub const SIGNING_DIR_NAME: &str = "signing";
 pub const PRIVATE_KEY_FILE: &str = "private.pem";
 pub const PUBLIC_KEY_FILE: &str = "public.pub";
-pub const CERTIFICATE_FILE: &str = "certificate.crt";
+pub const LEGACY_CERTIFICATE_FILE: &str = "certificate.crt";
 pub const COSIGN2_CONFIG_FILE: &str = "cosign2.toml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,16 +26,21 @@ pub struct SigningIdentityPaths {
 impl SigningIdentityPaths {
     pub fn new(identity_name: impl Into<String>, root: PathBuf) -> Self {
         let identity_name = identity_name.into();
+        let certificate = root.join(certificate_file_name(&identity_name));
         Self {
             identity_name,
             private_key: root.join(PRIVATE_KEY_FILE),
             public_key: root.join(PUBLIC_KEY_FILE),
-            certificate: root.join(CERTIFICATE_FILE),
+            certificate,
             cosign2_config: root.join(COSIGN2_CONFIG_FILE),
             root,
         }
     }
+
+    pub fn legacy_certificate(&self) -> PathBuf { self.root.join(LEGACY_CERTIFICATE_FILE) }
 }
+
+pub fn certificate_file_name(identity_name: &str) -> String { format!("{identity_name}.crt") }
 
 pub fn foundation_dir() -> Result<PathBuf, SigningError> {
     let home = dirs::home_dir().ok_or(SigningError::HomeDirUnavailable)?;
@@ -181,7 +186,8 @@ mod tests {
         assert_eq!(identity.cosign2_config, identity.root.join(COSIGN2_CONFIG_FILE));
         assert_eq!(identity.private_key, identity.root.join("private.pem"));
         assert_eq!(identity.public_key, identity.root.join("public.pub"));
-        assert_eq!(identity.certificate, identity.root.join("certificate.crt"));
+        assert_eq!(identity.certificate, identity.root.join("sample.crt"));
+        assert_eq!(identity.legacy_certificate(), identity.root.join("certificate.crt"));
 
         cleanup(&root);
     }

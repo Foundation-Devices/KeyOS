@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Handlers for CaptureScreen, InjectTouch, and InjectKey — used by the passport-drive debug bridge.
+//! Handlers for CaptureScreen, InjectTouch, InjectKey, and InjectPowerButton.
+//! Used by the passport-drive debug bridge.
 
-use gui_server_api::msg::{CaptureScreen, InjectKey, InjectTouch};
+use gui_server_api::msg::{CaptureScreen, InjectKey, InjectPowerButton, InjectTouch};
 use server::{LendMutHandler, ScalarHandler, ServerContext};
 use xous::PID;
 
@@ -35,5 +36,16 @@ impl ScalarHandler<InjectKey> for Gui {
         _context: &mut ServerContext<Self>,
     ) {
         self.dispatch_key_event(is_pressed, key);
+    }
+}
+
+impl ScalarHandler<InjectPowerButton> for Gui {
+    fn handle(
+        &mut self,
+        InjectPowerButton(is_pressed): InjectPowerButton,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        self.handle_power_button(is_pressed);
     }
 }

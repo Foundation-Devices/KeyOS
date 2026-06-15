@@ -2,24 +2,22 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg(any(not(feature = "production"), feature = "log-serial"))]
-
 use core::fmt::Write;
 
 use keyos::{PLAINTEXT_DRAM_BASE, PLAINTEXT_DRAM_END};
 
-use crate::process::{current_pid, ThreadState};
-use crate::{
-    debug::BufStr,
-    services::{MAX_PROCESS_COUNT, MAX_THREAD_COUNT},
-};
+#[cfg(any(not(feature = "production"), feature = "log-serial"))]
+use crate::process::current_pid;
+use crate::{debug::BufStr, services::MAX_THREAD_COUNT};
 
 pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
     // 16 KB temporary buffer in kernel space that can be used to print
     // when another process is activated. It is static instead of a stack
     // variable, because the kernel has a tiny allocated stack.
+    #[cfg(any(not(feature = "production"), feature = "log-serial"))]
     static mut TMP: [u8; 0x10000] = [0; 0x10000];
     match cmd {
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'i' => {
             writeln!(output, "Interrupt handlers:").ok();
             writeln!(output, "  IRQ | Process | Handler | Argument").ok();
@@ -37,6 +35,7 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
                 });
             });
         }
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'm' => {
             writeln!(output, "Printing memory page tables").ok();
             crate::services::SystemServices::with(|system_services| {
@@ -52,7 +51,8 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
             });
         }
         b'p' => print_processes(&mut output),
-        b't' => print_processes_compact(&mut output),
+        b't' => super::process_list::print_processes_compact(&mut output),
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'P' => {
             writeln!(output, "Printing processes and threads").ok();
             crate::services::SystemServices::with(|system_services| {
@@ -66,12 +66,14 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
                 }
             });
         }
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'o' => {
             writeln!(output, "RAM ownership stats:").ok();
             crate::mem::MemoryManager::with(|mm| {
                 mm.print_ownership(&mut output);
             });
         }
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b's' => {
             writeln!(output, "Servers in use:").ok();
             crate::services::SystemServices::with(|system_services| {
@@ -92,10 +94,12 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
                 }
             });
         }
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'c' => {
             crate::platform::atsama5d2::cache::print_l2cache_stats();
         }
         b'a' => print_app_ids(&mut output),
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'k' => {
             writeln!(output, "Page table and ownership consistency check").ok();
             crate::services::SystemServices::with(|system_services| {
@@ -114,6 +118,7 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
                 }
             });
         }
+        #[cfg(any(not(feature = "production"), feature = "log-serial"))]
         b'h' => print_help(output),
         _ => {}
     }
@@ -131,7 +136,7 @@ fn print_processes(mut output: impl core::fmt::Write) {
     )
     .ok();
 
-    let totals = for_each_process_debug_row(|row| {
+    let totals = super::process_list::for_each_process_row(|row| {
         let mut state = BufStr::<[u8; MAX_THREAD_COUNT]>::new();
         for ch in row.thread_states {
             state.write_char(ch).ok();
@@ -176,100 +181,6 @@ fn print_processes(mut output: impl core::fmt::Write) {
     .ok();
 }
 
-fn print_processes_compact(mut output: impl core::fmt::Write) {
-    let process_count = crate::services::SystemServices::with(|system_services| {
-        system_services.processes.iter().flatten().count()
-    });
-    writeln!(output, "PROC {}", process_count).ok();
-
-    let totals = for_each_process_debug_row(|row| {
-        write!(output, "R {} {} {} ", row.pid, row.ppid, row.name).ok();
-        let len = row.thread_states.iter().rposition(|ch| *ch != ' ').map(|idx| idx + 1).unwrap_or(1);
-        for ch in &row.thread_states[..len] {
-            let out = if *ch == ' ' { '.' } else { *ch };
-            write!(output, "{}", out).ok();
-        }
-        writeln!(output, " {} {} {}", row.cpu_percent, row.ram_used / 1024, row.connection_count).ok();
-    });
-
-    let cpu_used_percent = (totals.total_cpu_usage - totals.cpu_idle) * 100 / totals.total_cpu_usage;
-    let total_ram_size = PLAINTEXT_DRAM_END - PLAINTEXT_DRAM_BASE;
-    writeln!(output, "SUM {} {} {}", cpu_used_percent, totals.total_ram_usage / 1024, total_ram_size / 1024)
-        .ok();
-}
-
-struct ProcessDebugRow<'a> {
-    pid: usize,
-    ppid: usize,
-    name: &'a str,
-    thread_states: [char; MAX_THREAD_COUNT],
-    cpu_percent: u64,
-    ram_used: usize,
-    connection_count: usize,
-}
-
-struct ProcessDebugTotals {
-    total_ram_usage: usize,
-    cpu_idle: u64,
-    total_cpu_usage: u64,
-}
-
-fn for_each_process_debug_row(mut on_row: impl FnMut(ProcessDebugRow<'_>)) -> ProcessDebugTotals {
-    let mut totals = ProcessDebugTotals { total_ram_usage: 0, cpu_idle: 0, total_cpu_usage: 0 };
-
-    crate::services::SystemServices::with(|system_services| {
-        let mut cpu_usage_map = [0u64; MAX_PROCESS_COUNT];
-        crate::scheduler::Scheduler::with(|scheduler| {
-            for (pid, usage) in &scheduler.cpu_usage {
-                cpu_usage_map[*pid as usize] += *usage as u64;
-                totals.total_cpu_usage += *usage as u64;
-            }
-        });
-        totals.cpu_idle = cpu_usage_map[1];
-        cpu_usage_map[1] = 0;
-        if totals.total_cpu_usage == 0 {
-            totals.total_cpu_usage = 1;
-        }
-
-        let current_pid = current_pid();
-        for process in system_services.processes.iter().flatten() {
-            process.activate();
-
-            let mut thread_states = [' '; MAX_THREAD_COUNT];
-            for (tid, state) in thread_states.iter_mut().enumerate() {
-                *state = match process.thread_state(tid) {
-                    ThreadState::Free => ' ',
-                    ThreadState::Ready => 'R',
-                    ThreadState::WaitJoin { .. } => 'j',
-                    ThreadState::RetryConnect { .. } => 'c',
-                    ThreadState::RetryQueueFull { .. } => 'q',
-                    ThreadState::WaitBlocking { .. } => 'b',
-                    ThreadState::WaitReceive { .. } => 'w',
-                    ThreadState::WaitFutex { .. } => 'f',
-                };
-            }
-
-            let ram_used = crate::mem::MemoryManager::with(|mm| mm.ram_used_by(process.pid));
-            totals.total_ram_usage += ram_used;
-
-            let row = ProcessDebugRow {
-                pid: process.pid.get() as usize,
-                ppid: process.ppid.map(|p| p.get() as usize).unwrap_or(0),
-                name: process.name().unwrap_or("N/A"),
-                thread_states,
-                cpu_percent: cpu_usage_map[process.pid.get() as usize] * 100 / totals.total_cpu_usage,
-                ram_used,
-                connection_count: process.number_of_connections(),
-            };
-
-            system_services.process(current_pid).unwrap().activate();
-            on_row(row);
-        }
-    });
-
-    totals
-}
-
 fn print_app_ids(mut output: impl core::fmt::Write) {
     writeln!(output, " pid | process                          | AppId").ok();
     writeln!(output, " --- + -------------------------------- | --------------------------------").ok();
@@ -300,6 +211,7 @@ fn print_progress_bar(pct: usize, mut output: impl core::fmt::Write) {
     write!(output, "] ").ok();
 }
 
+#[cfg(any(not(feature = "production"), feature = "log-serial"))]
 pub fn print_help(mut output: impl core::fmt::Write) {
     writeln!(output, "KeyOS Kernel Debug").ok();
     writeln!(output, "key | command").ok();

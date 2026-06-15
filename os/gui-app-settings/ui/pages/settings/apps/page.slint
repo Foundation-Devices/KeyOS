@@ -4,6 +4,7 @@
 import {
     BasePage,
     HLine,
+    IconButton,
     MenuActionItem,
     MenuBooleanItem,
     TextMd,
@@ -25,6 +26,7 @@ component AppListCard inherits Rectangle {
     in property <bool> last;
 
     callback clicked();
+    callback launch-clicked();
 
     property <duration> select-anim-duration: 100ms;
     animate background { duration: select-anim-duration; }
@@ -36,7 +38,7 @@ component AppListCard inherits Rectangle {
     border-bottom-right-radius: last ? Size.sz6 : 0px;
 
     TouchArea {
-        width: parent.width;
+        width: parent.width - Size.sz16;
         height: parent.height;
 
         clicked => {
@@ -81,7 +83,7 @@ component AppListCard inherits Rectangle {
         content-column := VerticalLayout {
             alignment: center;
             spacing: Size.sz1;
-            width: root.width - (Size.sz4 * 2) - icon-column.width - parent.spacing;
+            width: root.width - (Size.sz4 * 2) - icon-column.width - launch-column.width - (parent.spacing * 2);
 
             TextMd {
                 width: parent.width;
@@ -99,6 +101,27 @@ component AppListCard inherits Rectangle {
                 horizontal-alignment: left;
                 wrap: no-wrap;
                 overflow: elide;
+            }
+        }
+
+        launch-column := Rectangle {
+            width: root.app.can_launch ? Size.sz10 : 0px;
+            height: parent.height;
+            visible: root.app.can_launch;
+            background: Palette.transparent;
+
+            VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    icon: "play";
+                    size: Size.sz10;
+                    icon-size: Size.sz6;
+
+                    clicked => {
+                        root.launch-clicked();
+                    }
+                }
             }
         }
     }
@@ -165,6 +188,10 @@ export component AppsPage inherits BasePage {
                                 description: row.app.description,
                                 permissions: row.app.permissions,
                             }, { });
+                        }
+
+                        launch-clicked => {
+                            AppManagementGlobal.launch-installed-app(row.app.app_id);
                         }
                     }
 

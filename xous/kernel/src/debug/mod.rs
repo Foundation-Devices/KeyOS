@@ -9,6 +9,8 @@ mod macros;
 #[cfg(keyos)]
 pub mod commands;
 #[cfg(keyos)]
+mod process_list;
+#[cfg(keyos)]
 pub mod serial;
 
 #[derive(Clone)]

@@ -16,23 +16,24 @@
 //!
 //! Commands:
 //!   0x01 SCREENSHOT  – no payload.  Response: raw pixel data (480×800×4 bytes)
-//!   0x02 TAP         – payload: x_lo x_hi y_lo y_hi kind (5 bytes)
-//!   0x03 POWER_BTN   – payload: 1 byte (1=pressed, 0=released)
+//!   0x02 SWIPE       – payload: start_x start_y end_x end_y duration_ms steps
+//!   0x03 POWER_BTN   – payload: 1 byte (1=long press, 0=short press)
 //!   0x04 REBOOT_SAMBA – no payload.  Reboots into SAM-BA mode.
 //!   0x05 CLOSE_APP   – payload: pid_lo pid_hi (2 bytes)
 //!   0x06 KERNEL_CMD  – payload: 1 byte (command char h/i/m/p/t/s/c/a/o/k)
 //!   0x07 INPUT_TEXT  – payload: UTF-8 text
 //!   0x08 GET_VERSION – no payload.  Response: UTF-8 KeyOS version bytes.
 //!   0x09 LAUNCH_APP  – payload: 16-byte AppId.  Response: pid_lo pid_hi
-//!
-//! **This crate must NEVER be included in production firmware.**
-
-#[cfg(feature = "production")]
-compile_error!("usb-debug must not be included in production firmware");
+//!   0x0A GET_DEVELOPER_MODE – no payload. Response: 1 byte, 0=off/1=on.
+//!   0x0B..0x0E LOAD_APP – multi-command upload of relative filenames and file bytes
+//!   0x0F GET_PROCESS_LIST – no payload. Response: compact kernel process list
 
 mod dispatch;
 mod msos20;
 
+use std::sync::{Arc, Condvar, Mutex};
+
+use server::{Server, ServerContext, ServerMessages};
 use usb::device::{
     api::{EndpointDirection, EndpointType},
     messages::EndpointProperties,
@@ -40,16 +41,82 @@ use usb::device::{
 use usb_debug_protocol::Response;
 
 usb::use_device_api!();
+settings::use_api!();
+
+const DEBUG_INTERFACE_NUMBER: u8 = usb::device::interface_numbers::USB_DEBUG;
 
 /// Max pending log messages in the channel before the log drain starts dropping.
 /// Each chunk is up to 16 KB, so 8 chunks ≈ 128 KB max buffered.
 const MAX_PENDING_LOGS: usize = 8;
 
+#[derive(Clone)]
+struct EnabledGate {
+    inner: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl EnabledGate {
+    fn new(enabled: bool) -> Self { Self { inner: Arc::new((Mutex::new(enabled), Condvar::new())) } }
+
+    fn set_enabled(&self, enabled: bool) {
+        let (lock, cvar) = &*self.inner;
+        *lock.lock().unwrap() = enabled;
+        if enabled {
+            cvar.notify_all();
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        let (lock, _) = &*self.inner;
+        *lock.lock().unwrap()
+    }
+
+    fn wait_enabled(&self) {
+        let (lock, cvar) = &*self.inner;
+        let mut enabled = lock.lock().unwrap();
+        while !*enabled {
+            enabled = cvar.wait(enabled).unwrap();
+        }
+    }
+}
+
+struct DeveloperModeWatcher {
+    interface: UsbRegisteredInterface,
+    gate: EnabledGate,
+}
+
+impl ServerMessages for DeveloperModeWatcher {
+    const NAME: &'static str = "";
+
+    fn messages() -> &'static [server::MessageDef<Self>] { &[] }
+}
+
+impl Server for DeveloperModeWatcher {
+    fn on_start(&mut self, context: &mut ServerContext<Self>) {
+        SettingsApi::default().server_subscribe_developer_mode(context);
+    }
+}
+
+impl server::ScalarEventHandler<settings::global::DeveloperMode> for DeveloperModeWatcher {
+    fn handle(
+        &mut self,
+        settings::global::DeveloperMode(enabled): settings::global::DeveloperMode,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        if let Err(e) = self.interface.set_enabled(enabled) {
+            log::warn!("failed to set usb-debug interface enabled={enabled}: {e:?}");
+            return;
+        }
+        self.gate.set_enabled(enabled);
+    }
+}
+
 // Debug OUT drain thread — reads debug protocol commands from the
 // vendor-specific bulk OUT endpoint.
 fn debug_out_drain_thread(
     mut ep_out: UsbEmulatedEndpoint,
-    tx: std::sync::mpsc::SyncSender<usb_debug_protocol::Response>,
+    tx: std::sync::mpsc::SyncSender<Response>,
+    gate: EnabledGate,
 ) {
     let usb_api = UsbDeviceEmulation::default();
     let mut debug = dispatch::DebugProtocol::new();
@@ -57,15 +124,19 @@ fn debug_out_drain_thread(
         xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W).expect("Could not allocate buffer");
 
     loop {
+        gate.wait_enabled();
         match ep_out.read_buf(usb_recv_buffer, 512) {
             Ok(l) => {
-                let data = &usb_recv_buffer.as_slice()[..l];
-                debug.process(data, &tx);
+                if gate.is_enabled() {
+                    let data = &usb_recv_buffer.as_slice()[..l];
+                    debug.process(data, &tx);
+                }
             }
             Err(e) => match e {
                 usb::error::UsbError::HostDisconnected => {
                     usb_api.wait_for_connection().expect("Error waiting for connection");
                 }
+                usb::error::UsbError::InterfaceDisabled => {}
                 _ => log::error!("Error reading debug OUT: {e:?}"),
             },
         }
@@ -76,13 +147,14 @@ fn debug_out_drain_thread(
 // data to the main loop via the bounded channel. The sync_channel
 // naturally blocks when the queue is full, providing backpressure
 // without needing to call log_reader.read() when the host isn't draining.
-fn log_drain_thread(tx: std::sync::mpsc::SyncSender<Response>) {
+fn log_drain_thread(tx: std::sync::mpsc::SyncSender<Response>, gate: EnabledGate) {
     let log_reader = log_server::reader::LogReader::default();
     let log_buffer =
         xous::map_memory(None, None, 0x4000, xous::MemoryFlags::W).expect("Could not allocate log buffer");
     loop {
+        gate.wait_enabled();
         let len = log_reader.read(log_buffer);
-        if len > 0 {
+        if len > 0 && gate.is_enabled() {
             let data = log_buffer.as_slice()[..len].to_vec();
             if tx.send(Response::Log(data)).is_err() {
                 break;
@@ -91,8 +163,8 @@ fn log_drain_thread(tx: std::sync::mpsc::SyncSender<Response>) {
     }
 }
 
-/// Write a frame (header + payload) to the bulk IN endpoint as a single
-/// USB transfer. The USB server handles DMA chunking internally.
+/// Write one frame to the bulk IN endpoint as a single USB transfer. The USB
+/// server handles DMA chunking internally.
 fn write_frame(
     ep_in: &mut UsbEmulatedEndpoint,
     usb_api: &UsbDeviceEmulation,
@@ -100,17 +172,33 @@ fn write_frame(
     payload: &[u8],
     scratch: &mut xous::MemoryRange,
 ) {
+    if header.is_empty() {
+        log::error!("Error writing frame: empty header");
+        return;
+    }
+
     let total = header.len() + payload.len();
     let buf = scratch.as_slice_mut();
-    buf[..header.len()].copy_from_slice(header);
-    buf[header.len()..total].copy_from_slice(payload);
+    if total > buf.len() {
+        log::error!("Error writing frame: {total} bytes exceeds scratch buffer {}", buf.len());
+        return;
+    }
 
+    buf[..header.len()].copy_from_slice(header);
+    let offset = header.len();
+    buf[offset..total].copy_from_slice(payload);
+
+    // Keep the ZLP behavior: usb-debug IN framing intentionally uses USB short
+    // packets/ZLPs as frame terminators instead of carrying a protocol length.
+    // Max-packet-aligned frames need the ZLP or the host cannot distinguish a
+    // complete frame from one that still has more chunks coming.
     match ep_in.write_buf_zlp(*scratch, total) {
         Ok(_) => {}
         Err(usb::error::UsbError::HostDisconnected) => {
             usb_api.wait_for_connection().expect("Error waiting for connection");
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
+        Err(usb::error::UsbError::InterfaceDisabled) => {}
         Err(e) => log::error!("Error writing frame: {e:?}"),
     }
 }
@@ -122,48 +210,41 @@ fn main() -> ! {
     xous::set_thread_priority(xous::ThreadPriority::AppBackground0).unwrap();
 
     let mut usb_api = UsbDeviceEmulation::default();
+    let gate = EnabledGate::new(false);
 
-    // Advertise WinUSB binding for the debug interface via MS OS 2.0
-    // descriptors so Windows hosts auto-bind winusb.sys without Zadig.
-    let debug_interface_num = usb::device::interface_numbers::USB_DEBUG;
-    usb_api
-        .register_setup_responder(msos20::SetupResponder {
-            descriptor_set: msos20::descriptor_set(debug_interface_num),
-        })
-        .expect("Error registering MS OS 2.0 setup responder");
-    usb_api
-        .register_capability(
-            0x10, // bDescriptorType: DEVICE_CAPABILITY
-            0x05, // bDevCapabilityType: PLATFORM
-            msos20::PLATFORM_CAPABILITY_UUID,
-            &msos20::PLATFORM_CAPABILITY,
-        )
-        .expect("Error registering MS OS 2.0 platform capability");
-
-    let [debug_ep_out, mut ep_in] = usb_api
+    let (debug_interface, [debug_ep_out, mut ep_in]) = usb_api
         .register_interface(
-            usb::device::interface_numbers::USB_DEBUG,
-            0xFF, // Class: Vendor Specific
-            0x00,
-            0x00,
-            &[
-                EndpointProperties {
-                    ep_type: EndpointType::Bulk,
-                    ep_direction: EndpointDirection::Out,
-                    max_packet_len: 512,
-                    interval: 0,
-                    use_dma: false,
-                },
-                EndpointProperties {
-                    ep_type: EndpointType::Bulk,
-                    ep_direction: EndpointDirection::In,
-                    max_packet_len: 512,
-                    interval: 0,
-                    use_dma: true,
-                },
-            ],
-            &[],
-            0,
+            UsbInterfaceConfig::new(
+                DEBUG_INTERFACE_NUMBER,
+                0xFF, // Class: Vendor Specific
+                0x00,
+                0x00,
+                &[
+                    EndpointProperties {
+                        ep_type: EndpointType::Bulk,
+                        ep_direction: EndpointDirection::Out,
+                        max_packet_len: 512,
+                        interval: 0,
+                        use_dma: false,
+                    },
+                    EndpointProperties {
+                        ep_type: EndpointType::Bulk,
+                        ep_direction: EndpointDirection::In,
+                        max_packet_len: 512,
+                        interval: 0,
+                        use_dma: true,
+                    },
+                ],
+            )
+            .with_setup_responder(Some(msos20::SetupResponder {
+                descriptor_set: msos20::descriptor_set(DEBUG_INTERFACE_NUMBER),
+            }))
+            .with_capability(
+                0x10, // bDescriptorType: DEVICE_CAPABILITY
+                0x05, // bDevCapabilityType: PLATFORM
+                msos20::PLATFORM_CAPABILITY_UUID,
+                &msos20::PLATFORM_CAPABILITY,
+            ),
         )
         .expect("Error registering debug interface");
 
@@ -173,10 +254,16 @@ fn main() -> ! {
 
     // Debug OUT: binary protocol commands
     let cmd_tx = tx.clone();
-    std::thread::spawn(move || debug_out_drain_thread(debug_ep_out, cmd_tx));
+    std::thread::spawn({
+        let gate = gate.clone();
+        move || debug_out_drain_thread(debug_ep_out, cmd_tx, gate)
+    });
 
     // Log drain: reads from log server, sends Log variants
-    std::thread::spawn(move || log_drain_thread(tx));
+    std::thread::spawn({
+        let gate = gate.clone();
+        move || log_drain_thread(tx, gate)
+    });
 
     // Reusable scratch buffer — large enough for the biggest frame (screenshot ≈ 1.5 MB).
     // POPULATE guarantees physically contiguous pages for DMA.
@@ -184,6 +271,12 @@ fn main() -> ! {
     let mut scratch =
         xous::map_memory(None, None, scratch_size, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
             .expect("scratch alloc");
+
+    std::thread::spawn({
+        let gate = gate.clone();
+        let interface = debug_interface.clone();
+        move || server::listen(DeveloperModeWatcher { interface, gate })
+    });
 
     // Main loop: blocking recv on the unified channel.
     loop {

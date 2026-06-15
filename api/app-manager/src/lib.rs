@@ -43,6 +43,13 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         Ok(())
     }
 
+    pub fn refresh_installed_apps(&self) -> Result<(), AppManagerError>
+    where
+        P: MessageAllowed<RefreshInstalledApps>,
+    {
+        self.0.try_send_blocking_scalar(RefreshInstalledApps).map_err(|_| AppManagerError::InternalError)?
+    }
+
     pub fn app_name_by_app_id(&self, id: &AppId, locale: &str) -> Option<String>
     where
         P: MessageAllowed<GetAppName>,

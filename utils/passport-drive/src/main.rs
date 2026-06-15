@@ -7,6 +7,7 @@
 //! (screenshot, tap, logs, kernel debug commands).
 
 mod hid;
+mod load_app;
 mod mcp;
 pub(crate) mod screenshot;
 
@@ -18,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rusb::UsbContext;
 use serde::Deserialize;
-use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, TouchKind, UsbDebugClient};
+use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient};
 
 // Screen / framebuffer constants (pub(crate) so mcp module can use them)
 pub(crate) const SCREEN_WIDTH: u32 = 480;
@@ -27,6 +28,7 @@ pub(crate) const FB_SIZE: usize = (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize;
 
 // Log protocol constant
 const LOG_TERMINATOR: u8 = 0x1E;
+const TAP_HOLD_MS: u16 = 50;
 
 #[derive(Parser)]
 #[command(name = "passport-drive", about = "Drive Passport Prime over USB")]
@@ -51,12 +53,19 @@ enum CliCommand {
         sy: u16,
         ex: u16,
         ey: u16,
+        /// Gesture duration in ms
+        #[arg(long, default_value = "300")]
+        duration_ms: u16,
         /// Number of drag steps
         #[arg(short, long, default_value = "15")]
-        steps: u16,
+        steps: u8,
     },
-    /// Press power button (press + release)
-    Power,
+    /// Press power button
+    Power {
+        /// Hold long enough to open the shutdown control center instead of short-press locking
+        #[arg(long)]
+        long: bool,
+    },
     /// Tap, wait, then screenshot
     TapScreenshot {
         x: u16,
@@ -74,6 +83,12 @@ enum CliCommand {
         sy: u16,
         ex: u16,
         ey: u16,
+        /// Gesture duration in ms
+        #[arg(long, default_value = "300")]
+        duration_ms: u16,
+        /// Number of drag steps
+        #[arg(short, long, default_value = "15")]
+        steps: u8,
         /// Output PNG path
         #[arg(short, long, default_value = "/tmp/passport-screen.png")]
         output: PathBuf,
@@ -121,6 +136,12 @@ enum CliCommand {
     GetVersion,
     /// Print the compact kernel process list
     GetProcessList,
+    /// Upload an app bundle into keyos/sideloaded-apps/<app-id> over usb-debug
+    #[command(name = "load_app", alias = "load-app")]
+    LoadApp {
+        /// Directory containing app.elf, manifest.json, and optional icon.bin/resources
+        app_path: PathBuf,
+    },
     /// Start MCP server mode (JSON-RPC over stdio for AI integration)
     Mcp,
     /// Send one ISO 7816 APDU over HID and print the RAPDU
@@ -198,11 +219,6 @@ fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
 
 fn open_usb() -> Result<UsbDebugClient> { UsbDebugClient::open().context("Failed to open USB device") }
 
-fn tap(client: &UsbDebugClient, x: u16, y: u16, kind: TouchKind) -> Result<()> {
-    client.send(Command::Tap { x, y, kind }, Duration::from_secs(5))?;
-    Ok(())
-}
-
 fn save_screenshot_png(payload: &[u8], output: &PathBuf) -> Result<()> {
     let png_data = screenshot::bgra_to_png(payload).map_err(|e| anyhow::anyhow!(e))?;
     std::fs::write(output, &png_data).with_context(|| format!("Cannot create {}", output.display()))?;
@@ -219,25 +235,29 @@ fn do_screenshot(client: &UsbDebugClient, output: &PathBuf) -> Result<()> {
 }
 
 fn do_tap(client: &UsbDebugClient, x: u16, y: u16) -> Result<()> {
-    eprintln!("Tap ({x}, {y}) press...");
-    tap(client, x, y, TouchKind::Press)?;
-    std::thread::sleep(Duration::from_millis(50));
-    eprintln!("Tap ({x}, {y}) release...");
-    tap(client, x, y, TouchKind::Release)?;
+    eprintln!("Tap ({x}, {y})...");
+    client.send(
+        Command::Swipe { start_x: x, start_y: y, end_x: x, end_y: y, duration_ms: TAP_HOLD_MS, steps: 0 },
+        Duration::from_millis(u64::from(TAP_HOLD_MS) + 5_000),
+    )?;
     eprintln!("Tap OK");
     Ok(())
 }
 
-fn do_swipe(client: &UsbDebugClient, sx: u16, sy: u16, ex: u16, ey: u16, steps: u16) -> Result<()> {
-    eprintln!("Swipe ({sx},{sy}) -> ({ex},{ey})");
-    tap(client, sx, sy, TouchKind::Press)?;
-    for i in 1..=steps {
-        let x = sx as f32 + (ex as f32 - sx as f32) * i as f32 / steps as f32;
-        let y = sy as f32 + (ey as f32 - sy as f32) * i as f32 / steps as f32;
-        std::thread::sleep(Duration::from_millis(20));
-        tap(client, x as u16, y as u16, TouchKind::Drag)?;
-    }
-    tap(client, ex, ey, TouchKind::Release)?;
+fn do_swipe(
+    client: &UsbDebugClient,
+    sx: u16,
+    sy: u16,
+    ex: u16,
+    ey: u16,
+    duration_ms: u16,
+    steps: u8,
+) -> Result<()> {
+    eprintln!("Swipe ({sx},{sy}) -> ({ex},{ey}) duration={duration_ms}ms steps={steps}");
+    client.send(
+        Command::Swipe { start_x: sx, start_y: sy, end_x: ex, end_y: ey, duration_ms, steps },
+        Duration::from_millis(u64::from(duration_ms) + 5_000),
+    )?;
     eprintln!("Swipe OK");
     Ok(())
 }
@@ -257,17 +277,14 @@ fn do_get_version(client: &UsbDebugClient) -> Result<()> {
 }
 
 fn do_get_process_list(client: &UsbDebugClient) -> Result<()> {
-    let payload = client.send(Command::KernelCmd { cmd_byte: b't' }, Duration::from_secs(5))?;
+    let payload = client.send(Command::GetProcessList, Duration::from_secs(5))?;
     print!("{}", String::from_utf8_lossy(&payload));
     Ok(())
 }
 
-fn do_power(client: &UsbDebugClient) -> Result<()> {
-    eprintln!("Power button press...");
-    client.send(Command::PowerButton { pressed: true }, Duration::from_secs(5))?;
-    std::thread::sleep(Duration::from_millis(200));
-    eprintln!("Power button release...");
-    client.send(Command::PowerButton { pressed: false }, Duration::from_secs(5))?;
+fn do_power(client: &UsbDebugClient, long: bool) -> Result<()> {
+    eprintln!("Power button {} press...", if long { "long" } else { "short" });
+    client.send(Command::PowerButton { long }, Duration::from_secs(5))?;
     eprintln!("Power OK");
     Ok(())
 }
@@ -374,6 +391,7 @@ enum Action {
     Swipe([u16; 4]),
     Screenshot(String),
     Wait(u64),
+    /// Power button press; true = long, false = short.
     Power(bool),
     InputText(String),
 }
@@ -387,7 +405,7 @@ fn run_actions(client: &UsbDebugClient, actions: &[Action]) -> Result<()> {
             }
             Action::Swipe([sx, sy, ex, ey]) => {
                 eprintln!("[{i}] swipe ({sx},{sy}) -> ({ex},{ey})");
-                do_swipe(client, *sx, *sy, *ex, *ey, 15)?;
+                do_swipe(client, *sx, *sy, *ex, *ey, 300, 15)?;
             }
             Action::Screenshot(path) => {
                 eprintln!("[{i}] screenshot -> {path}");
@@ -397,9 +415,9 @@ fn run_actions(client: &UsbDebugClient, actions: &[Action]) -> Result<()> {
                 eprintln!("[{i}] wait {ms}ms");
                 std::thread::sleep(Duration::from_millis(*ms));
             }
-            Action::Power(pressed) => {
-                eprintln!("[{i}] power pressed={pressed}");
-                client.send(Command::PowerButton { pressed: *pressed }, Duration::from_secs(5))?;
+            Action::Power(long) => {
+                eprintln!("[{i}] power {} press", if *long { "long" } else { "short" });
+                client.send(Command::PowerButton { long: *long }, Duration::from_secs(5))?;
             }
             Action::InputText(text) => {
                 eprintln!("[{i}] input_text ({} chars)", text.chars().count());
@@ -566,16 +584,18 @@ fn main() -> Result<()> {
     match cli.command {
         CliCommand::Screenshot { output } => do_screenshot(&client, &output)?,
         CliCommand::Tap { x, y } => do_tap(&client, x, y)?,
-        CliCommand::Swipe { sx, sy, ex, ey, steps } => do_swipe(&client, sx, sy, ex, ey, steps)?,
-        CliCommand::Power => do_power(&client)?,
+        CliCommand::Swipe { sx, sy, ex, ey, duration_ms, steps } => {
+            do_swipe(&client, sx, sy, ex, ey, duration_ms, steps)?;
+        }
+        CliCommand::Power { long } => do_power(&client, long)?,
         CliCommand::InputText { text } => do_input_text(&client, &text)?,
         CliCommand::TapScreenshot { x, y, output, wait } => {
             do_tap(&client, x, y)?;
             std::thread::sleep(Duration::from_millis(wait));
             do_screenshot(&client, &output)?;
         }
-        CliCommand::SwipeScreenshot { sx, sy, ex, ey, output, wait } => {
-            do_swipe(&client, sx, sy, ex, ey, 15)?;
+        CliCommand::SwipeScreenshot { sx, sy, ex, ey, duration_ms, steps, output, wait } => {
+            do_swipe(&client, sx, sy, ex, ey, duration_ms, steps)?;
             std::thread::sleep(Duration::from_millis(wait));
             do_screenshot(&client, &output)?;
         }
@@ -599,7 +619,7 @@ fn main() -> Result<()> {
                 }
                 LaunchAppStatus::AlreadyRunning => {
                     eprintln!(
-                        "App is already running with PID {}. Newly copied code will not run until the app is closed and launched again.",
+                        "App is already running with PID {}. Newly uploaded code will not run until the app is closed and launched again.",
                         result.pid
                     );
                 }
@@ -617,6 +637,20 @@ fn main() -> Result<()> {
         }
         CliCommand::GetVersion => do_get_version(&client)?,
         CliCommand::GetProcessList => do_get_process_list(&client)?,
+        CliCommand::LoadApp { app_path } => {
+            eprintln!("Uploading app from {}...", app_path.display());
+            let report = load_app::load_app(&client, &app_path)?;
+            eprintln!(
+                "Loaded {} into keyos/sideloaded-apps/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
+                report.app_id,
+                report.app_id,
+                report.elf_bytes,
+                report.manifest_bytes,
+                report.icon_bytes.unwrap_or(0),
+                report.resource_files,
+                report.resource_bytes
+            );
+        }
         CliCommand::Logs { max_lines, filter, include_stale } => {
             if !include_stale {
                 std::thread::sleep(Duration::from_millis(500));

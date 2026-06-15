@@ -11,6 +11,10 @@ use crate::error::{AppManagerError, LaunchError};
 #[response(Result<PID, AppManagerError>)]
 pub struct LaunchAppBlocking(pub AppId);
 
+#[derive(Debug, server::Message)]
+#[response(Result<(), AppManagerError>)]
+pub struct RefreshInstalledApps;
+
 impl AsScalar<3> for AppManagerError {
     fn as_scalar(&self) -> [u32; 3] { [self.to_u32().unwrap(), 0, 0] }
 }
@@ -51,6 +55,7 @@ pub struct InstalledAppInfo {
     /// large icon (or many apps) cannot overflow the listing's IPC buffer.
     pub bundled_icon_path: Option<String>,
     pub publisher: String,
+    pub can_launch: bool,
     pub version: String,
     pub size_bytes: u64,
     pub description: String,

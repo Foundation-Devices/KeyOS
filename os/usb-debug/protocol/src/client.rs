@@ -4,8 +4,10 @@
 //! Host-side `rusb` transport. Gated behind the `client` feature so device
 //! builds of this crate don't pull in `rusb`/`anyhow`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -21,18 +23,19 @@ pub const PASSPORT_PID: u16 = 0x0165;
 pub const LEGACY_VID: u16 = 0x2c97;
 pub const LEGACY_PID: u16 = 0x0007;
 
-/// Minimum size of the reader thread's USB IN buffer. Logs arrive unannounced
-/// and the device-side log buffer is 16 KiB per chunk, so the floor must
-/// comfortably exceed that. Screenshots bump the buffer further via the
-/// resize-hint channel.
-const READ_BUFFER_FLOOR: usize = 64 * 1024;
+/// USB read chunk size. Protocol frames may be larger than this; the reader
+/// accumulates chunks until a short packet or ZLP terminates the frame.
+const READ_CHUNK_LEN: usize = 64 * 1024;
+const READ_TIMEOUT: Duration = Duration::from_millis(100);
+const MAX_IN_FRAME_LEN: usize = 2 * 1024 * 1024;
 
 pub struct UsbDebugClient {
     handle: Arc<DeviceHandle<GlobalContext>>,
     ep_out: u8,
     log_rx: Receiver<Vec<u8>>,
     resp_rx: Receiver<RawResponse>,
-    resize_tx: Sender<usize>,
+    reader_enabled: Arc<AtomicBool>,
+    reader_thread: Option<JoinHandle<()>>,
 }
 
 impl UsbDebugClient {
@@ -97,21 +100,20 @@ impl UsbDebugClient {
         let handle = Arc::new(handle);
         let (log_tx, log_rx) = mpsc::channel();
         let (resp_tx, resp_rx) = mpsc::channel();
-        let (resize_tx, resize_rx) = mpsc::channel();
+        let reader_enabled = Arc::new(AtomicBool::new(true));
 
         let reader_handle = handle.clone();
-        std::thread::spawn(move || reader_thread(reader_handle, ep_in, log_tx, resp_tx, resize_rx));
+        let reader_gate = reader_enabled.clone();
+        let reader_thread =
+            std::thread::spawn(move || reader_thread(reader_handle, ep_in, log_tx, resp_tx, reader_gate));
 
-        Ok(Self { handle, ep_out, log_rx, resp_rx, resize_tx })
+        Ok(Self { handle, ep_out, log_rx, resp_rx, reader_enabled, reader_thread: Some(reader_thread) })
     }
 
     /// Encode `cmd`, send it on the OUT endpoint, and wait up to `timeout` for
     /// the matching `[STATUS][PAYLOAD]` response frame. Validates the status
-    /// byte and returns just the payload on success. Internally hints the
-    /// reader thread to size its buffer for `cmd.max_response_size()`.
+    /// byte and returns just the payload on success.
     pub fn send(&self, cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
-        let _ = self.resize_tx.send(cmd.max_response_size());
-
         let mut out_buf = Vec::with_capacity(64);
         cmd.encode_into(&mut out_buf);
         let cmd_byte = cmd.cmd_byte();
@@ -126,6 +128,7 @@ impl UsbDebugClient {
         match Status::from_byte(resp.status) {
             Ok(Status::Ok) => Ok(resp.payload),
             Ok(Status::Err) => Err(ProtocolError::DeviceError(resp.status).into()),
+            Ok(Status::Locked) => Err(ProtocolError::DeviceLocked.into()),
             Err(e) => Err(e.into()),
         }
     }
@@ -138,52 +141,121 @@ impl UsbDebugClient {
     }
 }
 
-// DeviceHandle's Drop calls libusb_close which releases all claimed interfaces.
-// The reader thread's Arc clone keeps the handle alive until it exits, which
-// it does when the receivers are dropped and `send` errors out.
+impl Drop for UsbDebugClient {
+    fn drop(&mut self) {
+        self.reader_enabled.store(false, Ordering::Release);
+        if let Some(reader_thread) = self.reader_thread.take() {
+            let _ = reader_thread.join();
+        }
+    }
+}
+
+// DeviceHandle's Drop calls libusb_close, which releases all claimed
+// interfaces. Gate the reader off on client drop so its Arc clone is released
+// before `disconnect` returns and another process can claim the interface.
 fn reader_thread(
     handle: Arc<DeviceHandle<GlobalContext>>,
     ep_in: u8,
     log_tx: Sender<Vec<u8>>,
     resp_tx: Sender<RawResponse>,
-    resize_rx: Receiver<usize>,
+    reader_enabled: Arc<AtomicBool>,
 ) {
-    let mut buf = vec![0u8; READ_BUFFER_FLOOR];
+    let mut buf = vec![0u8; READ_CHUNK_LEN];
+    let mut pending = Vec::with_capacity(READ_CHUNK_LEN);
 
-    loop {
-        // Drain any pending size hints before the next read; grow but never shrink.
-        let mut hint = 0;
-        while let Ok(size) = resize_rx.try_recv() {
-            hint = hint.max(size);
-        }
-        if hint > buf.len() {
-            buf.resize(hint, 0);
-        }
-
-        match handle.read_bulk(ep_in, &mut buf, Duration::from_secs(5)) {
-            Ok(0) => continue,
+    while reader_enabled.load(Ordering::Acquire) {
+        match handle.read_bulk(ep_in, &mut buf, READ_TIMEOUT) {
+            Ok(0) => {
+                if !finish_pending_frame(&mut pending, &log_tx, &resp_tx) {
+                    return;
+                }
+            }
             Ok(n) => {
-                let frame_byte = buf[0];
-                let payload = &buf[1..n];
-                match FrameType::from_byte(frame_byte) {
-                    Ok(FrameType::Log) => {
-                        if log_tx.send(payload.to_vec()).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(FrameType::Response) => {
-                        if let Some((&status, rest)) = payload.split_first() {
-                            let resp = RawResponse { status, payload: rest.to_vec() };
-                            if resp_tx.send(resp).is_err() {
-                                return;
-                            }
-                        }
-                    }
-                    Err(_) => {} // unknown frame type -- drop silently
+                pending.extend_from_slice(&buf[..n]);
+                if pending.len() > MAX_IN_FRAME_LEN {
+                    pending.clear();
+                    continue;
+                }
+                if n < READ_CHUNK_LEN && !finish_pending_frame(&mut pending, &log_tx, &resp_tx) {
+                    return;
                 }
             }
             Err(rusb::Error::Timeout) => continue,
             Err(_) => return,
         }
+    }
+}
+
+fn finish_pending_frame(
+    pending: &mut Vec<u8>,
+    log_tx: &Sender<Vec<u8>>,
+    resp_tx: &Sender<RawResponse>,
+) -> bool {
+    if pending.is_empty() {
+        return true;
+    }
+
+    let frame_byte = pending[0];
+    let payload = &pending[1..];
+    let keep_reading = match FrameType::from_byte(frame_byte) {
+        Ok(FrameType::Log) => log_tx.send(payload.to_vec()).is_ok(),
+        Ok(FrameType::Response) => {
+            if let Some((&status, rest)) = payload.split_first() {
+                resp_tx.send(RawResponse { status, payload: rest.to_vec() }).is_ok()
+            } else {
+                true
+            }
+        }
+        Err(_) => true, // unknown frame type -- drop silently
+    };
+    pending.clear();
+    keep_reading
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(frame_type: FrameType, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + payload.len());
+        out.push(frame_type as u8);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn assembles_response_until_short_packet() {
+        let (log_tx, log_rx) = mpsc::channel();
+        let (resp_tx, resp_rx) = mpsc::channel();
+        let mut pending = Vec::new();
+        let mut response = frame(FrameType::Response, &[Status::Ok as u8]);
+        response.resize(READ_CHUNK_LEN + 4, 0xaa);
+        response[1] = Status::Ok as u8;
+
+        pending.extend_from_slice(&response[..READ_CHUNK_LEN]);
+        assert!(resp_rx.try_recv().is_err());
+        assert!(log_rx.try_recv().is_err());
+
+        pending.extend_from_slice(&response[READ_CHUNK_LEN..]);
+        assert!(finish_pending_frame(&mut pending, &log_tx, &resp_tx));
+
+        let resp = resp_rx.try_recv().expect("response");
+        assert_eq!(resp.status, Status::Ok as u8);
+        assert_eq!(resp.payload, vec![0xaa; READ_CHUNK_LEN + 2]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn zlp_terminates_max_packet_aligned_frame() {
+        let (log_tx, log_rx) = mpsc::channel();
+        let (resp_tx, resp_rx) = mpsc::channel();
+        let mut pending = Vec::new();
+        pending.extend_from_slice(&frame(FrameType::Log, &[0xaa; READ_CHUNK_LEN - 1]));
+
+        assert!(finish_pending_frame(&mut pending, &log_tx, &resp_tx));
+
+        assert_eq!(log_rx.try_recv().expect("log"), vec![0xaa; READ_CHUNK_LEN - 1]);
+        assert!(resp_rx.try_recv().is_err());
+        assert!(pending.is_empty());
     }
 }

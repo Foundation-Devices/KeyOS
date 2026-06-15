@@ -4,7 +4,7 @@
 use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar};
 
-use crate::NextFrameAnimationKind;
+use crate::{GuiServerError, NextFrameAnimationKind};
 
 #[derive(Debug, server::Message)]
 pub struct SwitchTo {
@@ -70,6 +70,11 @@ impl AsScalar<1> for Shutdown {
 pub struct SwitchToLauncher;
 
 #[derive(Debug, server::Message)]
+#[response(bool)]
+pub struct IsLocked;
+
+#[derive(Debug, server::Message)]
+#[response(Result<(), GuiServerError>)]
 pub struct CloseApp {
     pub pid: usize,
 }

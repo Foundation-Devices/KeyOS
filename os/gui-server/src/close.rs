@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use gui_server_api::{consts::CLOSE_TIMEOUT_EXIT_CODE, error::NavigationError, InputMessage};
+use gui_server_api::{
+    consts::CLOSE_TIMEOUT_EXIT_CODE,
+    error::{GuiServerError, NavigationError},
+    InputMessage,
+};
 use log::{debug, error, info, warn};
 use server::MessageId as _;
 use xous::PID;
@@ -94,14 +98,22 @@ impl Gui {
         self.notify_switcher_app_closed(pid);
     }
 
-    pub(crate) fn close_app(&mut self, pid: PID) {
+    pub(crate) fn close_app(&mut self, pid: PID) -> Result<(), GuiServerError> {
+        if self.app_registry.is_essential_app(pid) {
+            warn!(
+                "close_app: rejecting request to close essential app {:?} (pid={pid})",
+                self.app_registry.role(pid)
+            );
+            return Err(GuiServerError::CannotCloseEssentialApp);
+        }
+
         let Some(window) = self.windows.get_mut(&pid) else {
             error!("close_app: no window registered for pid {pid}");
-            return;
+            return Err(GuiServerError::AppNotFound);
         };
         if matches!(window.close_state, AppCloseState::Closing | AppCloseState::Terminating) {
             error!("Can't close app with pid {pid}: already closing.");
-            return;
+            return Err(GuiServerError::AppAlreadyClosing);
         }
         info!("Closing app {} (pid={pid})", window.name);
         window.close_state = AppCloseState::Closing;
@@ -113,6 +125,8 @@ impl Gui {
             Some(cb) => cb.request(GRACEFUL_CLOSE_TIMEOUT_MS, CloseAppTimeout::ID, 0),
             None => error!("Close app callback not initialized"),
         }
+
+        Ok(())
     }
 
     pub(crate) fn close_all_apps(&mut self) {
@@ -151,7 +165,7 @@ impl Gui {
             error!("Can't kill any apps, no non-essential apps are active");
             return;
         };
-        self.close_app(pid);
+        let _ = self.close_app(pid);
     }
 
     pub(crate) fn close_app_timed_out(&mut self) {

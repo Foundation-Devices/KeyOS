@@ -66,7 +66,7 @@ The CLI uses `~/.foundation` for user-managed state:
 | `~/.foundation/plugin-index.toml` | Plugin registry index (overridable via `FOUNDATION_PLUGIN_INDEX`) |
 | `~/.foundation/signing/<identity>/private.pem` | ECDSA secp256k1 private key for app signing |
 | `~/.foundation/signing/<identity>/public.pub` | Public key, hex-encoded |
-| `~/.foundation/signing/<identity>/certificate.crt` | X.509 publisher certificate |
+| `~/.foundation/signing/<identity>/<identity>.crt` | X.509 publisher certificate |
 | `~/.foundation/signing/<identity>/cosign2.toml` | cosign2 config pointing at the above |
 
 The plugin cache lives in the user cache directory (resolved via the `dirs`
@@ -462,12 +462,12 @@ RUSTFLAGS="--cfg keyos"
 Signature:
 
 ```text
-foundation sideload [--release] [--no-run] [--mount-path PATH] [--serial-port PATH]
+foundation sideload [--release] [--no-run]
 ```
 
 Purpose:
 
-- Build and sign a hardware-targeted KeyOS app bundle, copy it to a connected Passport Prime over USB storage, and launch it over the USB debug/logging channel by default
+- Build and sign a hardware-targeted KeyOS app bundle, upload it to a connected Passport Prime over usb-debug, and launch it over the same usb-debug channel by default
 
 Behavior:
 
@@ -475,32 +475,29 @@ Behavior:
   - `target/keyos/<app-name>/app.elf`
   - `target/keyos/<app-name>/manifest.json`
   - `target/keyos/<app-name>/icon.bin`
-- Resolves the mounted `PRIME` USB volume by:
-  - `--mount-path`, if provided
-  - otherwise common auto-detect locations such as `/Volumes/PRIME`, `/media/<user>/PRIME`, or `/run/media/<user>/PRIME`
-- Starts passport-drive MCP and checks that Developer Mode is enabled before copying the app bundle.
-- Copies the signed app bundle to:
+- Starts passport-drive MCP and checks that Developer Mode is enabled before uploading the app bundle.
+- Uploads the signed app bundle to:
 
 ```text
-<prime-mount>/keyos/sideloaded-apps/<app-id>/
+keyos/sideloaded-apps/<app-id>/
 ```
 
 - Writes:
-  - `<prime-mount>/keyos/sideloaded-apps/<app-id>/app.elf`
-  - `<prime-mount>/keyos/sideloaded-apps/<app-id>/manifest.json`
-  - `<prime-mount>/keyos/sideloaded-apps/<app-id>/icon.bin`
+  - `keyos/sideloaded-apps/<app-id>/app.elf`
+  - `keyos/sideloaded-apps/<app-id>/manifest.json`
+  - `keyos/sideloaded-apps/<app-id>/icon.bin`
 - The `<app-id>` directory is the normalized 32-character lowercase hex app ID without the `0x` prefix.
-- Copies generated app resources from `target/keyos/<app-name>/resources` into:
+- Uploads generated app resources from `target/keyos/<app-name>/resources` into:
 
 ```text
-<prime-mount>/keyos/sideloaded-apps/<app-id>/resources/
+keyos/sideloaded-apps/<app-id>/resources/
 ```
 
 - Launches the app through passport-drive MCP unless `--no-run` is set.
-- Copy failures tell the user to check that the device is unlocked, connected by USB, and Airlock is in Read/Write mode.
+- Upload failures tell the user to check that the device is unlocked, connected by USB, Developer Mode is enabled, and no other process is using the USB debug interface.
 - MCP launch failures tell the user to check that Developer Mode is enabled.
-- If the copy succeeds but ping or launch fails, the error reports that the app bundle was copied and includes the install path plus the failing serial path or response
-- `--no-run` skips launch after copying, but the command still probes passport-drive MCP and Developer Mode before copying
+- If upload succeeds but launch fails, the error reports that the app bundle was uploaded and includes the failing response.
+- `--no-run` skips launch after upload, but the command still probes passport-drive MCP and Developer Mode before uploading.
 
 ### `cert`
 
@@ -525,7 +522,7 @@ Behavior:
 - Writes:
   - `~/.foundation/signing/<name>/private.pem`
   - `~/.foundation/signing/<name>/public.pub`
-  - `~/.foundation/signing/<name>/certificate.crt`
+  - `~/.foundation/signing/<name>/<name>.crt`
   - `~/.foundation/signing/<name>/cosign2.toml`
 - Uses OpenSSL to generate:
   - a secp256k1 private key

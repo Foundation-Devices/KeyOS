@@ -39,7 +39,7 @@ This plan has now largely been executed. It remains in the repo as a compact com
 
 - [x] Fix `preview` for default relative `ui/app.slint` paths
 - [x] Keep `build`, `sim`, and `preview` on the shared config/codegen path
-- [x] Add `sideload` to build, sign, copy, and optionally launch apps on hardware over USB
+- [x] Add `sideload` to build, sign, upload over usb-debug, and optionally launch apps on hardware
 - [x] Make `sim` build, stage, and launch the simulator
 - [x] Make `new` initialize Git by default
 - [x] Make `--no-git` skip repository initialization

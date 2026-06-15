@@ -222,7 +222,8 @@ fn resolve_identity_for_print(explicit_name: Option<&str>) -> Result<SigningIden
                 "Invalid publisher identity name '%{name}'. It cannot be empty or contain path separators."
             );
         }
-        let identity = signing_identity_paths(name)?;
+        let mut identity = signing_identity_paths(name)?;
+        select_existing_certificate_path(&mut identity);
         if identity.certificate.exists() {
             return Ok(identity);
         }
@@ -230,7 +231,7 @@ fn resolve_identity_for_print(explicit_name: Option<&str>) -> Result<SigningIden
     }
 
     let mut identities: Vec<SigningIdentityPaths> =
-        list_signing_identities()?.into_iter().filter(|identity| identity.certificate.exists()).collect();
+        list_signing_identities()?.into_iter().filter_map(existing_certificate_identity).collect();
 
     if let Some(project_identity) = ProjectContext::discover_optional()
         .and_then(|project| project.config.publisher.name_value().map(str::to_string))
@@ -259,6 +260,20 @@ fn resolve_identity_for_print(explicit_name: Option<&str>) -> Result<SigningIden
                 .select("Select a publisher certificate", &options)
                 .context("Failed to choose a publisher certificate")?;
             Ok(identities.remove(selection))
+        }
+    }
+}
+
+fn existing_certificate_identity(mut identity: SigningIdentityPaths) -> Option<SigningIdentityPaths> {
+    select_existing_certificate_path(&mut identity);
+    identity.certificate.exists().then_some(identity)
+}
+
+fn select_existing_certificate_path(identity: &mut SigningIdentityPaths) {
+    if !identity.certificate.exists() {
+        let legacy_certificate = identity.legacy_certificate();
+        if legacy_certificate.exists() {
+            identity.certificate = legacy_certificate;
         }
     }
 }
@@ -357,12 +372,8 @@ fn write_private_key(path: &Path, key: &[u8]) -> io::Result<()> {
     {
         use std::io::Write;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
+        let mut file =
+            fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(key)?;
         file.sync_all()?;
@@ -582,6 +593,26 @@ mod tests {
         assert_eq!(parsed["pubkey"].as_str(), Some(public_key_hex));
         assert_eq!(parsed["secret"].as_str(), Some(private_key_path.display().to_string().as_str()));
         assert_eq!(parsed["target"].as_str(), Some("atsama5d27-keyos"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_certificate_identity_accepts_legacy_certificate_filename() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("foundation-cert-legacy-{unique}"));
+        let identity_root = root.join("demo");
+        fs::create_dir_all(&identity_root).unwrap();
+
+        let identity = foundation_core::SigningIdentityPaths::new("demo", identity_root);
+        let legacy_certificate = identity.legacy_certificate();
+        fs::write(&legacy_certificate, b"CERTIFICATE").unwrap();
+
+        let resolved = super::existing_certificate_identity(identity).unwrap();
+        assert_eq!(resolved.certificate, legacy_certificate);
 
         let _ = fs::remove_dir_all(root);
     }

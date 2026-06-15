@@ -8649,6 +8649,7 @@ name = "passport-drive"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app-manifest",
  "base64 0.22.1",
  "clap 4.5.41",
  "hex",
@@ -12458,6 +12459,8 @@ dependencies = [
 name = "usb-debug"
 version = "0.1.0"
 dependencies = [
+ "app-manager",
+ "fs",
  "gui-server-api",
  "log 0.4.27",
  "power-manager",

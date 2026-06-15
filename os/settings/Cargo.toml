@@ -6,6 +6,10 @@ name = "settings-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+production = []
+
 [dependencies]
 fs = { workspace = true }
 hex = { version = "0.4" }

@@ -4,11 +4,15 @@
 //! USB debug protocol shared between the device-side `usb-debug` service
 //! and host-side tooling (`passport-drive`, `keyos-log-viewer`, xtask).
 //!
-//! Wire format (vendor-specific bulk interface, single transfer per frame):
+//! Wire format (vendor-specific bulk interface):
 //!   OUT (host -> device): `[CMD:1][PAYLOAD:0..N]`
 //!   IN  (device -> host): `[FRAME_TYPE:1][PAYLOAD...]`
 //!     FRAME_TYPE Log      = 0x01 -- raw 0x1E-terminated log records
 //!     FRAME_TYPE Response = 0x02 -- `[STATUS:1][PAYLOAD...]`
+//!
+//! IN frames are terminated by USB short packets or ZLPs. Keep that framing:
+//! it avoids a protocol length prefix and lets the USB transfer boundary carry
+//! the packet end marker.
 //!
 //! Source of truth for command bytes, status bytes, and payload encoding.
 //! The `client` feature additionally exposes `UsbDebugClient`, a `rusb`-based
@@ -43,26 +47,12 @@ impl FrameType {
 pub enum Status {
     Ok = 0x00,
     Err = 0x01,
+    Locked = 0x02,
 }
 
 impl Status {
     pub fn from_byte(b: u8) -> Result<Self, ProtocolError> {
         Self::from_u8(b).ok_or(ProtocolError::UnknownStatus(b))
-    }
-}
-
-/// Touch event kind for `Command::Tap`.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
-pub enum TouchKind {
-    Press = 0,
-    Release = 1,
-    Drag = 2,
-}
-
-impl TouchKind {
-    pub fn from_byte(b: u8) -> Result<Self, ProtocolError> {
-        Self::from_u8(b).ok_or(ProtocolError::InvalidTouchKind(b))
     }
 }
 
@@ -120,10 +110,11 @@ impl LaunchAppResult {
 const HDR_LOG: &[u8] = &[FrameType::Log as u8];
 const HDR_RESP_OK: &[u8] = &[FrameType::Response as u8, Status::Ok as u8];
 const HDR_RESP_ERR: &[u8] = &[FrameType::Response as u8, Status::Err as u8];
+const HDR_RESP_LOCKED: &[u8] = &[FrameType::Response as u8, Status::Locked as u8];
 
 // Command byte assignments. Kept private; the `Command` enum is the public API.
 const CMD_SCREENSHOT: u8 = 0x01;
-const CMD_TAP: u8 = 0x02;
+const CMD_SWIPE: u8 = 0x02;
 const CMD_POWER_BTN: u8 = 0x03;
 const CMD_REBOOT_SAMBA: u8 = 0x04;
 const CMD_CLOSE_APP: u8 = 0x05;
@@ -132,18 +123,31 @@ const CMD_INPUT_TEXT: u8 = 0x07;
 const CMD_GET_VERSION: u8 = 0x08;
 const CMD_LAUNCH_APP: u8 = 0x09;
 const CMD_GET_DEVELOPER_MODE: u8 = 0x0a;
+const CMD_LOAD_APP_BEGIN: u8 = 0x0b;
+const CMD_LOAD_APP_FILE_BEGIN: u8 = 0x0c;
+const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
+const CMD_LOAD_APP_END: u8 = 0x0e;
+const CMD_GET_PROCESS_LIST: u8 = 0x0f;
+
+pub const LOAD_APP_CHUNK_MAX: usize = 510;
+/// Maximum UTF-8 bytes for a load-app relative filename. The device reads one
+/// 512-byte OUT transfer per command: 1 command byte + 8 size bytes + filename.
+pub const LOAD_APP_FILE_PATH_MAX: usize = 512 - 1 - 8;
 
 /// Host -> device command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Screenshot,
-    Tap {
-        x: u16,
-        y: u16,
-        kind: TouchKind,
+    Swipe {
+        start_x: u16,
+        start_y: u16,
+        end_x: u16,
+        end_y: u16,
+        duration_ms: u16,
+        steps: u8,
     },
     PowerButton {
-        pressed: bool,
+        long: bool,
     },
     RebootSamba,
     CloseApp {
@@ -157,10 +161,19 @@ pub enum Command {
     LaunchApp {
         app_id: [u8; 16],
     },
-    /// Read the current value of the global `DeveloperMode` setting. Used by
-    /// host tools (e.g. `foundation sideload`) to fail early when the user
-    /// hasn't enabled Developer Mode on the device.
+    /// Probe the Developer Mode gated usb-debug interface. If this command is
+    /// reachable, Developer Mode is enabled.
     GetDeveloperMode,
+    LoadAppBegin {
+        app_id: [u8; 16],
+    },
+    LoadAppFileBegin {
+        filename: String,
+        size: u64,
+    },
+    LoadAppChunk(Vec<u8>),
+    LoadAppEnd,
+    GetProcessList,
 }
 
 impl Command {
@@ -168,7 +181,7 @@ impl Command {
     pub fn cmd_byte(&self) -> u8 {
         match self {
             Command::Screenshot => CMD_SCREENSHOT,
-            Command::Tap { .. } => CMD_TAP,
+            Command::Swipe { .. } => CMD_SWIPE,
             Command::PowerButton { .. } => CMD_POWER_BTN,
             Command::RebootSamba => CMD_REBOOT_SAMBA,
             Command::CloseApp { .. } => CMD_CLOSE_APP,
@@ -177,19 +190,11 @@ impl Command {
             Command::GetVersion => CMD_GET_VERSION,
             Command::LaunchApp { .. } => CMD_LAUNCH_APP,
             Command::GetDeveloperMode => CMD_GET_DEVELOPER_MODE,
-        }
-    }
-
-    /// Upper bound on the response payload size (excluding the 2-byte response
-    /// header). Used by the client to size its read buffer.
-    pub fn max_response_size(&self) -> usize {
-        match self {
-            // 480 * 800 * 4 = 1,536,000 plus header slack.
-            Command::Screenshot => 2 * 1024 * 1024,
-            // Kernel debug output is bounded by the kernel's debug buffer.
-            Command::KernelCmd { .. } => 256 * 1024,
-            // Everything else: ack or a short string.
-            _ => 4 * 1024,
+            Command::LoadAppBegin { .. } => CMD_LOAD_APP_BEGIN,
+            Command::LoadAppFileBegin { .. } => CMD_LOAD_APP_FILE_BEGIN,
+            Command::LoadAppChunk(_) => CMD_LOAD_APP_CHUNK,
+            Command::LoadAppEnd => CMD_LOAD_APP_END,
+            Command::GetProcessList => CMD_GET_PROCESS_LIST,
         }
     }
 
@@ -197,14 +202,22 @@ impl Command {
     pub fn encode_into(&self, out: &mut Vec<u8>) {
         out.push(self.cmd_byte());
         match self {
-            Command::Screenshot | Command::RebootSamba | Command::GetVersion | Command::GetDeveloperMode => {}
-            Command::Tap { x, y, kind } => {
-                out.extend_from_slice(&x.to_le_bytes());
-                out.extend_from_slice(&y.to_le_bytes());
-                out.push(*kind as u8);
+            Command::Screenshot
+            | Command::RebootSamba
+            | Command::GetVersion
+            | Command::GetDeveloperMode
+            | Command::LoadAppEnd
+            | Command::GetProcessList => {}
+            Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps } => {
+                out.extend_from_slice(&start_x.to_le_bytes());
+                out.extend_from_slice(&start_y.to_le_bytes());
+                out.extend_from_slice(&end_x.to_le_bytes());
+                out.extend_from_slice(&end_y.to_le_bytes());
+                out.extend_from_slice(&duration_ms.to_le_bytes());
+                out.push(*steps);
             }
-            Command::PowerButton { pressed } => {
-                out.push(u8::from(*pressed));
+            Command::PowerButton { long } => {
+                out.push(u8::from(*long));
             }
             Command::CloseApp { pid } => {
                 out.extend_from_slice(&pid.to_le_bytes());
@@ -218,6 +231,16 @@ impl Command {
             Command::LaunchApp { app_id } => {
                 out.extend_from_slice(app_id);
             }
+            Command::LoadAppBegin { app_id } => {
+                out.extend_from_slice(app_id);
+            }
+            Command::LoadAppFileBegin { filename, size } => {
+                out.extend_from_slice(&size.to_le_bytes());
+                out.extend_from_slice(filename.as_bytes());
+            }
+            Command::LoadAppChunk(data) => {
+                out.extend_from_slice(data);
+            }
         }
     }
 
@@ -226,20 +249,20 @@ impl Command {
         let (&cmd, payload) = bytes.split_first().ok_or(ProtocolError::Empty)?;
         match cmd {
             CMD_SCREENSHOT => Ok(Command::Screenshot),
-            CMD_TAP => {
-                let bytes: &[u8; 5] = payload.first_chunk().ok_or(ProtocolError::TruncatedPayload {
-                    cmd,
-                    need: 5,
-                    got: payload.len(),
-                })?;
-                let x = u16::from_le_bytes([bytes[0], bytes[1]]);
-                let y = u16::from_le_bytes([bytes[2], bytes[3]]);
-                let kind = TouchKind::from_byte(bytes[4])?;
-                Ok(Command::Tap { x, y, kind })
+            CMD_SWIPE => {
+                let bytes: &[u8; 11] = exact_payload(cmd, payload)?;
+                Ok(Command::Swipe {
+                    start_x: u16::from_le_bytes([bytes[0], bytes[1]]),
+                    start_y: u16::from_le_bytes([bytes[2], bytes[3]]),
+                    end_x: u16::from_le_bytes([bytes[4], bytes[5]]),
+                    end_y: u16::from_le_bytes([bytes[6], bytes[7]]),
+                    duration_ms: u16::from_le_bytes([bytes[8], bytes[9]]),
+                    steps: bytes[10],
+                })
             }
             CMD_POWER_BTN => {
                 let b = *payload.first().ok_or(ProtocolError::TruncatedPayload { cmd, need: 1, got: 0 })?;
-                Ok(Command::PowerButton { pressed: b != 0 })
+                Ok(Command::PowerButton { long: b != 0 })
             }
             CMD_REBOOT_SAMBA => Ok(Command::RebootSamba),
             CMD_CLOSE_APP => {
@@ -269,9 +292,36 @@ impl Command {
                 })?;
                 Ok(Command::LaunchApp { app_id: *bytes })
             }
+            CMD_LOAD_APP_BEGIN => {
+                let bytes: &[u8; 16] = exact_payload(cmd, payload)?;
+                Ok(Command::LoadAppBegin { app_id: *bytes })
+            }
+            CMD_LOAD_APP_FILE_BEGIN => {
+                let size_bytes: &[u8; 8] = payload.first_chunk().ok_or(ProtocolError::TruncatedPayload {
+                    cmd,
+                    need: 8,
+                    got: payload.len(),
+                })?;
+                let size = u64::from_le_bytes(*size_bytes);
+                let filename = core::str::from_utf8(&payload[8..]).map_err(|_| ProtocolError::InvalidUtf8)?;
+                Ok(Command::LoadAppFileBegin { filename: filename.to_string(), size })
+            }
+            CMD_LOAD_APP_CHUNK => Ok(Command::LoadAppChunk(payload.to_vec())),
+            CMD_LOAD_APP_END => Ok(Command::LoadAppEnd),
+            CMD_GET_PROCESS_LIST => Ok(Command::GetProcessList),
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
+}
+
+fn exact_payload<const N: usize>(cmd: u8, payload: &[u8]) -> Result<&[u8; N], ProtocolError> {
+    if payload.len() < N {
+        return Err(ProtocolError::TruncatedPayload { cmd, need: N, got: payload.len() });
+    }
+    if payload.len() > N {
+        return Err(ProtocolError::InvalidPayloadLength { cmd, need: N, got: payload.len() });
+    }
+    Ok(payload.first_chunk().expect("payload length already checked"))
 }
 
 /// Response payload buffer. On keyos, wraps a `DropDeallocate` (typically the
@@ -321,17 +371,20 @@ impl core::fmt::Debug for Payload {
 /// Device -> host. Constructed by the device dispatcher.
 ///
 /// `parts()` returns `(header, payload)` slices for direct USB writes without
-/// intermediate concatenation.
+/// intermediate concatenation. `header[0]` is the `FrameType` byte. Remaining
+/// header bytes are the first bytes of the frame payload.
 #[derive(Debug)]
 pub enum Response {
     Ack,
     Err,
+    Locked,
     Screenshot(Payload),
     KernelOutput(Payload),
     Version(Vec<u8>),
     /// Ack carrying a small fixed-size payload (e.g. LaunchApp returning the PID).
     LaunchAck(Vec<u8>),
     /// Reply to `Command::GetDeveloperMode`. Single-byte payload: 0x00 = off, 0x01 = on.
+    /// Device-side usb-debug returns `true` because the interface itself is Developer Mode gated.
     DeveloperMode(bool),
     /// Asynchronous log frame; not a reply to a `Command`.
     Log(Vec<u8>),
@@ -344,6 +397,7 @@ impl Response {
         match self {
             Response::Ack => (HDR_RESP_OK, &[]),
             Response::Err => (HDR_RESP_ERR, &[]),
+            Response::Locked => (HDR_RESP_LOCKED, &[]),
             Response::Screenshot(p) => (HDR_RESP_OK, p),
             Response::KernelOutput(p) => (HDR_RESP_OK, p),
             Response::Version(d) => (HDR_RESP_OK, d.as_slice()),
@@ -382,17 +436,24 @@ pub enum ProtocolError {
     UnknownCommand(u8),
     UnknownFrameType(u8),
     UnknownStatus(u8),
-    InvalidTouchKind(u8),
     InvalidLaunchAppStatus(u8),
     TruncatedPayload {
         cmd: u8,
         need: usize,
         got: usize,
     },
+    InvalidPayloadLength {
+        cmd: u8,
+        need: usize,
+        got: usize,
+    },
     InvalidUtf8,
-    /// Returned by `UsbDebugClient::send_checked` when the device replied with
-    /// `Status::Err` (or any non-Ok status byte).
+    /// Returned by `UsbDebugClient::send` when the device replied with
+    /// `Status::Err`.
     DeviceError(u8),
+    /// Returned by `UsbDebugClient::send` when the device explicitly rejects an
+    /// operation because the lock screen is active.
+    DeviceLocked,
 }
 
 impl core::fmt::Display for ProtocolError {
@@ -402,15 +463,18 @@ impl core::fmt::Display for ProtocolError {
             ProtocolError::UnknownCommand(b) => write!(f, "unknown command byte 0x{b:02x}"),
             ProtocolError::UnknownFrameType(b) => write!(f, "unknown frame type 0x{b:02x}"),
             ProtocolError::UnknownStatus(b) => write!(f, "unknown status byte 0x{b:02x}"),
-            ProtocolError::InvalidTouchKind(b) => write!(f, "invalid touch kind 0x{b:02x}"),
             ProtocolError::InvalidLaunchAppStatus(b) => {
                 write!(f, "invalid launch app status 0x{b:02x}")
             }
             ProtocolError::TruncatedPayload { cmd, need, got } => {
                 write!(f, "command 0x{cmd:02x} payload truncated: need {need}, got {got}")
             }
+            ProtocolError::InvalidPayloadLength { cmd, need, got } => {
+                write!(f, "command 0x{cmd:02x} payload length invalid: need {need}, got {got}")
+            }
             ProtocolError::InvalidUtf8 => write!(f, "payload is not valid UTF-8"),
             ProtocolError::DeviceError(b) => write!(f, "device returned status 0x{b:02x}"),
+            ProtocolError::DeviceLocked => write!(f, "device is locked"),
         }
     }
 }
@@ -431,11 +495,24 @@ mod tests {
     #[test]
     fn command_roundtrips() {
         roundtrip(Command::Screenshot);
-        roundtrip(Command::Tap { x: 480, y: 800, kind: TouchKind::Press });
-        roundtrip(Command::Tap { x: 0, y: 0, kind: TouchKind::Release });
-        roundtrip(Command::Tap { x: 12, y: 34, kind: TouchKind::Drag });
-        roundtrip(Command::PowerButton { pressed: true });
-        roundtrip(Command::PowerButton { pressed: false });
+        roundtrip(Command::Swipe {
+            start_x: 100,
+            start_y: 930,
+            end_x: 100,
+            end_y: 20,
+            duration_ms: 300,
+            steps: 15,
+        });
+        roundtrip(Command::Swipe {
+            start_x: 240,
+            start_y: 400,
+            end_x: 240,
+            end_y: 400,
+            duration_ms: 700,
+            steps: 0,
+        });
+        roundtrip(Command::PowerButton { long: false });
+        roundtrip(Command::PowerButton { long: true });
         roundtrip(Command::RebootSamba);
         roundtrip(Command::CloseApp { pid: 0x1234 });
         roundtrip(Command::KernelCmd { cmd_byte: b'p' });
@@ -444,14 +521,30 @@ mod tests {
         roundtrip(Command::GetVersion);
         roundtrip(Command::GetDeveloperMode);
         roundtrip(Command::LaunchApp { app_id: [0xab; 16] });
+        roundtrip(Command::LoadAppBegin {
+            app_id: [
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+                0xff,
+            ],
+        });
+        roundtrip(Command::LoadAppFileBegin { filename: "app.elf".to_string(), size: 123 });
+        roundtrip(Command::LoadAppFileBegin { filename: "manifest.json".to_string(), size: 456 });
+        roundtrip(Command::LoadAppFileBegin { filename: "icon.bin".to_string(), size: 789 });
+        roundtrip(Command::LoadAppFileBegin {
+            filename: "resources/.foundation/icon.raw".to_string(),
+            size: 321,
+        });
+        roundtrip(Command::LoadAppChunk(vec![1, 2, 3, 4]));
+        roundtrip(Command::LoadAppEnd);
+        roundtrip(Command::GetProcessList);
     }
 
     #[test]
     fn decode_rejects_truncated() {
         assert!(matches!(Command::decode(&[]), Err(ProtocolError::Empty)));
         assert!(matches!(
-            Command::decode(&[CMD_TAP, 0, 0]),
-            Err(ProtocolError::TruncatedPayload { cmd: CMD_TAP, need: 5, got: 2 })
+            Command::decode(&[CMD_SWIPE, 0, 0]),
+            Err(ProtocolError::TruncatedPayload { cmd: CMD_SWIPE, need: 11, got: 2 })
         ));
         assert!(matches!(
             Command::decode(&[CMD_CLOSE_APP, 0]),
@@ -460,6 +553,28 @@ mod tests {
         assert!(matches!(
             Command::decode(&[CMD_POWER_BTN]),
             Err(ProtocolError::TruncatedPayload { cmd: CMD_POWER_BTN, .. })
+        ));
+        assert!(matches!(
+            Command::decode(&[CMD_LOAD_APP_FILE_BEGIN, 0]),
+            Err(ProtocolError::TruncatedPayload { cmd: CMD_LOAD_APP_FILE_BEGIN, need: 8, got: 1 })
+        ));
+        assert!(matches!(
+            Command::decode(&[CMD_LAUNCH_APP, 0, 1]),
+            Err(ProtocolError::TruncatedPayload { cmd: CMD_LAUNCH_APP, need: 16, got: 2 })
+        ));
+        assert!(matches!(
+            Command::decode(&[CMD_LOAD_APP_BEGIN, 0, 1]),
+            Err(ProtocolError::TruncatedPayload { cmd: CMD_LOAD_APP_BEGIN, need: 16, got: 2 })
+        ));
+    }
+
+    #[test]
+    fn load_app_begin_rejects_legacy_hex_string_payload() {
+        let mut bytes = Vec::from([CMD_LOAD_APP_BEGIN]);
+        bytes.extend_from_slice(b"00112233445566778899aabbccddeeff");
+        assert!(matches!(
+            Command::decode(&bytes),
+            Err(ProtocolError::InvalidPayloadLength { cmd: CMD_LOAD_APP_BEGIN, need: 16, got: 32 })
         ));
     }
 
@@ -491,5 +606,13 @@ mod tests {
             LaunchAppResult::decode(&[0x34, 0x12]).unwrap(),
             LaunchAppResult::new(0x1234, LaunchAppStatus::Launched)
         );
+    }
+
+    #[test]
+    fn locked_response_uses_locked_status() {
+        let (header, payload) = Response::Locked.parts();
+
+        assert_eq!(header, &[FrameType::Response as u8, Status::Locked as u8]);
+        assert!(payload.is_empty());
     }
 }

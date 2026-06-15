@@ -105,9 +105,7 @@ const MAX_LOCK_DURATION_S: u8 = 10;
 
 #[cfg(all(keyos, not(feature = "test-app")))]
 #[derive(Default)]
-pub(crate) struct SetupResponder {
-    pub(crate) interface_num: u16,
-}
+pub(crate) struct SetupResponder;
 #[cfg(all(keyos, not(feature = "test-app")))]
 impl server::ServerMessages for SetupResponder {
     const NAME: &'static str = "";
@@ -133,24 +131,20 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _context: &mut ServerContext<Self>,
     ) -> Option<Vec<u8>> {
         log::debug!("Setup packet: {msg:02x?}");
-        if msg.index == self.interface_num {
-            if msg.request_type == 0x81 && msg.request == 0x06 {
-                // HID GET_DESCRIPTOR
-                if msg.value == 0x2200 {
-                    // REPORT_DESC
-                    Some(USB_U2F_REPORT_DESCRIPTOR.to_vec())
-                } else if msg.value == 0x2100 {
-                    // DESCRIPTOR_TYPE
-                    Some(USB_U2F_FUNC_DESCRIPTOR.to_vec())
-                } else {
-                    None
-                }
-            } else if msg.request_type == 0x21 && msg.request == 0x0a {
-                // HID SET_IDLE
-                Some(vec![])
+        if msg.request_type == 0x81 && msg.request == 0x06 {
+            // HID GET_DESCRIPTOR
+            if msg.value == 0x2200 {
+                // REPORT_DESC
+                Some(USB_U2F_REPORT_DESCRIPTOR.to_vec())
+            } else if msg.value == 0x2100 {
+                // DESCRIPTOR_TYPE
+                Some(USB_U2F_FUNC_DESCRIPTOR.to_vec())
             } else {
                 None
             }
+        } else if msg.request_type == 0x21 && msg.request == 0x0a {
+            // HID SET_IDLE
+            Some(vec![])
         } else {
             None
         }
@@ -372,16 +366,18 @@ impl CtapHidServer {
         #[cfg(all(keyos, not(feature = "test-app")))]
         let usb_ep_sender = {
             let mut usb_api = UsbDeviceEmulation::default();
-            usb_api.register_setup_responder(SetupResponder { interface_num: USB_U2F_IFCE_NUMBER as u16 })?;
-            let [ep_out, ep_in] = usb_api.register_interface(
-                USB_U2F_IFCE_NUMBER,
-                USB_U2F_IFCE_CLASS,
-                USB_U2F_IFCE_SUBCLASS,
-                USB_U2F_IFCE_PROTOCOL,
-                &USB_U2F_ENDPOINTS,
-                &USB_U2F_FUNC_DESCRIPTOR,
-                0,
+            let (usb_interface, [ep_out, ep_in]) = usb_api.register_interface(
+                UsbInterfaceConfig::new(
+                    USB_U2F_IFCE_NUMBER,
+                    USB_U2F_IFCE_CLASS,
+                    USB_U2F_IFCE_SUBCLASS,
+                    USB_U2F_IFCE_PROTOCOL,
+                    &USB_U2F_ENDPOINTS,
+                )
+                .with_functional_descriptors(&USB_U2F_FUNC_DESCRIPTOR)
+                .with_setup_responder(Some(SetupResponder)),
             )?;
+            usb_interface.set_enabled(true)?;
             std::thread::spawn(|| receive_request_thread(ep_out));
             let (usb_ep_sender, receiver_ep_in) = mpsc::channel();
             std::thread::spawn(|| send_response_thread(ep_in, receiver_ep_in));

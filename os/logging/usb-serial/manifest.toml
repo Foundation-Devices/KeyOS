@@ -9,8 +9,8 @@ en = "Log over USB serial"
 "os/usbdev" = [
     "ReadEndpoint",
     "WriteEndpoint",
-    "RegisterSetupResponder",
     "RegisterInterface",
+    "SetInterfaceEnabled",
     "WaitForConnection",
 ]
 "os/log" = ["ReadLogs"]

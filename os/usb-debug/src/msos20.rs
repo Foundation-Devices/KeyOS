@@ -5,7 +5,7 @@
 //! the vendor-specific debug interface without a third-party driver.
 //!
 //! - [`PLATFORM_CAPABILITY`] is the body of the BOS Platform Capability descriptor (the 20-byte header is
-//!   prepended by `register_capability`).
+//!   prepended by the USB interface capability registration).
 //! - [`descriptor_set`] returns the full MS OS 2.0 descriptor set that the host fetches via the vendor
 //!   control request advertised in the platform capability.
 
@@ -24,7 +24,7 @@ const MS_VENDOR_CODE: u8 = 0x01;
 const DESCRIPTOR_SET_INDEX: u16 = 0x0007;
 
 /// Body of the BOS Platform Capability functional descriptors. The 20-byte
-/// MS OS 2.0 platform capability header is prepended by `register_capability`.
+/// MS OS 2.0 platform capability header is prepended by the USB interface capability registration.
 /// Layout: dwWindowsVersion (4) | wMSOSDescriptorSetTotalLength (2) | bMS_VendorCode (1) | bAltEnumCode (1).
 #[rustfmt::skip]
 pub const PLATFORM_CAPABILITY: [u8; 8] = [

@@ -30,7 +30,7 @@
     '';
     sdkBuildConfig = builtins.fromTOML (builtins.readFile (root + "/sdk-build.toml"));
     foundationSlintVersion = sdkBuildConfig.submodules.slint.ref;
-    foundationSlintHash = "sha256-iH4X6e2B/U/m5C5eyE9HSLqfanZJQIUlu3yVcveCzj4=";
+    foundationSlintHash = "sha256-7vZ3LnTm1l3+Q4tRSogesNzGp/iCy4IIpkP0w5/l/9k=";
     systems = [
       "aarch64-darwin"
       "x86_64-darwin"
@@ -110,6 +110,7 @@
           (with pkgs; [
             clang
             cmake
+            fontconfig
             gcc-arm-embedded
             git
             gnumake
@@ -121,13 +122,15 @@
             pkg-config
             protobuf
             viewerRunner
+            zlib
           ])
           ++ [
             rustKeyos
           ]
-          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (with pkgs; [
             linuxCrossCc
-          ];
+            systemd
+          ]);
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
@@ -137,8 +140,10 @@
               fontconfig
               libGL
               libxkbcommon
+              zlib
             ]
             ++ lib.optionals stdenv.isLinux [
+              systemd
               xorg.libX11
               xorg.libXcursor
               xorg.libXi
@@ -195,34 +200,52 @@
         '';
       };
     in {
-      inherit pkgs foundationSlint linuxCrossCc linuxCrossCcPath maintainerShell;
+      inherit
+        pkgs
+        foundationSlint
+        linuxCrossCc
+        linuxCrossCcPath
+        maintainerShell
+        ;
     };
   in {
-    packages = forAllSystems (system: let
-      inherit (mkSystem system) foundationSlint;
-    in {
-      foundation-slint-viewer = foundationSlint."foundation-slint-viewer";
-    });
-    devShells = forAllSystems (system: let
-      inherit (mkSystem system) maintainerShell;
-    in {
-      default = maintainerShell;
-      maintainer = maintainerShell;
-    });
-    checks = forAllSystems (system: let
-      inherit (mkSystem system) pkgs;
-    in {
-      workspace-tests =
-        pkgs.runCommand "foundation-sdk-workspace-tests" {
-          nativeBuildInputs = with pkgs; [cargo rustc git];
-        } ''
-          export HOME="$TMPDIR/home"
-          export CARGO_HOME="$TMPDIR/cargo-home"
-          mkdir -p "$HOME" "$CARGO_HOME"
-          cd ${root}
-          cargo test --offline --locked --manifest-path Cargo.toml
-          touch "$out"
-        '';
-    });
+    packages = forAllSystems (
+      system: let
+        inherit (mkSystem system) foundationSlint;
+      in {
+        foundation-slint-viewer = foundationSlint."foundation-slint-viewer";
+      }
+    );
+    devShells = forAllSystems (
+      system: let
+        inherit (mkSystem system) maintainerShell;
+      in {
+        default = maintainerShell;
+        maintainer = maintainerShell;
+      }
+    );
+    checks = forAllSystems (
+      system: let
+        inherit (mkSystem system) pkgs;
+      in {
+        workspace-tests =
+          pkgs.runCommand "foundation-sdk-workspace-tests"
+          {
+            nativeBuildInputs = with pkgs; [
+              cargo
+              rustc
+              git
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            export CARGO_HOME="$TMPDIR/cargo-home"
+            mkdir -p "$HOME" "$CARGO_HOME"
+            cd ${root}
+            cargo test --offline --locked --manifest-path Cargo.toml
+            touch "$out"
+          '';
+      }
+    );
   };
 }

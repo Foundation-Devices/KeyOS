@@ -75,9 +75,7 @@ async fn run() -> Result<()> {
         Some((subcommand_name, sub_matches)) if subcommand_name == cli::CMD_SIDELOAD => {
             let release = sub_matches.get_flag("release");
             let no_run = sub_matches.get_flag("no-run");
-            let mount_path = sub_matches.get_one::<String>("mount-path").map(|s| s.as_str());
-            let serial_port = sub_matches.get_one::<String>("serial-port").map(|s| s.as_str());
-            commands::sideload::execute(release, no_run, mount_path, serial_port)?;
+            commands::sideload::execute(release, no_run)?;
         }
         Some((subcommand_name, _sub_matches)) if subcommand_name == cli::CMD_SIM => {
             commands::sim::execute()?;

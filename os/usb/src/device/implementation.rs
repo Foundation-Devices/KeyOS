@@ -35,9 +35,8 @@ pub struct UsbDeviceServer {
     is_configured: bool,
     should_be_enabled: bool,
     enabled: bool,
-    interfaces: BTreeMap<u8, RegisteredInterface>,
+    interfaces: BTreeMap<u8, InterfaceRegistration>,
     capabilities: Vec<RegisteredCapability>,
-    setup_responders: Vec<xous::CID>,
     config_descriptor: Vec<u8>,
     bos_descriptor: Vec<u8>,
     remaining_setup_tx_data: Vec<u8>,
@@ -53,8 +52,66 @@ pub struct UsbDeviceServer {
 #[all_permissions]
 struct InternalPermissions;
 
-struct RegisteredInterface {
-    descriptors: Vec<u8>,
+struct InterfaceRegistration {
+    owner_pid: xous::PID,
+    if_class: u8,
+    if_subclass: u8,
+    if_protocol: u8,
+    endpoints: Vec<EndpointProperties>,
+    endpoint_numbers: Vec<u8>,
+    interface_functional_descriptors: Vec<u8>,
+    associated_interface_count: u8,
+    capabilities: Vec<RegisteredCapability>,
+    enabled: bool,
+    setup_responder: Option<xous::CID>,
+}
+
+impl InterfaceRegistration {
+    fn descriptors(&self, interface_number: u8) -> Vec<u8> {
+        let mut descriptors = Vec::new();
+
+        if self.associated_interface_count > 0 {
+            descriptors.extend_from_slice(&[
+                0x08,                            // bLength
+                0x0b,                            // bDescriptorType: Interface Association
+                interface_number,                // bFirstInterface: First iface
+                self.associated_interface_count, // Two ifaces
+                self.if_class,                   // bInterfaceClass
+                self.if_subclass,                // bInterfaceSubClass
+                self.if_protocol,                // bInterfaceProtocol
+                2,                               // iInterface: index to iProduct
+            ]);
+        }
+
+        descriptors.extend_from_slice(&[
+            // Interface Descriptor
+            0x09,                       // bLength
+            0x04,                       // bDescriptorType: Interface
+            interface_number,           // bInterfaceNumber
+            0x00,                       // bAlternateSetting
+            self.endpoints.len() as u8, // bNumEndpoints
+            self.if_class,              // bInterfaceClass
+            self.if_subclass,           // bInterfaceSubClass
+            self.if_protocol,           // bInterfaceProtocol
+            2,                          // iInterface: index to iProduct
+        ]);
+        descriptors.extend_from_slice(&self.interface_functional_descriptors);
+
+        for (ep_number, properties) in self.endpoint_numbers.iter().zip(&self.endpoints) {
+            descriptors.extend_from_slice(&[
+                // Endpoint Descriptor
+                0x07, // bLength
+                0x05, // bDescriptorType: Endpoint
+                ep_number + if properties.ep_direction == EndpointDirection::In { 0x80 } else { 0 }, // bEndpointAddress
+                properties.ep_type as u8, // bmAttributes
+                properties.max_packet_len as u8, // wMaxPacketSize
+                (properties.max_packet_len >> 8) as u8,
+                properties.interval, // bInterval
+            ]);
+        }
+
+        descriptors
+    }
 }
 
 struct RegisteredCapability {
@@ -80,6 +137,7 @@ struct OngoingWrite {
 }
 
 struct RuntimeEndpointData {
+    interface_number: u8,
     properties: EndpointProperties,
     use_dma: bool,
     ongoing_read: Option<DeferredLendMut<ReadEndpoint>>,
@@ -172,7 +230,6 @@ impl UsbDeviceServer {
             connection_waiters: Default::default(),
             interfaces: Default::default(),
             capabilities,
-            setup_responders: Default::default(),
             config_descriptor: Default::default(),
             endpoints: Default::default(),
             bos_descriptor: Default::default(),
@@ -208,6 +265,28 @@ impl UsbDeviceServer {
 
     fn configure(&mut self) {
         for (ept_num, ept_data) in &mut self.endpoints {
+            if !self
+                .interfaces
+                .get(&ept_data.interface_number)
+                .map(|interface| interface.enabled)
+                .unwrap_or(false)
+            {
+                log::debug!("Disabling EP{ept_num} for disabled interface {}", ept_data.interface_number);
+                let ept_num = *ept_num as usize;
+                self.hw.reset_endpoint(ept_num);
+                if ept_data.use_dma && ept_num < 8 {
+                    self.hw.dma(ept_num).control.set(DmaControl(0));
+                }
+                let ep = self.hw.endpoint(ept_num);
+                let mut control = EndpointControl(0);
+                control.set_enable(true);
+                control.set_auto_valid(true);
+                control.set_received_out_interrupt(true);
+                control.set_transmission_complete_interrupt(true);
+                ep.ctl_disable.set(control);
+                ep.cfg.set(EndpointConfiguration(0));
+                continue;
+            }
             log::debug!("Setting up EP{ept_num} as {:?}", ept_data.properties);
             self.hw.reset_endpoint(*ept_num as usize);
             let ep = self.hw.endpoint(*ept_num as usize);
@@ -314,113 +393,159 @@ impl UsbDeviceServer {
     }
 
     fn recalculate_config_descriptor(&mut self) {
-        self.config_descriptor = vec![
+        self.config_descriptor = Vec::new();
+        let mut config_descriptor = vec![
             // Configuration Descriptor
             0x09, // bLength
             0x02, // bDescriptorType: Configuration
-            0x00, // wTotalLength (u16, fixed up later)
-            0x00,
-            self.interfaces.len() as u8, // bNumInterfaces
-            0x01,                        // bConfigurationValue (used to call SetConfiguration)
-            2,                           // iConfiguration: index to iProduct
-            0xc0,                        // bmAttributes (self-powered, no remote wakeup)
-            0x10,                        /* MaxPower: 32mA. This does not have to be accurate,
-                                          * but if it's too large,
-                                          * the device will be rejected with "insufficient available bus
-                                          * power" */
+            0x00, // wTotalLength LSB (fixed up later)
+            0x00, // wTotalLength MSB (fixed up later)
+            0x00, // bNumInterfaces (fixed up below)
+            0x01, // bConfigurationValue (used to call SetConfiguration)
+            2,    // iConfiguration: index to iProduct
+            0xc0, // bmAttributes (self-powered, no remote wakeup)
+            0x10, /* MaxPower: 32mA. This does not have to be accurate,
+                   * but if it's too large,
+                   * the device will be rejected with "insufficient available bus
+                   * power" */
         ];
-        for interface in self.interfaces.values() {
-            self.config_descriptor.extend_from_slice(&interface.descriptors);
+        let mut interface_count = 0u8;
+        for (&interface_number, interface) in &self.interfaces {
+            if interface.enabled {
+                config_descriptor.extend_from_slice(&interface.descriptors(interface_number));
+                interface_count += 1;
+            }
         }
-        self.config_descriptor[2] = self.config_descriptor.len() as u8;
-        self.config_descriptor[3] = (self.config_descriptor.len() >> 8) as u8;
+        if interface_count == 0 {
+            self.config_descriptor.clear();
+            return;
+        }
+        config_descriptor[2] = config_descriptor.len() as u8;
+        config_descriptor[3] = (config_descriptor.len() >> 8) as u8;
+        config_descriptor[4] = interface_count;
+        self.config_descriptor = config_descriptor;
     }
 
-    // Returns the registered endpoint numbers.
-    fn register_interface(&mut self, msg: RegisterInterface) -> Result<Vec<u8>, UsbError> {
+    fn reenumerate_or_update_hw(&mut self) {
+        if self.enabled {
+            self.hw.set_enabled(false);
+            self.send_disconnected();
+            self.enabled = false;
+            self.is_configured = false;
+            // XXX: Without this sleep, Windows doesn't handle the reset well.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        self.update_hw_enabled_state();
+    }
+
+    fn apply_descriptor_update(&mut self, old_config_descriptor: Vec<u8>, old_bos_descriptor: Vec<u8>) {
+        if self.config_descriptor != old_config_descriptor || self.bos_descriptor != old_bos_descriptor {
+            self.reenumerate_or_update_hw();
+        } else {
+            self.update_hw_enabled_state();
+        }
+    }
+
+    fn endpoint_interface_enabled(&self, endpoint_number: u8) -> bool {
+        self.endpoints
+            .get(&endpoint_number)
+            .and_then(|endpoint| self.interfaces.get(&endpoint.interface_number))
+            .map(|interface| interface.enabled)
+            .unwrap_or(false)
+    }
+
+    fn check_endpoint_owner(&self, endpoint_number: u8, sender: xous::PID) -> Result<(), UsbError> {
+        let Some(endpoint) = self.endpoints.get(&endpoint_number) else {
+            return Err(UsbError::NotFound);
+        };
+        let Some(interface) = self.interfaces.get(&endpoint.interface_number) else {
+            return Err(UsbError::NotFound);
+        };
+        if interface.owner_pid != sender {
+            return Err(UsbError::NotClaimed);
+        }
+        Ok(())
+    }
+
+    fn register_interface(
+        &mut self,
+        msg: RegisterInterface,
+        owner_pid: xous::PID,
+    ) -> Result<RegisteredInterfaceInfo, UsbError> {
         if self.interfaces.contains_key(&msg.interface_number) {
             return Err(UsbError::AlreadyRegistered);
         }
-
-        let mut descriptors = Vec::new();
-
-        if msg.associated_interface_count > 0 {
-            descriptors.extend_from_slice(&[
-                0x08,                           // bLength
-                0x0b,                           // bDescriptorType: Interface Association
-                msg.interface_number,           // bFirstInterface: First iface
-                msg.associated_interface_count, // Two ifaces
-                msg.if_class,                   // bInterfaceClass
-                msg.if_subclass,                // bInterfaceSubClass
-                msg.if_protocol,                // bInterfaceProtocol
-                2,                              // iInterface: index to iProduct
-            ]);
-        }
-
-        descriptors.extend_from_slice(&[
-            // Interface Descriptor
-            0x09,                      // bLength
-            0x04,                      // bDescriptorType: Interface
-            msg.interface_number,      // bInterfaceNumber
-            0x00,                      // bAlternateSetting
-            msg.endpoints.len() as u8, // bNumEndpoints
-            msg.if_class,              // bInterfaceClass
-            msg.if_subclass,           // bInterfaceSubClass
-            msg.if_protocol,           // bInterfaceProtocol
-            2,                         // iInterface: index to iProduct
-        ]);
-        descriptors.extend_from_slice(&msg.interface_functional_descriptors);
-        let mut result = Vec::new();
-        for properties in msg.endpoints {
+        let mut endpoint_numbers = Vec::new();
+        for properties in &msg.endpoints {
             let ep_number = if properties.use_dma {
                 (1..=7u8).find(|n| !self.endpoints.contains_key(n)).expect("no free DMA endpoint (EP1-7)")
             } else {
                 (8..=15u8).find(|n| !self.endpoints.contains_key(n)).expect("no free FIFO endpoint (EP8-15)")
             };
-            descriptors.extend_from_slice(&[
-                // Endpoint Descriptor
-                0x07, // bLength
-                0x05, // bDescriptorType: Endpoint
-                ep_number + if properties.ep_direction == EndpointDirection::In { 0x80 } else { 0 }, // bEndpointAddress
-                properties.ep_type as u8, // bmAttributes
-                properties.max_packet_len as u8, // wMaxPacketSize
-                (properties.max_packet_len >> 8) as u8,
-                properties.interval, // bInterval
-            ]);
             let use_dma = properties.use_dma;
             self.endpoints.insert(
                 ep_number,
                 RuntimeEndpointData {
-                    properties,
+                    interface_number: msg.interface_number,
+                    properties: properties.clone(),
                     use_dma,
                     ongoing_read: None,
                     ongoing_write: None,
                     pending_rx: VecDeque::new(),
                 },
             );
-            result.push(ep_number);
+            endpoint_numbers.push(ep_number);
         }
-        self.interfaces.insert(msg.interface_number, RegisteredInterface { descriptors });
-        Ok(result)
+        let capabilities = msg.capabilities.into_iter().map(Self::registered_capability).collect();
+
+        self.interfaces.insert(
+            msg.interface_number,
+            InterfaceRegistration {
+                owner_pid,
+                if_class: msg.if_class,
+                if_subclass: msg.if_subclass,
+                if_protocol: msg.if_protocol,
+                endpoints: msg.endpoints,
+                endpoint_numbers: endpoint_numbers.clone(),
+                interface_functional_descriptors: msg.interface_functional_descriptors,
+                associated_interface_count: msg.associated_interface_count,
+                capabilities,
+                enabled: false,
+                setup_responder: msg.setup_responder,
+            },
+        );
+
+        Ok(RegisteredInterfaceInfo { endpoints: endpoint_numbers })
     }
 
     fn recalculate_bos_descriptor(&mut self) {
+        let interface_capability_count: usize = self
+            .interfaces
+            .values()
+            .filter(|interface| interface.enabled)
+            .map(|interface| interface.capabilities.len())
+            .sum();
         self.bos_descriptor = vec![
             // Binary Object Store Descriptor
             0x05, // bLength
             0x0f, // bDescriptorType: Binary Object Store
             0x00, // wTotalLength (u16, fixed up later)
             0x00,
-            self.capabilities.len() as u8, // bNumDeviceCaps
+            (self.capabilities.len() + interface_capability_count) as u8, // bNumDeviceCaps
         ];
         for capability in &self.capabilities {
             self.bos_descriptor.extend_from_slice(&capability.descriptors);
+        }
+        for interface in self.interfaces.values().filter(|interface| interface.enabled) {
+            for capability in &interface.capabilities {
+                self.bos_descriptor.extend_from_slice(&capability.descriptors);
+            }
         }
         self.bos_descriptor[2] = self.bos_descriptor.len() as u8;
         self.bos_descriptor[3] = (self.bos_descriptor.len() >> 8) as u8;
     }
 
-    fn register_capability(&mut self, msg: RegisterCapability) {
+    fn registered_capability(msg: DeviceCapability) -> RegisteredCapability {
         let mut descriptors = vec![
             // Platform Device Capability
             20 + msg.capability_functional_descriptors.len() as u8, // bLength
@@ -430,7 +555,7 @@ impl UsbDeviceServer {
         ];
         descriptors.extend_from_slice(&msg.cap_uuid);
         descriptors.extend_from_slice(&msg.capability_functional_descriptors);
-        self.capabilities.push(RegisteredCapability { descriptors });
+        RegisteredCapability { descriptors }
     }
 
     fn handle_ep0_tx_complete(&mut self) {
@@ -462,42 +587,49 @@ impl BlockingArchiveHandler<RegisterInterface> for UsbDeviceServer {
     fn handle(
         &mut self,
         msg: RegisterInterface,
-        _sender: xous::PID,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> Result<Vec<u8>, UsbError> {
-        log::info!("Registering interface class {} with {} endpoints", msg.if_class, msg.endpoints.len());
-        let result = self.register_interface(msg)?;
+    ) -> Result<RegisteredInterfaceInfo, UsbError> {
+        log::info!(
+            "Registering interface {} class {} with {} endpoints",
+            msg.interface_number,
+            msg.if_class,
+            msg.endpoints.len()
+        );
+        let old_config_descriptor = self.config_descriptor.clone();
+        let old_bos_descriptor = self.bos_descriptor.clone();
+        let result = self.register_interface(msg, sender)?;
         self.recalculate_config_descriptor();
         self.recalculate_bos_descriptor();
-        self.update_hw_enabled_state();
+        self.apply_descriptor_update(old_config_descriptor, old_bos_descriptor);
 
         Ok(result)
     }
 }
 
-impl BlockingArchiveHandler<RegisterCapability> for UsbDeviceServer {
+impl BlockingScalarHandler<SetInterfaceEnabled> for UsbDeviceServer {
     fn handle(
         &mut self,
-        msg: RegisterCapability,
-        _sender: xous::PID,
+        msg: SetInterfaceEnabled,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), UsbError> {
-        log::info!("Registering capability type {}:{}", msg.cap_type, msg.cap_subtype);
-        self.register_capability(msg);
+        let Some(interface) = self.interfaces.get_mut(&msg.interface_number) else {
+            return Err(UsbError::NotFound);
+        };
+        if interface.owner_pid != sender {
+            return Err(UsbError::NotClaimed);
+        }
+        if interface.enabled == msg.enabled {
+            return Ok(());
+        }
+        log::info!("Setting USB interface {} enabled={}", msg.interface_number, msg.enabled);
+        let old_config_descriptor = self.config_descriptor.clone();
+        let old_bos_descriptor = self.bos_descriptor.clone();
+        interface.enabled = msg.enabled;
+        self.recalculate_config_descriptor();
         self.recalculate_bos_descriptor();
-
-        Ok(())
-    }
-}
-
-impl BlockingScalarHandler<RegisterSetupResponder> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        msg: RegisterSetupResponder,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> Result<(), UsbError> {
-        self.setup_responders.push(msg.0);
+        self.apply_descriptor_update(old_config_descriptor, old_bos_descriptor);
         Ok(())
     }
 }
@@ -506,9 +638,13 @@ impl ScalarHandler<SetEndpointStalled> for UsbDeviceServer {
     fn handle(
         &mut self,
         msg: SetEndpointStalled,
-        _sender: xous::PID,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
+        if let Err(e) = self.check_endpoint_owner(msg.endpoint, sender) {
+            log::warn!("SetEndpointStalled denied for endpoint {}: {e:?}", msg.endpoint);
+            return;
+        }
         if !self.is_configured {
             log::warn!("SetEndpointStalled called when device was not configured");
             return;
@@ -545,6 +681,14 @@ impl DeferredLendMutHandler<ReadEndpoint> for UsbDeviceServer {
             return;
         }
         let endpoint_number = msg.body().endpoint;
+        if let Err(e) = self.check_endpoint_owner(endpoint_number, msg.pid()) {
+            msg.set_response(Err(e));
+            return;
+        }
+        if !self.endpoint_interface_enabled(endpoint_number) {
+            msg.set_response(Err(UsbError::InterfaceDisabled));
+            return;
+        }
         let Some(endpoint) = self.endpoints.get_mut(&endpoint_number) else {
             msg.set_response(Err(UsbError::NotFound));
             return;
@@ -591,6 +735,14 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
             return;
         }
         let endpoint_number = msg.body().endpoint;
+        if let Err(e) = self.check_endpoint_owner(endpoint_number, msg.pid()) {
+            msg.set_response(Err(e));
+            return;
+        }
+        if !self.endpoint_interface_enabled(endpoint_number) {
+            msg.set_response(Err(UsbError::InterfaceDisabled));
+            return;
+        }
         let Some(endpoint) = self.endpoints.get_mut(&endpoint_number) else {
             msg.set_response(Err(UsbError::NotFound));
             return;
@@ -633,21 +785,6 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
     fn default_response() -> <WriteEndpoint as server::LendMut>::Response { Err(UsbError::HostDisconnected) }
 }
 
-impl UsbDeviceServer {
-    /// Disconnect the device from the USB bus, hold DETACH, then reattach.
-    /// Forces the host to re-enumerate so descriptor changes (e.g. a new
-    /// VID:PID) take effect. The 100ms hold is required for Windows to
-    /// register the disconnect.
-    fn reattach_bus(&mut self) {
-        if self.enabled {
-            self.hw.set_enabled(false);
-            self.send_disconnected();
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            self.hw.set_enabled(true);
-        }
-    }
-}
-
 impl BlockingScalarHandler<ResetController> for UsbDeviceServer {
     fn handle(
         &mut self,
@@ -655,7 +792,9 @@ impl BlockingScalarHandler<ResetController> for UsbDeviceServer {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <ResetController as server::BlockingScalar>::Response {
-        self.reattach_bus();
+        if self.enabled {
+            self.reenumerate_or_update_hw();
+        }
         Ok(())
     }
 }
@@ -669,7 +808,9 @@ impl BlockingScalarHandler<SetVidPid> for UsbDeviceServer {
     ) -> <SetVidPid as server::BlockingScalar>::Response {
         self.custom_vid = msg.vid;
         self.custom_pid = msg.pid;
-        self.reattach_bus();
+        if self.enabled {
+            self.reenumerate_or_update_hw();
+        }
         Ok(())
     }
 }
@@ -777,19 +918,38 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
                 }
                 Some(Vec::new())
             }
-            _ => self.setup_responders.iter().find_map(|setup_responder| {
-                // A responder app may exit while the host is still issuing SETUP
-                // packets (e.g. during shutdown or right after a reset_controller
-                // re-enum). Treat a dead CID as "didn't handle this packet" so
-                // we move on to the next responder instead of panicking.
-                match try_send_blocking_archive(*setup_responder, SetupPacketCallback(msg.clone())) {
-                    Ok(response) => response,
-                    Err(e) => {
-                        log::warn!("setup responder {setup_responder:?} unreachable: {e:?}");
-                        None
+            _ => {
+                let send_setup = |setup_responder| {
+                    // A responder app may exit while the host is still issuing SETUP
+                    // packets. Treat a dead CID as "didn't handle this packet" so
+                    // the control endpoint stalls instead of panicking the USB server.
+                    match try_send_blocking_archive(setup_responder, SetupPacketCallback(msg.clone())) {
+                        Ok(response) => response,
+                        Err(e) => {
+                            log::warn!("setup responder {setup_responder:?} unreachable: {e:?}");
+                            None
+                        }
                     }
-                }
-            }),
+                };
+                let interface_number = (msg.index & 0xff) as u8;
+                let interface_response = self
+                    .interfaces
+                    .get(&interface_number)
+                    .filter(|interface| interface.enabled)
+                    .and_then(|interface| interface.setup_responder)
+                    .and_then(&send_setup);
+
+                interface_response.or_else(|| {
+                    if msg.request_type & 0x1f != 0 {
+                        return None;
+                    }
+                    self.interfaces
+                        .values()
+                        .filter(|interface| interface.enabled)
+                        .filter_map(|interface| interface.setup_responder)
+                        .find_map(send_setup)
+                })
+            }
         };
         match response {
             Some(mut bytes) => {
@@ -823,6 +983,15 @@ impl MoveHandler<RxCompleteInterrupt> for UsbDeviceServer {
         // EP0: currently discarded (same as before)
         if ep_num == 0 {
             log::trace!("Rx complete on EP0 ({byte_count} bytes, discarded)");
+            return;
+        }
+
+        let Some(interface_number) = self.endpoints.get(&ep_num).map(|ep| ep.interface_number) else {
+            log::warn!("RxCompleteInterrupt for unknown EP{ep_num}");
+            return;
+        };
+        if !self.interfaces.get(&interface_number).map(|interface| interface.enabled).unwrap_or(false) {
+            log::warn!("RxCompleteInterrupt for disabled interface {interface_number} EP{ep_num} ({byte_count} bytes)");
             return;
         }
 
@@ -868,8 +1037,18 @@ impl ScalarHandler<TxCompleteInterrupt> for UsbDeviceServer {
             return;
         }
 
+        let Some(interface_number) = self.endpoints.get(&msg.endpoint).map(|ep| ep.interface_number) else {
+            log::warn!("TxCompleteInterrupt for unknown EP{}", msg.endpoint);
+            return;
+        };
+        if !self.interfaces.get(&interface_number).map(|interface| interface.enabled).unwrap_or(false) {
+            log::warn!("TxCompleteInterrupt for disabled interface {interface_number} EP{}", msg.endpoint);
+            return;
+        }
+
         // EP1+: FIFO-mode write completion.
         let Some(ep) = self.endpoints.get_mut(&msg.endpoint) else {
+            log::warn!("TxCompleteInterrupt for unknown EP{}", msg.endpoint);
             return;
         };
         if let Some(ref wr) = ep.ongoing_write {
@@ -899,7 +1078,17 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
         }
         log::trace!("Dma interrupt: {msg:?}");
         let ep_num = msg.endpoint;
+        let Some(interface_number) = self.endpoints.get(&ep_num).map(|ep| ep.interface_number) else {
+            log::warn!("DmaInterrupt for unknown EP{ep_num}: {:?}", msg.status);
+            return;
+        };
+        if !self.interfaces.get(&interface_number).map(|interface| interface.enabled).unwrap_or(false) {
+            log::warn!("DmaInterrupt for disabled interface {interface_number} EP{ep_num}: {:?}", msg.status);
+            return;
+        }
+
         let Some(ep) = self.endpoints.get_mut(&ep_num) else {
+            log::warn!("DmaInterrupt for unknown EP{ep_num}: {:?}", msg.status);
             return;
         };
         // DMA read completion.

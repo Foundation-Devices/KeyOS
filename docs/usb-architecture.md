@@ -11,11 +11,16 @@ Descriptors (IAD) to group its three functions under a single configuration.
 | Product | Passport Prime |
 | Max Power | 32 mA (self-powered) |
 
-Each KeyOS server registers its interface(s) dynamically at boot by calling
-`register_interface()` on the central USB device server (`os/usb`). The interface
-numbers below reflect the default registration order in a standard development build.
+Each KeyOS server registers its interface(s) at boot by calling `register_interface()`
+on the central USB device server (`os/usb`) with a fixed interface number.
+Class-specific setup responders are attached to interface registration and are
+routed by `wIndex`. The interface numbers below reflect the normal fixed
+assignment with Developer Mode enabled.
 
-## USB Descriptor Tree — Normal Mode
+When Developer Mode is disabled, the debug interface is omitted from the active
+configuration descriptor and the device re-enumerates without it.
+
+## USB Descriptor Tree — Normal Mode, Developer Mode Enabled
 
 ```mermaid
 graph TD
@@ -25,8 +30,8 @@ graph TD
     DEV --> CFG
 
     IF0["<b>Interface 0 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
-    IF1["<b>Interface 1 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>non-production only</i>"]
-    IF2["<b>Interface 2 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
+    IF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
+    IF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs"]
 
     CFG --> IF0
     CFG --> IF1
@@ -40,21 +45,20 @@ graph TD
     HID["HID Report Descriptor<br/>Usage Page: 0xF1D0 (FIDO Alliance)<br/>Usage: U2F Authenticator<br/>64-byte IN + OUT reports"]
     IF0 --> HID
 
-    EP8O["EP 8 OUT<br/>Bulk · 512 B"]
+    EP4O["EP 4 OUT<br/>Bulk · 512 B · DMA"]
     EP3I["EP 3 IN<br/>Bulk · 512 B · DMA"]
-    IF1 --> EP8O
+    IF1 --> EP4O
     IF1 --> EP3I
 
-    EP5O["EP 5 OUT<br/>Bulk · 512 B · DMA"]
-    EP4I["EP 4 IN<br/>Bulk · 512 B · DMA"]
-    IF2 --> EP5O
-    IF2 --> EP4I
+    EP8O["EP 8 OUT<br/>Bulk · 512 B"]
+    EP5I["EP 5 IN<br/>Bulk · 512 B · DMA"]
+    IF2 --> EP8O
+    IF2 --> EP5I
 
-    style IF1 stroke-dasharray: 5 5
+    style IF2 stroke-dasharray: 5 5
 ```
 
-> Interface 1 (dashed) is excluded from production firmware by a `compile_error!` guard
-> in `os/usb-debug/src/main.rs`.
+> Interface 2 (dashed) is only visible at runtime when Developer Mode is enabled.
 
 ## USB Descriptor Tree — Legacy Mode (Flux Emulator Active)
 
@@ -72,7 +76,7 @@ graph TD
 
     LIF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Ledger APDU Transport"]
     LIF1["<b>Interface 1 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
-    LIF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>non-production only</i>"]
+    LIF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
     LIF3["<b>Interface 3 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
 
     CFG2 --> LIF0
@@ -124,8 +128,8 @@ graph LR
     FLUX["<b>gui-app-emu-flux</b><br/>Legacy HID<br/>Ledger APDU Transport<br/><i>when Flux app active</i>"]
 
     USB -- "IF 0 · HID 0x03" --- CTAP
-    USB -- "IF 1 · Vendor 0xFF" --- DBG
-    USB -- "IF 2 · MSC 0x08" --- MSE
+    USB -- "IF 1 · MSC 0x08" --- MSE
+    USB -- "IF 2 · Vendor 0xFF" --- DBG
     USB -. "IF 0 · HID 0x03<br/>promotes to IF 0<br/>+ changes VID:PID" .- FLUX
 
     FIDO["fido crate<br/>U2F + CTAP2"]
@@ -152,8 +156,8 @@ graph LR
 ## USB-Debug Interface — Protocol Reference
 
 The vendor-specific debug interface (class `0xFF`) carries both debug commands and
-system logs on a single pair of bulk endpoints. It is only present in non-production
-firmware builds (enabled automatically for all `just build` / `just sim` invocations).
+system logs on a single pair of bulk endpoints. It is only present when the
+`usb-debug` service is built and Developer Mode is enabled.
 
 **Source files:**
 - Device side: `os/usb-debug/src/main.rs`, `os/usb-debug/src/protocol.rs`
@@ -204,7 +208,21 @@ TYPE 0x02 — Debug response:
 | `0x06` | `KERNEL_CMD` | 1 B: command character (see below) | Kernel debug output (variable) |
 | `0x07` | `INPUT_TEXT` | UTF-8 text bytes | Ack (empty) |
 | `0x08` | `GET_VERSION` | — | UTF-8 KeyOS version bytes |
-| `0x09` | `LAUNCH_APP` | 16-byte AppId | `pid_lo pid_hi` (2 B LE) |
+| `0x09` | `LAUNCH_APP` | 16-byte AppId | `pid_lo pid_hi status` (3 B; status `0` launched, `1` already running) |
+| `0x0A` | `GET_DEVELOPER_MODE` | — | 1 B: `0` disabled, `1` enabled |
+| `0x0B` | `LOAD_APP_BEGIN` | UTF-8 sideloaded app-id directory name | Ack (empty) |
+| `0x0C` | `LOAD_APP_FILE_BEGIN` | `kind:1` + expected size as 8 B LE | Ack (empty) |
+| `0x0D` | `LOAD_APP_CHUNK` | File bytes, max 510 B per chunk | Ack; final chunk closes current file |
+| `0x0E` | `LOAD_APP_END` | — | Ack (empty) |
+| `0x0F` | `GET_PROCESS_LIST` | — | Compact process list output |
+
+`LOAD_APP_FILE_BEGIN` file kinds are `0x00` for `app.elf` and `0x01` for
+`manifest.json`. Normal uploads send `LOAD_APP_FILE_BEGIN`, then
+`LOAD_APP_CHUNK` frames until the declared size is reached; that final chunk
+flushes and promotes the current `.part` file. The `load_app` MCP tool drives
+`0x0B`, the per-file `0x0C`/`0x0D` uploads, and `0x0E`, then asks app-manager to
+rescan installed apps. In production builds, the device rejects `REBOOT_SAMBA`
+and `KERNEL_CMD`; the other commands above are allowed.
 
 **TAP touch kinds:** `0` = Press, `1` = Release, `2` = Drag. Screen coordinates:
 origin top-left, 480 x 800 pixels.
@@ -290,11 +308,25 @@ over USB. It is the most feature-complete host tool.
 - **Transport:** `rusb` crate. Auto-detects the vendor-specific interface (class
   `0xFF`) by iterating the USB config descriptor. A background reader thread
   demuxes IN frames into separate `log_rx` and `resp_rx` channels.
-- **Debug commands used:** All 9 (`0x01`–`0x09`).
+- **Debug commands used:** All device debug commands (`0x01`–`0x0F`) through the
+  CLI and MCP server.
+- **MCP tools over the debug interface:** `connect`, `disconnect`, `get_logs`,
+  `clear_logs`, `screenshot`, `tap`, `touch`, `power_button`,
+  `send_debug_command`, `send_kernel_command`, `reboot_to_samba`, `input_text`,
+  `close_app`, `load_app`, `launch_app`, `get_developer_mode`, `get_version`,
+  `get_process_list`.
 - **Additional capabilities:**
+  - Device discovery: `list_ports`.
   - SAM-BA bootloader mode: flash read / write / verify (via `sambuca` crate).
   - HID APDU exchange: CTAP/FIDO mode (usage page `0xF1D0`) and Ledger mode
     (VID `0x2C97`, usage page `0xFFA0`) on Interface 0.
+
+**MCP tools for SAM-BA mode:** `samba_list_devices`, `samba_connect`,
+`samba_disconnect`, `samba_version`, `samba_read_u32`, `samba_write_u32`,
+`samba_init_flash`, `samba_flash_info`, `samba_read_flash`,
+`samba_write_flash`, `samba_verify_flash`, `samba_reboot`.
+
+**MCP tool for HID APDU:** `send_apdu`.
 
 ### keyos-log-viewer
 
@@ -319,9 +351,10 @@ The SDK CLI for Flux app developers.
 - **`foundation logs`** — Launches `keyos-log-viewer` as a subprocess (no direct
   USB usage).
 - **`foundation sideload`** — Builds and signs the app, copies the ELF and manifest
-  to mass storage (Interface 2), then launches it through the `passport-drive`
+  to mass storage (Interface 1), then launches it through the `passport-drive`
   MCP server. The SDK package stages that helper as `foundation-passport-drive`.
-- **Debug commands used:** `0x09` only.
+- **Debug commands used:** `0x0A` for Developer Mode preflight and `0x09` to
+  launch the installed app, via the `passport-drive` MCP server.
 
 ### Tool Command Matrix
 
@@ -336,10 +369,16 @@ The SDK CLI for Flux app developers.
 | `0x07` INPUT_TEXT | x | | |
 | `0x08` GET_VERSION | x | | |
 | `0x09` LAUNCH_APP | x | | x |
+| `0x0A` GET_DEVELOPER_MODE | x | | x |
+| `0x0B` LOAD_APP_BEGIN | x | | |
+| `0x0C` LOAD_APP_FILE_BEGIN | x | | |
+| `0x0D` LOAD_APP_CHUNK | x | | |
+| `0x0E` LOAD_APP_END | x | | |
+| `0x0F` GET_PROCESS_LIST | x | | |
 | Log Streaming (TYPE 0x01) | x | x | |
 | SAM-BA Flash R/W | x | | |
 | HID APDU (CTAP + Ledger) | x | | |
-| Mass Storage (IF 2) | | | x |
+| Mass Storage (IF 1) | | | x |
 
 ---
 
@@ -356,7 +395,7 @@ re-enumerates with the Ledger Flex identity. When the Flux app exits, the normal
 VID:PID is restored and the bus re-enumerates again. Each transition is visible
 to the host as a USB disconnect followed by a new device appearing.
 
-All three host tools try the normal VID:PID first, then fall back to the Legacy one.
+The host tools try the normal VID:PID first, then fall back to the Legacy one.
 
 **CDC ACM serial** (`os/logging/usb-serial`): An optional logging transport that
 adds two extra interfaces (CDC control + CDC data). Excluded from normal builds;

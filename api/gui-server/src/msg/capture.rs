@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Messages for device capture (screenshot), touch injection, and key injection.
+//! Messages for device capture (screenshot), touch/key injection, and power-button injection.
 //! These work on both hardware and simulator — used by the passport-drive debug bridge.
 
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -40,6 +40,10 @@ pub struct InjectKey {
     pub is_pressed: bool,
     pub key: Key,
 }
+
+/// Injects a power button press or release into gui-server's power-button state machine.
+#[derive(Debug, server::Message)]
+pub struct InjectPowerButton(pub bool);
 
 impl AsScalar<3> for InjectKey {
     fn as_scalar(&self) -> [u32; 3] {

@@ -33,77 +33,102 @@
     ];
     forAllSystems = nixpkgs.lib.genAttrs systems;
   in {
-    devShells = forAllSystems (system: let
-      pkgs = import nixpkgs {inherit system;};
-      baseToolchain = fenix.packages.${system}.fromToolchainFile {
-        file = rustToolchainFile;
-        sha256 = rustToolchainSha256;
-      };
-      armv7aStd = fenix.packages.${system}.targets.armv7a-none-eabi.fromToolchainFile {
-        file = rustToolchainFile;
-        sha256 = rustToolchainSha256;
-      };
-      customTargetLib = pkgs.fetchzip {
-        url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.91.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
-        sha256 = "sha256-/69j8t7mcFk3o0BA+yW7NMLw0T9/CvKl4tBB5w+s7vI=";
-        stripRoot = false;
-      };
-      rustKeyos = fenix.packages.${system}.combine [
-        baseToolchain
-        armv7aStd
-        customTargetLib
-      ];
-    in {
-      default = pkgs.mkShell {
-        packages = with pkgs; [
-          clang
-          gcc-arm-embedded
-          git
-          gnumake
-          openssl
-          pkg-config
-          rustKeyos
+    devShells = forAllSystems (
+      system: let
+        pkgs = import nixpkgs {inherit system;};
+        baseToolchain = fenix.packages.${system}.fromToolchainFile {
+          file = rustToolchainFile;
+          sha256 = rustToolchainSha256;
+        };
+        armv7aStd = fenix.packages.${system}.targets.armv7a-none-eabi.fromToolchainFile {
+          file = rustToolchainFile;
+          sha256 = rustToolchainSha256;
+        };
+        customTargetLib = pkgs.fetchzip {
+          url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.91.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
+          sha256 = "sha256-/69j8t7mcFk3o0BA+yW7NMLw0T9/CvKl4tBB5w+s7vI=";
+          stripRoot = false;
+        };
+        rustKeyos = fenix.packages.${system}.combine [
+          baseToolchain
+          armv7aStd
+          customTargetLib
         ];
+      in {
+        default = pkgs.mkShell {
+          packages = with pkgs;
+            [
+              clang
+              fontconfig
+              gcc-arm-embedded
+              git
+              gnumake
+              openssl
+              pkg-config
+              rustKeyos
+              zlib
+            ]
+            ++ lib.optionals stdenv.isLinux [
+              systemd
+            ];
 
-        shellHook = ''
-          export FOUNDATION_SDK_ROOT="''${FOUNDATION_SDK_ROOT:-$PWD}"
-          export FOUNDATION_SDK_BIN="''${FOUNDATION_SDK_BIN:-$FOUNDATION_SDK_ROOT/bin}"
+          LD_LIBRARY_PATH = with pkgs;
+            lib.makeLibraryPath (
+              [
+                fontconfig
+                zlib
+              ]
+              ++ lib.optionals stdenv.isLinux [
+                libGL
+                libxkbcommon
+                systemd
+                xorg.libX11
+                xorg.libXcursor
+                xorg.libXi
+                wayland
+              ]
+            );
 
-          if [ "$(uname -s)" = "Darwin" ]; then
-            unset DEVELOPER_DIR SDKROOT || true
+          shellHook = ''
+            export FOUNDATION_SDK_ROOT="''${FOUNDATION_SDK_ROOT:-$PWD}"
+            export FOUNDATION_SDK_BIN="''${FOUNDATION_SDK_BIN:-$FOUNDATION_SDK_ROOT/bin}"
 
-            if [ -x /usr/bin/xcode-select ]; then
-              FOUNDATION_DEVELOPER_DIR="$(
-                /usr/bin/xcode-select -p 2>/dev/null || true
-              )"
-              if [ -n "$FOUNDATION_DEVELOPER_DIR" ]; then
-                export DEVELOPER_DIR="$FOUNDATION_DEVELOPER_DIR"
+            if [ "$(uname -s)" = "Darwin" ]; then
+              unset DEVELOPER_DIR SDKROOT || true
+
+              if [ -x /usr/bin/xcode-select ]; then
+                FOUNDATION_DEVELOPER_DIR="$(
+                  /usr/bin/xcode-select -p 2>/dev/null || true
+                )"
+                if [ -n "$FOUNDATION_DEVELOPER_DIR" ]; then
+                  export DEVELOPER_DIR="$FOUNDATION_DEVELOPER_DIR"
+                fi
               fi
+
+              if [ -x /usr/bin/xcrun ]; then
+                FOUNDATION_SDKROOT="$(
+                  /usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true
+                )"
+                if [ -n "$FOUNDATION_SDKROOT" ]; then
+                  export SDKROOT="$FOUNDATION_SDKROOT"
+                fi
+              fi
+
+              export CC="/usr/bin/cc"
+              export CXX="/usr/bin/c++"
+              export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="/usr/bin/cc"
+              export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="/usr/bin/cc"
             fi
 
-            if [ -x /usr/bin/xcrun ]; then
-              FOUNDATION_SDKROOT="$(
-                /usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true
-              )"
-              if [ -n "$FOUNDATION_SDKROOT" ]; then
-                export SDKROOT="$FOUNDATION_SDKROOT"
-              fi
+            if [ -d "$FOUNDATION_SDK_BIN" ]; then
+              export PATH="$FOUNDATION_SDK_BIN:$PATH"
             fi
 
-            export CC="/usr/bin/cc"
-            export CXX="/usr/bin/c++"
-            export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="/usr/bin/cc"
-            export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="/usr/bin/cc"
-          fi
-
-          if [ -d "$FOUNDATION_SDK_BIN" ]; then
-            export PATH="$FOUNDATION_SDK_BIN:$PATH"
-          fi
-
-          echo "Foundation SDK user shell ready."
-          echo "Run: foundation doctor"
-        '';
-      };
-    });
+            echo "Foundation SDK user shell ready."
+            echo "Run: foundation doctor"
+          '';
+        };
+      }
+    );
   };
 }

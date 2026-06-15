@@ -39,7 +39,7 @@ template = ["gui-app", "fs-generic"]
     "GetUsbReadAccess",
     "GetUsbWriteAccess",
 ]
-"os/gui-server" = ["SwitchToLauncher", "UpdateKioskPolicy", "ClaimSettingsRole"]
+"os/gui-server" = ["SwitchTo", "SwitchToLauncher", "UpdateKioskPolicy", "ClaimSettingsRole"]
 "os/settings" = [
     "GetTimeZone",
     "SetTimeZone",
@@ -61,8 +61,8 @@ template = ["gui-app", "fs-generic"]
     "SetEnvoyTimeSync",
     "GetMagicBackupEnabled",
     "SetMagicBackupEnabled",
-    "GetDeveloperMode",
     "SetDeveloperMode",
+    "SubscribeDeveloperMode",
     "GetLocale",
     "GetPrimeColor",
     "GetOnboardingStatus",

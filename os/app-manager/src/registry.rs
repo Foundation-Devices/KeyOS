@@ -45,10 +45,18 @@ enum AppSource {
     ThirdParty,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct AppBinaryMetadata {
     version: String,
     size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum ThirdPartySignatureCache {
+    #[default]
+    Unknown,
+    Verified([u8; 33]),
+    Invalid([u8; 33]),
 }
 
 /// Removes sub-rules with invalid regex patterns, then removes rules that become empty.
@@ -97,6 +105,8 @@ pub(crate) struct AppInfo {
     source: AppSource,
     #[cfg_attr(not(keyos), allow(dead_code))]
     is_flux: bool,
+    binary_metadata: Option<AppBinaryMetadata>,
+    third_party_signature_cache: ThirdPartySignatureCache,
 }
 
 #[cfg(any(keyos, test))]
@@ -154,6 +164,11 @@ impl AppRegistry {
             Ok(apps_list) => {
                 for app in apps_list {
                     let app_label = app.elf_path.as_deref().unwrap_or(apps_dir).to_string();
+                    if source == AppSource::ThirdParty
+                        && !sideloaded_app_has_cosign2_header(app.elf_path.as_deref(), &app.manifest.app_id)
+                    {
+                        continue;
+                    }
                     if Self::insert_app(installed_apps, app.elf_path, app.manifest, source, is_flux) {
                         register_manifest_with_names(&app.manifest_bytes, &app_label);
                     }
@@ -220,11 +235,20 @@ impl AppRegistry {
 
         prune_qr_match_rules(&mut manifest.qr_match_rules, &app_id);
 
-        installed_apps.insert(app_id, AppInfo { id: app_id, elf_path, manifest, source, is_flux });
+        installed_apps.insert(
+            app_id,
+            AppInfo {
+                id: app_id,
+                elf_path,
+                manifest,
+                source,
+                is_flux,
+                binary_metadata: None,
+                third_party_signature_cache: ThirdPartySignatureCache::Unknown,
+            },
+        );
         true
     }
-
-    pub(crate) fn refresh_installed_apps(&mut self) -> anyhow::Result<()> { self.scan_installed_apps() }
 
     pub(crate) fn app_name_by_id(&self, id: &AppId, locale: &str) -> Option<String> {
         self.installed_apps
@@ -259,21 +283,23 @@ impl AppRegistry {
     }
 
     pub(crate) fn installed_apps(
-        &self,
+        &mut self,
         locale: &str,
         trusted_publishers: &[ThirdPartyCertificateInfo],
     ) -> Vec<InstalledAppInfo> {
         let mut apps = self
             .installed_apps
-            .values()
+            .values_mut()
             .filter(|app_info| app_info.is_third_party())
             .map(|app_info| {
                 let name = app_info.localized_name(locale);
                 let binary_metadata = app_info.binary_metadata();
+                let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
                 let mut installed_app = InstalledAppInfo {
                     app_id: format!("0x{}", hex::encode(app_info.id.0)),
                     bundled_icon_path: app_info.bundled_icon_file_path(),
-                    publisher: app_info.publisher(trusted_publishers),
+                    publisher,
+                    can_launch,
                     version: binary_metadata.version.clone(),
                     size_bytes: binary_metadata.size_bytes,
                     description: app_info.description(),
@@ -290,17 +316,15 @@ impl AppRegistry {
     }
 
     pub(crate) fn app_name_requiring_third_party_key(
-        &self,
+        &mut self,
         public_key: &str,
         locale: &str,
     ) -> Option<String> {
         let public_key = crate::third_party_certs::decode_public_key_hex(public_key)?;
 
-        self.installed_apps
-            .values()
-            .filter(|app_info| app_info.is_third_party())
-            .find(|app_info| app_info.has_verified_third_party_signature(public_key))
-            .map(|app_info| app_info.localized_name(locale))
+        self.installed_apps.values_mut().filter(|app_info| app_info.is_third_party()).find_map(|app_info| {
+            app_info.has_verified_third_party_signature(public_key).then(|| app_info.localized_name(locale))
+        })
     }
 
     pub(crate) fn list_apps(
@@ -410,16 +434,44 @@ impl AppInfo {
             .collect()
     }
 
-    fn publisher(&self, trusted_publishers: &[ThirdPartyCertificateInfo]) -> String {
+    fn publisher_and_launchable(
+        &mut self,
+        trusted_publishers: &[ThirdPartyCertificateInfo],
+    ) -> (String, bool) {
         if self.is_built_in() {
-            return FOUNDATION_PUBLISHER.to_string();
+            return (FOUNDATION_PUBLISHER.to_string(), true);
         }
 
-        self.elf_path
-            .as_deref()
-            .and_then(|elf_path| app_verified_third_party_publisher(elf_path, trusted_publishers))
-            .map(|publisher| publisher.name.clone())
-            .unwrap_or_default()
+        match self.verified_third_party_publisher(trusted_publishers) {
+            Some(publisher) => (publisher.name.clone(), true),
+            None => (String::new(), false),
+        }
+    }
+
+    fn verified_third_party_publisher<'a>(
+        &mut self,
+        trusted_publishers: &'a [ThirdPartyCertificateInfo],
+    ) -> Option<&'a ThirdPartyCertificateInfo> {
+        match self.third_party_signature_cache {
+            ThirdPartySignatureCache::Verified(public_key) => {
+                return trusted_publisher_by_key(trusted_publishers, public_key);
+            }
+            ThirdPartySignatureCache::Invalid(_) => return None,
+            ThirdPartySignatureCache::Unknown => {}
+        }
+
+        let elf_path = self.elf_path.as_deref()?;
+        let header = read_third_party_app_header(elf_path)?;
+        let (publisher, public_key) = trusted_publisher_matching_header(&header, trusted_publishers)?;
+
+        let verified = app_verified_third_party_header_after_prefilter(elf_path, public_key).is_some();
+        self.third_party_signature_cache = if verified {
+            ThirdPartySignatureCache::Verified(public_key)
+        } else {
+            ThirdPartySignatureCache::Invalid(public_key)
+        };
+
+        verified.then_some(publisher)
     }
 
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
@@ -474,18 +526,43 @@ impl AppInfo {
         Some(format!("{app_dir}/{icon}"))
     }
 
-    fn binary_metadata(&self) -> AppBinaryMetadata {
-        self.elf_path.as_deref().map(app_binary_metadata).unwrap_or_default()
+    fn binary_metadata(&mut self) -> AppBinaryMetadata {
+        if self.binary_metadata.is_none() {
+            self.binary_metadata =
+                Some(self.elf_path.as_deref().map(app_binary_metadata).unwrap_or_default());
+        }
+        self.binary_metadata.clone().unwrap_or_default()
     }
 
     fn is_built_in(&self) -> bool { self.source == AppSource::BuiltIn }
 
     fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
 
-    fn has_verified_third_party_signature(&self, public_key: [u8; 33]) -> bool {
-        self.elf_path
-            .as_deref()
-            .is_some_and(|elf_path| app_has_verified_third_party_signature(elf_path, public_key))
+    fn has_verified_third_party_signature(&mut self, public_key: [u8; 33]) -> bool {
+        match self.third_party_signature_cache {
+            ThirdPartySignatureCache::Verified(cached_key) => return cached_key == public_key,
+            ThirdPartySignatureCache::Invalid(cached_key) if cached_key == public_key => return false,
+            ThirdPartySignatureCache::Invalid(_) => {}
+            ThirdPartySignatureCache::Unknown => {}
+        }
+
+        let Some(elf_path) = self.elf_path.as_deref() else {
+            return false;
+        };
+        let Some(header) = read_third_party_app_header(elf_path) else {
+            return false;
+        };
+        if !third_party_header_uses_key(&header, public_key) {
+            return false;
+        }
+
+        let verified = app_verified_third_party_header_after_prefilter(elf_path, public_key).is_some();
+        self.third_party_signature_cache = if verified {
+            ThirdPartySignatureCache::Verified(public_key)
+        } else {
+            ThirdPartySignatureCache::Invalid(public_key)
+        };
+        verified
     }
 }
 
@@ -503,49 +580,59 @@ fn read_cosign2_header_from_reader(reader: &mut impl Read) -> Option<cosign2::He
         .flatten()
 }
 
-fn app_has_verified_third_party_signature(elf_path: &str, public_key: [u8; 33]) -> bool {
-    app_verified_third_party_header(elf_path, public_key).is_some()
-}
-
-fn app_verified_third_party_publisher<'a>(
-    elf_path: &str,
-    trusted_publishers: &'a [ThirdPartyCertificateInfo],
-) -> Option<&'a ThirdPartyCertificateInfo> {
-    let header = match read_app_header(elf_path) {
-        Ok(Some(header)) => header,
-        Ok(None) => return None,
+fn read_third_party_app_header(elf_path: &str) -> Option<cosign2::Header> {
+    match read_app_header(elf_path) {
+        Ok(Some(header)) => Some(header),
+        Ok(None) => None,
         Err(e) => {
             log::warn!("failed to read app header for third-party key check {elf_path}: {e:?}");
-            return None;
+            None
         }
-    };
-
-    let publisher = trusted_publishers.iter().find(|publisher| {
-        crate::third_party_certs::decode_public_key_hex(&publisher.public_key)
-            .is_some_and(|public_key| third_party_header_uses_key(&header, public_key))
-    })?;
-
-    let public_key = crate::third_party_certs::decode_public_key_hex(&publisher.public_key)?;
-    app_verified_third_party_header_after_prefilter(elf_path, public_key).map(|_| publisher)
-}
-
-fn app_verified_third_party_header(elf_path: &str, public_key: [u8; 33]) -> Option<cosign2::Header> {
-    let header = match read_app_header(elf_path) {
-        Ok(Some(header)) => header,
-        Ok(None) => return None,
-        Err(e) => {
-            log::warn!("failed to read app header for third-party key check {elf_path}: {e:?}");
-            return None;
-        }
-    };
-
-    if !third_party_header_uses_key(&header, public_key) {
-        return None;
     }
-
-    app_verified_third_party_header_after_prefilter(elf_path, public_key)
 }
 
+#[cfg(any(keyos, test))]
+fn sideloaded_app_has_cosign2_header(elf_path: Option<&str>, app_id: &[u8; 16]) -> bool {
+    let app_id = hex::encode(app_id);
+    let Some(elf_path) = elf_path else {
+        log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: missing app.elf path");
+        return false;
+    };
+
+    match read_app_header(elf_path) {
+        Ok(Some(_)) => true,
+        Ok(None) => {
+            log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: missing cosign2 header");
+            false
+        }
+        Err(e) => {
+            log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: cannot read app.elf: {e:?}");
+            false
+        }
+    }
+}
+
+fn trusted_publisher_by_key(
+    trusted_publishers: &[ThirdPartyCertificateInfo],
+    public_key: [u8; 33],
+) -> Option<&ThirdPartyCertificateInfo> {
+    trusted_publishers.iter().find(|publisher| {
+        crate::third_party_certs::decode_public_key_hex(&publisher.public_key) == Some(public_key)
+    })
+}
+
+fn trusted_publisher_matching_header<'a>(
+    header: &cosign2::Header,
+    trusted_publishers: &'a [ThirdPartyCertificateInfo],
+) -> Option<(&'a ThirdPartyCertificateInfo, [u8; 33])> {
+    trusted_publishers.iter().find_map(|publisher| {
+        crate::third_party_certs::decode_public_key_hex(&publisher.public_key)
+            .filter(|public_key| third_party_header_uses_key(header, *public_key))
+            .map(|public_key| (publisher, public_key))
+    })
+}
+
+#[cfg(not(test))]
 fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::Result<cosign2::Header> {
     Ok(fw_utils::hash::verify_cosign2_mem_with_third_party_keys(
         &crate::CryptoApi::default(),
@@ -553,6 +640,55 @@ fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::
         &[public_key],
         true,
     )?)
+}
+
+#[cfg(test)]
+fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::Result<cosign2::Header> {
+    use sha2::{Digest, Sha256};
+
+    struct TestSha256;
+
+    impl cosign2::Sha256 for TestSha256 {
+        fn hash(&self, data: &[u8]) -> [u8; 32] { Sha256::digest(data).into() }
+    }
+
+    struct TestSecp256k1Verify;
+
+    impl cosign2::Secp256k1Verify for TestSecp256k1Verify {
+        fn verify_ecdsa(
+            &self,
+            msg: [u8; 32],
+            signature: [u8; 64],
+            pubkey: [u8; 33],
+        ) -> cosign2::VerificationResult {
+            let Ok(public_key) = secp256k1::PublicKey::from_slice(&pubkey) else {
+                return cosign2::VerificationResult::Invalid;
+            };
+            let Ok(signature) = secp256k1::ecdsa::Signature::from_compact(&signature) else {
+                return cosign2::VerificationResult::Invalid;
+            };
+
+            let secp = secp256k1::Secp256k1::verification_only();
+            if secp.verify_ecdsa(&secp256k1::Message::from_digest(msg), &signature, &public_key).is_ok() {
+                cosign2::VerificationResult::Valid
+            } else {
+                cosign2::VerificationResult::Invalid
+            }
+        }
+    }
+
+    let Some(header) =
+        cosign2::Header::parse(bytes, &[], &TestSha256, &TestSecp256k1Verify, cosign2::Header::DEFAULT_SIZE)
+            .map_err(|e| anyhow::anyhow!("cosign2 parse error: {e:?}"))?
+    else {
+        anyhow::bail!("missing cosign2 header");
+    };
+
+    if third_party_header_uses_key(&header, public_key) {
+        Ok(header)
+    } else {
+        anyhow::bail!("third-party header does not use expected key");
+    }
 }
 
 fn app_verified_third_party_header_after_prefilter(
@@ -722,6 +858,8 @@ mod tests {
             },
             source,
             is_flux: false,
+            binary_metadata: None,
+            third_party_signature_cache: ThirdPartySignatureCache::Unknown,
         }
     }
 
@@ -873,8 +1011,35 @@ mod tests {
     }
 
     #[test]
+    fn sideloaded_app_header_check_accepts_signed_app() {
+        let root = make_temp_dir("signed-header-check");
+        let elf_path = root.join("app.elf");
+        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
+        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
+
+        assert!(sideloaded_app_has_cosign2_header(
+            Some(elf_path.to_str().unwrap()),
+            &app_manifest::parse_app_id_bytes(THIRD_PARTY_APP_ID).unwrap()
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sideloaded_app_header_check_rejects_unsigned_app() {
+        let root = make_temp_dir("unsigned-header-check");
+        let elf_path = root.join("app.elf");
+        fs::write(&elf_path, b"unsigned app").unwrap();
+
+        assert!(!sideloaded_app_has_cosign2_header(
+            Some(elf_path.to_str().unwrap()),
+            &app_manifest::parse_app_id_bytes(THIRD_PARTY_APP_ID).unwrap()
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn installed_apps_excludes_built_in_apps() {
-        let registry = registry_with(vec![
+        let mut registry = registry_with(vec![
             built_in_app_info(
                 "0x426974636f696e2057616c6c65740000",
                 "Bitcoin Wallet",
@@ -891,7 +1056,7 @@ mod tests {
 
     #[test]
     fn installed_apps_excludes_system_manifests_without_app_file() {
-        let registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
+        let mut registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
 
         assert!(registry.installed_apps("en", &[]).is_empty());
     }
@@ -931,7 +1096,7 @@ mod tests {
         let public_key = signer.public_key();
         fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
 
-        let registry = registry_with(vec![app_info(
+        let mut registry = registry_with(vec![app_info(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some(elf_path.to_str().unwrap()),
@@ -952,7 +1117,7 @@ mod tests {
         let public_key = signer.public_key();
         fs::write(&elf_path, third_party_app_bytes(&InvalidSignatureSigner { public_key })).unwrap();
 
-        let registry = registry_with(vec![app_info(
+        let mut registry = registry_with(vec![app_info(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some(elf_path.to_str().unwrap()),
@@ -976,7 +1141,7 @@ mod tests {
             .set_len(MAX_THIRD_PARTY_KEY_CHECK_APP_SIZE + 1)
             .unwrap();
 
-        let registry = registry_with(vec![app_info(
+        let mut registry = registry_with(vec![app_info(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some(elf_path.to_str().unwrap()),
@@ -995,7 +1160,7 @@ mod tests {
         fs::write(&elf_path, b"elf").unwrap();
         fs::write(&icon_path, b"icon").unwrap();
 
-        let registry = registry_with(vec![app_info_with_icon(
+        let mut registry = registry_with(vec![app_info_with_icon(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some(elf_path.to_str().unwrap()),
@@ -1045,7 +1210,7 @@ mod tests {
         fs::write(&elf_path, b"elf").unwrap();
         fs::write(&icon_path, b"icon").unwrap();
 
-        let registry = registry_with(vec![app_info_with_icon(
+        let mut registry = registry_with(vec![app_info_with_icon(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some(elf_path.to_str().unwrap()),
@@ -1068,11 +1233,12 @@ mod tests {
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
         app.manifest.version = Some("1.2.3".to_string());
-        let registry = registry_with(vec![app]);
+        let mut registry = registry_with(vec![app]);
 
         let apps = registry.installed_apps("en", &[]);
 
         assert!(apps[0].publisher.is_empty());
+        assert!(!apps[0].can_launch);
         assert_eq!(apps[0].description, "Example description");
         assert!(apps[0].version.is_empty());
     }
@@ -1091,7 +1257,7 @@ mod tests {
                 .map(|index| format!("{index:02}-{}", "é".repeat(INSTALLED_APP_PERMISSION_LINE_MAX_BYTES)))
                 .collect::<BTreeSet<_>>(),
         )]);
-        let registry = registry_with(vec![app]);
+        let mut registry = registry_with(vec![app]);
 
         let apps = registry.installed_apps("en", &[]);
 
@@ -1114,11 +1280,62 @@ mod tests {
 
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(elf_path.to_str().unwrap()));
         app.manifest.publisher = Some("Spoofed Manifest Publisher".to_string());
-        let registry = registry_with(vec![app]);
+        let mut registry = registry_with(vec![app]);
 
         let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
 
         assert_eq!(apps[0].publisher, "Verified Publisher");
+        assert!(apps[0].can_launch);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn installed_apps_verifies_after_matching_publisher_becomes_trusted() {
+        let root = make_temp_dir("deferred-publisher");
+        let elf_path = root.join("app.elf");
+        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
+        let public_key = signer.public_key();
+        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
+
+        let mut registry = registry_with(vec![app_info(
+            THIRD_PARTY_APP_ID,
+            "Example App",
+            Some(elf_path.to_str().unwrap()),
+        )]);
+
+        let apps = registry.installed_apps("en", &[]);
+        assert!(apps[0].publisher.is_empty());
+        assert!(!apps[0].can_launch);
+
+        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
+        assert_eq!(apps[0].publisher, "Verified Publisher");
+        assert!(apps[0].can_launch);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn installed_apps_reuses_verified_publisher_until_registry_refresh() {
+        let root = make_temp_dir("cached-publisher");
+        let elf_path = root.join("app.elf");
+        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
+        let public_key = signer.public_key();
+        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
+
+        let mut registry = registry_with(vec![app_info(
+            THIRD_PARTY_APP_ID,
+            "Example App",
+            Some(elf_path.to_str().unwrap()),
+        )]);
+
+        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
+        assert_eq!(apps[0].publisher, "Verified Publisher");
+        assert!(apps[0].can_launch);
+
+        // The Settings-list cache is invalidated by a registry refresh after
+        // sideload writes. App launch still performs full verification.
+        fs::write(&elf_path, b"not a signed app").unwrap();
+        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Renamed Publisher")]);
+        assert_eq!(apps[0].publisher, "Renamed Publisher");
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1131,7 +1348,7 @@ mod tests {
         );
         app.manifest.publisher = Some("Different Publisher".to_string());
 
-        assert_eq!(app.publisher(&[]), FOUNDATION_PUBLISHER);
+        assert_eq!(app.publisher_and_launchable(&[]), (FOUNDATION_PUBLISHER.to_string(), true));
     }
 
     fn make_temp_dir(label: &str) -> std::path::PathBuf {
@@ -1145,7 +1362,6 @@ mod tests {
     // QR match-rule pruning tests (`prune_qr_match_rules`).
     // ---------------------------------------------------------------------------------------------
 
-    use app_manager::decode_app_id_str;
     use app_manifest::{QrMatchRule, QrMatchSubRule, QrPriority};
 
     fn qr_app_id() -> AppId { AppId([0u8; app_manifest::APP_ID_BYTE_LEN]) }

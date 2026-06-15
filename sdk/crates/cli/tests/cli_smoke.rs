@@ -144,7 +144,7 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     let signing_root = env.home().join(".foundation").join("signing").join("Smoke Publisher");
     assert!(signing_root.join("private.pem").exists());
     assert!(signing_root.join("public.pub").exists());
-    assert!(signing_root.join("certificate.crt").exists());
+    assert!(signing_root.join("Smoke Publisher.crt").exists());
     assert!(signing_root.join("cosign2.toml").exists());
 
     let print_cert = env.command().arg("cert").arg("print").arg("Smoke Publisher").output().unwrap();
@@ -170,24 +170,20 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(built_manifest_contents.contains("os/gui-server"));
     assert!(built_manifest_contents.contains("os/settings"));
 
-    let mount = env.root.join("prime");
-    fs::create_dir_all(&mount).unwrap();
     let sideload = env
         .command_in(env.app_root())
         .env("IN_NIX_SHELL", "1")
         .arg("sideload")
         .arg("--no-run")
-        .arg("--mount-path")
-        .arg(&mount)
         .output()
         .unwrap();
     assert!(sideload.status.success(), "sideload failed: {}", stderr(&sideload));
-    let sideloaded_app = mount.join("keyos").join("sideloaded-apps").join("00112233445566778899aabbccddeeff");
-    assert!(sideloaded_app.join("app.elf").exists());
-    assert!(sideloaded_app.join("manifest.json").exists());
-    assert!(sideloaded_app.join("icon.bin").exists());
-    assert!(sideloaded_app.join("resources").join(".foundation").join("icon.raw").exists());
-    assert!(!mount.join("keyos").join("common").exists());
+    let passport_drive_log = env.read_log("passport-drive.log");
+    assert!(passport_drive_log.contains("\"name\":\"load_app\""), "missing load_app call: {passport_drive_log}");
+    assert!(
+        passport_drive_log.contains("target/keyos/smoke-app"),
+        "load_app did not receive built artifact dir: {passport_drive_log}"
+    );
 
     let sim = env.command_in(env.app_root()).arg("sim").output().unwrap();
     assert!(sim.status.success(), "sim failed: {}", stderr(&sim));
@@ -543,7 +539,9 @@ esac
         self.write_script(
             self.fake_bin.join("foundation-passport-drive"),
             r#"#!/bin/sh
+log="$(dirname "$0")/../passport-drive.log"
 while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   if [ -z "$id" ]; then
     continue

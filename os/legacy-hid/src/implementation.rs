@@ -213,20 +213,25 @@ impl HidInEndpoint {
 #[cfg(keyos)]
 fn start_hid() -> HidInEndpoint {
     let mut usb_api = UsbDeviceEmulation::default();
-    usb_api.register_setup_responder(SetupResponder { interface_num: HID_INTERFACE_NUMBER as u16 }).unwrap();
-    let [hid_ep_in, hid_ep_out] = usb_api
+    let (hid_interface, [hid_ep_in, hid_ep_out]) = usb_api
         .register_interface(
-            HID_INTERFACE_NUMBER,
-            HID_INTERFACE_CLASS,
-            HID_INTERFACE_SUBCLASS,
-            HID_INTERFACE_PROTOCOL,
-            &HID_ENDPOINTS,
-            &HID_FUNC_DESCRIPTOR,
-            0,
+            UsbInterfaceConfig::new(
+                HID_INTERFACE_NUMBER,
+                HID_INTERFACE_CLASS,
+                HID_INTERFACE_SUBCLASS,
+                HID_INTERFACE_PROTOCOL,
+                &HID_ENDPOINTS,
+            )
+            .with_functional_descriptors(&HID_FUNC_DESCRIPTOR)
+            .with_setup_responder(Some(SetupResponder { interface_num: HID_INTERFACE_NUMBER as u16 })),
         )
         .unwrap();
 
-    std::thread::spawn(|| out_thread(hid_ep_out));
+    if let Err(e) = hid_interface.set_enabled(true) {
+        log::error!("legacy-hid: failed to enable USB HID interface: {e:?}");
+    } else {
+        std::thread::spawn(|| out_thread(hid_ep_out));
+    }
     HidInEndpoint::new(hid_ep_in)
 }
 

@@ -222,8 +222,8 @@ fn build_cert_print_command() -> Command {
 
 fn build_sideload_command() -> Command {
     Command::new(CMD_SIDELOAD)
-        .about("Build, sign, copy, and launch on hardware over USB")
-        .long_about("Builds and signs the application, copies it to a connected Passport Prime over USB storage, and launches it through passport-drive MCP by default")
+        .about("Build, sign, upload, and launch on hardware over usb-debug")
+        .long_about("Builds and signs the application, uploads it to a connected Passport Prime over usb-debug, and launches it through passport-drive MCP by default")
         .arg(
             Arg::new("release")
                 .long("release")
@@ -234,20 +234,8 @@ fn build_sideload_command() -> Command {
         .arg(
             Arg::new("no-run")
                 .long("no-run")
-                .help("Copy the app bundle to the device but do not launch it afterward")
+                .help("Upload the app bundle to the device but do not launch it afterward")
                 .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("mount-path")
-                .long("mount-path")
-                .help("Mounted PRIME volume path to use instead of auto-detection")
-                .value_name("PATH"),
-        )
-        .arg(
-            Arg::new("serial-port")
-                .long("serial-port")
-                .help("USB serial/debug device path to use instead of auto-detection")
-                .value_name("PATH"),
         )
 }
 

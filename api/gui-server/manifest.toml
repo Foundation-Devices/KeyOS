@@ -15,7 +15,7 @@ RequestRedraw = { id = 23, type = "scalar" }
 Shutdown = { id = 29, type = "blockingScalar" }
 SimulatePowerButton = { id = 33, type = "scalar", cfg = "not(keyos)" }
 SwitchToLauncher = { id = 34, type = "blockingScalar" }
-CloseApp = { id = 35, type = "scalar" }
+CloseApp = { id = 35, type = "blockingScalar" }
 AnimateNextFrame = { id = 39, type = "scalar" }
 NavigateTo = { id = 40, type = "blockingArchive" }
 ShowModal = { id = 44, type = "blockingArchive" }
@@ -30,6 +30,8 @@ InjectTouch = { id = 55, type = "scalar" }
 InjectKey = { id = 56, type = "scalar" }
 RunApp = { id = 57, type = "blockingArchive" }
 UpdateKioskPolicy = { id = 58, type = "scalar" }
+IsLocked = { id = 59, type = "blockingScalar" }
+InjectPowerButton = { id = 60, type = "scalar" }
 
 # Privileged registrations
 RegisterControlCenter = { id = 127, type = "blockingArchive" }

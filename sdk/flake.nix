@@ -22,7 +22,6 @@
         if builtins.pathExists ./nix/foundation-slint.nix
         then ./nix
         else ../nix;
-    })
-    .outputs
+    }).outputs
     inputs;
 }
