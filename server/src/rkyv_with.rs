@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rkyv::{
     with::{ArchiveWith, DeserializeWith, SerializeWith},
-    Archive, Archived, Place, Serialize,
+    Archive, Archived, Deserialize, Place, Serialize,
 };
 
 /// A custom UnixTimestamp implementation that doesn't have an error.
@@ -41,5 +41,38 @@ where
 {
     fn deserialize_with(field: &Archived<Duration>, _: &mut D) -> Result<SystemTime, D::Error> {
         Ok(UNIX_EPOCH + Duration::from(*field))
+    }
+}
+
+pub struct WithAppId;
+
+impl ArchiveWith<xous::AppId> for WithAppId {
+    type Archived = Archived<[u32; 4]>;
+    type Resolver = <[u32; 4] as Archive>::Resolver;
+
+    #[inline]
+    fn resolve_with(field: &xous::AppId, resolver: Self::Resolver, out: Place<Self::Archived>) {
+        let words: [u32; 4] = field.into();
+        Archive::resolve(&words, resolver, out);
+    }
+}
+
+impl<S> SerializeWith<xous::AppId, S> for WithAppId
+where
+    S: rkyv::rancor::Fallible + ?Sized,
+{
+    fn serialize_with(field: &xous::AppId, s: &mut S) -> Result<Self::Resolver, S::Error> {
+        let words: [u32; 4] = field.into();
+        words.serialize(s)
+    }
+}
+
+impl<D> DeserializeWith<Archived<[u32; 4]>, xous::AppId, D> for WithAppId
+where
+    D: rkyv::rancor::Fallible + ?Sized,
+{
+    fn deserialize_with(field: &Archived<[u32; 4]>, d: &mut D) -> Result<xous::AppId, D::Error> {
+        let words = field.deserialize(d)?;
+        Ok(words.into())
     }
 }

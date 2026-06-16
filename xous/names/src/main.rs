@@ -88,7 +88,7 @@ impl NameServer {
                 if owner_app_id != app_id {
                     log::error!(
                         "Rejected manifest for `{app_name}`: server `{server_name}` is already owned by app_id=0x{}",
-                        hex::encode(owner_app_id.0)
+                        owner_app_id
                     );
                     return Err(xous::Error::MemoryInUse);
                 }

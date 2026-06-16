@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use num_traits::{FromPrimitive, ToPrimitive};
-use server::SimpleMemoryMessage;
-use xous::MemoryRange;
+use server::{rkyv_with::WithAppId, SimpleMemoryMessage};
+use xous::{AppId, MemoryRange};
 
 use crate::{
     DirEntry, DirHandle, Error, FileHandle, FileSystemEvent, Location, MappedFileInTheirSpace, Metadata,
@@ -72,7 +72,8 @@ pub enum AppResourcesRoot {
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<(), Error>)]
 pub struct RegisterAppResources {
-    pub app_id: [u8; xous::APP_ID_SIZE],
+    #[rkyv(with = WithAppId)]
+    pub app_id: AppId,
     pub root: AppResourcesRoot,
     pub app_dir: String,
 }

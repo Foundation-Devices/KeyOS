@@ -611,6 +611,16 @@ impl AppId {
     }
 }
 
+impl core::fmt::Display for AppId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // do not change this format, used by fs
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
 impl From<&AppId> for [u32; 4] {
     fn from(app_id: &AppId) -> [u32; 4] {
         [
@@ -794,4 +804,10 @@ impl From<usize> for ThreadPriority {
             _ => Self::AppDefault,
         }
     }
+}
+
+#[test]
+fn app_id_display() {
+    let app_id = AppId(*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff");
+    assert_eq!(app_id.to_string(), "00112233445566778899aabbccddeeff");
 }

@@ -4,6 +4,8 @@
 //! QR code scanner navigation request and response formats.
 
 use app_manifest::QrPriority;
+use server::rkyv_with::WithAppId;
+use xous::AppId;
 
 /// Options for the QR Scanner navigation request.
 ///
@@ -31,7 +33,8 @@ pub struct ScanQrMatchedRule {
 /// more than once in the disambiguation list.
 #[derive(Debug, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 pub struct ScanQrMatchingApp {
-    pub id: [u32; 4],
+    #[rkyv(with = WithAppId)]
+    pub id: AppId,
     pub matched_rules: Vec<ScanQrMatchedRule>,
 }
 

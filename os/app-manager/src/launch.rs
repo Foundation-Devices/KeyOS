@@ -31,7 +31,7 @@ pub fn launch_app(
     _check_trust: bool,
 ) -> Result<PID, LaunchError> {
     if let Some(pid) = xous::app_id_to_pid(app_id)? {
-        log::debug!("App {:02x?} already running with pid {}", app_id.0, pid);
+        log::debug!("App 0x{app_id} already running with pid {pid}");
 
         return Ok(pid);
     }

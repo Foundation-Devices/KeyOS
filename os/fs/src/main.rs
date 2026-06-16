@@ -130,7 +130,7 @@ impl Server {
             | Location::Airlock => path.to_owned(),
             Location::SystemAppData => {
                 let app_id = app_id_for_pid(pid)?;
-                format!("{}/{}/{path}", fs::SYSTEM_STATE_ROOT, hex::encode(app_id.0))
+                format!("{}/{app_id}/{path}", fs::SYSTEM_STATE_ROOT)
             }
             #[cfg(not(feature = "recovery-os"))]
             Location::CommonAssets => format!("keyos/common/{path}"),
@@ -138,7 +138,7 @@ impl Server {
             Location::CommonAssets => format!("common/{path}"),
             Location::AppData => {
                 let app_id = app_id_for_pid(pid)?;
-                format!("appdata/{}/{path}", hex::encode(app_id.0))
+                format!("appdata/{app_id}/{path}")
             }
             Location::AppResources => {
                 let app_id = app_id_for_pid(pid)?;
@@ -164,7 +164,7 @@ impl server::BlockingArchiveHandler<RegisterAppResources> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <RegisterAppResources as server::BlockingArchive>::Response {
-        let app_id = xous::AppId(msg.app_id);
+        let app_id = msg.app_id;
         let Some(path) = app_resources_path(app_id, msg.root, &msg.app_dir) else {
             return Err(Error::InvalidPath);
         };
@@ -191,7 +191,7 @@ fn app_resources_path(app_id: xous::AppId, root: AppResourcesRoot, app_dir: &str
     let root = match root {
         AppResourcesRoot::BuiltIn => "keyos/apps",
         AppResourcesRoot::Sideloaded => {
-            if app_dir != hex::encode(app_id.0) {
+            if app_dir != app_id.to_string() {
                 return None;
             }
             "keyos/sideloaded-apps"
@@ -309,7 +309,8 @@ impl Server {
                     .ok_or(Error::NoMedia)?
                     .root_dir()
                     .create_dir(fs::SYSTEM_STATE_ROOT)?;
-                state_dir.create_dir(&hex::encode(xous::get_app_id(pid)?.ok_or(Error::InternalError)?.0))?;
+                let app_id = xous::get_app_id(pid)?.ok_or(Error::InternalError)?.to_string();
+                state_dir.create_dir(&app_id)?;
             }
             Location::AppData => {
                 let app_dir = self
@@ -317,7 +318,8 @@ impl Server {
                     .ok_or(Error::NoMedia)?
                     .root_dir()
                     .create_dir("appdata")?;
-                app_dir.create_dir(&hex::encode(xous::get_app_id(pid)?.ok_or(Error::InternalError)?.0))?;
+                let app_id = xous::get_app_id(pid)?.ok_or(Error::InternalError)?.to_string();
+                app_dir.create_dir(&app_id)?;
             }
             #[cfg(not(feature = "recovery-os"))]
             Location::User => {

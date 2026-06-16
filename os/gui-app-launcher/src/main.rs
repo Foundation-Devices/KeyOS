@@ -345,7 +345,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             // Auto-forward when only one app matches — skip the selection UI entirely
             if matching_apps.len() == 1 {
                 let single_match = &matching_apps[0];
-                let app_id = AppId::from(single_match.id);
+                let app_id = single_match.id;
                 let gui = state.borrow().gui.clone();
                 log::info!("Single app match — auto-forwarding universal QR");
                 let options =
@@ -360,12 +360,12 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             let mut matched: Vec<_> = matching_apps
                 .iter()
                 .filter_map(|app| {
-                    let app_id = AppId::from(app.id);
+                    let app_id = app.id;
                     let Some(app_name) = AppManagerApi::default().app_name_by_app_id(&app_id, locale) else {
-                        log::warn!("Could not fetch app name for app_id=0x{}", hex::encode(app_id.0));
+                        log::warn!("Could not fetch app name for app_id=0x{app_id}");
                         return None;
                     };
-                    let app_id_hex = format!("0x{}", hex::encode(app_id.0));
+                    let app_id_hex = format!("0x{app_id}");
                     let icon = APP_ID_ICONS
                         .iter()
                         .find(|(id, _)| *id == app_id_hex)
@@ -931,7 +931,7 @@ fn error_message(
 
     ui.global::<Navigate>().invoke_error(
         ErrorParams {
-            crashed_app_id: app_id.map(|a| hex::encode(a.0).into()).unwrap_or("".into()),
+            crashed_app_id: app_id.map(|a| a.to_string().into()).unwrap_or("".into()),
             crashed_pid: pid.map(|p| p.get() as i32).unwrap_or(0),
             error_message: message.into(),
             error_title: title.into(),
@@ -953,8 +953,7 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
                 return;
             }
 
-            let app_id = AppId::from(app_id);
-            log::info!("App launched: app_id={}, pid={pid}", hex::encode(app_id.0));
+            log::info!("App launched: app_id={app_id}, pid={pid}");
 
             // Start a timeout to clear the loading state as a fallback
             // In normal cases, the Hidden event will clear it first
@@ -992,7 +991,7 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             clear_update_settings_crash(state, app_id);
 
             let app_name = AppManagerApi::default()
-                    .app_name_by_app_id(&app_id.into(), "en") // TODO: i18n, get the locale from the settings
+                    .app_name_by_app_id(&app_id, "en") // TODO: i18n, get the locale from the settings
                     .unwrap_or_else(|| "Unknown App".to_string());
 
             if exit_code == 0 {
@@ -1015,7 +1014,7 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
                     ),
                     panic_message,
                     Some(pid),
-                    Some(app_id.into()),
+                    Some(app_id),
                 )
             }
         }
@@ -1112,7 +1111,7 @@ fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
 
     log::info!("interrupted update detected; launching settings to resume");
     ui.global::<State>().set_update_resume_active(true);
-    ui.global::<State>().set_loading_app_id(format!("0x{}", hex::encode(SETTINGS_APP_ID.0)).into());
+    ui.global::<State>().set_loading_app_id(format!("0x{SETTINGS_APP_ID}").into());
 
     state.gui.update_kiosk_policy(UpdateKioskPolicy::all(false)).context("set kiosk policy")?;
 
@@ -1129,10 +1128,8 @@ fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear_update_settings_crash(state: StoredValue<AppState>, app_id: [u32; 4]) {
-    if state.borrow().ui().global::<State>().get_update_resume_active()
-        && AppId::from(app_id) == SETTINGS_APP_ID
-    {
+fn clear_update_settings_crash(state: StoredValue<AppState>, app_id: AppId) {
+    if state.borrow().ui().global::<State>().get_update_resume_active() && app_id == SETTINGS_APP_ID {
         clear_update_resume_state(state);
     }
 }

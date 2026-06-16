@@ -251,11 +251,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
     where
         P: MessageAllowed<RegisterAppResources>,
     {
-        self.conn.send_blocking_archive(RegisterAppResources {
-            app_id: app_id.0,
-            root,
-            app_dir: app_dir.into(),
-        })
+        self.conn.send_blocking_archive(RegisterAppResources { app_id, root, app_dir: app_dir.into() })
     }
 
     fn ensure_read_access(&self, location: Location) -> Result<(), Error> {

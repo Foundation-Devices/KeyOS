@@ -18,7 +18,7 @@ impl fmt::Display for BinaryElf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "    PID {:>2}: {}", self.pid, self.program_name)?;
         writeln!(f, "           size: {} bytes", self.data.len())?;
-        writeln!(f, "           appId: 0x{}", hex::encode(self.app_id.0))
+        writeln!(f, "           appId: 0x{}", self.app_id)
     }
 }
 

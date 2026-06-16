@@ -17,7 +17,6 @@ byteorder = "1.5.0"
 enum_dispatch = "0.3.13"
 fatfs = { workspace = true, features = ["std", "alloc", "chrono"] }
 fs = { workspace = true }
-hex = "0.4"
 log = { workspace = true }
 log-server = { workspace = true }
 lru = "0.13"

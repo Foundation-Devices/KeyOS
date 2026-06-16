@@ -187,7 +187,7 @@ impl BlockingScalarHandler<LaunchAppBlocking> for AppManagerServer {
         sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> <LaunchAppBlocking as BlockingScalar>::Response {
-        info!("PID {sender} is launching app 0x{}", hex::encode(app_id.0));
+        info!("PID {sender} is launching app 0x{app_id}");
 
         let pid = self.launch_app(app_id, sender)?;
         Ok(pid)
@@ -210,10 +210,10 @@ impl ArchiveEventSubscriptionHandler<SubscribeAppEvents> for AppManagerServer {
 
 impl ScalarHandler<LaunchApp> for AppManagerServer {
     fn handle(&mut self, LaunchApp(app_id): LaunchApp, sender: PID, _context: &mut ServerContext<Self>) {
-        info!("PID {sender} is asynchronously launching app 0x{}", hex::encode(app_id.0));
+        info!("PID {sender} is asynchronously launching app 0x{app_id}");
         if let Err(e) = self.launch_app(app_id, sender) {
             if let Some(s) = self.app_event_subscribers.iter().find(|s| s.pid() == sender) {
-                let event = AppEvent::LaunchError { app_id: (&app_id).into(), error: e };
+                let event = AppEvent::LaunchError { app_id, error: e };
                 if s.send(&event).is_err() {
                     error!("Failed to send launch error to subscriber PID {sender}");
                 }
@@ -230,7 +230,7 @@ impl BlockingArchiveHandler<GetAppName> for AppManagerServer {
         _context: &mut ServerContext<Self>,
     ) -> Option<String> {
         match msg {
-            GetAppName::ByAppId { id, locale } => self.app_registry.app_name_by_id(&id.into(), &locale),
+            GetAppName::ByAppId { id, locale } => self.app_registry.app_name_by_id(&id, &locale),
             GetAppName::ByPid { pid, locale } => self.app_registry.app_name_by_pid(pid, &locale),
         }
     }
@@ -260,12 +260,12 @@ impl ScalarHandler<ChildCrashed> for AppManagerServer {
         };
 
         let Some(launched_by) = self.app_registry.launched_by(app_id) else {
-            error!("Failed to find launched_by PID for app ID 0x{}", hex::encode(app_id.0));
+            error!("Failed to find launched_by PID for app ID 0x{app_id}");
             return;
         };
 
         let event = AppEvent::AppCrashed {
-            app_id: app_id.into(),
+            app_id: *app_id,
             pid: sender,
             launched_by,
             exit_code,
@@ -285,12 +285,11 @@ impl ScalarHandler<Disconnected> for AppManagerServer {
 
 impl AppManagerServer {
     fn launch_app(&mut self, app_id: AppId, sender: PID) -> Result<PID, LaunchError> {
-        let app_id_str = hex::encode(app_id.0);
-        debug!("Launching app with ID: 0x{}", app_id_str);
+        debug!("Launching app with ID: 0x{app_id}");
 
         #[cfg(keyos)]
         if let Some(pid) = xous::app_id_to_pid(&app_id)? {
-            log::debug!("App {:02x?} already running with pid {}", app_id, pid);
+            log::debug!("App 0x{app_id} already running with pid {pid}");
             self.app_registry.register_running_app(pid, app_id, sender);
             self.notify_app_launched(app_id, pid, sender);
             return Ok(pid);
@@ -331,9 +330,8 @@ impl AppManagerServer {
     }
 
     fn notify_app_launched(&mut self, app_id: AppId, pid: PID, sender: PID) {
-        let app_id_str = hex::encode(app_id.0);
-        debug!("Notifying app launch for app ID: 0x{}", app_id_str);
-        let event = AppEvent::AppLaunched { app_id: (&app_id).into(), pid, launched_by: sender };
+        debug!("Notifying app launch for app ID: 0x{app_id}");
+        let event = AppEvent::AppLaunched { app_id, pid, launched_by: sender };
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 

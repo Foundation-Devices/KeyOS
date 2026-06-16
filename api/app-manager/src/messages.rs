@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use num_traits::{FromPrimitive, ToPrimitive};
-use server::{AsScalar, FromScalar};
+use server::{rkyv_with::WithAppId, AsScalar, FromScalar};
 use xous::{AppId, PID};
 
 use crate::error::{AppManagerError, LaunchError};
@@ -31,18 +31,35 @@ pub struct SubscribeAppEvents;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AppEvent {
-    AppLaunched { app_id: [u32; 4], pid: PID, launched_by: PID },
+    AppLaunched {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+        pid: PID,
+        launched_by: PID,
+    },
 
-    AppCrashed { app_id: [u32; 4], pid: PID, launched_by: PID, exit_code: u32, panic_message: Option<String> },
+    AppCrashed {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+        pid: PID,
+        launched_by: PID,
+        exit_code: u32,
+        panic_message: Option<String>,
+    },
 
-    LaunchError { app_id: [u32; 4], error: LaunchError },
+    LaunchError {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+        error: LaunchError,
+    },
 }
 
 #[derive(Debug, server::Message)]
 pub struct LaunchApp(pub AppId);
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AppQrMatchRules {
-    pub id: [u32; 4],
+    #[rkyv(with = WithAppId)]
+    pub id: AppId,
     pub rules_json: Vec<u8>,
 }
 
@@ -100,14 +117,21 @@ pub enum RemoveThirdPartyCertificateResult {
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Option<String>)]
 pub enum GetAppName {
-    ByAppId { id: [u32; 4], locale: String },
+    ByAppId {
+        #[rkyv(with = WithAppId)]
+        id: AppId,
+        locale: String,
+    },
 
-    ByPid { pid: PID, locale: String },
+    ByPid {
+        pid: PID,
+        locale: String,
+    },
 }
 
 impl GetAppName {
     pub fn new_by_app_id(id: &AppId, locale: &str) -> Self {
-        Self::ByAppId { id: id.into(), locale: locale.to_string() }
+        Self::ByAppId { id: *id, locale: locale.to_string() }
     }
 
     pub fn new_by_pid(pid: PID, locale: &str) -> Self { Self::ByPid { pid, locale: locale.to_string() } }

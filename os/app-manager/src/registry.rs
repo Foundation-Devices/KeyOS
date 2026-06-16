@@ -72,21 +72,14 @@ pub(crate) fn prune_qr_match_rules(rules: &mut Vec<app_manifest::QrMatchRule>, a
                 Err(e) => {
                     error!(
                         "Dropping sub-rule {:?} in rule {:?} for app 0x{} due to invalid regex: {}",
-                        sub_rule_id,
-                        rule.id,
-                        hex::encode(app_id.0),
-                        e
+                        sub_rule_id, rule.id, app_id, e
                     );
                     false
                 }
             }
         });
         if rule.sub_rules.is_empty() {
-            error!(
-                "Rule {:?} for app 0x{} has no sub-rules and will never match",
-                rule.id,
-                hex::encode(app_id.0)
-            );
+            error!("Rule {:?} for app 0x{} has no sub-rules and will never match", rule.id, app_id);
             false
         } else {
             true
@@ -221,11 +214,7 @@ impl AppRegistry {
         let app_id = AppId(manifest.app_id);
 
         if installed_apps.contains_key(&app_id) {
-            log::warn!(
-                "scan_installed_apps: skipping duplicate app_id=0x{} from {:?}",
-                hex::encode(app_id.0),
-                source
-            );
+            log::warn!("scan_installed_apps: skipping duplicate app_id=0x{} from {:?}", app_id, source);
             return false;
         }
 
@@ -268,13 +257,13 @@ impl AppRegistry {
             .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
             .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
                 Ok(rules_json) if !rules_json.is_empty() => {
-                    Some(AppQrMatchRules { id: (&app_info.id).into(), rules_json })
+                    Some(AppQrMatchRules { id: app_info.id, rules_json })
                 }
                 Ok(_) => None,
                 Err(_) => {
                     log::warn!(
                         "qr_match_rules: failed to serialize qr_match_rules for app_id=0x{}",
-                        hex::encode(app_info.id.0)
+                        app_info.id
                     );
                     None
                 }
@@ -296,7 +285,7 @@ impl AppRegistry {
                 let binary_metadata = app_info.binary_metadata();
                 let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
                 let mut installed_app = InstalledAppInfo {
-                    app_id: format!("0x{}", hex::encode(app_info.id.0)),
+                    app_id: format!("0x{}", app_info.id),
                     bundled_icon_path: app_info.bundled_icon_file_path(),
                     publisher,
                     can_launch,
@@ -342,11 +331,7 @@ impl AppRegistry {
                     .get(&locale.to_string().into())
                     .cloned()
                     .unwrap_or_else(|| info.manifest.app_name_en());
-                app_manager::AppEntry {
-                    app_id: format!("0x{}", hex::encode(info.id.0)),
-                    name,
-                    is_flux: info.is_flux,
-                }
+                app_manager::AppEntry { app_id: format!("0x{}", info.id), name, is_flux: info.is_flux }
             })
             .collect()
     }
@@ -360,7 +345,7 @@ impl AppRegistry {
         match read_app_icon_bytes(&path, MAX_APP_ICON_SIZE_BYTES) {
             Ok(data) => Some(data),
             Err(e) => {
-                log::warn!("failed to read bundled app icon for app_id=0x{}: {e:?}", hex::encode(app_id.0));
+                log::warn!("failed to read bundled app icon for app_id=0x{app_id}: {e:?}");
                 None
             }
         }
@@ -421,7 +406,7 @@ impl AppInfo {
             .get(&Locale(locale.to_string()))
             .or_else(|| self.manifest.app_name.get(&Locale("en".to_string())))
             .cloned()
-            .unwrap_or_else(|| format!("0x{}", hex::encode(self.id.0)))
+            .unwrap_or_else(|| format!("0x{}", self.id))
     }
 
     fn permission_lines(&self) -> Vec<String> {
@@ -510,7 +495,7 @@ impl AppInfo {
         };
         let app_dir = match self.source {
             AppSource::BuiltIn => app_dir.to_string(),
-            AppSource::ThirdParty => hex::encode(self.id.0),
+            AppSource::ThirdParty => self.id.to_string(),
         };
 
         Some(AppResourcesLocation { root, app_dir })
@@ -777,7 +762,7 @@ fn sideloaded_app_dir_matches_app_id(elf_path: Option<&str>, app_id: &AppId, sou
         return false;
     };
 
-    let expected_app_dir = hex::encode(app_id.0);
+    let expected_app_dir = app_id.to_string();
     if app_dir != expected_app_dir {
         log::warn!(
             "scan_installed_apps: skipping sideloaded app 0x{} from directory {:?}; expected {:?}",

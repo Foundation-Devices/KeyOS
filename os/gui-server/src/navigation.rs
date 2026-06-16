@@ -20,7 +20,7 @@ impl Gui {
             return;
         }
 
-        let Some(pid) = self.launch_app(AppId(request.message.app_id)) else {
+        let Some(pid) = self.launch_app(request.message.app_id) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -37,7 +37,7 @@ impl Gui {
         }
         let NavigateTo { app_id, .. } = &request.message;
 
-        let Some(pid) = self.launch_app(AppId(*app_id)) else {
+        let Some(pid) = self.launch_app(*app_id) else {
             request.response.respond(Err(NavigationError::AppIdNotFound)).ok();
             return;
         };
@@ -57,7 +57,7 @@ impl Gui {
             return RunAppResponse::Locked;
         }
 
-        let app_id = AppId(request.app_id);
+        let app_id = request.app_id;
         let (pid, already_running) = match self.launch_app_with_state(app_id) {
             Ok(result) => result,
             Err(error) => return error,

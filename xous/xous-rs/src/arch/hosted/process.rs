@@ -4,16 +4,6 @@ use super::CHILD_PROCESS_ADDRESS;
 use crate::AppId;
 pub use crate::PID;
 
-impl core::fmt::Display for AppId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        for i in self.0 {
-            write!(f, "{:02x}", i)?;
-        }
-
-        Ok(())
-    }
-}
-
 impl From<&str> for AppId {
     fn from(v: &str) -> AppId {
         let mut key = [0u8; 16];

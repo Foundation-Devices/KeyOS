@@ -39,7 +39,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     where
         P: MessageAllowed<ShowModal>,
     {
-        let nav_req = ShowModal { modal_style, app_id: app_id.0, args: args.to_vec() };
+        let nav_req = ShowModal { modal_style, app_id, args: args.to_vec() };
         let response = self.conn.try_send_blocking_archive(nav_req)?;
         Ok(response.or_else(|_| Err(NavigationError::RequestBufferTooSmall)))
     }
@@ -49,7 +49,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     where
         P: MessageAllowed<NavigateTo>,
     {
-        let nav_req = NavigateTo { app_id: app_id.0, args: args.to_vec() };
+        let nav_req = NavigateTo { app_id, args: args.to_vec() };
         let response = self.conn.try_send_blocking_archive(nav_req)?;
         Ok(response.or_else(|_| Err(NavigationError::RequestBufferTooSmall)))
     }
@@ -58,7 +58,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     where
         P: MessageAllowed<RunApp>,
     {
-        Ok(self.conn.try_send_blocking_archive(RunApp { app_id: app_id.0 })?)
+        Ok(self.conn.try_send_blocking_archive(RunApp { app_id })?)
     }
 
     pub fn check_user_presence(

@@ -21,7 +21,7 @@ where
     P: CheckedPermissions + MessageAllowed<ShowModal>,
 {
     let msg = ShowModal {
-        app_id: QR_SCANNER_APP_ID.0,
+        app_id: QR_SCANNER_APP_ID,
         modal_style: ModalStyle::SlideUpFullscreen,
         args: options.serialize(),
     };
@@ -42,7 +42,7 @@ where
     P: CheckedPermissions + MessageAllowed<ShowModal>,
 {
     let msg = ShowModal {
-        app_id: FILE_BROWSER_APP_ID.0,
+        app_id: FILE_BROWSER_APP_ID,
         modal_style: ModalStyle::SlideUpDraggablePopup,
         args: options.serialize(),
     };
@@ -61,7 +61,7 @@ where
     P: CheckedPermissions + MessageAllowed<ShowModal>,
 {
     let msg = ShowModal {
-        app_id: LOCK_SCREEN_APP_ID.0,
+        app_id: LOCK_SCREEN_APP_ID,
         modal_style: ModalStyle::SlideUpFullscreen,
         args: request.serialize(),
     };
