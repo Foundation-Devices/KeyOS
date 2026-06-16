@@ -23,19 +23,14 @@ target_excludes := '--exclude atsama5d27 ' + \
     '--exclude log-usb-serial ' + \
     '--exclude usb-debug'
 
-# Apps that link the ledger C SDK; they do not link on the host.
-flux_excludes := '--exclude app-flux-ethereum ' + \
-    '--exclude app-flux-monero ' + \
-    '--exclude app-flux-solana ' + \
-    '--exclude app-flux-zcash'
+# Flux app sources are temporarily absent from this repository.
+flux_excludes := ''
 
 check_excludes := target_excludes + ' ' + flux_excludes
 
-# Excluded from the test run only: the flux emulator (doesn't link on the host),
-# softbuffer's windowing test (needs a display), tar's vendored integration test,
-# and qbsdiff whose test rewrites a tracked asset.
+# Excluded from the test run only: softbuffer's windowing test (needs a display),
+# tar's vendored integration test, and qbsdiff whose test rewrites a tracked asset.
 test_only_excludes := '--exclude gui-app-emu-flux ' + \
-    '--exclude gui-app-emu-flux-server ' + \
     '--exclude softbuffer ' + \
     '--exclude tar ' + \
     '--exclude qbsdiff'

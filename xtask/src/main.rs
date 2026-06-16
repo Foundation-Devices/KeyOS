@@ -107,7 +107,6 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
     "gui-app-alerts",
     "gui-app-authenticator",
     "gui-app-bitcoin",
-    "gui-app-emu-flux-server",
     "gui-app-file-browser",
     "gui-app-onboarding",
     "gui-app-qr-scanner",
@@ -126,9 +125,9 @@ const DEV_APPS: &[&str] = &[
     "gui-app-update-test",
 ];
 
-const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &["app-flux-ethereum", "app-flux-solana"];
+const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &[];
 
-const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[/*"app-flux-ethereum"*/];
+const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[];
 
 const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "gpio-server",
@@ -176,7 +175,6 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     // "gui-app-recovery",
     "gui-app-file-picker-test",
     "gui-app-switcher",
-    "gui-app-emu-flux-server",
     // "recovery-worker",
     "simulator",
     "simulator-cli",

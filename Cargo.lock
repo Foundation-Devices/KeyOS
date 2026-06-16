@@ -255,32 +255,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "app-flux-ethereum"
-version = "0.1.0"
-dependencies = [
- "app-flux-build-support",
- "app-flux-runtime",
- "cc",
- "gui-app-emu-flux",
- "log 0.4.27",
- "server",
- "xous-api-log",
-]
-
-[[package]]
-name = "app-flux-monero"
-version = "0.1.0"
-dependencies = [
- "app-flux-build-support",
- "app-flux-runtime",
- "cc",
- "gui-app-emu-flux",
- "log 0.4.27",
- "server",
- "xous-api-log",
-]
-
-[[package]]
 name = "app-flux-runtime"
 version = "0.1.0"
 dependencies = [
@@ -296,32 +270,6 @@ dependencies = [
  "server",
  "sha2",
  "sha3",
-]
-
-[[package]]
-name = "app-flux-solana"
-version = "0.1.0"
-dependencies = [
- "app-flux-build-support",
- "app-flux-runtime",
- "cc",
- "gui-app-emu-flux",
- "log 0.4.27",
- "server",
- "xous-api-log",
-]
-
-[[package]]
-name = "app-flux-zcash"
-version = "0.1.0"
-dependencies = [
- "app-flux-build-support",
- "app-flux-runtime",
- "cc",
- "gui-app-emu-flux",
- "log 0.4.27",
- "server",
- "xous-api-log",
 ]
 
 [[package]]
@@ -4613,45 +4561,6 @@ dependencies = [
  "sha2",
  "thiserror 2.0.11",
  "xous",
-]
-
-[[package]]
-name = "gui-app-emu-flux-server"
-version = "0.1.0"
-dependencies = [
- "ab_glyph",
- "anyhow",
- "app-manager",
- "app-manifest",
- "armv7",
- "atsama5d27",
- "bip39",
- "crc32fast",
- "fs",
- "fw-utils",
- "getrandom 0.2.10",
- "gui-app-emu-flux",
- "gui-server-api",
- "haptics",
- "hex",
- "legacy-hid",
- "log 0.4.27",
- "miniz_oxide 0.8.0",
- "rkyv",
- "security",
- "serde",
- "serde_json",
- "server",
- "settings",
- "slint-keyos-platform",
- "slint-keyos-platform-build",
- "thiserror 2.0.11",
- "usb",
- "utralib",
- "uuid",
- "xous",
- "xous-api-log",
- "xous-ipc",
 ]
 
 [[package]]
