@@ -19,15 +19,10 @@
     nixpkgs,
     fenix,
   }: let
-    rustToolchainChannel = "nightly-2025-09-11";
+    # Single source of truth for the toolchain so plain rustup and nix agree.
+    rustToolchainFile = root + "/rust-toolchain.toml";
+    rustToolchainChannel = (builtins.fromTOML (builtins.readFile rustToolchainFile)).toolchain.channel;
     rustToolchainSha256 = "sha256-mEgn8v8xFz241fdSjNB1CxBHwm3aZz0svD9IqZVZeEA=";
-    rustToolchainFile = builtins.toFile "foundation-sdk-rust-toolchain.toml" ''
-      [toolchain]
-      channel = "${rustToolchainChannel}"
-      components = ["rustfmt", "clippy", "rustc", "rust-src"]
-      targets = []
-      profile = "minimal"
-    '';
     sdkBuildConfig = builtins.fromTOML (builtins.readFile (root + "/sdk-build.toml"));
     foundationSlintVersion = sdkBuildConfig.submodules.slint.ref;
     foundationSlintHash = "sha256-7vZ3LnTm1l3+Q4tRSogesNzGp/iCy4IIpkP0w5/l/9k=";

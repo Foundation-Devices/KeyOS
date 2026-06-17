@@ -355,11 +355,7 @@ fn install_binary_atomically(install_path: &Path, bytes: &[u8]) -> Result<(), In
             format!("install path has no filename: {}", install_path.display()),
         )
     })?;
-    let temp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
+    let temp_path = parent.join(format!(".{}.{}.tmp", file_name.to_string_lossy(), std::process::id()));
 
     let result = (|| -> Result<(), InstallError> {
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp_path)?;
@@ -417,7 +413,9 @@ pub enum InstallError {
     #[error("Failed to parse index file '{0}': {1}")]
     IndexParseError(String, String),
 
-    #[error("Plugin index version {got} is newer than supported version {supported}; upgrade the foundation CLI")]
+    #[error(
+        "Plugin index version {got} is newer than supported version {supported}; upgrade the foundation CLI"
+    )]
     UnsupportedIndexVersion { got: u32, supported: u32 },
 
     #[error("Network error: {0}")]

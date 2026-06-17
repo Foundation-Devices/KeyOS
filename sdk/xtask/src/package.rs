@@ -572,8 +572,7 @@ EMBEDDED_GPG_PUBLIC_KEY_B64="{base64_key}"
                 fingerprint = public_key.fingerprint,
             )
         }
-        None => "EMBEDDED_GPG_PUBLIC_KEY_FINGERPRINT=\"\"\nEMBEDDED_GPG_PUBLIC_KEY_B64=\"\"\n"
-            .to_string(),
+        None => "EMBEDDED_GPG_PUBLIC_KEY_FINGERPRINT=\"\"\nEMBEDDED_GPG_PUBLIC_KEY_B64=\"\"\n".to_string(),
     };
 
     format!(

@@ -80,8 +80,9 @@ fn list_signing_identities_in_root(root: &Path) -> Result<Vec<SigningIdentityPat
         fs::read_dir(root).map_err(|source| SigningError::ListFailed { path: root.to_path_buf(), source })?
     {
         let entry = entry.map_err(|source| SigningError::ListFailed { path: root.to_path_buf(), source })?;
-        let file_type =
-            entry.file_type().map_err(|source| SigningError::ListFailed { path: root.to_path_buf(), source })?;
+        let file_type = entry
+            .file_type()
+            .map_err(|source| SigningError::ListFailed { path: root.to_path_buf(), source })?;
         if !file_type.is_dir() {
             continue;
         }

@@ -364,10 +364,7 @@ mod tests {
     fn app_id_rejects_short_even_length() {
         // Even length but only 2 bytes — previously accepted, then rejected by
         // the device's decode_app_id_str (needs exactly 32 hex chars).
-        assert!(matches!(
-            AppId::from_hex("0x1234"),
-            Err(AppIdError::WrongLength { actual: 2 })
-        ));
+        assert!(matches!(AppId::from_hex("0x1234"), Err(AppIdError::WrongLength { actual: 2 })));
     }
 
     #[test]

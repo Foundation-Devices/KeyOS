@@ -53,6 +53,7 @@ build targets="native":
     cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
     cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
     cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{justfile_directory()}}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
     cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
     cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
 
@@ -81,6 +82,7 @@ finalize sign_key="":
     cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
     cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
     cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{justfile_directory()}}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
     cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
     cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
 

@@ -7,10 +7,8 @@
 //! `ContextError`, `SdkError`, `SigningError`, `AppIdError`). This module
 //! defines a `FoundationCoreError` that wraps all of them so callers can:
 //!
-//! - return a single `Result<T, FoundationCoreError>` from helpers that touch
-//!   several modules
-//! - match on a single enum at the binary boundary instead of plumbing five
-//!   different error types
+//! - return a single `Result<T, FoundationCoreError>` from helpers that touch several modules
+//! - match on a single enum at the binary boundary instead of plumbing five different error types
 //! - convert into `anyhow::Error` cheaply (`?` works thanks to `From`)
 //!
 //! The per-module enums remain the canonical surface — they carry the

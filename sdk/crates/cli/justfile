@@ -8,3 +8,8 @@ install:
     cargo install --path .
     [ "$(uname)" = "Darwin" ] && codesign -s - -f ~/.cargo/bin/foundation || true
     @echo "Installed size: $(ls -lh ~/.cargo/bin/foundation | awk '{print $5}')"
+
+# The crate builds on stable, but rustfmt.toml uses unstable options, so
+# formatting needs the pinned nightly even though `rust-toolchain.toml` is stable.
+fmt *args:
+    cargo +nightly-2025-09-11 fmt {{args}}

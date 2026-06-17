@@ -28,7 +28,10 @@ jobs:
           use-cache: 'false'
       
       - run: nix shell .#rust-keyos --command cargo fmt --all -- --check
-     
+      # sdk/ is a separate workspace, so the root --all above does not reach it.
+      - run: nix shell .#rust-keyos --command cargo fmt --manifest-path sdk/Cargo.toml --all -- --check
+      - run: nix shell .#rust-keyos --command cargo fmt --manifest-path sdk/crates/cli/Cargo.toml --all -- --check
+
   format-slint:
     name: Check Slint formatting
     runs-on: ubuntu-latest

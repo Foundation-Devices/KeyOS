@@ -99,7 +99,8 @@ pub fn check_all(root: &Path, config: &Config, overrides: &SourceOverrides) -> R
 
     if let Some(path) = active_keyos_override(root, overrides.get(KEYOS_SOURCE_NAME).map(PathBuf::as_path)) {
         if !path.exists() {
-            errors.push(format!("{KEYOS_OVERRIDE_ENV} override for keyos does not exist: {}", path.display()));
+            errors
+                .push(format!("{KEYOS_OVERRIDE_ENV} override for keyos does not exist: {}", path.display()));
         } else {
             println!("using {KEYOS_OVERRIDE_ENV} override for keyos: {}", path.display());
         }

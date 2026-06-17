@@ -579,10 +579,9 @@ fn validate_layout(root: &Path, config: &Config, resolver: &SourceResolver) -> L
     let keyos_root = resolver.keyos_root();
     let manifest = keyos_root.join("Cargo.toml");
     if !manifest.exists() {
-        report.errors.push(format!(
-            "repo-mode KeyOS source root is missing Cargo.toml at {}",
-            manifest.display()
-        ));
+        report
+            .errors
+            .push(format!("repo-mode KeyOS source root is missing Cargo.toml at {}", manifest.display()));
     }
     validate_shared_ui_sources(keyos_root, &mut report);
     validate_slint_alignment(keyos_root, config, resolver, &mut report);
@@ -1126,9 +1125,9 @@ fn read_hosted_services_manifest(path: &Path) -> Result<BTreeMap<String, (String
         .map_err(|e| boxed_err(format!("couldn't read hosted services manifest {}: {e}", path.display())))?;
     let value: serde_json::Value = serde_json::from_str(&data)
         .map_err(|e| boxed_err(format!("couldn't parse hosted services manifest {}: {e}", path.display())))?;
-    let entries = value
-        .as_array()
-        .ok_or_else(|| boxed_err(format!("hosted services manifest {} is not a JSON array", path.display())))?;
+    let entries = value.as_array().ok_or_else(|| {
+        boxed_err(format!("hosted services manifest {} is not a JSON array", path.display()))
+    })?;
 
     let mut map = BTreeMap::new();
     for entry in entries {
@@ -1528,7 +1527,8 @@ fn stage_keyos_workspace_root(
 
     let keyos_source_root = resolver.keyos_root();
     let member_dirs = collect_staged_keyos_member_dirs(root, resolver, copy_entries)?;
-    let manifest = render_staged_keyos_workspace_manifest(keyos_source_root, &staged_keyos_root, &member_dirs)?;
+    let manifest =
+        render_staged_keyos_workspace_manifest(keyos_source_root, &staged_keyos_root, &member_dirs)?;
     fs::write(staged_keyos_root.join("Cargo.toml"), manifest)?;
     Ok(())
 }
@@ -2270,32 +2270,24 @@ mod tests {
         local_staged_workspace_dependency_override, nix_shell_active, parse_git_source_commit,
         parse_toolchain_channel, prune_nested_member_dirs, render_staged_keyos_workspace_manifest,
         render_staged_slint_workspace_manifest, rust_toolchain_channel, should_stage_simulator_for_target,
-        should_strip_packaged_binaries, stage_cargo_package_snapshot, stage_shared_ui_artifact, stage_slint_sdk_snapshot,
-        verify_common_stage, verify_target_stage, BuildArgs, SmokeCheckArgs, StageDirLock,
+        should_strip_packaged_binaries, stage_cargo_package_snapshot, stage_shared_ui_artifact,
+        stage_slint_sdk_snapshot, verify_common_stage, verify_target_stage, BuildArgs, SmokeCheckArgs,
+        StageDirLock,
     };
     use crate::config::workspace_root;
 
     #[test]
     fn stage_dir_lock_blocks_concurrent_holders() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let output_dir = env::temp_dir().join(format!("foundation-stage-lock-{unique}"));
         let stage_root = output_dir.join(".stage");
         fs::create_dir_all(&output_dir).unwrap();
 
         let first = StageDirLock::acquire(&output_dir, &stage_root).expect("first lock should succeed");
         let second = StageDirLock::acquire(&output_dir, &stage_root);
-        assert!(
-            second.is_err(),
-            "second lock acquisition should fail while first is held"
-        );
+        assert!(second.is_err(), "second lock acquisition should fail while first is held");
         let err = second.unwrap_err().to_string();
-        assert!(
-            err.contains("another xtask invocation"),
-            "expected lock-contention message, got: {err}"
-        );
+        assert!(err.contains("another xtask invocation"), "expected lock-contention message, got: {err}");
 
         // Releasing the first lock should let a new caller succeed.
         drop(first);

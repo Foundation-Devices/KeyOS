@@ -179,7 +179,10 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
         .unwrap();
     assert!(sideload.status.success(), "sideload failed: {}", stderr(&sideload));
     let passport_drive_log = env.read_log("passport-drive.log");
-    assert!(passport_drive_log.contains("\"name\":\"load_app\""), "missing load_app call: {passport_drive_log}");
+    assert!(
+        passport_drive_log.contains("\"name\":\"load_app\""),
+        "missing load_app call: {passport_drive_log}"
+    );
     assert!(
         passport_drive_log.contains("target/keyos/smoke-app"),
         "load_app did not receive built artifact dir: {passport_drive_log}"
