@@ -255,6 +255,9 @@ impl Server for Gui {
 
         self.init_auto_lock(context);
 
+        #[cfg(not(keyos))]
+        self.rgb_led.subscribe_color_updates(context);
+
         self.display.subscribe_to_vsync(context);
 
         self.close_app_callback =

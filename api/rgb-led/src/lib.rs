@@ -51,6 +51,15 @@ impl<P: CheckedPermissions> RgbApi<P> {
     {
         self.conn.try_send_scalar(AnimateAllTo(animation)).ok();
     }
+
+    #[cfg(not(keyos))]
+    pub fn subscribe_color_updates<S>(&self, context: &mut server::ServerContext<S>)
+    where
+        P: MessageAllowed<messages::SubscribeColorUpdates>,
+        S: server::Server + server::ScalarEventHandler<RgbColor>,
+    {
+        self.conn.subscribe_scalar_infallible(messages::SubscribeColorUpdates, context);
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

@@ -4,8 +4,13 @@
 use std::time::Duration;
 
 use rgb_led::{RgbAnimation, RgbColor};
+#[cfg(not(keyos))]
+use server::ServerContext;
 
 rgb_led::use_api!();
+
+#[cfg(not(keyos))]
+use crate::Gui;
 
 /// See [`crate::display::lcdc::LCD_DEFAULT_BACKLIGHT_LEVEL_PERCENT`]
 const RGB_BRIGHTNESS_DEFAULT: f32 = 0.8;
@@ -26,10 +31,19 @@ impl Default for RgbLedState {
 }
 
 impl RgbLedState {
-    fn ensure_connected(&mut self) {
-        if self.rgb_api.is_none() {
-            self.rgb_api = RgbApi::try_new_with_timeout(Duration::from_millis(RGB_CONNECTION_TIMEOUT_MS));
+    #[cfg(not(keyos))]
+    pub(crate) fn subscribe_color_updates(&mut self, context: &mut ServerContext<Gui>) {
+        self.ensure_connected();
+        if let Some(api) = &mut self.rgb_api {
+            api.subscribe_color_updates(context);
         }
+    }
+
+    fn ensure_connected(&mut self) {
+        if self.rgb_api.is_some() {
+            return;
+        }
+        self.rgb_api = RgbApi::try_new_with_timeout(Duration::from_millis(RGB_CONNECTION_TIMEOUT_MS));
     }
 
     fn animate(&mut self, animation: RgbAnimation) {

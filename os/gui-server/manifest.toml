@@ -26,7 +26,7 @@ ForceShutdownTimeout = { id = 50, type = "scalar" }
 "os/haptics" = ["Vibrate"]
 "os/power-manager" = ["SetPeripheralEnabled", "Shutdown", "Reboot"]
 "os/power-manager-ext" = ["GetStatus"]
-"os/rgb-server" = ["AnimateAllTo", "SetAllTo"]
+"os/rgb-server" = ["AnimateAllTo", "SetAllTo", "SubscribeColorUpdates"]
 "os/security" = ["Logout", "GetMasterKeyState"]
 "os/settings" = [
     "GetAutoLock",

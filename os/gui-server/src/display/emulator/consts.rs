@@ -15,8 +15,8 @@ pub(super) const TOUCH_AREA_W: usize = SCREEN_WIDTH;
 pub(super) const TOUCH_AREA_H: usize = SCREEN_HEIGHT;
 
 // On-screen coordinates of the virtual touch button area for hosted mode
-pub(super) const VIRT_HOME_BUTTON_X: usize = 211;
-pub(super) const VIRT_HOME_BUTTON_Y: usize = 978;
+pub(super) const VIRT_HOME_BUTTON_X: usize = 220;
+pub(super) const VIRT_HOME_BUTTON_Y: usize = 1008;
 pub(super) const VIRT_HOME_BUTTON_TOUCH_Y: usize = 880; // On-screen and touch coordinates are different
 pub(super) const VIRT_HOME_BUTTON_WIDTH: usize = 150;
 pub(super) const VIRT_HOME_BUTTON_HEIGHT: usize = 30; // It's less tall in hardware (10 px)

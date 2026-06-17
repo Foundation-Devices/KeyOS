@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 log = { workspace = true }
+rkyv = { workspace = true }
 server = { workspace = true }
 xous = { workspace = true }
 

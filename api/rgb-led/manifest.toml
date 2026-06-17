@@ -3,3 +3,4 @@ manifestVersion = "0"
 SetTo = { id = 1, type = "scalar" }
 SetAllTo = { id = 0, type = "scalar" }
 AnimateAllTo = { id = 2, type = "scalar" }
+SubscribeColorUpdates = { id = 3, type = "scalarEvent", cfg = "not(keyos)" }

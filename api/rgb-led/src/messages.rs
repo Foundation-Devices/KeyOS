@@ -5,6 +5,10 @@ use server::{AsScalar, FromScalar};
 
 use crate::{RgbAnimation, RgbColor};
 
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[event(RgbColor)]
+pub struct SubscribeColorUpdates;
+
 /// Set a single LED to a color by index
 #[derive(Debug, server::Message)]
 pub struct SetTo(pub u32, pub RgbColor);

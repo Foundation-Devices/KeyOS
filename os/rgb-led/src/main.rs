@@ -13,7 +13,11 @@ use atsama5d2::Implementation;
 mod hosted;
 #[cfg(not(keyos))]
 use hosted::Implementation;
+#[cfg(not(keyos))]
+use rgb_led::messages::SubscribeColorUpdates;
 use rgb_led::{messages::*, RgbColor};
+#[cfg(not(keyos))]
+use server::{ScalarEventSubscriber, ScalarEventSubscriptionHandler};
 use server::{ScalarHandler, Server, ServerContext};
 use xous::PID;
 
@@ -42,6 +46,19 @@ impl ScalarHandler<SetAllTo> for RgbServer {
 impl ScalarHandler<SetTo> for RgbServer {
     fn handle(&mut self, SetTo(index, color): SetTo, _sender: PID, _context: &mut ServerContext<Self>) {
         self.implementation.set(index as u8, color)
+    }
+}
+
+#[cfg(not(keyos))]
+impl ScalarEventSubscriptionHandler<SubscribeColorUpdates> for RgbServer {
+    fn handle(
+        &mut self,
+        _msg: SubscribeColorUpdates,
+        subscriber: ScalarEventSubscriber<RgbColor>,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<(), server::Infallible> {
+        self.implementation.subscribe(subscriber);
+        Ok(())
     }
 }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::sync::{
-    atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering},
     Mutex,
 };
 
@@ -27,6 +27,10 @@ static LAYER_STACK: Mutex<LayerStack> = Mutex::new(LayerStack { layers: [None, N
 static LCD_BACKLIGHT_LEVEL: AtomicU8 = AtomicU8::new(0xff);
 
 static SCALE_FACTOR: AtomicUsize = AtomicUsize::new(0x100);
+
+/// Packed RGB LED color (LE bytes [r, g, b, 0]) as last set by the hosted RGB server.
+/// `u32::MAX` is the sentinel meaning "not yet set" — valid colors always have byte 3 == 0.
+static CURRENT_RGB_LED_COLOR: AtomicU32 = AtomicU32::new(u32::MAX);
 
 static VIRTUAL_VSYNC_EVENTS: Mutex<Vec<Box<dyn FnMut() + Send>>> = Mutex::new(Vec::new());
 
@@ -104,6 +108,22 @@ impl PlatformDisplay {
     }
 
     pub(crate) fn scale_factor() -> f64 { SCALE_FACTOR.load(Ordering::Relaxed) as f64 / 256.0 }
+
+    pub(crate) fn set_rgb_led_color(packed: u32) {
+        if CURRENT_RGB_LED_COLOR.swap(packed, Ordering::Relaxed) != packed {
+            DISPLAY_DIRTY.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Returns the current RGB LED color, or `None` if not yet set by the hosted RGB server.
+    pub(crate) fn rgb_led_color() -> Option<u32> {
+        let v = CURRENT_RGB_LED_COLOR.load(Ordering::Relaxed);
+        if v == u32::MAX {
+            None
+        } else {
+            Some(v)
+        }
+    }
 
     pub(crate) fn set_backlight_level_pct(&mut self, percent: u8) {
         let level = (percent.clamp(0, 100) as u32 * 0xFF / 100) as u8;

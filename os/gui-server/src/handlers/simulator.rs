@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gui_server_api::msg::{GetDeviceFrame, SetScaleFactor, SimulateKey, SimulatePowerButton, SimulateScroll};
-use server::{LendMutHandler, ScalarHandler, ServerContext};
+use rgb_led::RgbColor;
+use server::{LendMutHandler, ScalarEventHandler, ScalarHandler, ServerContext};
 use xous::PID;
 
 use crate::display::PlatformDisplay;
@@ -55,5 +56,11 @@ impl ScalarHandler<SimulateScroll> for Gui {
         _context: &mut ServerContext<Self>,
     ) {
         self.dispatch_scroll_event(x, y, delta_x, delta_y);
+    }
+}
+
+impl ScalarEventHandler<RgbColor> for Gui {
+    fn handle(&mut self, color: RgbColor, _sender: PID, _context: &mut ServerContext<Self>) {
+        PlatformDisplay::set_rgb_led_color(color.into());
     }
 }
