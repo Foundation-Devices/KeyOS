@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fido::messages::Transport;
+use fido::messages::{Transport, U2fApduCommand};
 use gpio::{GpioPin, PinSettings};
 use nfc::error::NfcError;
 use {
@@ -376,7 +376,7 @@ impl Implementation {
             }
 
             // U2F: Forward unknown instructions on CLA=0x00 to U2F processing
-            (ZERO_CLA, Instruction::Unknown(_)) => self.handle_u2f_apdu(rx_data, &cmd, remaining_data),
+            (ZERO_CLA, Instruction::Unknown(_)) => self.handle_u2f_apdu(&cmd, remaining_data),
 
             // Unsupported CLA
             _ if cla != ZERO_CLA && cla != NO_SM_CLA => {
@@ -419,13 +419,9 @@ impl Implementation {
     }
 
     /// Handle U2F APDU commands (CLA=0x00, unknown instructions)
-    fn handle_u2f_apdu(
-        &mut self,
-        rx_data: &[u8],
-        cmd: &Command<256>,
-        remaining_data: &mut Vec<u8>,
-    ) -> ApduResponse {
-        let mut resp = self.fido.as_ref().unwrap().u2f_process_apdu(rx_data.to_vec(), Transport::Nfc);
+    fn handle_u2f_apdu(&mut self, cmd: &Command<256>, remaining_data: &mut Vec<u8>) -> ApduResponse {
+        let command = U2fApduCommand::from_command_view(cmd.as_view());
+        let mut resp = self.fido.as_ref().unwrap().u2f_process_apdu(command, Transport::Nfc);
         log::debug!("[>] U2F reply: {:02x?}, len={}", resp, resp.len());
 
         if cmd.extended {

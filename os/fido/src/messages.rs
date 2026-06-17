@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use iso7816::command::{CommandView, FromSliceError};
 use server::{AsScalar, FromScalar};
 
 use crate::error::FidoError;
@@ -11,6 +12,65 @@ use crate::SecurityKeyView;
 pub enum Transport {
     Usb,
     Nfc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum U2fApduParseError {
+    WrongLength,
+    ClassNotSupported,
+}
+
+impl U2fApduParseError {
+    pub fn to_u2f_response(self) -> Vec<u8> {
+        match self {
+            Self::WrongLength => vec![0x67, 0x00],
+            Self::ClassNotSupported => vec![0x6e, 0x00],
+        }
+    }
+}
+
+impl From<FromSliceError> for U2fApduParseError {
+    fn from(error: FromSliceError) -> Self {
+        match error {
+            FromSliceError::InvalidClass => Self::ClassNotSupported,
+            FromSliceError::TooShort
+            | FromSliceError::TooLong
+            | FromSliceError::InvalidFirstBodyByteForExtended
+            | FromSliceError::InvalidSliceLength => Self::WrongLength,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct U2fApduCommand {
+    pub class: u8,
+    pub instruction: u8,
+    pub p1: u8,
+    pub p2: u8,
+    pub data: Vec<u8>,
+    pub expected: u32,
+    pub extended: bool,
+}
+
+impl U2fApduCommand {
+    pub fn parse(apdu: &[u8]) -> Result<Self, U2fApduParseError> {
+        let command = CommandView::try_from(apdu)?;
+        Ok(Self::from_command_view(command))
+    }
+
+    pub fn from_command_view(command: CommandView<'_>) -> Self {
+        Self {
+            class: command.class().into_inner(),
+            instruction: command.instruction().into(),
+            p1: command.p1,
+            p2: command.p2,
+            data: command.data().to_vec(),
+            expected: command.expected() as u32,
+            extended: command.extended,
+        }
+    }
+
+    pub fn data(&self) -> &[u8] { &self.data }
 }
 
 // === Key change event ===
@@ -138,7 +198,7 @@ pub struct SelectSecurityKey(pub Option<usize>);
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Vec<u8>)]
 pub struct U2fProcessApdu {
-    pub msg: Vec<u8>,
+    pub command: U2fApduCommand,
     pub transport: Transport,
 }
 
@@ -147,6 +207,43 @@ pub struct U2fProcessApdu {
 pub struct CtapProcessCbor {
     pub cmd: u8,
     pub raw: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn u2f_apdu_command_rejects_short_buffers() {
+        for len in 0..4 {
+            let data = vec![0; len];
+            assert_eq!(U2fApduCommand::parse(&data), Err(U2fApduParseError::WrongLength));
+        }
+    }
+
+    #[test]
+    fn u2f_apdu_command_parses_short_apdu() {
+        let command = U2fApduCommand::parse(&[0x00, 0x01, 0x02, 0x00, 0x02, 0xaa, 0xbb, 0x00]).unwrap();
+
+        assert_eq!(command.class, 0x00);
+        assert_eq!(command.instruction, 0x01);
+        assert_eq!(command.p1, 0x02);
+        assert_eq!(command.p2, 0x00);
+        assert_eq!(command.data(), &[0xaa, 0xbb]);
+        assert_eq!(command.expected, 256);
+        assert!(!command.extended);
+    }
+
+    #[test]
+    fn u2f_apdu_command_parses_extended_apdu() {
+        let command =
+            U2fApduCommand::parse(&[0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x02, 0xaa, 0xbb, 0x00, 0x00])
+                .unwrap();
+
+        assert_eq!(command.data(), &[0xaa, 0xbb]);
+        assert_eq!(command.expected, 65_536);
+        assert!(command.extended);
+    }
 }
 
 // === Test messages ===

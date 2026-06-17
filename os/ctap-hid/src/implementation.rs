@@ -5,7 +5,7 @@
 use std::sync::mpsc;
 use std::{collections::BTreeMap, time::Instant};
 
-use fido::messages::Transport;
+use fido::messages::{Transport, U2fApduCommand};
 #[cfg(not(test))]
 use rgb_led::{RgbAnimation, RgbColor};
 #[cfg(feature = "test-app")]
@@ -194,7 +194,13 @@ impl Channel {
             Command::Message => {
                 log::debug!("CTAPHID_MSG");
                 if self.buf.len() >= 4 {
-                    let payload = self.fido.u2f_process_apdu(self.buf.clone(), Transport::Usb);
+                    let payload = match U2fApduCommand::parse(&self.buf) {
+                        Ok(command) => self.fido.u2f_process_apdu(command, Transport::Usb),
+                        Err(e) => {
+                            log::error!("CTAPHID_MSG: invalid U2F APDU: {e:?}");
+                            e.to_u2f_response()
+                        }
+                    };
                     log::debug!("CTAPHID_MSG response: {payload:02x?}");
                     (Command::Message, payload)
                 } else {

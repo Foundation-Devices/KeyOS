@@ -704,7 +704,7 @@ impl BlockingArchiveHandler<U2fProcessApdu> for FidoServer {
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
     ) -> <U2fProcessApdu as server::BlockingArchive>::Response {
-        self.u2f_process_apdu(&msg.msg, msg.transport)
+        self.u2f_process_apdu(&msg.command, msg.transport)
     }
 }
 

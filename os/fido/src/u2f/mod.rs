@@ -12,7 +12,7 @@ use gui_server_api::navigation::securitykeys::UserPresenceOptions;
 
 use crate::{
     implementation::{presence_fingerprint, FidoServer, PresencePoll, SELECTION_TIMEOUT},
-    messages::{OperationOutcomeEvent, OperationType, Transport},
+    messages::{OperationOutcomeEvent, OperationType, Transport, U2fApduCommand},
     RegisteredKey,
 };
 
@@ -27,19 +27,18 @@ struct OperationOutcome {
 impl FidoServer {
     fn process_apdu(
         &mut self,
-        data: &[u8],
+        command: &U2fApduCommand,
         transport: Transport,
         is_repeat: bool,
     ) -> Result<(Vec<u8>, Option<OperationOutcome>), Error> {
-        log::debug!("process_apdu({:02x?},{:?})", data, transport);
-        let _class = data[0];
-        let instruction = data[1];
-        let p1 = data[2];
-        let p2 = data[3];
+        log::debug!("process_apdu({:02x?},{:?})", command, transport);
+        let instruction = command.instruction;
+        let p1 = command.p1;
+        let p2 = command.p2;
         if p2 != 0 {
             return Err(Error::WrongParameter);
         }
-        let body = &data[4..];
+        let body = command.data();
         // Fingerprint used to match this request against any pending presence prompt on retry.
         let fingerprint = presence_fingerprint(body);
         match Command::try_from(instruction)? {
@@ -57,7 +56,7 @@ impl FidoServer {
                 // the user has zero keys, so a fresh user can register their first key
                 // directly from a RP-initiated Register request.
 
-                let req = RegisterRequest::from_apdu(body)?;
+                let req = RegisterRequest::from_apdu_data(body)?;
                 log::debug!("{req:02x?}");
 
                 // NFC can't stay in card emulation across the CNS retry loop, so we can't
@@ -112,7 +111,7 @@ impl FidoServer {
                 if !is_repeat {
                     log::info!("Authenticate");
                 }
-                let req = AuthenticateRequest::from_apdu(body)?;
+                let req = AuthenticateRequest::from_apdu_data(body)?;
                 log::debug!("{req:02x?}");
                 let security_key_index = req.key_handle.security_key_index;
                 let registered_key_index = req.key_handle.registered_key_index;
@@ -219,17 +218,15 @@ impl FidoServer {
         }
     }
 
-    pub fn u2f_process_apdu(&mut self, data: &[u8], transport: Transport) -> Vec<u8> {
+    pub fn u2f_process_apdu(&mut self, command: &U2fApduCommand, transport: Transport) -> Vec<u8> {
         // Detect repeats of the same APDU (same fingerprint) arriving while we wait on the
         // user — an RP polling during a user-presence window. We gate the
         // "Register"/"Authenticate" info log on `!is_repeat` so the retry loop doesn't spam.
-        let fingerprint = if data.len() >= 4 { Some(presence_fingerprint(&data[4..])) } else { None };
-        let is_repeat = fingerprint.is_some() && self.last_u2f_fingerprint == fingerprint;
-        if let Some(fp) = fingerprint {
-            self.last_u2f_fingerprint = Some(fp);
-        }
+        let fingerprint = presence_fingerprint(command.data());
+        let is_repeat = self.last_u2f_fingerprint == Some(fingerprint);
+        self.last_u2f_fingerprint = Some(fingerprint);
 
-        let res = self.process_apdu(data, transport, is_repeat);
+        let res = self.process_apdu(command, transport, is_repeat);
         if let Err(ref e) = res {
             match e {
                 // Not a real error — it's the "retry me" signal while we wait for user

@@ -3622,6 +3622,7 @@ dependencies = [
  "file-backed",
  "fs",
  "gui-server-api",
+ "iso7816",
  "log 0.4.27",
  "minicbor 0.24.4",
  "p256",

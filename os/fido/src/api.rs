@@ -7,7 +7,7 @@ use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 use crate::messages::ResetState;
 use crate::messages::{
     CreateSecurityKey, CtapProcessCbor, EditSecurityKey, GetSelectedSecurityKey, ListSecurityKeys,
-    SelectSecurityKey, SetArchived, Transport, U2fProcessApdu,
+    SelectSecurityKey, SetArchived, Transport, U2fApduCommand, U2fProcessApdu,
 };
 use crate::SecurityKeyView;
 
@@ -33,7 +33,7 @@ pub struct FidoApi<P: CheckedPermissions>(CheckedConn<P>);
 pub struct FidoApiStub;
 
 impl FidoApiStub {
-    pub fn u2f_process_apdu(&self, _msg: Vec<u8>, _transport: Transport) -> Vec<u8> { Vec::new() }
+    pub fn u2f_process_apdu(&self, _command: U2fApduCommand, _transport: Transport) -> Vec<u8> { Vec::new() }
 
     pub fn ctap_process_cbor(&self, _cmd: u8, _raw: Vec<u8>) -> Vec<u8> { Vec::new() }
 }
@@ -112,11 +112,11 @@ impl<P: CheckedPermissions> FidoApi<P> {
 
     /* API for ctap-hid/nfc server */
 
-    pub fn u2f_process_apdu(&self, msg: Vec<u8>, transport: Transport) -> Vec<u8>
+    pub fn u2f_process_apdu(&self, command: U2fApduCommand, transport: Transport) -> Vec<u8>
     where
         P: MessageAllowed<U2fProcessApdu>,
     {
-        self.0.send_blocking_archive(U2fProcessApdu { msg, transport })
+        self.0.send_blocking_archive(U2fProcessApdu { command, transport })
     }
 
     pub fn ctap_process_cbor(&self, cmd: u8, raw: Vec<u8>) -> Vec<u8>
