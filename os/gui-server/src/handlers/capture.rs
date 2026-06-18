@@ -10,20 +10,50 @@ use xous::PID;
 
 use crate::Gui;
 
+impl Gui {
+    #[cfg(all(keyos, not(feature = "recovery-os")))]
+    fn debug_capture_injection_allowed(&self, operation: &str, sender: PID) -> bool {
+        if self.developer_mode_enabled {
+            return true;
+        }
+
+        log::warn!("Rejecting {operation} from PID={sender}: Developer Mode is disabled");
+        false
+    }
+
+    #[cfg(all(keyos, feature = "recovery-os"))]
+    fn debug_capture_injection_allowed(&self, operation: &str, sender: PID) -> bool {
+        log::warn!("Rejecting {operation} from PID={sender}: debug capture and input injection are disabled in Recovery OS");
+        false
+    }
+
+    #[cfg(not(keyos))]
+    fn debug_capture_injection_allowed(&self, _operation: &str, _sender: PID) -> bool { true }
+}
+
 impl LendMutHandler<CaptureScreen> for Gui {
     fn handle(
         &mut self,
         CaptureScreen(mut mem): CaptureScreen,
-        _sender: PID,
+        sender: PID,
         _context: &mut ServerContext<Self>,
     ) {
         let out = mem.as_slice_mut();
+        if !self.debug_capture_injection_allowed("CaptureScreen", sender) {
+            out.fill(0);
+            return;
+        }
+
         self.capture_screen_into(out);
     }
 }
 
 impl ScalarHandler<InjectTouch> for Gui {
-    fn handle(&mut self, InjectTouch(touch): InjectTouch, _sender: PID, _context: &mut ServerContext<Self>) {
+    fn handle(&mut self, InjectTouch(touch): InjectTouch, sender: PID, _context: &mut ServerContext<Self>) {
+        if !self.debug_capture_injection_allowed("InjectTouch", sender) {
+            return;
+        }
+
         self.touch_dispatch(touch, true);
     }
 }
@@ -32,9 +62,13 @@ impl ScalarHandler<InjectKey> for Gui {
     fn handle(
         &mut self,
         InjectKey { is_pressed, key }: InjectKey,
-        _sender: PID,
+        sender: PID,
         _context: &mut ServerContext<Self>,
     ) {
+        if !self.debug_capture_injection_allowed("InjectKey", sender) {
+            return;
+        }
+
         self.dispatch_key_event(is_pressed, key);
     }
 }
@@ -43,9 +77,13 @@ impl ScalarHandler<InjectPowerButton> for Gui {
     fn handle(
         &mut self,
         InjectPowerButton(is_pressed): InjectPowerButton,
-        _sender: PID,
+        sender: PID,
         _context: &mut ServerContext<Self>,
     ) {
+        if !self.debug_capture_injection_allowed("InjectPowerButton", sender) {
+            return;
+        }
+
         self.handle_power_button(is_pressed);
     }
 }

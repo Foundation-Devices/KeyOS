@@ -35,6 +35,7 @@ ForceShutdownTimeout = { id = 50, type = "scalar" }
     "SubscribeScreenBrightness",
     "GetTouchOffset",
     "SubscribeTouchOffset",
+    "SubscribeDeveloperMode",
     "FlushAll",
     "SubscribeOnboardingStatus",
     "GetPrimeColor",

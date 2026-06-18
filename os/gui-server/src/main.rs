@@ -212,6 +212,8 @@ pub struct Gui {
     security: Security,
     #[cfg(not(feature = "recovery-os"))]
     settings: SettingsApi,
+    #[cfg(all(keyos, not(feature = "recovery-os")))]
+    developer_mode_enabled: bool,
     startup_state: StartupState,
 }
 
@@ -240,6 +242,10 @@ impl Server for Gui {
 
         #[cfg(not(feature = "recovery-os"))]
         {
+            #[cfg(keyos)]
+            {
+                self.settings.server_subscribe_developer_mode(context);
+            }
             self.settings.server_subscribe_screen_brightness(context);
             self.settings.server_subscribe_touch_offset(context);
             self.settings.server_subscribe_onboarding_status(context);
@@ -327,6 +333,8 @@ impl Gui {
             security,
             #[cfg(not(feature = "recovery-os"))]
             settings: SettingsApi::default(),
+            #[cfg(all(keyos, not(feature = "recovery-os")))]
+            developer_mode_enabled: false,
             startup_state,
         })
     }

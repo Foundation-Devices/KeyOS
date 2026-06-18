@@ -35,6 +35,18 @@ impl ScalarEventHandler<settings::global::TouchOffset> for Gui {
     }
 }
 
+#[cfg(all(keyos, not(feature = "recovery-os")))]
+impl ScalarEventHandler<settings::global::DeveloperMode> for Gui {
+    fn handle(
+        &mut self,
+        msg: settings::global::DeveloperMode,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        self.developer_mode_enabled = msg.0;
+    }
+}
+
 impl ArchiveEventHandler<settings::global::OnboardingStatus> for Gui {
     fn handle(
         &mut self,
