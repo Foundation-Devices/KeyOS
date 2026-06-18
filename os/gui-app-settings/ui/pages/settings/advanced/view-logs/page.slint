@@ -4,7 +4,7 @@
 import { ListView } from "std-widgets.slint";
 
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { BasePage, PageBody, ContentSection, ButtonSection, WrappedIcon, Button } from "@ui/widgets.slint";
+import { BasePage, PageBody, ContentSection, ButtonSection, WrappedIcon, Button, ScrollFadeMask } from "@ui/widgets.slint";
 import { Palette, Size } from "@ui/theme.slint";
 
 import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
@@ -56,22 +56,14 @@ export component ViewLogsPage inherits BasePage {
             }
         }
     }
-    // Top shadow
-    Rectangle {
-        width: flickable.width;
-        height: 80px;
-        y: flickable.y;
-        visible: !at-top;
-        background: @linear-gradient(0deg, #00000000 0%, Palette.background-primary 100%);
-    }
 
-    // Bottom shadow
-    Rectangle {
+    ScrollFadeMask {
+        y: flickable.y;
         width: flickable.width;
-        height: 80px;
-        y: flickable.y + flickable.height - self.height;
-        visible: !at-bottom && !glue-bottom;
-        background: @linear-gradient(0deg, Palette.background-primary 0%, #00000000 100%);
+        height: flickable.height;
+        at-top: root.at-top;
+        at-bottom: root.at-bottom;
+        bottom-visible: !root.at-bottom && !root.glue-bottom;
     }
 
     // Save button

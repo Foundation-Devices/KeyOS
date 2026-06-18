@@ -7,6 +7,7 @@ import {
     IconButton,
     MenuActionItem,
     MenuBooleanItem,
+    ScrollFadeMask,
     TextMd,
     TextSm
 } from "@ui/widgets.slint";
@@ -134,106 +135,128 @@ export component AppsPage inherits BasePage {
         AppManagementGlobal.refresh-installed-apps();
     }
 
-    VerticalLayout {
-        SettingsNavHeader {
-            title: TR2.lookup(TrId.AppsTitle);
-        }
+    header := SettingsNavHeader {
+        y: 0px;
+        title: TR2.lookup(TrId.AppsTitle);
+    }
 
-        // One virtualized list for the whole page: section headers, installed
-        // app cards, and the fixed settings rows are flattened into a single
-        // row model in Rust so only on-screen rows (and their icons) are ever
-        // instantiated. Each card row repaints the group card background and
-        // rounds its first/last corners; the group drop-shadow is dropped.
-        ListView {
-            for row in AppManagementGlobal.apps-list-rows: Rectangle {
-                // Delegate width is auto-bound to the ListView width. Height is
-                // explicit per row kind so geometry flows strictly top-down,
-                // which avoids a layout binding loop with AppListCard's
-                // content column (it derives its width from the card width).
-                height: row.kind == AppsListRowKind.section-header ? 56px : row.kind == AppsListRowKind.app ? (84px + (row.show_divider ? 1px : 0px)) : (64px + (row.show_divider ? 1px : 0px));
+    // One virtualized list for the whole page: section headers, installed app
+    // cards, and the fixed settings rows are flattened into a single row model
+    // in Rust so only on-screen rows (and their icons) are ever instantiated.
+    // Keep the list constrained below the header so it can scroll when many
+    // sideloaded apps are installed.
+    apps-list := ListView {
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+        viewport-width: self.width;
+        mouse-drag-pan-enabled: true;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
 
-                if row.kind == AppsListRowKind.section-header: TextSm {
-                    x: Size.sz6 + Size.sz4;
-                    y: Size.sz6;
-                    width: parent.width - (Size.sz6 + Size.sz4) - Size.sz6;
-                    text: row.action_id == 0 ? TR2.lookup(TrId.AppsInstalledApps) : TR2.lookup(TrId.AppsSectionSettings);
-                    color: Palette.content-tertiary;
-                    horizontal-alignment: left;
+        for row in AppManagementGlobal.apps-list-rows: row-delegate := Rectangle {
+            // Delegate width is auto-bound to the ListView width. Height is
+            // explicit per row kind so geometry flows strictly top-down, which
+            // avoids a layout binding loop with AppListCard's content column
+            // (it derives its width from the card width).
+            property <length> content-height: row.kind == AppsListRowKind.section-header ? 56px : row.kind == AppsListRowKind.app ? 84px : 64px;
+            property <length> divider-height: row.show_divider ? 1px : 0px;
+            height: content-height + (row.kind == AppsListRowKind.section-header ? 0px : divider-height);
+
+            if row.kind == AppsListRowKind.section-header: TextSm {
+                x: Size.sz6 + Size.sz4;
+                y: Size.sz6;
+                width: parent.width - (Size.sz6 + Size.sz4) - Size.sz6;
+                height: row-delegate.content-height;
+                text: row.action_id == 0 ? TR2.lookup(TrId.AppsInstalledApps) : TR2.lookup(TrId.AppsSectionSettings);
+                color: Palette.content-tertiary;
+                horizontal-alignment: left;
+            }
+
+            if row.kind != AppsListRowKind.section-header: Rectangle {
+                x: Size.sz6;
+                width: parent.width - Size.sz6 * 2;
+                height: parent.height;
+                background: Palette.background-primary;
+                border-top-left-radius: row.first ? Size.sz6 : 0px;
+                border-top-right-radius: row.first ? Size.sz6 : 0px;
+                border-bottom-left-radius: row.last ? Size.sz6 : 0px;
+                border-bottom-right-radius: row.last ? Size.sz6 : 0px;
+
+                if row.kind == AppsListRowKind.app: AppListCard {
+                    width: parent.width;
+                    height: row-delegate.content-height;
+                    app: row.app;
+                    first: row.first;
+                    last: row.last;
+
+                    clicked => {
+                        AppManagementGlobal.selected-app-permission-groups = row.app.permission_groups;
+                        Navigate.app-details({
+                            app-id: row.app.app_id,
+                            icon-key: row.app.icon_key,
+                            name: row.app.name,
+                            publisher: row.app.publisher,
+                            version: row.app.version,
+                            size: row.app.size,
+                            description: row.app.description,
+                        }, { });
+                    }
+
+                    launch-clicked => {
+                        AppManagementGlobal.launch-installed-app(row.app.app_id);
+                    }
                 }
 
-                if row.kind != AppsListRowKind.section-header: Rectangle {
-                    x: Size.sz6;
-                    width: parent.width - Size.sz6 * 2;
-                    height: parent.height;
-                    background: Palette.background-primary;
-                    border-top-left-radius: row.first ? Size.sz6 : 0px;
-                    border-top-right-radius: row.first ? Size.sz6 : 0px;
-                    border-bottom-left-radius: row.last ? Size.sz6 : 0px;
-                    border-bottom-right-radius: row.last ? Size.sz6 : 0px;
-
-                    if row.kind == AppsListRowKind.app: AppListCard {
-                        width: parent.width;
-                        app: row.app;
-                        first: row.first;
-                        last: row.last;
-
-                        clicked => {
-                            AppManagementGlobal.selected-app-permission-groups = row.app.permission_groups;
-                            Navigate.app-details({
-                                app-id: row.app.app_id,
-                                icon-key: row.app.icon_key,
-                                name: row.app.name,
-                                publisher: row.app.publisher,
-                                version: row.app.version,
-                                size: row.app.size,
-                                description: row.app.description,
-                            }, { });
-                        }
-
-                        launch-clicked => {
-                            AppManagementGlobal.launch-installed-app(row.app.app_id);
+                if row.kind == AppsListRowKind.action: MenuActionItem {
+                    width: parent.width;
+                    height: row-delegate.content-height;
+                    first: row.first;
+                    last: row.last;
+                    label: TR2.lookup(TrId.AppsTrustedPublishers);
+                    clicked => {
+                        if row.action_id == 0 {
+                            Navigate.trusted-publishers({ });
                         }
                     }
+                }
 
-                    if row.kind == AppsListRowKind.action: MenuActionItem {
-                        width: parent.width;
-                        first: row.first;
-                        last: row.last;
-                        label: TR2.lookup(TrId.AppsTrustedPublishers);
-                        clicked => {
-                            if row.action_id == 0 {
-                                Navigate.trusted-publishers({ });
-                            }
+                if row.kind == AppsListRowKind.toggle: MenuBooleanItem {
+                    width: parent.width;
+                    height: row-delegate.content-height;
+                    first: row.first;
+                    last: row.last;
+                    label: TR2.lookup(TrId.AppsDeveloperMode);
+                    checked: SettingGlobal.developer-mode;
+                    changed(enabled) => {
+                        if row.action_id == 1 {
+                            SettingGlobal.set-developer-mode(enabled);
                         }
                     }
+                }
 
-                    if row.kind == AppsListRowKind.toggle: MenuBooleanItem {
-                        width: parent.width;
-                        first: row.first;
-                        last: row.last;
-                        label: TR2.lookup(TrId.AppsDeveloperMode);
-                        checked: SettingGlobal.developer-mode;
-                        changed(enabled) => {
-                            if row.action_id == 1 {
-                                SettingGlobal.set-developer-mode(enabled);
-                            }
-                        }
-                    }
+                if row.kind == AppsListRowKind.empty: TextSm {
+                    x: Size.sz4;
+                    y: (parent.height - self.preferred-height) / 2;
+                    width: parent.width - (Size.sz4 * 2);
+                    height: row-delegate.content-height;
+                    text: TR2.lookup(TrId.AppsNoInstalledApps);
+                    color: Palette.content-tertiary;
+                }
 
-                    if row.kind == AppsListRowKind.empty: TextSm {
-                        x: Size.sz4;
-                        y: (parent.height - self.preferred-height) / 2;
-                        width: parent.width - (Size.sz4 * 2);
-                        text: TR2.lookup(TrId.AppsNoInstalledApps);
-                        color: Palette.content-tertiary;
-                    }
-
-                    if row.show_divider: HLine {
-                        y: parent.height - 1px;
-                        width: parent.width;
-                    }
+                if row.show_divider: HLine {
+                    y: row-delegate.content-height;
+                    width: parent.width;
                 }
             }
         }
+    }
+
+    ScrollFadeMask {
+        y: apps-list.y;
+        width: apps-list.width;
+        height: apps-list.height;
+        at-top: apps-list.viewport-y == 0;
+        at-bottom: -apps-list.viewport-y + apps-list.height >= apps-list.viewport-height;
     }
 }

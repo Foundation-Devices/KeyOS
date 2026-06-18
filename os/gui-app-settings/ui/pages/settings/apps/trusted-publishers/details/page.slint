@@ -7,6 +7,7 @@ import {
     ContentSection,
     ConfirmationModal,
     ErrorModal,
+    ScrollFadeMask,
     TextMd,
     TextSm
 } from "@ui/widgets.slint";
@@ -145,20 +146,12 @@ export component TrustedPublisherDetailsPage inherits BasePage {
         }
     }
 
-    Rectangle {
-        width: flickable.width;
-        height: 80px;
+    ScrollFadeMask {
         y: flickable.y;
-        visible: !at-top;
-        background: @linear-gradient(0deg, #00000000 0%, Palette.background-primary 100%);
-    }
-
-    Rectangle {
         width: flickable.width;
-        height: 80px;
-        y: flickable.y + flickable.height - self.height;
-        visible: !at-bottom;
-        background: @linear-gradient(0deg, Palette.background-primary 0%, #00000000 100%);
+        height: flickable.height;
+        at-top: root.at-top;
+        at-bottom: root.at-bottom;
     }
 
     if remove-confirm-visible: ConfirmationModal {

@@ -92,6 +92,32 @@ export component ScrollBody inherits Rectangle {
     }
 }
 
+export component ScrollFadeMask inherits Rectangle {
+    in property <bool> at-top: true;
+    in property <bool> at-bottom: true;
+    in property <bool> top-visible: !root.at-top;
+    in property <bool> bottom-visible: !root.at-bottom;
+    in property <length> fade-height: 80px;
+    in property <brush> fade-color: Palette.background-primary;
+
+    background: Palette.transparent;
+
+    Rectangle {
+        width: parent.width;
+        height: root.fade-height;
+        visible: root.top-visible;
+        background: @linear-gradient(0deg, #00000000 0%, root.fade-color 100%);
+    }
+
+    Rectangle {
+        y: parent.height - self.height;
+        width: parent.width;
+        height: root.fade-height;
+        visible: root.bottom-visible;
+        background: @linear-gradient(0deg, root.fade-color 0%, #00000000 100%);
+    }
+}
+
 export component Modal inherits Rectangle {
     in property <string> icon: "info";
     in property <brush> icon-color: Palette.content-brand;
