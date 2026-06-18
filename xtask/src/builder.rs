@@ -518,17 +518,20 @@ impl Builder {
                 false,
             );
             let worker_elf = &worker_artifacts[0];
-            strip_elf(worker_elf, &format!("{worker_elf}.strip"));
+            self.strip_elf(worker_elf, &format!("{worker_elf}.strip"));
         }
         let built_services = self.build_crates(&self.services, &self.features, &target, true);
 
         // ------ build and bundle the filesystem apps ------
+        // Hosted apps are raw host binaries launched by path; signing would only
+        // wrap them in a cosign2 header that create_process can't spawn.
+        let sign_apps = self.target.is_some() && !self.ci;
         let apps_path = self.get_apps_path();
-        self.build_and_bundle_apps(&apps_path, &self.apps, !self.ci, signing_mode);
+        self.build_and_bundle_apps(&apps_path, &self.apps, sign_apps, signing_mode);
 
         // ------ build and bundle the filesystem flux ------
         let flux_apps_path = self.get_flux_apps_path();
-        self.build_and_bundle_apps(&flux_apps_path, &self.flux_apps, !self.ci, signing_mode);
+        self.build_and_bundle_apps(&flux_apps_path, &self.flux_apps, sign_apps, signing_mode);
 
         // ------ build the kernel ------
         let built_kernel = self
@@ -593,6 +596,7 @@ impl Builder {
         // other `build --hosted` consumer) can stage it for the simulator kernel.
         if result.target.is_none() {
             result.write_hosted_services_manifest();
+            crate::hosted_image::build_hosted_disk_images();
         }
         result
     }
@@ -616,7 +620,7 @@ impl Builder {
                 .to_string();
             let stripped_name = format!("{service_path}.strip");
             let manifest: Manifest = load_manifest(service_crate);
-            strip_elf(service_path, &stripped_name);
+            self.strip_elf(service_path, &stripped_name);
             args.add(tags::BinaryElf::new(
                 pid,
                 program_name,
@@ -692,13 +696,8 @@ impl Builder {
             )
             .expect("Json serialization failed");
 
-            // Strip the ELF for KeyOS target, otherwise just copy it
             let elf_path = out_elf_dir.join("app.elf");
-            if target.is_some() {
-                strip_elf(&app_bin, elf_path.as_os_str().to_str().unwrap());
-            } else {
-                fs::copy(app_bin, &elf_path).unwrap();
-            }
+            self.strip_elf(&app_bin, elf_path.as_os_str().to_str().unwrap());
 
             app_data.push(AppInfo { app_name, elf_path });
         }
@@ -814,6 +813,25 @@ impl Builder {
         }
         writeln!(f, "];").unwrap();
     }
+
+    /// Strip an ELF with the toolchain matching the build target: the KeyOS cross
+    /// strip for hardware, the host strip for hosted binaries.
+    fn strip_elf(&self, elf_in_path: &str, stripped_path: &str) {
+        println!("Stripping {elf_in_path:}");
+
+        let mut command;
+        if self.target.is_some() {
+            command = Command::new("arm-none-eabi-strip");
+            command.arg("--strip-unneeded");
+        } else {
+            command = Command::new("strip");
+        }
+        command.args([elf_in_path, "-o", stripped_path]);
+
+        if !command.status().unwrap().success() {
+            panic!("{} failed", command.get_program().to_string_lossy());
+        }
+    }
 }
 
 impl BuildResult {
@@ -881,8 +899,11 @@ impl BuildResult {
 
             println!("Starting hosted mode...");
             println!("    Command: {} {}", self.built_kernel, services_path.display());
+            // app-manager execs host app binaries from here (mirrors the image /keyos dir).
+            let app_elf_root = project_root().join("target").join("hosted").join("keyos");
             let exec_err = Command::new(self.built_kernel)
                 .current_dir(project_root().join("xous/kernel"))
+                .env("FOUNDATION_SIMULATOR_APP_ELF_ROOT", app_elf_root)
                 .arg(&services_path)
                 .exec();
             panic!("Could not execute kernel: {exec_err}");
@@ -993,19 +1014,6 @@ fn pad_for_sha_dma(binary: &mut Vec<u8>) {
 
     let aligned = binary.len().next_multiple_of(SHA_DMA_BIG_ALIGNMENT);
     binary.resize(aligned, 0);
-}
-
-fn strip_elf(elf_in_path: &str, stripped_path: &str) {
-    println!("Stripping {elf_in_path:}");
-
-    if !Command::new("arm-none-eabi-strip")
-        .args(["--strip-unneeded", elf_in_path, "-o", stripped_path])
-        .status()
-        .unwrap()
-        .success()
-    {
-        panic!("arm-none-eabi-strip failed");
-    }
 }
 
 pub fn cargo() -> String { env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()) }

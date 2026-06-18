@@ -1,18 +1,12 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#[cfg(keyos)]
 use std::{cell::RefCell, collections::HashMap};
 
-#[cfg(keyos)]
 use slint::private_unstable_api::re_exports::StaticTextures;
 use slint::{private_unstable_api::re_exports::ImageInner, Image, SharedString};
-#[cfg(not(keyos))]
-use slint_keyos_platform_common::utils::parse_nine_slice_filename;
-#[cfg(keyos)]
 use slint_keyos_platform_common::{ArchivedIconSet, IconSet, RawImage};
 
-#[cfg(keyos)]
 pub fn load_raw_image<P>(
     fs: &fs::FileSystem<P>,
     cache: &RefCell<HashMap<String, (&'static StaticTextures, Option<[u16; 4]>)>>,
@@ -25,7 +19,7 @@ where
     P: server::MessageAllowed<fs::messages::OpenFileMessage>,
     P: server::MessageAllowed<fs::messages::CloseFile>,
     P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
     P: server::MessageAllowed<fs::messages::GetMetadata>,
 {
     // Try dark variant first if in dark mode
@@ -79,7 +73,6 @@ where
     image
 }
 
-#[cfg(keyos)]
 fn raw_image_location<P>(fs: &fs::FileSystem<P>, path: &str) -> Option<fs::Location>
 where
     P: server::CheckedPermissions,
@@ -90,14 +83,12 @@ where
         .find(|location| fs.metadata(path, *location).is_ok())
 }
 
-#[cfg(keyos)]
 #[derive(Default)]
 pub struct IconCache {
     icon_set: Option<&'static ArchivedIconSet>,
     cache: HashMap<(usize, String), &'static StaticTextures>,
 }
 
-#[cfg(keyos)]
 pub fn load_icon<P>(
     fs: &fs::FileSystem<P>,
     cache: &RefCell<IconCache>,
@@ -106,7 +97,7 @@ pub fn load_icon<P>(
 ) -> Image
 where
     P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
 {
     if cache.borrow().icon_set.is_none() {
         let Some(icon_set) = map_archive::<IconSet, _>(fs, "icon_set.bin") else {
@@ -140,7 +131,6 @@ where
     Image::from(ImageInner::StaticTextures(texture))
 }
 
-#[cfg(keyos)]
 pub fn load_raw_image_file<P>(
     fs: &fs::FileSystem<P>,
     cache: &RefCell<HashMap<String, &'static StaticTextures>>,
@@ -152,7 +142,7 @@ where
     P: server::MessageAllowed<fs::messages::OpenFileMessage>,
     P: server::MessageAllowed<fs::messages::CloseFile>,
     P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
 {
     let path = path.to_string();
     let key = format!("{location:?}:{path}");
@@ -180,14 +170,11 @@ where
 /// owns its pixels (refcounted), and the LRU bound caps how many stay resident:
 /// evicting an entry drops the cache's reference, freeing the pixels once no
 /// on-screen delegate still holds the image.
-#[cfg(keyos)]
 pub type BundledAppIconCache = RefCell<lru::LruCache<String, Image>>;
 
 /// Maximum number of decoded bundled app icons kept resident at once.
-#[cfg(keyos)]
 pub const BUNDLED_APP_ICON_CACHE_CAP: usize = 32;
 
-#[cfg(keyos)]
 pub fn new_bundled_app_icon_cache() -> BundledAppIconCache {
     RefCell::new(lru::LruCache::new(
         std::num::NonZeroUsize::new(BUNDLED_APP_ICON_CACHE_CAP).expect("cache cap is non-zero"),
@@ -197,7 +184,6 @@ pub fn new_bundled_app_icon_cache() -> BundledAppIconCache {
 /// Load a bundled app icon, fetching its bytes via `fetch_bytes()` only on a
 /// cache miss. The decoded image owns its pixels so the LRU can free it on
 /// eviction; a miss after eviction simply re-fetches and re-decodes.
-#[cfg(keyos)]
 pub fn load_raw_image_bytes<F>(cache: &BundledAppIconCache, cache_key: SharedString, fetch_bytes: F) -> Image
 where
     F: FnOnce() -> Vec<u8>,
@@ -238,7 +224,6 @@ where
 /// Unlike the `StaticTextures` path (which borrows `&'static` data and therefore
 /// must leak), this copies the texture's pixels into a `SharedPixelBuffer` that
 /// frees with the last `Image` clone — required for an evicting cache.
-#[cfg(keyos)]
 fn decode_raw_image_to_owned(archived: &slint_keyos_platform_common::ArchivedRawImage) -> Option<Image> {
     use slint_keyos_platform_common::ArchivedPixelFormat;
 
@@ -304,7 +289,6 @@ fn decode_raw_image_to_owned(archived: &slint_keyos_platform_common::ArchivedRaw
     }
 }
 
-#[cfg(keyos)]
 fn load_archive_from_location<T, P>(
     fs: &fs::FileSystem<P>,
     location: fs::Location,
@@ -317,7 +301,7 @@ where
     P: server::MessageAllowed<fs::messages::OpenFileMessage>,
     P: server::MessageAllowed<fs::messages::CloseFile>,
     P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
 {
     if location == fs::Location::AppResources {
         read_archive_from_location::<T, P>(fs, location, path)
@@ -326,7 +310,6 @@ where
     }
 }
 
-#[cfg(keyos)]
 fn read_archive_from_location<T, P>(
     fs: &fs::FileSystem<P>,
     location: fs::Location,
@@ -358,18 +341,16 @@ where
     Some(archived)
 }
 
-#[cfg(keyos)]
 fn map_archive<T, P>(fs: &fs::FileSystem<P>, path: &str) -> Option<&'static T::Archived>
 where
     T: rkyv::Archive,
     T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
 {
     map_archive_from_location::<T, P>(fs, fs::Location::CommonAssets, path)
 }
 
-#[cfg(keyos)]
 fn map_archive_from_location<T, P>(
     fs: &fs::FileSystem<P>,
     location: fs::Location,
@@ -379,7 +360,7 @@ where
     T: rkyv::Archive,
     T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
+    P: fs::MapFilePermissions,
 {
     log::debug!("Mapping file {path}");
     let mapping = match fs.map_file(location, path) {
@@ -393,153 +374,4 @@ where
     let mapping = unsafe { core::mem::transmute::<&[u8], &'static [u8]>(mapping.as_slice()) };
     let archived = rkyv::access::<T::Archived, rkyv::rancor::Error>(mapping).ok()?;
     Some(archived)
-}
-
-#[cfg(not(keyos))]
-fn try_load_image_with_name(
-    base_dir: &std::path::Path,
-    target_name: &str,
-    nine_slice: bool,
-) -> Option<Image> {
-    for entry in std::fs::read_dir(base_dir).ok()? {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        let supported = path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .map(str::to_ascii_lowercase)
-            .is_some_and(|extension| {
-                matches!(extension.as_str(), "svg" | "png" | "jpg" | "jpeg" | "webp" | "bmp")
-            });
-        if !supported {
-            continue;
-        }
-
-        if nine_slice {
-            if let Some((ns_name, nine_slice_edges)) = parse_nine_slice_filename(&path) {
-                if ns_name == target_name {
-                    let Ok(mut image) = Image::load_from_path(&entry.path()) else {
-                        continue;
-                    };
-                    image.set_nine_slice_edges(
-                        nine_slice_edges[0],
-                        nine_slice_edges[1],
-                        nine_slice_edges[2],
-                        nine_slice_edges[3],
-                    );
-                    return Some(image);
-                }
-            }
-        } else {
-            if path.file_stem().map(|s| s == target_name).unwrap_or(false) {
-                if let Ok(image) = Image::load_from_path(&path) {
-                    return Some(image);
-                }
-            }
-        }
-    }
-    None
-}
-
-#[cfg(not(keyos))]
-fn image_base_dirs(name: &str) -> Vec<std::path::PathBuf> {
-    let mut roots = std::env::var_os("FOUNDATION_APP_RESOURCES_DIR")
-        .map(std::path::PathBuf::from)
-        .into_iter()
-        .collect::<Vec<_>>();
-    roots.extend(["../../resources", "../../ui/ui"].into_iter().map(std::path::PathBuf::from));
-
-    roots
-        .into_iter()
-        .filter_map(|root| {
-            let candidate = root.join(name);
-            candidate.parent().map(std::path::Path::to_path_buf)
-        })
-        .collect()
-}
-
-#[cfg(not(keyos))]
-pub fn load_raw_image<FS>(
-    _fs: &FS,
-    _cache: &(),
-    name: SharedString,
-    nine_slice: bool,
-    is_dark: bool,
-) -> Image {
-    let image_name = name.split("/").last().unwrap();
-    let search_dirs = image_base_dirs(&name);
-
-    for base_dir in &search_dirs {
-        if is_dark {
-            let dark_image_name = format!("{}-dark", image_name);
-            if let Some(image) = try_load_image_with_name(base_dir, &dark_image_name, nine_slice) {
-                log::debug!("Using dark variant: {}", dark_image_name);
-                return image;
-            }
-        }
-
-        if let Some(image) = try_load_image_with_name(base_dir, image_name, nine_slice) {
-            return image;
-        }
-    }
-
-    log::warn!("Could not find image: \"{name}\". Tried {:?}", search_dirs);
-    Image::from(ImageInner::None)
-}
-
-#[cfg(not(keyos))]
-pub fn load_raw_image_file<FS>(_fs: &FS, _cache: &(), _location: fs::Location, path: SharedString) -> Image {
-    let path = std::path::PathBuf::from(path.as_str());
-    let mut last_error = None;
-
-    for candidate in hosted_image_file_candidates(&path) {
-        match Image::load_from_path(&candidate) {
-            Ok(image) => return image,
-            Err(e) => last_error = Some((candidate, e)),
-        }
-    }
-
-    if let Some((candidate, error)) = last_error {
-        log::warn!("Could not load image file at path \"{candidate:?}\": {error:?}");
-    } else {
-        log::warn!("Could not load image file at path \"{path:?}\"");
-    }
-    Image::from(ImageInner::None)
-}
-
-#[cfg(not(keyos))]
-fn hosted_image_file_candidates(path: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut candidates = vec![path.to_path_buf()];
-    if path.extension().and_then(|extension| extension.to_str()) == Some("raw") {
-        candidates.extend(
-            ["svg", "png", "jpg", "jpeg", "webp", "bmp"]
-                .into_iter()
-                .map(|extension| path.with_extension(extension)),
-        );
-    }
-    candidates
-}
-
-#[cfg(not(keyos))]
-pub fn load_icon<FS>(_fs: &FS, _cache: &(), name: SharedString, _requested_size: f32) -> Image {
-    let mut candidate_paths = std::env::var_os("FOUNDATION_APP_RESOURCES_DIR")
-        .map(|root| std::path::PathBuf::from(root).join("icons").join(format!("{name}.svg")))
-        .into_iter()
-        .collect::<Vec<_>>();
-    candidate_paths.extend([
-        std::path::PathBuf::from(format!("../../resources/icons/{name}.svg")),
-        std::path::PathBuf::from(format!("../../ui/ui/icons/{name}.svg")),
-    ]);
-
-    for path in &candidate_paths {
-        match Image::load_from_path(&path) {
-            Ok(img) => return img,
-            Err(e) => log::debug!("Error loading image at path \"{path:?}\": {e:?}"),
-        }
-    }
-
-    log::warn!("Could not find icon: \"{name}\". Tried {:?}", candidate_paths);
-    Image::from(ImageInner::None)
 }

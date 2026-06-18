@@ -3,6 +3,7 @@
 
 //! Sim command - build an app for hosted execution and run it in the KeyOS simulator
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -11,15 +12,20 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use foundation_core::{AppConfig, AppManifest, ProjectContext, SdkLayout, SdkRoot};
 
-use crate::assets::{copy_app_resources_to_bundle, stage_simulator_resources, APP_RESOURCES_DIR_ENV};
+use crate::assets::stage_hardware_assets;
 use crate::cargo_support::{configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present};
 use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
 const SCREENSHOTS_DIR_ENV: &str = "FOUNDATION_SIMULATOR_SCREENSHOTS_DIR";
-const SIMULATOR_APPS_DIR_ENV: &str = "FOUNDATION_SIMULATOR_APPS_DIR";
+const APP_ELF_ROOT_ENV: &str = "FOUNDATION_SIMULATOR_APP_ELF_ROOT";
+
+const FATFS_IMAGE_BINARY: &str = "fatfs-image";
+const FATFS_IMAGE_ENV: &str = "FOUNDATION_FATFS_IMAGE";
+const SYSTEM_IMAGE: &str = "disk_system.dat";
+const SYSTEM_IMAGE_SIZE: &str = "128M";
 
 /// Execute the sim command
 pub fn execute() -> Result<()> {
@@ -44,15 +50,24 @@ pub fn execute() -> Result<()> {
     // Build the app for native/hosted execution (not the ARM hardware target).
     build_for_simulator(project_root, config, sdk.root(), &themes_rust_dir)?;
 
-    // Copy to SDK apps directory
+    let app_id_hex = config.app_id.as_hex();
+    // app-manager keys a sideloaded bundle on the bare hex app id (no `0x`); the
+    // host-launch path and the in-image bundle dir must both use it.
+    let sideloaded_dir = app_id_hex.trim_start_matches("0x");
+
+    // The app-elf root mirrors the image's /keyos dir (built-ins under apps,
+    // sideloaded under sideloaded-apps); app-manager execs the dev app.elf here.
+    let app_elf_root = simulator_app_elf_root(&sdk);
     println!("Copying application to KeyOS SDK...");
-    let dest_dir = copy_to_sdk(config, project_root, &sdk.simulator_apps_dir())?;
-    let resources_dir = stage_simulator_resources(config, project_root)?;
-    copy_app_resources_to_bundle(&resources_dir, &dest_dir)
-        .with_context(|| format!("Failed to copy simulator resources to {}", dest_dir.display()))?;
+    let dest_dir = copy_to_sdk(config, project_root, &app_elf_root.join("sideloaded-apps"), sideloaded_dir)?;
+
+    // The dev app is read through fs like on device, so its manifest, icon, and
+    // resources go into the simulator's system image (the app.elf does not; it is
+    // exec'd from the host stage above).
+    inject_sideloaded_app(&sdk, config, project_root, sideloaded_dir)?;
 
     println!("Starting KeyOS simulator...");
-    launch_simulator(&sdk, &dest_dir, config.app_id.as_hex(), project_root, &resources_dir)?;
+    launch_simulator(&sdk, &dest_dir, app_id_hex, project_root, &app_elf_root)?;
 
     println!();
     println!("Application deployed and simulator started.");
@@ -90,9 +105,10 @@ fn build_for_simulator(
     Ok(())
 }
 
-/// Copy the built app to the SDK simulator app directory.
-fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path) -> Result<PathBuf> {
-    // Determine source paths
+/// Copy the built app to `<apps_dir>/<dest_name>/app.elf` (plus a manifest for
+/// reference). The dir is named by the bare hex app id so the host-launch path
+/// resolves it; the binary is still the cargo package output.
+fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path, dest_name: &str) -> Result<PathBuf> {
     let profile = "debug"; // Simulator always uses debug for faster iteration
     let binary_path = project_root.join("target").join(profile).join(&config.app_name);
 
@@ -100,21 +116,126 @@ fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path) -> Resu
         anyhow::bail!("Built binary not found at: {}", binary_path.display());
     }
 
-    // Destination directory in SDK
-    let dest_dir = apps_dir.join(&config.app_name);
+    let dest_dir = apps_dir.join(dest_name);
     fs::create_dir_all(&dest_dir)?;
 
-    // Copy binary as app.elf
     let dest_binary = dest_dir.join("app.elf");
     fs::copy(&binary_path, &dest_binary)
         .with_context(|| format!("Failed to copy binary to {}", dest_binary.display()))?;
 
-    // Generate and write manifest.json
     let manifest_json = generate_manifest_json(config, project_root)?;
-    let dest_manifest = dest_dir.join("manifest.json");
-    fs::write(&dest_manifest, manifest_json)?;
+    fs::write(dest_dir.join("manifest.json"), manifest_json)?;
 
     Ok(dest_dir)
+}
+
+/// Build the dev app's device-format bundle (manifest, icon, resources; no
+/// app.elf) and inject it into the simulator system image under
+/// `keyos/sideloaded-apps/<hex>`, where app-manager enumerates it through fs.
+fn inject_sideloaded_app(
+    sdk: &SdkRoot,
+    config: &AppConfig,
+    project_root: &Path,
+    sideloaded_dir: &str,
+) -> Result<()> {
+    let bundle_dir = project_root.join("target").join("foundation").join("sim-sideload").join(sideloaded_dir);
+    if bundle_dir.exists() {
+        fs::remove_dir_all(&bundle_dir)
+            .with_context(|| format!("Failed to clean sideload bundle dir {}", bundle_dir.display()))?;
+    }
+    fs::create_dir_all(&bundle_dir)?;
+    stage_hardware_assets(config, project_root, &bundle_dir)?;
+    fs::write(bundle_dir.join("manifest.json"), generate_manifest_json(config, project_root)?)?;
+
+    let kernel_dir = simulator_kernel_dir(sdk);
+    ensure_simulator_images(sdk, &kernel_dir)?;
+    let system_image = kernel_dir.join(SYSTEM_IMAGE);
+
+    println!("Injecting app into simulator system image...");
+    let dest = format!("keyos/sideloaded-apps/{sideloaded_dir}");
+    // Drop the old bundle first, or stale entries from a previous run linger.
+    run_fatfs_image(sdk, &[OsStr::new("rm"), system_image.as_os_str(), OsStr::new(&dest)])?;
+    run_fatfs_image(
+        sdk,
+        &[OsStr::new("cp"), system_image.as_os_str(), bundle_dir.as_os_str(), OsStr::new(&dest)],
+    )
+}
+
+/// Directory the hosted kernel runs in, where `os/fs` opens `disk*.dat`.
+fn simulator_kernel_dir(sdk: &SdkRoot) -> PathBuf {
+    match sdk.layout() {
+        SdkLayout::Repo => sdk.keyos_root().join("xous").join("kernel"),
+        SdkLayout::Bundle => sdk.keyos_root().join("simulator").join("xous").join("kernel"),
+    }
+}
+
+/// Host mirror of the image's `/keyos` dir, holding the binaries the simulator
+/// execs (`apps/<name>/app.elf`, `sideloaded-apps/<hex>/app.elf`).
+fn simulator_app_elf_root(sdk: &SdkRoot) -> PathBuf {
+    match sdk.layout() {
+        SdkLayout::Repo => sdk.keyos_root().join("target").join("hosted").join("keyos"),
+        SdkLayout::Bundle => sdk.keyos_root().join("simulator"),
+    }
+}
+
+/// Create the simulator system image if missing, so the injected dev app has a
+/// volume to land in. `os/fs` mounts it instead of formatting, so any seeded
+/// assets must persist; create-if-missing never clobbers a shipped image. The
+/// user volume (disk.dat) is created by the simulator launcher on first run.
+fn ensure_simulator_images(sdk: &SdkRoot, kernel_dir: &Path) -> Result<()> {
+    fs::create_dir_all(kernel_dir)
+        .with_context(|| format!("Failed to create simulator kernel dir {}", kernel_dir.display()))?;
+    ensure_image(sdk, &kernel_dir.join(SYSTEM_IMAGE), SYSTEM_IMAGE_SIZE, "PRIME")
+}
+
+fn ensure_image(sdk: &SdkRoot, image: &Path, size: &str, label: &str) -> Result<()> {
+    if image.exists() {
+        return Ok(());
+    }
+    println!("Creating simulator image {}", image.display());
+    run_fatfs_image(
+        sdk,
+        &[
+            OsStr::new("create"),
+            image.as_os_str(),
+            OsStr::new("--size"),
+            OsStr::new(size),
+            OsStr::new("--label"),
+            OsStr::new(label),
+        ],
+    )
+}
+
+fn run_fatfs_image(sdk: &SdkRoot, args: &[&OsStr]) -> Result<()> {
+    let output = fatfs_image_command(sdk)?
+        .args(args)
+        .output()
+        .with_context(|| format!("Failed to run {FATFS_IMAGE_BINARY}"))?;
+    if !output.status.success() {
+        bail!("{FATFS_IMAGE_BINARY} failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(())
+}
+
+/// Resolve the `fatfs-image` helper: an explicit override, the SDK-bundled
+/// binary, or a source build from the KeyOS workspace (repo layout).
+fn fatfs_image_command(sdk: &SdkRoot) -> Result<Command> {
+    if let Some(path) = std::env::var_os(FATFS_IMAGE_ENV) {
+        return Ok(Command::new(path));
+    }
+
+    if let Some(path) = sdk.tool_path(&[FATFS_IMAGE_BINARY]) {
+        return Ok(Command::new(path));
+    }
+
+    let manifest = sdk.keyos_root().join("utils").join("fatfs-image").join("Cargo.toml");
+    if manifest.exists() {
+        let mut command = Command::new("cargo");
+        command.arg("run").arg("--quiet").arg("--manifest-path").arg(manifest).arg("--");
+        return Ok(command);
+    }
+
+    bail!("{FATFS_IMAGE_BINARY} not found. Reinstall the Foundation SDK or set {FATFS_IMAGE_ENV} to the helper binary path.")
 }
 
 fn launch_simulator(
@@ -122,7 +243,7 @@ fn launch_simulator(
     staged_dir: &Path,
     app_id_hex: &str,
     project_root: &Path,
-    resources_dir: &Path,
+    app_elf_root: &Path,
 ) -> Result<()> {
     let screenshots_dir = simulator_screenshots_dir(sdk, project_root);
 
@@ -134,7 +255,7 @@ fn launch_simulator(
             staged_dir,
             app_id_hex,
             screenshots_dir.as_deref(),
-            resources_dir,
+            app_elf_root,
         );
     }
 
@@ -152,7 +273,7 @@ fn launch_simulator(
             staged_dir,
             app_id_hex,
             None,
-            resources_dir,
+            app_elf_root,
         );
     }
 
@@ -164,7 +285,7 @@ fn launch_simulator(
             staged_dir,
             app_id_hex,
             screenshots_dir.as_deref(),
-            resources_dir,
+            app_elf_root,
         );
     }
 
@@ -202,16 +323,13 @@ fn run_simulator_command(
     staged_dir: &Path,
     app_id_hex: &str,
     screenshots_dir: Option<&Path>,
-    resources_dir: &Path,
+    app_elf_root: &Path,
 ) -> Result<()> {
     command.current_dir(current_dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(screenshots_dir) = screenshots_dir {
         command.env(SCREENSHOTS_DIR_ENV, screenshots_dir);
     }
-    command.env(APP_RESOURCES_DIR_ENV, resources_dir);
-    if let Some(apps_dir) = staged_dir.parent() {
-        command.env(SIMULATOR_APPS_DIR_ENV, apps_dir);
-    }
+    command.env(APP_ELF_ROOT_ENV, app_elf_root);
     let child =
         command.spawn().with_context(|| format!("Failed to start the simulator using {}", description))?;
 
@@ -476,9 +594,8 @@ mod tests {
 
     use super::{
         drain_pending_control_events, launch_simulator, parse_control_line, simulator_screenshots_dir,
-        ControlEvent, SCREENSHOTS_DIR_ENV, SIMULATOR_APPS_DIR_ENV,
+        ControlEvent, APP_ELF_ROOT_ENV, SCREENSHOTS_DIR_ENV,
     };
-    use crate::assets::APP_RESOURCES_DIR_ENV;
     use crate::test_support::PROCESS_LOCK;
 
     #[test]
@@ -493,14 +610,12 @@ mod tests {
         fs::write(
             &simulator,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$PWD\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> \"{}\"\n  case \"$line\" in\n    ping)\n      printf 'ok ping proto=1 caps=run\\n'\n      ;;\n    run\\ *)\n      printf 'ok run launched pid=42\\n'\n      exit 0\n      ;;\n  esac\ndone\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$PWD\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> \"{}\"\n  case \"$line\" in\n    ping)\n      printf 'ok ping proto=1 caps=run\\n'\n      ;;\n    run\\ *)\n      printf 'ok run launched pid=42\\n'\n      exit 0\n      ;;\n  esac\ndone\n",
                 sdk_root.join("simulator.log").display(),
                 SCREENSHOTS_DIR_ENV,
                 sdk_root.join("simulator-screenshots-dir.log").display(),
-                APP_RESOURCES_DIR_ENV,
-                sdk_root.join("simulator-resources-dir.log").display(),
-                SIMULATOR_APPS_DIR_ENV,
-                sdk_root.join("simulator-apps-dir.log").display(),
+                APP_ELF_ROOT_ENV,
+                sdk_root.join("simulator-app-elf-root.log").display(),
                 sdk_root.join("simulator-stdin.log").display()
             ),
         )
@@ -513,9 +628,8 @@ mod tests {
             fs::set_permissions(&simulator, perms).unwrap();
         }
 
-        let resources_dir =
-            sdk_root.join("example-app").join("target").join("foundation").join("sim-resources");
-        launch_simulator(&sdk, &staged_dir, "0x00112233", &sdk_root.join("example-app"), &resources_dir)
+        let app_elf_root = sdk_root.join("elf-root");
+        launch_simulator(&sdk, &staged_dir, "0x00112233", &sdk_root.join("example-app"), &app_elf_root)
             .unwrap();
 
         assert_eq!(
@@ -527,12 +641,8 @@ mod tests {
             sdk_root.join("example-app").join("screenshots")
         );
         assert_eq!(
-            PathBuf::from(fs::read_to_string(sdk_root.join("simulator-resources-dir.log")).unwrap().trim()),
-            resources_dir
-        );
-        assert_eq!(
-            PathBuf::from(fs::read_to_string(sdk_root.join("simulator-apps-dir.log")).unwrap().trim()),
-            staged_dir.parent().unwrap()
+            PathBuf::from(fs::read_to_string(sdk_root.join("simulator-app-elf-root.log")).unwrap().trim()),
+            app_elf_root
         );
         assert!(fs::read_to_string(sdk_root.join("simulator-stdin.log")).unwrap().contains("run 0x00112233"));
 
@@ -545,7 +655,7 @@ mod tests {
         let _path_guard = PathGuard::capture();
         let sdk_root = make_repo_sdk_root("repo-launch");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let staged_dir = sdk.simulator_apps_dir().join("demo");
+        let staged_dir = sdk_root.join("staged-app");
         let fake_bin = sdk_root.join("fake-bin");
         fs::create_dir_all(&staged_dir).unwrap();
         fs::create_dir_all(&fake_bin).unwrap();
@@ -554,14 +664,12 @@ mod tests {
         fs::write(
             &just,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"sim\" ]; then printf '%s\\n' \"$PWD\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"{}\"; case \"$line\" in ping) printf 'ok ping proto=1 caps=run\\n' ;; run\\ *) printf 'ok run launched pid=7\\n'; exit 0 ;; esac; done; fi\nexit 1\n",
+                "#!/bin/sh\nif [ \"$1\" = \"sim\" ]; then printf '%s\\n' \"$PWD\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"{}\"; case \"$line\" in ping) printf 'ok ping proto=1 caps=run\\n' ;; run\\ *) printf 'ok run launched pid=7\\n'; exit 0 ;; esac; done; fi\nexit 1\n",
                 sdk_root.join("just-sim.log").display(),
                 SCREENSHOTS_DIR_ENV,
                 sdk_root.join("just-sim-screenshots-dir.log").display(),
-                APP_RESOURCES_DIR_ENV,
-                sdk_root.join("just-sim-resources-dir.log").display(),
-                SIMULATOR_APPS_DIR_ENV,
-                sdk_root.join("just-sim-apps-dir.log").display(),
+                APP_ELF_ROOT_ENV,
+                sdk_root.join("just-sim-app-elf-root.log").display(),
                 sdk_root.join("just-sim-stdin.log").display()
             ),
         )
@@ -577,9 +685,8 @@ mod tests {
         let path = std::env::join_paths([fake_bin.clone()]).unwrap();
         std::env::set_var("PATH", path);
 
-        let resources_dir =
-            sdk_root.join("example-app").join("target").join("foundation").join("sim-resources");
-        launch_simulator(&sdk, &staged_dir, "0xaabbccdd", &sdk_root.join("example-app"), &resources_dir)
+        let app_elf_root = sdk_root.join("elf-root");
+        launch_simulator(&sdk, &staged_dir, "0xaabbccdd", &sdk_root.join("example-app"), &app_elf_root)
             .unwrap();
 
         assert_eq!(
@@ -588,12 +695,8 @@ mod tests {
         );
         assert!(fs::read_to_string(sdk_root.join("just-sim-screenshots-dir.log")).unwrap().trim().is_empty());
         assert_eq!(
-            PathBuf::from(fs::read_to_string(sdk_root.join("just-sim-resources-dir.log")).unwrap().trim()),
-            resources_dir
-        );
-        assert_eq!(
-            PathBuf::from(fs::read_to_string(sdk_root.join("just-sim-apps-dir.log")).unwrap().trim()),
-            staged_dir.parent().unwrap()
+            PathBuf::from(fs::read_to_string(sdk_root.join("just-sim-app-elf-root.log")).unwrap().trim()),
+            app_elf_root
         );
         assert!(fs::read_to_string(sdk_root.join("just-sim-stdin.log")).unwrap().contains("run 0xaabbccdd"));
 

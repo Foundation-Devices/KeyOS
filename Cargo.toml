@@ -146,6 +146,7 @@ members = [
     "test-apps/ticktimer-test-client",
     "test-apps/undef-test",
     "ui/slintbook",
+    "utils/fatfs-image",
     "utils/fiat-symbols",
     "utils/fuse",
     "utils/app-flux-build-support",

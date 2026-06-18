@@ -53,8 +53,8 @@ pub const USER_PARTITION_START_SECTOR: u32 = SYSTEM_PARTITION_START_SECTOR + SYS
 
 const _: () = assert!(USER_PARTITION_START_SECTOR + USER_PARTITION_SIZE_SECTORS <= TOTAL_FLASH_BLOCKS as u32);
 
-const DEFAULT_ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
-const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
+pub const DEFAULT_ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
+pub const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
     ("alert", &[64]),
     ("decline-circle", &[64]),
     ("bitcoin", &[64]),

@@ -17,6 +17,7 @@ mod bootloader;
 mod builder;
 mod elf;
 mod flash;
+mod hosted_image;
 mod hot_reload;
 mod release_generator;
 mod symbolicate;
@@ -103,6 +104,8 @@ const DEFAULT_SERVICES_NORMAL: &[&str] = &[
     "gui-app-switcher",
 ];
 
+// Built-in apps launched on demand by app-manager rather than run as services,
+// on hardware and hosted alike; DEV_APPS are the dev-only additions on top.
 const DEFAULT_APPS_NORMAL: &[&str] = &[
     "gui-app-alerts",
     "gui-app-authenticator",
@@ -158,9 +161,9 @@ pub const SYSTEM_SERVICES_HOSTED: &[&str] = &[
 ];
 
 const DEFAULT_SERVICES_HOSTED: &[&str] = &[
-    // The non-GUI services here have no hosted implementation; their `main` exits
-    // immediately, so they stay out of SYSTEM_SERVICES_HOSTED. They are built only so
-    // clients that reference their messages pass manifest validation.
+    // No hosted implementation; their `main` exits immediately (so they stay out of
+    // SYSTEM_SERVICES_HOSTED), built only so clients referencing their messages pass
+    // manifest validation.
     "dma-server",
     "emmc",
     "gpio-server",
@@ -169,25 +172,11 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "mass-storage-server",
     "spi-server",
     "usb-server",
+    // The UI apps kept as always-running services.
     "gui-app-control-center",
     "gui-app-lock-screen",
-    "gui-app-qr-scanner",
     "gui-app-keyboard",
     "gui-app-launcher",
-    "gui-app-settings",
-    "gui-app-crypto-perf",
-    "gui-app-playground",
-    "gui-app-image-viewer",
-    "gui-app-regulatory",
-    "gui-app-system-actions",
-    "gui-app-file-browser",
-    "gui-app-bitcoin",
-    "gui-app-authenticator",
-    "gui-app-security-keys",
-    "gui-app-seed-vault",
-    "gui-app-onboarding",
-    // "gui-app-recovery",
-    "gui-app-file-picker-test",
     "gui-app-switcher",
     // "recovery-worker",
 ];
@@ -377,7 +366,8 @@ fn main() {
         }
         Commands::Run { gdb, mut build_args } => {
             process_services(&mut build_args);
-            Builder::new(build_args).build(SigningMode::Developer).run(&gdb);
+            let built = Builder::new(build_args).build(SigningMode::Developer);
+            built.run(&gdb);
         }
         Commands::GenerateRelease { manifest_file, output_path } => {
             release_generator::generate_release(&manifest_file, &output_path).unwrap();
@@ -451,6 +441,10 @@ fn process_services(build_args: &mut BuildArgs) {
     }
     if build_args.services.is_empty() {
         let additional_crates: Vec<&str> = if build_args.hosted {
+            if build_args.apps.is_empty() {
+                build_args.apps = DEFAULT_APPS_NORMAL.iter().map(|s| s.to_string()).collect();
+                build_args.apps.extend(DEV_APPS.iter().map(|s| s.to_string()));
+            }
             if build_args.flux_apps.is_empty() {
                 build_args.flux_apps = DEFAULT_FLUX_APPS_HOSTED.iter().map(|s| s.to_string()).collect();
             }

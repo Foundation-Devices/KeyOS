@@ -90,15 +90,6 @@ impl SdkRoot {
         self.keyos_root().join("ui2").join("theme-editor").join("defaults").join("plugins")
     }
 
-    pub fn simulator_apps_dir(&self) -> PathBuf {
-        match self.layout {
-            SdkLayout::Repo => self.keyos_root().join("target").join("apps"),
-            SdkLayout::Bundle => {
-                self.root.join("lib").join("keyos").join("simulator").join("target").join("apps")
-            }
-        }
-    }
-
     pub fn template_root(&self) -> Option<PathBuf> {
         self.template_roots().into_iter().find(|path| path.exists())
     }
@@ -269,10 +260,6 @@ mod tests {
         assert_eq!(sdk.keyos_root(), root.join("lib").join("keyos"));
         assert_eq!(sdk.ui_library_path(), root.join("ui").join("ui"));
         assert_eq!(sdk.ui_shared_resources_path(), root.join("resources"));
-        assert_eq!(
-            sdk.simulator_apps_dir(),
-            root.join("lib").join("keyos").join("simulator").join("target").join("apps")
-        );
 
         cleanup(&root);
     }

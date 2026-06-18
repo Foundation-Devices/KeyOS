@@ -21,6 +21,7 @@ clap = { version = "4.5", features = ["derive"] }
 colored = "2.0"
 crc = "1.8.1"
 fatfs = { workspace = true, features = ["std", "alloc"] }
+fatfs-image = { path = "../utils/fatfs-image" }
 fscommon = "0.1.1"
 hex = "0.4"
 keyos = { path = "../keyos" }

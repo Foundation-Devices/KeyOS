@@ -7,32 +7,26 @@ use app_manager::{
     AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, ThirdPartyCertificateInfo,
 };
 use app_manifest::{Locale, Manifest};
-#[cfg(any(keyos, test))]
 use fs::messages::AppResourcesRoot;
 use log::error;
 use regex::Regex;
 use serde_json::to_vec;
 use xous::{AppId, PID};
 
-use crate::launch::list_apps;
+use crate::FileSystem;
 
 #[cfg(keyos)]
-#[path = "registry/hw.rs"]
-mod platform;
-#[cfg(not(keyos))]
-#[path = "registry/hosted.rs"]
-mod platform;
+mod hw;
 
-use platform::{
-    app_binary_metadata, app_binary_size, app_icon_exists, read_app_bytes, read_app_header,
-    read_app_icon_bytes,
-};
+#[cfg(keyos)]
+use hw::{app_binary_size, read_app_bytes, read_app_header};
 
 const FOUNDATION_PUBLISHER: &str = "Foundation Devices, Inc.";
 const BUNDLED_ICON_FILE: &str = "icon.bin";
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
-const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
+pub const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
 const MAX_APP_ICON_SIZE_BYTES: u64 = 256 * 1024;
+#[cfg(keyos)]
 const MAX_THIRD_PARTY_KEY_CHECK_APP_SIZE: u64 = 16 * 1024 * 1024;
 const INSTALLED_APP_NAME_MAX_BYTES: usize = 128;
 const INSTALLED_APP_PUBLISHER_MAX_BYTES: usize = 128;
@@ -47,12 +41,7 @@ enum AppSource {
     ThirdParty,
 }
 
-#[derive(Debug, Clone, Default)]
-struct AppBinaryMetadata {
-    version: String,
-    size_bytes: u64,
-}
-
+#[cfg(keyos)]
 #[derive(Debug, Clone, Copy, Default)]
 enum ThirdPartySignatureCache {
     #[default]
@@ -89,22 +78,27 @@ pub(crate) fn prune_qr_match_rules(rules: &mut Vec<app_manifest::QrMatchRule>, a
     });
 }
 
-#[cfg(keyos)]
 const FLUX_APPS_DIR: &str = "/keyos/apps/gui-app-emu-flux/apps";
 
 #[derive(Debug, Clone)]
 pub(crate) struct AppInfo {
     id: AppId,
-    elf_path: Option<String>,
+    /// Filesystem path of the app's bundle directory (e.g. `/keyos/apps/<name>`).
+    /// Icon, manifest, and resources are read from it via `fs`; the launchable
+    /// `app.elf` is derived as `<app_dir>/app.elf`.
+    app_dir: Option<String>,
     manifest: Manifest,
+    /// Raw manifest bytes, kept so the name server can be told about the app at
+    /// launch (see [`AppRegistry::register_app_names`]).
+    manifest_bytes: Vec<u8>,
     source: AppSource,
     #[cfg_attr(not(keyos), allow(dead_code))]
     is_flux: bool,
-    binary_metadata: Option<AppBinaryMetadata>,
+    binary_size: Option<u64>,
+    #[cfg(keyos)]
     third_party_signature_cache: ThirdPartySignatureCache,
 }
 
-#[cfg(any(keyos, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppResourcesLocation {
     pub(crate) root: AppResourcesRoot,
@@ -127,20 +121,13 @@ impl AppRegistry {
     pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<()> {
         let mut installed_apps = HashMap::new();
 
-        #[cfg(keyos)]
-        {
-            // App location is the source of truth for trust classification:
-            // firmware-shipped apps live under /keyos/apps, while sideloaded
-            // apps live under /keyos/sideloaded-apps.
-            Self::scan_apps_dir(&mut installed_apps, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false)?;
-            Self::scan_apps_dir(&mut installed_apps, FLUX_APPS_DIR, AppSource::BuiltIn, true)?;
-            Self::scan_apps_dir(&mut installed_apps, SIDELOADED_APPS_DIR, AppSource::ThirdParty, false)?;
-        }
-
-        #[cfg(not(keyos))]
-        {
-            Self::scan_hosted_apps(&mut installed_apps)?;
-        }
+        // App location is the source of truth for trust classification:
+        // firmware-shipped apps live under /keyos/apps, sideloaded apps under
+        // /keyos/sideloaded-apps. The simulator reads the same dirs through fs.
+        // Trust is enforced at launch (verify_app), so enumeration doesn't filter.
+        Self::scan_apps_dir(&mut installed_apps, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false);
+        Self::scan_apps_dir(&mut installed_apps, FLUX_APPS_DIR, AppSource::BuiltIn, true);
+        Self::scan_apps_dir(&mut installed_apps, SIDELOADED_APPS_DIR, AppSource::ThirdParty, false);
 
         self.installed_apps = installed_apps;
         log::info!("scan_installed_apps: registry tracks {} installed apps", self.installed_apps.len());
@@ -148,97 +135,68 @@ impl AppRegistry {
         Ok(())
     }
 
-    #[cfg(keyos)]
+    /// Read every app bundle under `apps_dir` (a `Location::System` path) through
+    /// fs and register it. A missing or unreadable dir is just logged and skipped;
+    /// a real loading problem then shows up as a missing app.
     fn scan_apps_dir(
         installed_apps: &mut HashMap<AppId, AppInfo>,
         apps_dir: &str,
         source: AppSource,
         is_flux: bool,
-    ) -> anyhow::Result<()> {
-        match list_apps(apps_dir) {
-            Ok(apps_list) => {
-                for app in apps_list {
-                    let app_label = app.elf_path.as_deref().unwrap_or(apps_dir).to_string();
-                    if source == AppSource::ThirdParty
-                        && !sideloaded_app_has_cosign2_header(app.elf_path.as_deref(), &app.manifest.app_id)
-                    {
-                        continue;
-                    }
-                    if Self::insert_app(installed_apps, app.elf_path, app.manifest, source, is_flux) {
-                        register_manifest_with_names(&app.manifest_bytes, &app_label);
-                    }
-                }
-                Ok(())
-            }
-
+    ) {
+        let dir = match FileSystem::default().open_dir(apps_dir.to_string(), fs::Location::System) {
+            Ok(dir) => dir,
             Err(e) => {
-                if source == AppSource::ThirdParty {
-                    log::debug!("Sideloaded apps directory {apps_dir} is not available: {e:?}");
-                    Ok(())
-                } else {
-                    log::error!("Error listing apps in {apps_dir}: {e:?}");
-                    Err(anyhow::anyhow!("Error listing apps in {apps_dir}: {e:?}"))
+                log::info!("Not scanning apps in {apps_dir}: {e:?}");
+                return;
+            }
+        };
+
+        while let Ok(Some(entry)) = dir.next_entry() {
+            if !entry.is_dir || entry.name == "." || entry.name == ".." {
+                continue;
+            }
+            let app_dir = format!("{apps_dir}/{}", entry.name);
+            match Self::load_app(&app_dir, source, is_flux) {
+                Ok(Some(app)) if installed_apps.contains_key(&app.id) => {
+                    log::warn!("Skipping duplicate app_id=0x{} from {source:?}", hex::encode(app.id.0));
                 }
+                Ok(Some(app)) => {
+                    installed_apps.insert(app.id, app);
+                }
+                Ok(None) => {}
+                Err(e) => log::warn!("Skipping app bundle {app_dir}: {e:?}"),
             }
         }
     }
 
-    #[cfg(not(keyos))]
-    fn scan_hosted_apps(installed_apps: &mut HashMap<AppId, AppInfo>) -> anyhow::Result<()> {
-        let apps_list = list_apps(BUILT_IN_APPS_DIR).map_err(|e| {
-            log::error!("Error listing hosted apps: {e:?}");
-            anyhow::anyhow!("Error listing hosted apps: {e:?}")
-        })?;
+    /// Load and validate one app bundle's manifest. Returns `None` when a
+    /// sideloaded bundle's dir name doesn't match its app id (already logged).
+    fn load_app(app_dir: &str, source: AppSource, is_flux: bool) -> anyhow::Result<Option<AppInfo>> {
+        let fs = FileSystem::default();
+        let mut manifest_file =
+            fs.open_file(format!("{app_dir}/manifest.json"), fs::Location::System, fs::OpenFlags::READ_ONLY)?;
+        let mut manifest_bytes = vec![];
+        manifest_file.read_to_end(&mut manifest_bytes)?;
+        let mut manifest = app_manifest::try_from_bytes(&manifest_bytes)?;
 
-        for app in apps_list {
-            let app_label = app
-                .elf_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "system manifest".to_string());
-            let elf_path = app.elf_path.map(|p| p.to_string_lossy().to_string());
-            let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
-            if Self::insert_app(installed_apps, elf_path, app.manifest, source, false) {
-                register_manifest_with_names(&app.manifest_bytes, &app_label);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn insert_app(
-        installed_apps: &mut HashMap<AppId, AppInfo>,
-        elf_path: Option<String>,
-        mut manifest: Manifest,
-        source: AppSource,
-        is_flux: bool,
-    ) -> bool {
         let app_id = AppId(manifest.app_id);
-
-        if installed_apps.contains_key(&app_id) {
-            log::warn!("scan_installed_apps: skipping duplicate app_id=0x{} from {:?}", app_id, source);
-            return false;
+        if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, source) {
+            return Ok(None);
         }
-
-        if !sideloaded_app_dir_matches_app_id(elf_path.as_deref(), &app_id, source) {
-            return false;
-        }
-
         prune_qr_match_rules(&mut manifest.qr_match_rules, &app_id);
 
-        installed_apps.insert(
-            app_id,
-            AppInfo {
-                id: app_id,
-                elf_path,
-                manifest,
-                source,
-                is_flux,
-                binary_metadata: None,
-                third_party_signature_cache: ThirdPartySignatureCache::Unknown,
-            },
-        );
-        true
+        Ok(Some(AppInfo {
+            id: app_id,
+            app_dir: Some(app_dir.to_string()),
+            manifest,
+            manifest_bytes,
+            source,
+            is_flux,
+            binary_size: None,
+            #[cfg(keyos)]
+            third_party_signature_cache: ThirdPartySignatureCache::Unknown,
+        }))
     }
 
     pub(crate) fn app_name_by_id(&self, id: &AppId, locale: &str) -> Option<String> {
@@ -284,15 +242,16 @@ impl AppRegistry {
             .filter(|app_info| app_info.is_third_party())
             .map(|app_info| {
                 let name = app_info.localized_name(locale);
-                let binary_metadata = app_info.binary_metadata();
+                let size_bytes = app_info.binary_size();
+                let version = app_info.manifest.version.clone().unwrap_or_default();
                 let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
                 let mut installed_app = InstalledAppInfo {
                     app_id: format!("0x{}", app_info.id),
                     bundled_icon_path: app_info.bundled_icon_file_path(),
                     publisher,
                     can_launch,
-                    version: binary_metadata.version.clone(),
-                    size_bytes: binary_metadata.size_bytes,
+                    version,
+                    size_bytes,
                     description: app_info.description(),
                     permissions: app_info.permission_groups(),
                     name,
@@ -311,11 +270,24 @@ impl AppRegistry {
         public_key: &str,
         locale: &str,
     ) -> Option<String> {
-        let public_key = crate::third_party_certs::decode_public_key_hex(public_key)?;
-
-        self.installed_apps.values_mut().filter(|app_info| app_info.is_third_party()).find_map(|app_info| {
-            app_info.has_verified_third_party_signature(public_key).then(|| app_info.localized_name(locale))
-        })
+        // Third-party signature verification is device-only; the simulator has
+        // no signed apps to block on.
+        #[cfg(not(keyos))]
+        {
+            let _ = (public_key, locale);
+            return None;
+        }
+        #[cfg(keyos)]
+        {
+            let public_key = crate::third_party_certs::decode_public_key_hex(public_key)?;
+            self.installed_apps.values_mut().filter(|app_info| app_info.is_third_party()).find_map(
+                |app_info| {
+                    app_info
+                        .has_verified_third_party_signature(public_key)
+                        .then(|| app_info.localized_name(locale))
+                },
+            )
+        }
     }
 
     pub(crate) fn list_apps(
@@ -339,7 +311,7 @@ impl AppRegistry {
     }
 
     pub(crate) fn elf_path(&self, app_id: AppId) -> Option<String> {
-        self.installed_apps.get(&app_id).and_then(|app_info| app_info.elf_path.clone())
+        self.installed_apps.get(&app_id).and_then(AppInfo::elf_path)
     }
 
     pub(crate) fn app_icon_bytes(&self, app_id: AppId) -> Option<Vec<u8>> {
@@ -353,7 +325,6 @@ impl AppRegistry {
         }
     }
 
-    #[cfg(any(keyos, test))]
     pub(crate) fn app_resources_location(&self, app_id: AppId) -> Option<AppResourcesLocation> {
         self.installed_apps.get(&app_id).and_then(AppInfo::app_resources_location)
     }
@@ -378,13 +349,12 @@ impl AppRegistry {
             return None;
         }
 
-        let elf_path = app_info.elf_path.as_deref()?;
-        let app_dir = sideloaded_app_dir_from_elf_path(elf_path)?;
-        if app_dir != hex::encode(app_id.0) {
+        let app_dir = app_info.app_dir.as_deref()?;
+        if app_dir.rsplit('/').next()? != hex::encode(app_id.0) {
             return None;
         }
 
-        Some(format!("{SIDELOADED_APPS_DIR}/{app_dir}"))
+        Some(app_dir.to_string())
     }
 
     pub(crate) fn clear_registered_manifest(&self, app_id: AppId) {
@@ -414,6 +384,13 @@ impl AppRegistry {
     }
 
     pub(crate) fn terminate_app(&mut self, pid: PID) { self.running_apps.remove(&pid); }
+
+    /// Register the app's manifest names with the name server.
+    pub(crate) fn register_app_names(&self, app_id: AppId) {
+        if let Some(info) = self.installed_apps.get(&app_id) {
+            register_manifest_with_names(&info.manifest_bytes, info.app_dir.as_deref().unwrap_or("app"));
+        }
+    }
 }
 
 #[cfg(any(keyos, all(not(test), not(keyos))))]
@@ -445,6 +422,9 @@ fn clear_manifest_with_names(_app_id: AppId) -> Result<(), xous::Error> {
 }
 
 impl AppInfo {
+    /// The launchable `app.elf` lives directly inside the bundle dir.
+    fn elf_path(&self) -> Option<String> { self.app_dir.as_deref().map(|dir| format!("{dir}/app.elf")) }
+
     fn localized_name(&self, locale: &str) -> String {
         self.manifest
             .app_name
@@ -473,12 +453,21 @@ impl AppInfo {
             return (FOUNDATION_PUBLISHER.to_string(), true);
         }
 
+        // Cosign2 publisher verification is device-only; the simulator can't
+        // verify signatures, so a sideloaded app shows no verified publisher.
+        #[cfg(keyos)]
         match self.verified_third_party_publisher(trusted_publishers) {
             Some(publisher) => (publisher.name.clone(), true),
             None => (String::new(), false),
         }
+        #[cfg(not(keyos))]
+        {
+            let _ = trusted_publishers;
+            (String::new(), false)
+        }
     }
 
+    #[cfg(keyos)]
     fn verified_third_party_publisher<'a>(
         &mut self,
         trusted_publishers: &'a [ThirdPartyCertificateInfo],
@@ -491,11 +480,11 @@ impl AppInfo {
             ThirdPartySignatureCache::Unknown => {}
         }
 
-        let elf_path = self.elf_path.as_deref()?;
-        let header = read_third_party_app_header(elf_path)?;
+        let elf_path = self.elf_path()?;
+        let header = read_third_party_app_header(&elf_path)?;
         let (publisher, public_key) = trusted_publisher_matching_header(&header, trusted_publishers)?;
 
-        let verified = app_verified_third_party_header_after_prefilter(elf_path, public_key).is_some();
+        let verified = app_verified_third_party_header_after_prefilter(&elf_path, public_key).is_some();
         self.third_party_signature_cache = if verified {
             ThirdPartySignatureCache::Verified(public_key)
         } else {
@@ -521,15 +510,12 @@ impl AppInfo {
     }
 
     fn bundled_icon_path(&self) -> Option<String> {
-        let elf_path = self.elf_path.as_deref()?;
-        let (app_dir, _) = elf_path.rsplit_once('/')?;
+        let app_dir = self.app_dir.as_deref()?;
         Some(format!("{app_dir}/{BUNDLED_ICON_FILE}"))
     }
 
-    #[cfg(any(keyos, test))]
     fn app_resources_location(&self) -> Option<AppResourcesLocation> {
-        let elf_path = self.elf_path.as_deref()?;
-        let (app_dir, _) = elf_path.rsplit_once('/')?;
+        let app_dir = self.app_dir.as_deref()?;
         let app_dir = app_dir.rsplit('/').next()?;
         if app_dir.is_empty() || app_dir == "." || app_dir == ".." {
             return None;
@@ -548,8 +534,7 @@ impl AppInfo {
     }
 
     fn app_bundle_icon_path(&self, icon: &str) -> Option<String> {
-        let elf_path = self.elf_path.as_deref()?;
-        let (app_dir, _) = elf_path.rsplit_once('/')?;
+        let app_dir = self.app_dir.as_deref()?;
         let icon = icon.trim_start_matches('/');
         if icon.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..") {
             return None;
@@ -557,18 +542,27 @@ impl AppInfo {
         Some(format!("{app_dir}/{icon}"))
     }
 
-    fn binary_metadata(&mut self) -> AppBinaryMetadata {
-        if self.binary_metadata.is_none() {
-            self.binary_metadata =
-                Some(self.elf_path.as_deref().map(app_binary_metadata).unwrap_or_default());
+    fn binary_size(&mut self) -> u64 {
+        if self.binary_size.is_none() {
+            // The simulator can't read the app size: the elf isn't in the image.
+            #[cfg(keyos)]
+            {
+                self.binary_size =
+                    Some(self.elf_path().as_deref().and_then(|path| app_binary_size(path).ok()).unwrap_or(0));
+            }
+            #[cfg(not(keyos))]
+            {
+                self.binary_size = Some(0);
+            }
         }
-        self.binary_metadata.clone().unwrap_or_default()
+        self.binary_size.unwrap_or(0)
     }
 
     fn is_built_in(&self) -> bool { self.source == AppSource::BuiltIn }
 
     fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
 
+    #[cfg(keyos)]
     fn has_verified_third_party_signature(&mut self, public_key: [u8; 33]) -> bool {
         match self.third_party_signature_cache {
             ThirdPartySignatureCache::Verified(cached_key) => return cached_key == public_key,
@@ -577,17 +571,17 @@ impl AppInfo {
             ThirdPartySignatureCache::Unknown => {}
         }
 
-        let Some(elf_path) = self.elf_path.as_deref() else {
+        let Some(elf_path) = self.elf_path() else {
             return false;
         };
-        let Some(header) = read_third_party_app_header(elf_path) else {
+        let Some(header) = read_third_party_app_header(&elf_path) else {
             return false;
         };
         if !third_party_header_uses_key(&header, public_key) {
             return false;
         }
 
-        let verified = app_verified_third_party_header_after_prefilter(elf_path, public_key).is_some();
+        let verified = app_verified_third_party_header_after_prefilter(&elf_path, public_key).is_some();
         self.third_party_signature_cache = if verified {
             ThirdPartySignatureCache::Verified(public_key)
         } else {
@@ -597,10 +591,24 @@ impl AppInfo {
     }
 }
 
-fn read_cosign2_version_from_reader(reader: &mut impl Read) -> Option<String> {
-    read_cosign2_header_from_reader(reader).map(|header| header.version().to_string())
+/// The bundled icon lives in the image on both targets, so it is read through
+/// `fs` regardless of where the app's elf runs from.
+fn app_icon_exists(path: &str) -> bool { FileSystem::default().metadata(path, fs::Location::System).is_ok() }
+
+fn read_app_icon_bytes(path: &str, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
+    let fs = FileSystem::default();
+    let metadata = fs.metadata(path, fs::Location::System)?;
+    if metadata.size > max_size_bytes {
+        anyhow::bail!("app icon {path} is too large: {} bytes", metadata.size);
+    }
+
+    let mut file = fs.open_file(path, fs::Location::System, fs::OpenFlags::READ_ONLY)?;
+    let mut bytes = Vec::with_capacity(metadata.size as usize);
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
+#[cfg(keyos)]
 fn read_cosign2_header_from_reader(reader: &mut impl Read) -> Option<cosign2::Header> {
     let mut header_bytes = vec![0; cosign2::Header::DEFAULT_SIZE];
     reader.read_exact(&mut header_bytes).ok()?;
@@ -611,6 +619,7 @@ fn read_cosign2_header_from_reader(reader: &mut impl Read) -> Option<cosign2::He
         .flatten()
 }
 
+#[cfg(keyos)]
 fn read_third_party_app_header(elf_path: &str) -> Option<cosign2::Header> {
     match read_app_header(elf_path) {
         Ok(Some(header)) => Some(header),
@@ -622,27 +631,7 @@ fn read_third_party_app_header(elf_path: &str) -> Option<cosign2::Header> {
     }
 }
 
-#[cfg(any(keyos, test))]
-fn sideloaded_app_has_cosign2_header(elf_path: Option<&str>, app_id: &[u8; 16]) -> bool {
-    let app_id = hex::encode(app_id);
-    let Some(elf_path) = elf_path else {
-        log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: missing app.elf path");
-        return false;
-    };
-
-    match read_app_header(elf_path) {
-        Ok(Some(_)) => true,
-        Ok(None) => {
-            log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: missing cosign2 header");
-            false
-        }
-        Err(e) => {
-            log::warn!("scan_installed_apps: skipping sideloaded app 0x{app_id}: cannot read app.elf: {e:?}");
-            false
-        }
-    }
-}
-
+#[cfg(keyos)]
 fn trusted_publisher_by_key(
     trusted_publishers: &[ThirdPartyCertificateInfo],
     public_key: [u8; 33],
@@ -652,6 +641,7 @@ fn trusted_publisher_by_key(
     })
 }
 
+#[cfg(keyos)]
 fn trusted_publisher_matching_header<'a>(
     header: &cosign2::Header,
     trusted_publishers: &'a [ThirdPartyCertificateInfo],
@@ -663,7 +653,7 @@ fn trusted_publisher_matching_header<'a>(
     })
 }
 
-#[cfg(not(test))]
+#[cfg(keyos)]
 fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::Result<cosign2::Header> {
     Ok(fw_utils::hash::verify_cosign2_mem_with_third_party_keys(
         &crate::CryptoApi::default(),
@@ -673,55 +663,7 @@ fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::
     )?)
 }
 
-#[cfg(test)]
-fn verify_third_party_app_header(bytes: &[u8], public_key: [u8; 33]) -> anyhow::Result<cosign2::Header> {
-    use sha2::{Digest, Sha256};
-
-    struct TestSha256;
-
-    impl cosign2::Sha256 for TestSha256 {
-        fn hash(&self, data: &[u8]) -> [u8; 32] { Sha256::digest(data).into() }
-    }
-
-    struct TestSecp256k1Verify;
-
-    impl cosign2::Secp256k1Verify for TestSecp256k1Verify {
-        fn verify_ecdsa(
-            &self,
-            msg: [u8; 32],
-            signature: [u8; 64],
-            pubkey: [u8; 33],
-        ) -> cosign2::VerificationResult {
-            let Ok(public_key) = secp256k1::PublicKey::from_slice(&pubkey) else {
-                return cosign2::VerificationResult::Invalid;
-            };
-            let Ok(signature) = secp256k1::ecdsa::Signature::from_compact(&signature) else {
-                return cosign2::VerificationResult::Invalid;
-            };
-
-            let secp = secp256k1::Secp256k1::verification_only();
-            if secp.verify_ecdsa(&secp256k1::Message::from_digest(msg), &signature, &public_key).is_ok() {
-                cosign2::VerificationResult::Valid
-            } else {
-                cosign2::VerificationResult::Invalid
-            }
-        }
-    }
-
-    let Some(header) =
-        cosign2::Header::parse(bytes, &[], &TestSha256, &TestSecp256k1Verify, cosign2::Header::DEFAULT_SIZE)
-            .map_err(|e| anyhow::anyhow!("cosign2 parse error: {e:?}"))?
-    else {
-        anyhow::bail!("missing cosign2 header");
-    };
-
-    if third_party_header_uses_key(&header, public_key) {
-        Ok(header)
-    } else {
-        anyhow::bail!("third-party header does not use expected key");
-    }
-}
-
+#[cfg(keyos)]
 fn app_verified_third_party_header_after_prefilter(
     elf_path: &str,
     public_key: [u8; 33],
@@ -759,6 +701,7 @@ fn app_verified_third_party_header_after_prefilter(
     third_party_header_uses_key(&header, public_key).then_some(header)
 }
 
+#[cfg(keyos)]
 fn third_party_header_uses_key(header: &cosign2::Header, public_key: [u8; 33]) -> bool {
     header.pubkey1() == [0; 33]
         && header.signature1() == [0; 64]
@@ -803,30 +746,30 @@ fn truncate_string_bytes(value: &mut String, max_bytes: usize) {
     value.truncate(end);
 }
 
-fn sideloaded_app_dir_matches_app_id(elf_path: Option<&str>, app_id: &AppId, source: AppSource) -> bool {
+fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, source: AppSource) -> bool {
     if source != AppSource::ThirdParty {
         return true;
     }
 
-    let Some(elf_path) = elf_path else {
+    let Some(app_dir) = app_dir else {
         return true;
     };
 
-    if !elf_path.starts_with(SIDELOADED_APPS_DIR) {
+    if !app_dir.starts_with(SIDELOADED_APPS_DIR) {
         return true;
     }
 
-    let Some(app_dir) = sideloaded_app_dir_from_elf_path(elf_path) else {
-        log::warn!("scan_installed_apps: skipping sideloaded app with invalid bundle path {elf_path:?}");
+    let Some(name) = sideloaded_app_dir_name(app_dir) else {
+        log::warn!("scan_installed_apps: skipping sideloaded app with invalid bundle path {app_dir:?}");
         return false;
     };
 
-    let expected_app_dir = app_id.to_string();
-    if app_dir != expected_app_dir {
+    let expected_app_dir = hex::encode(app_id.0);
+    if name != expected_app_dir {
         log::warn!(
             "scan_installed_apps: skipping sideloaded app 0x{} from directory {:?}; expected {:?}",
             expected_app_dir,
-            app_dir,
+            name,
             expected_app_dir
         );
         return false;
@@ -835,41 +778,26 @@ fn sideloaded_app_dir_matches_app_id(elf_path: Option<&str>, app_id: &AppId, sou
     true
 }
 
-fn sideloaded_app_dir_from_elf_path(elf_path: &str) -> Option<&str> {
-    let relative_path = elf_path.strip_prefix(SIDELOADED_APPS_DIR)?.strip_prefix('/')?;
-    let (app_dir, file_name) = relative_path.split_once('/')?;
-    (file_name == "app.elf" && !app_dir.is_empty()).then_some(app_dir)
+fn sideloaded_app_dir_name(app_dir: &str) -> Option<&str> {
+    let name = app_dir.strip_prefix(SIDELOADED_APPS_DIR)?.strip_prefix('/')?;
+    (!name.is_empty() && !name.contains('/')).then_some(name)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, BTreeSet, HashMap},
-        fs,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     use app_manager::decode_app_id_str;
-    use sha2::{Digest, Sha256};
 
     use super::*;
 
     const THIRD_PARTY_APP_ID: &str = "0x00112233445566778899aabbccddeeff";
     const THIRD_PARTY_APP_DIR: &str = "00112233445566778899aabbccddeeff";
     const THIRD_PARTY_ELF_PATH: &str = "/keyos/sideloaded-apps/00112233445566778899aabbccddeeff/app.elf";
-    const THIRD_PARTY_SECRET_KEY: [u8; 32] = [
-        165, 173, 224, 118, 144, 45, 243, 15, 146, 156, 153, 56, 237, 13, 159, 208, 66, 208, 36, 143, 167,
-        240, 247, 115, 34, 1, 44, 218, 27, 221, 123, 244,
-    ];
 
     fn app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
         let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
         app_info_with_source_and_icon(app_id, name, elf_path, source, None)
-    }
-
-    fn app_info_with_icon(app_id: &str, name: &str, elf_path: Option<&str>, icon: Option<&str>) -> AppInfo {
-        let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
-        app_info_with_source_and_icon(app_id, name, elf_path, source, icon)
     }
 
     fn built_in_app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
@@ -885,7 +813,7 @@ mod tests {
     ) -> AppInfo {
         AppInfo {
             id: decode_app_id_str(app_id).unwrap(),
-            elf_path: elf_path.map(ToOwned::to_owned),
+            app_dir: elf_path.map(|path| path.strip_suffix("/app.elf").unwrap_or(path).to_owned()),
             manifest: Manifest {
                 app_name: BTreeMap::from([(Locale("en".to_string()), name.to_string())]),
                 app_id: app_manifest::parse_app_id_bytes(app_id).unwrap(),
@@ -900,9 +828,11 @@ mod tests {
                 syscall: Vec::new(),
                 qr_match_rules: Vec::new(),
             },
+            manifest_bytes: Vec::new(),
             source,
             is_flux: false,
-            binary_metadata: None,
+            binary_size: None,
+            #[cfg(keyos)]
             third_party_signature_cache: ThirdPartySignatureCache::Unknown,
         }
     }
@@ -912,67 +842,6 @@ mod tests {
             installed_apps: apps.into_iter().map(|app| (app.id, app)).collect::<HashMap<_, _>>(),
             running_apps: HashMap::new(),
         }
-    }
-
-    #[test]
-    fn insert_app_rejects_duplicate_app_ids() {
-        let app_id = "0x426974636f696e2057616c6c65740000";
-        let mut installed_apps = HashMap::new();
-        let built_in = built_in_app_info(app_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf"));
-        let sideloaded = app_info(
-            app_id,
-            "Bitcoin Wallet Copy",
-            Some("/keyos/sideloaded-apps/426974636f696e2057616c6c65740000/app.elf"),
-        );
-
-        assert!(AppRegistry::insert_app(
-            &mut installed_apps,
-            built_in.elf_path,
-            built_in.manifest,
-            AppSource::BuiltIn,
-            false
-        ));
-        assert!(!AppRegistry::insert_app(
-            &mut installed_apps,
-            sideloaded.elf_path,
-            sideloaded.manifest,
-            AppSource::ThirdParty,
-            false
-        ));
-
-        let app = installed_apps.get(&decode_app_id_str(app_id).unwrap()).unwrap();
-        assert_eq!(app.source, AppSource::BuiltIn);
-        assert_eq!(app.localized_name("en"), "Bitcoin Wallet");
-    }
-
-    #[test]
-    fn insert_app_accepts_sideloaded_app_id_directory() {
-        let mut installed_apps = HashMap::new();
-        let app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
-
-        assert!(AppRegistry::insert_app(
-            &mut installed_apps,
-            app.elf_path,
-            app.manifest,
-            AppSource::ThirdParty,
-            false
-        ));
-        assert!(installed_apps.contains_key(&decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()));
-    }
-
-    #[test]
-    fn insert_app_rejects_sideloaded_app_dir_that_differs_from_app_id() {
-        let mut installed_apps = HashMap::new();
-        let app = app_info(THIRD_PARTY_APP_ID, "Example App", Some("/keyos/sideloaded-apps/example/app.elf"));
-
-        assert!(!AppRegistry::insert_app(
-            &mut installed_apps,
-            app.elf_path,
-            app.manifest,
-            AppSource::ThirdParty,
-            false
-        ));
-        assert!(installed_apps.is_empty());
     }
 
     #[test]
@@ -1019,250 +888,11 @@ mod tests {
         assert_eq!(registry.sideloaded_bundle_dir(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()), None);
     }
 
-    struct TestSha256;
-
-    impl cosign2::Sha256 for TestSha256 {
-        fn hash(&self, data: &[u8]) -> [u8; 32] { Sha256::digest(data).into() }
-    }
-
-    struct TestSigner {
-        secret_key: secp256k1::SecretKey,
-    }
-
-    impl TestSigner {
-        fn new(secret_key: [u8; 32]) -> Self {
-            Self { secret_key: secp256k1::SecretKey::from_slice(&secret_key).unwrap() }
-        }
-
-        fn public_key(&self) -> [u8; 33] {
-            let secp = secp256k1::Secp256k1::signing_only();
-            secp256k1::PublicKey::from_secret_key(&secp, &self.secret_key).serialize()
-        }
-    }
-
-    impl cosign2::Secp256k1Sign for TestSigner {
-        fn sign_ecdsa(&self, msg: [u8; 32]) -> [u8; 64] {
-            let secp = secp256k1::Secp256k1::signing_only();
-            let signature = secp.sign_ecdsa(&secp256k1::Message::from_digest(msg), &self.secret_key);
-            signature.serialize_compact()
-        }
-
-        fn pubkey(&self) -> [u8; 33] { self.public_key() }
-    }
-
-    struct InvalidSignatureSigner {
-        public_key: [u8; 33],
-    }
-
-    impl cosign2::Secp256k1Sign for InvalidSignatureSigner {
-        fn sign_ecdsa(&self, _msg: [u8; 32]) -> [u8; 64] { [0xAB; 64] }
-
-        fn pubkey(&self) -> [u8; 33] { self.public_key }
-    }
-
-    fn third_party_app_bytes(signer: &impl cosign2::Secp256k1Sign) -> Vec<u8> {
-        let binary = b"example third-party app";
-        let header = cosign2::Header::sign_new(
-            cosign2::Magic::Atsama5d27KeyOs,
-            "1.2.3",
-            1,
-            cosign2::Signer::Developer,
-            binary,
-            &TestSha256,
-            signer,
-            cosign2::Header::DEFAULT_SIZE,
-        )
-        .unwrap();
-
-        let mut bytes = vec![0; cosign2::Header::DEFAULT_SIZE + binary.len()];
-        header.serialize(&mut bytes).unwrap();
-        bytes[cosign2::Header::DEFAULT_SIZE..].copy_from_slice(binary);
-        bytes
-    }
-
-    fn trusted_publisher(public_key: [u8; 33], name: &str) -> ThirdPartyCertificateInfo {
-        ThirdPartyCertificateInfo {
-            name: name.to_string(),
-            company: "Example Company".to_string(),
-            contact_email: "hello@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            public_key: hex::encode(public_key),
-            not_before_unix_seconds: Some(0),
-            not_after_unix_seconds: Some(u64::MAX),
-            serial_number: "1".to_string(),
-            issuer: String::new(),
-            subject: String::new(),
-            basic_constraints: String::new(),
-            key_usage: String::new(),
-            extended_key_usage: String::new(),
-        }
-    }
-
-    #[test]
-    fn sideloaded_app_header_check_accepts_signed_app() {
-        let root = make_temp_dir("signed-header-check");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-
-        assert!(sideloaded_app_has_cosign2_header(
-            Some(elf_path.to_str().unwrap()),
-            &app_manifest::parse_app_id_bytes(THIRD_PARTY_APP_ID).unwrap()
-        ));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn sideloaded_app_header_check_rejects_unsigned_app() {
-        let root = make_temp_dir("unsigned-header-check");
-        let elf_path = root.join("app.elf");
-        fs::write(&elf_path, b"unsigned app").unwrap();
-
-        assert!(!sideloaded_app_has_cosign2_header(
-            Some(elf_path.to_str().unwrap()),
-            &app_manifest::parse_app_id_bytes(THIRD_PARTY_APP_ID).unwrap()
-        ));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn installed_apps_excludes_built_in_apps() {
-        let mut registry = registry_with(vec![
-            built_in_app_info(
-                "0x426974636f696e2057616c6c65740000",
-                "Bitcoin Wallet",
-                Some("/keyos/apps/bitcoin/app.elf"),
-            ),
-            app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH)),
-        ]);
-
-        let apps = registry.installed_apps("en", &[]);
-
-        assert_eq!(apps.len(), 1);
-        assert_eq!(apps[0].app_id, THIRD_PARTY_APP_ID);
-    }
-
     #[test]
     fn installed_apps_excludes_system_manifests_without_app_file() {
         let mut registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
 
         assert!(registry.installed_apps("en", &[]).is_empty());
-    }
-
-    #[test]
-    fn debug_firmware_requires_signature_trust_for_third_party_apps() {
-        let built_in_id = "0x426974636f696e2057616c6c65740000";
-        let unknown_id = decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap();
-        let registry = registry_with(vec![
-            built_in_app_info(built_in_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf")),
-            app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH)),
-        ]);
-
-        assert!(!registry.requires_debug_signature_trust(decode_app_id_str(built_in_id).unwrap()));
-        assert!(registry.requires_debug_signature_trust(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()));
-        assert!(registry.requires_debug_signature_trust(unknown_id));
-    }
-
-    #[test]
-    fn debug_signature_trust_uses_app_source_not_app_id() {
-        let built_in_id = "0x426974636f696e2057616c6c65740000";
-        let registry = registry_with(vec![app_info(
-            built_in_id,
-            "Bitcoin Wallet Copy",
-            Some("/keyos/sideloaded-apps/426974636f696e2057616c6c65740000/app.elf"),
-        )]);
-
-        assert!(registry.requires_debug_signature_trust(decode_app_id_str(built_in_id).unwrap()));
-        assert!(!registry.is_built_in_app(decode_app_id_str(built_in_id).unwrap()));
-    }
-
-    #[test]
-    fn app_requiring_third_party_key_blocks_removal_for_valid_signature() {
-        let root = make_temp_dir("valid-third-party-signature");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-
-        let mut registry = registry_with(vec![app_info(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-        )]);
-
-        assert_eq!(
-            registry.app_name_requiring_third_party_key(&hex::encode(public_key), "en").as_deref(),
-            Some("Example App")
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn app_requiring_third_party_key_ignores_unverified_matching_header() {
-        let root = make_temp_dir("invalid-third-party-signature");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&InvalidSignatureSigner { public_key })).unwrap();
-
-        let mut registry = registry_with(vec![app_info(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-        )]);
-
-        assert_eq!(registry.app_name_requiring_third_party_key(&hex::encode(public_key), "en"), None);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn app_requiring_third_party_key_skips_oversized_binaries() {
-        let root = make_temp_dir("oversized-third-party-signature");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&elf_path)
-            .unwrap()
-            .set_len(MAX_THIRD_PARTY_KEY_CHECK_APP_SIZE + 1)
-            .unwrap();
-
-        let mut registry = registry_with(vec![app_info(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-        )]);
-
-        assert_eq!(registry.app_name_requiring_third_party_key(&hex::encode(public_key), "en"), None);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn installed_apps_include_manifest_app_resource_icon_when_present() {
-        let root = make_temp_dir("manifest-resource-icon");
-        let elf_path = root.join("app.elf");
-        let icon_path = root.join("resources").join(".foundation").join("icon.raw");
-        fs::create_dir_all(icon_path.parent().unwrap()).unwrap();
-        fs::write(&elf_path, b"elf").unwrap();
-        fs::write(&icon_path, b"icon").unwrap();
-
-        let mut registry = registry_with(vec![app_info_with_icon(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-            Some("resources/.foundation/icon.raw"),
-        )]);
-
-        let apps = registry.installed_apps("en", &[]);
-
-        assert_eq!(apps[0].bundled_icon_path.as_deref(), Some(icon_path.to_str().unwrap()));
-        assert_eq!(
-            registry.app_icon_bytes(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()),
-            Some(b"icon".to_vec())
-        );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1291,145 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn installed_apps_prefer_bundled_raw_icon_when_present() {
-        let root = make_temp_dir("bundled-icon");
-        let elf_path = root.join("app.elf");
-        let icon_path = root.join("icon.bin");
-        fs::write(&elf_path, b"elf").unwrap();
-        fs::write(&icon_path, b"icon").unwrap();
-
-        let mut registry = registry_with(vec![app_info_with_icon(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-            Some("images/apps/example/icon.raw"),
-        )]);
-
-        let apps = registry.installed_apps("en", &[]);
-
-        assert_eq!(apps[0].bundled_icon_path.as_deref(), Some(icon_path.to_str().unwrap()));
-        assert_eq!(
-            registry.app_icon_bytes(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()),
-            Some(b"icon".to_vec())
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn installed_apps_include_manifest_description_without_trusting_publisher_or_version() {
-        let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
-        app.manifest.publisher = Some("Example Publisher".to_string());
-        app.manifest.description = Some("Example description".to_string());
-        app.manifest.version = Some("1.2.3".to_string());
-        let mut registry = registry_with(vec![app]);
-
-        let apps = registry.installed_apps("en", &[]);
-
-        assert!(apps[0].publisher.is_empty());
-        assert!(!apps[0].can_launch);
-        assert_eq!(apps[0].description, "Example description");
-        assert!(apps[0].version.is_empty());
-    }
-
-    #[test]
-    fn installed_apps_caps_user_controlled_metadata() {
-        let mut app = app_info(
-            THIRD_PARTY_APP_ID,
-            &"é".repeat(INSTALLED_APP_NAME_MAX_BYTES),
-            Some(THIRD_PARTY_ELF_PATH),
-        );
-        app.manifest.description = Some("é".repeat(INSTALLED_APP_DESCRIPTION_MAX_BYTES));
-        app.manifest.permissions = BTreeMap::from([(
-            "server".to_string(),
-            (0..INSTALLED_APP_PERMISSION_LINES_MAX + 1)
-                .map(|index| format!("{index:02}-{}", "é".repeat(INSTALLED_APP_PERMISSION_LINE_MAX_BYTES)))
-                .collect::<BTreeSet<_>>(),
-        )]);
-        let mut registry = registry_with(vec![app]);
-
-        let apps = registry.installed_apps("en", &[]);
-
-        assert_eq!(apps[0].name.len(), INSTALLED_APP_NAME_MAX_BYTES);
-        assert_eq!(apps[0].description.len(), INSTALLED_APP_DESCRIPTION_MAX_BYTES);
-        assert_eq!(apps[0].permissions.len(), 1);
-        assert_eq!(apps[0].permissions[0].messages.len(), INSTALLED_APP_PERMISSION_LINES_MAX);
-        assert!(apps[0]
-            .permissions
-            .iter()
-            .flat_map(|group| group.messages.iter())
-            .all(|permission| permission.len() <= INSTALLED_APP_PERMISSION_LINE_MAX_BYTES));
-    }
-
-    #[test]
-    fn installed_apps_use_verified_trusted_publisher_cert_name() {
-        let root = make_temp_dir("verified-publisher");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-
-        let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(elf_path.to_str().unwrap()));
-        app.manifest.publisher = Some("Spoofed Manifest Publisher".to_string());
-        let mut registry = registry_with(vec![app]);
-
-        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
-
-        assert_eq!(apps[0].publisher, "Verified Publisher");
-        assert!(apps[0].can_launch);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn installed_apps_verifies_after_matching_publisher_becomes_trusted() {
-        let root = make_temp_dir("deferred-publisher");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-
-        let mut registry = registry_with(vec![app_info(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-        )]);
-
-        let apps = registry.installed_apps("en", &[]);
-        assert!(apps[0].publisher.is_empty());
-        assert!(!apps[0].can_launch);
-
-        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
-        assert_eq!(apps[0].publisher, "Verified Publisher");
-        assert!(apps[0].can_launch);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn installed_apps_reuses_verified_publisher_until_registry_refresh() {
-        let root = make_temp_dir("cached-publisher");
-        let elf_path = root.join("app.elf");
-        let signer = TestSigner::new(THIRD_PARTY_SECRET_KEY);
-        let public_key = signer.public_key();
-        fs::write(&elf_path, third_party_app_bytes(&signer)).unwrap();
-
-        let mut registry = registry_with(vec![app_info(
-            THIRD_PARTY_APP_ID,
-            "Example App",
-            Some(elf_path.to_str().unwrap()),
-        )]);
-
-        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Verified Publisher")]);
-        assert_eq!(apps[0].publisher, "Verified Publisher");
-        assert!(apps[0].can_launch);
-
-        // The Settings-list cache is invalidated by a registry refresh after
-        // sideload writes. App launch still performs full verification.
-        fs::write(&elf_path, b"not a signed app").unwrap();
-        let apps = registry.installed_apps("en", &[trusted_publisher(public_key, "Renamed Publisher")]);
-        assert_eq!(apps[0].publisher, "Renamed Publisher");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn built_in_app_publisher_comes_from_source() {
         let mut app = built_in_app_info(
             "0x426974636f696e2057616c6c65740000",
@@ -1439,13 +930,6 @@ mod tests {
         app.manifest.publisher = Some("Different Publisher".to_string());
 
         assert_eq!(app.publisher_and_launchable(&[]), (FOUNDATION_PUBLISHER.to_string(), true));
-    }
-
-    fn make_temp_dir(label: &str) -> std::path::PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("app-manager-registry-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -8,7 +8,6 @@ use std::process::{Command, Output};
 use anyhow::{bail, Context, Result};
 use foundation_core::{AppConfig, SdkRoot};
 
-pub const APP_RESOURCES_DIR_ENV: &str = "FOUNDATION_APP_RESOURCES_DIR";
 pub const BUNDLED_ICON_FILE: &str = "icon.bin";
 
 const ASSET_TOOL_BINARY: &str = "foundation-asset-tool";
@@ -44,52 +43,6 @@ pub fn stage_hardware_assets(config: &AppConfig, project_root: &Path, output_dir
     Ok(resources_dir)
 }
 
-pub fn stage_simulator_resources(config: &AppConfig, project_root: &Path) -> Result<PathBuf> {
-    let staged_resources = project_root.join("target").join("foundation").join("sim-resources");
-
-    if staged_resources.exists() {
-        fs::remove_dir_all(&staged_resources).with_context(|| {
-            format!("Failed to clean simulator resources directory {}", staged_resources.display())
-        })?;
-    }
-    fs::create_dir_all(&staged_resources).with_context(|| {
-        format!("Failed to create simulator resources directory {}", staged_resources.display())
-    })?;
-
-    let resources = project_root.join(RESOURCES_DIR);
-    if resources.exists() {
-        copy_dir_contents(&resources, &staged_resources)?;
-    }
-
-    stage_simulator_app_asset_dirs(project_root, &staged_resources)?;
-    stage_simulator_icon(config, project_root, &staged_resources)?;
-
-    Ok(staged_resources)
-}
-
-pub fn copy_app_resources_to_bundle(resources_dir: &Path, install_dir: &Path) -> Result<()> {
-    if !resources_dir.exists() {
-        return Ok(());
-    }
-
-    let install_resources = install_dir.join(RESOURCES_DIR);
-    if let Ok(metadata) = fs::symlink_metadata(&install_resources) {
-        if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            fs::remove_dir_all(&install_resources).with_context(|| {
-                format!("Failed to clean app resources directory {}", install_resources.display())
-            })?;
-        } else {
-            fs::remove_file(&install_resources).with_context(|| {
-                format!("Failed to replace app resources path {}", install_resources.display())
-            })?;
-        }
-    }
-    fs::create_dir_all(&install_resources).with_context(|| {
-        format!("Failed to create app resources directory {}", install_resources.display())
-    })?;
-    copy_dir_contents(resources_dir, &install_resources)
-}
-
 fn stage_icon(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<()> {
     let icon_source = project_root.join(&config.icon);
     let icon_destination = output_dir.join(config.manifest_icon_file());
@@ -100,17 +53,6 @@ fn stage_bundled_icon(config: &AppConfig, project_root: &Path, output_dir: &Path
     let icon_source = project_root.join(&config.icon);
     let icon_destination = output_dir.join(BUNDLED_ICON_FILE);
     convert_image_file(&icon_source, &icon_destination)
-}
-
-fn stage_simulator_icon(config: &AppConfig, project_root: &Path, resources_dir: &Path) -> Result<()> {
-    let icon_source = project_root.join(&config.icon);
-    let extension = icon_source.extension().and_then(|extension| extension.to_str()).unwrap_or("png");
-    let manifest_icon_name = config.manifest_icon_image_name();
-    let icon_name =
-        manifest_icon_name.strip_prefix("resources/").map(ToOwned::to_owned).unwrap_or(manifest_icon_name);
-    let icon_destination = resources_dir.join(icon_name).with_extension(extension);
-    write_file(&icon_destination, &fs::read(&icon_source)?)?;
-    Ok(())
 }
 
 fn stage_images(project_root: &Path, resources_dir: &Path) -> Result<()> {
@@ -164,19 +106,6 @@ fn stage_font_source_dir(fonts_dir: &Path, output_dir: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn stage_simulator_app_asset_dirs(project_root: &Path, staged_resources: &Path) -> Result<()> {
-    copy_optional_asset_dir(&project_root.join(IMAGES_DIR), &staged_resources.join(IMAGES_DIR))?;
-    copy_optional_asset_dir(&project_root.join(FONTS_DIR), &staged_resources.join(FONTS_DIR))
-}
-
-fn copy_optional_asset_dir(source: &Path, destination: &Path) -> Result<()> {
-    if should_skip_asset_source_dir(source)? {
-        return Ok(());
-    }
-
-    copy_dir_contents(source, destination)
 }
 
 fn convert_image_file(source: &Path, destination: &Path) -> Result<()> {
@@ -321,31 +250,6 @@ fn collect_files_into(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn copy_dir_contents(source: &Path, destination: &Path) -> Result<()> {
-    fs::create_dir_all(destination)?;
-
-    let mut entries = fs::read_dir(source)?.collect::<std::result::Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        if source_path.is_dir() {
-            copy_dir_contents(&source_path, &destination_path)?;
-        } else if source_path.is_file() {
-            fs::create_dir_all(destination_path.parent().unwrap())?;
-            fs::copy(&source_path, &destination_path).with_context(|| {
-                format!("Failed to copy {} to {}", source_path.display(), destination_path.display())
-            })?;
-            fs::File::open(&destination_path)
-                .and_then(|file| file.sync_all())
-                .with_context(|| format!("Failed to sync copied asset {}", destination_path.display()))?;
-        }
-    }
-
-    Ok(())
-}
-
 fn write_file(path: &Path, contents: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -378,7 +282,7 @@ mod tests {
     use foundation_core::{AppId, PermissionsConfig, PublisherConfig};
     use semver::Version;
 
-    use super::{copy_app_resources_to_bundle, stage_hardware_assets, stage_simulator_resources};
+    use super::stage_hardware_assets;
     use crate::assets::{is_supported_font, is_supported_image};
 
     #[test]
@@ -420,38 +324,6 @@ mod tests {
 
         cleanup(&root);
         cleanup(&sdk_shared);
-    }
-
-    #[test]
-    fn simulator_resources_are_copied_to_a_generated_target_dir() {
-        let root = make_temp_dir("sim-assets");
-        fs::create_dir_all(root.join("resources")).unwrap();
-        fs::create_dir_all(root.join("images")).unwrap();
-        fs::create_dir_all(root.join("fonts")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), svg()).unwrap();
-        fs::write(root.join("images").join("photo.svg"), svg()).unwrap();
-        fs::write(root.join("fonts").join("Brand.ttf"), b"font").unwrap();
-
-        let staged = stage_simulator_resources(&app_config(), &root).unwrap();
-
-        assert_eq!(fs::read_to_string(staged.join("images").join("photo.svg")).unwrap(), svg());
-        assert_eq!(fs::read(staged.join("fonts").join("Brand.ttf")).unwrap(), b"font");
-        assert_eq!(fs::read_to_string(staged.join(".foundation").join("icon.svg")).unwrap(), svg());
-        cleanup(&root);
-    }
-
-    #[test]
-    fn copies_app_resources_into_bundle_resources_dir() {
-        let root = make_temp_dir("copy-resources");
-        let resources = root.join("target").join("keyos").join("demo-app").join("resources");
-        fs::create_dir_all(resources.join("images")).unwrap();
-        fs::write(resources.join("images").join("app.raw"), b"raw").unwrap();
-        let install_dir = root.join("mount").join("keyos").join("apps").join("demo-app");
-
-        copy_app_resources_to_bundle(&resources, &install_dir).unwrap();
-
-        assert_eq!(fs::read(install_dir.join("resources").join("images").join("app.raw")).unwrap(), b"raw");
-        cleanup(&root);
     }
 
     #[test]

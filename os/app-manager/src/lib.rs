@@ -32,7 +32,11 @@ fs::use_api!();
 use crate::launch::launch_app;
 use crate::registry::AppRegistry;
 
-pub fn listen() { server::listen(AppManagerServer::new().unwrap()) }
+pub fn listen() {
+    #[cfg(not(keyos))]
+    crate::launch::warn_if_app_elf_root_unset();
+    server::listen(AppManagerServer::new().unwrap())
+}
 
 #[derive(server::Server)]
 #[name = "os/app-manager"]
@@ -343,14 +347,9 @@ impl AppManagerServer {
             return Ok(pid);
         }
 
-        #[cfg(keyos)]
+        // The registry tracks the bundle's fs `app.elf` path; the device launches
+        // it from the image, the simulator from the staged host binary.
         let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
-        #[cfg(not(keyos))]
-        let elf_path = self
-            .app_registry
-            .elf_path(app_id)
-            .map(std::path::PathBuf::from)
-            .ok_or(LaunchError::UnknownAppId)?;
         let check_trust =
             cfg!(feature = "production") || self.app_registry.requires_debug_signature_trust(app_id);
         // Imported developer certificates must never authorize a built-in AppId.
@@ -362,14 +361,20 @@ impl AppManagerServer {
         };
 
         #[cfg(keyos)]
-        let pid = {
-            let verified_app = crate::launch::verify_app(&app_id, &elf_path, &trusted_pubkeys, check_trust)?;
-            self.register_app_resources(app_id)?;
-            verified_app.launch()?
-        };
-
+        let verified = crate::launch::verify_app(&app_id, &elf_path, &trusted_pubkeys, check_trust)?;
         #[cfg(not(keyos))]
-        let pid = launch_app(&app_id, &elf_path, &trusted_pubkeys, check_trust)?;
+        let host_elf = crate::launch::host_elf_path(&elf_path).ok_or(LaunchError::UnknownAppId)?;
+
+        // Register only after verification, so a failed trust check can't expose
+        // the app's resources or claim its names.
+        self.register_app_resources(app_id)?;
+        self.app_registry.register_app_names(app_id);
+
+        #[cfg(keyos)]
+        let pid = verified.launch()?;
+        #[cfg(not(keyos))]
+        let pid = launch_app(&app_id, &host_elf, &trusted_pubkeys, check_trust)?;
+
         self.app_registry.register_running_app(pid, app_id, sender);
 
         self.notify_app_launched(app_id, pid, sender);
@@ -383,7 +388,6 @@ impl AppManagerServer {
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 
-    #[cfg(keyos)]
     fn register_app_resources(&self, app_id: AppId) -> Result<(), LaunchError> {
         if let Some(location) = self.app_registry.app_resources_location(app_id) {
             FileSystem::default()

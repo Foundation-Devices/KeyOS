@@ -282,14 +282,14 @@ impl Gui {
         let display = PlatformDisplay::init(Self::boot_splash_layer());
         #[cfg(not(feature = "recovery-os"))]
         let security = security::Security::default();
-        #[cfg(not(feature = "recovery-os"))]
+        #[cfg(all(not(feature = "recovery-os"), keyos))]
         let startup_state = if let security::MasterKeyState::Normal = security.master_key_state() {
             StartupState::InitialLockScreen
         } else {
             Self::launch_onboarding();
             StartupState::WaitingForOnboardingPID
         };
-        #[cfg(feature = "recovery-os")]
+        #[cfg(any(feature = "recovery-os", all(not(feature = "recovery-os"), not(keyos))))]
         let startup_state = StartupState::WaitingForLauncherPID;
 
         let animation_fb = xous::map_memory(

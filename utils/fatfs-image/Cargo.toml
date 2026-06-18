@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "fatfs-image"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fatfs_image"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fatfs-image"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+fatfs = { workspace = true, features = ["std", "alloc"] }
+fscommon = "0.1.1"
+mbrs = "0.3.1"

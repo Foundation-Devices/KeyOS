@@ -32,6 +32,13 @@ artifact = "foundation-asset-tool"
 binary = "foundation-asset-tool"
 
 [[compile]]
+name = "fatfs-image"
+manifest = "../utils/fatfs-image"
+package = "fatfs-image"
+artifact = "fatfs-image"
+binary = "fatfs-image"
+
+[[compile]]
 name = "simulator"
 manifest = "../apps/simulator"
 package = "simulator"

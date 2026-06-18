@@ -14,8 +14,6 @@ mod file_backed;
 mod mass_storage_bd;
 
 use enum_dispatch::enum_dispatch;
-#[cfg(not(keyos))]
-pub use file_backed::init_files;
 use fs::BLOCK_SIZE;
 
 // We try to keep this at a minimum to not hold too much stuff in memory, but

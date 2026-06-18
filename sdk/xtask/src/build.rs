@@ -28,55 +28,6 @@ const STAGED_KEYOS_SDK_UI_ROOT: &str = "lib/keyos/ui/ui";
 const STAGED_SDK_RESOURCES_ROOT: &str = "resources";
 const KEYOS_LEGACY_UI_SOURCE_ROOT: &str = "ui/ui";
 const KEYOS_LEGACY_UI_ASSET_DIRS: &[&str] = &["icons", "images", "fonts"];
-const KEYOS_HOSTED_MANDATORY_SERVICES: &[&str] =
-    &["xous-log", "log-hosted", "xous-ticktimer", "xous-names", "trng"];
-const KEYOS_HOSTED_DEFAULT_SERVICES: &[&str] = &[
-    "gpio-server",
-    "i2c-server",
-    "spi-server",
-    "security-server",
-    "update-server",
-    "quantum-link-server",
-    "backup-server",
-    "haptics-server",
-    "rgb-led-server",
-    "power-manager-server",
-    "dma-server",
-    "bt-server",
-    "emmc",
-    "mass-storage-server",
-    "fs-server",
-    "log-file",
-    "nfc-server",
-    "fido",
-    "keycard-server",
-    "settings-server",
-    "usb-server",
-    "camera-server",
-    "gui-server",
-    "app-manager-server",
-    "gui-app-control-center",
-    "gui-app-lock-screen",
-    "gui-app-qr-scanner",
-    "gui-app-keyboard",
-    "gui-app-launcher",
-    "gui-app-settings",
-    "gui-app-playground",
-    "gui-app-image-viewer",
-    "gui-app-regulatory",
-    "gui-app-system-actions",
-    "gui-app-file-browser",
-    "gui-app-bitcoin",
-    "gui-app-authenticator",
-    "gui-app-security-keys",
-    "gui-app-seed-vault",
-    "gui-app-onboarding",
-    "gui-app-file-picker-test",
-    "gui-app-switcher",
-    "simulator",
-    "simulator-cli",
-    "crypto-server",
-];
 const SLINT_SDK_SEED_DIRS: &[&str] = &[
     "api/rs/build",
     "api/rs/macros",
@@ -508,6 +459,7 @@ fn verify_target_stage(stage_dir: &Path, skip_simulator: bool) -> Result<()> {
     let mut required_paths = vec![
         stage_dir.join("bin").join("foundation"),
         stage_dir.join("bin").join("foundation-asset-tool"),
+        stage_dir.join("bin").join("fatfs-image"),
         stage_dir.join("bin").join("foundation-slint-viewer"),
         stage_dir.join("bin").join("foundation-keyos-log-viewer"),
         stage_dir.join("bin").join("foundation-passport-drive"),
@@ -524,9 +476,6 @@ fn verify_target_stage(stage_dir: &Path, skip_simulator: bool) -> Result<()> {
                 .join("xous")
                 .join("kernel")
                 .join(KEYOS_HOSTED_KERNEL_PACKAGE),
-        );
-        required_paths.push(
-            stage_dir.join(KEYOS_HOSTED_RUNTIME_ROOT).join("bin").join(KEYOS_HOSTED_MANDATORY_SERVICES[0]),
         );
         required_paths
             .push(stage_dir.join(KEYOS_HOSTED_RUNTIME_ROOT).join("ui").join("ui").join("theme.slint"));
@@ -549,6 +498,17 @@ fn verify_target_stage(stage_dir: &Path, skip_simulator: bool) -> Result<()> {
     let missing = required_paths.into_iter().filter(|path| !path.exists()).collect::<Vec<_>>();
 
     if missing.is_empty() {
+        // Services come from services.json; require at least one staged binary.
+        if !skip_simulator {
+            let bin_dir = stage_dir.join(KEYOS_HOSTED_RUNTIME_ROOT).join("bin");
+            if fs::read_dir(&bin_dir).ok().and_then(|mut entries| entries.next()).is_none() {
+                return Err(boxed_err(format!(
+                    "staged simulator runtime at {} has no service binaries in {}",
+                    stage_dir.display(),
+                    bin_dir.display()
+                )));
+            }
+        }
         return Ok(());
     }
 
@@ -865,8 +825,6 @@ fn stage_simulator_runtime(
         return Err(boxed_err(format!("missing KeyOS workspace manifest at {}", keyos_manifest.display())));
     }
 
-    let runtime_manifests = discover_runtime_manifests(keyos_root)?;
-    let service_packages = hosted_service_packages();
     let cargo_target_dir = root.join("target").join("xtask-build").join(target).join(&entry.name);
 
     let keyos_xtask_manifest = keyos_root.join("xtask").join("Cargo.toml");
@@ -884,13 +842,24 @@ fn stage_simulator_runtime(
 
     command.arg("--").arg("build").arg("--hosted").arg("--dont-sign");
 
+    // Ship a pristine system image: drop any state or sideloaded apps a prior
+    // local sim run left in the source image, since `build --hosted` recreates
+    // and reseeds it only when absent. This clobbers the developer's local image.
+    let built_system_image = keyos_root.join("xous").join("kernel").join("disk_system.dat");
+    if built_system_image.exists() {
+        fs::remove_file(&built_system_image)
+            .map_err(|e| boxed_err(format!("remove {}: {e}", built_system_image.display())))?;
+    }
+
     util::run_command(&mut command, args.verbose)?;
 
     let hosted_target_root = cargo_target_dir.join("hosted");
     let runtime_root = stage_dir.join(KEYOS_HOSTED_RUNTIME_ROOT);
     let runtime_bin_dir = runtime_root.join("bin");
     let runtime_kernel_dir = runtime_root.join("xous").join("kernel");
-    let runtime_apps_dir = runtime_root.join("target").join("apps");
+    // app-manager execs built-in binaries from <runtime_root>/apps (mirrors the
+    // image's /keyos/apps); foundation sim points the app-elf root at runtime_root.
+    let runtime_apps_dir = runtime_root.join("apps");
     let runtime_ui_dir = runtime_root.join("ui").join("ui");
     let runtime_ui_resources_dir = runtime_root.join("resources");
     let legacy_ui_dir = keyos_root.join(KEYOS_LEGACY_UI_SOURCE_ROOT);
@@ -906,44 +875,41 @@ fn stage_simulator_runtime(
     util::copy_file(&built_kernel, &staged_kernel)?;
     maybe_strip_staged_binary(&staged_kernel, should_strip_packaged_binaries(args), args.verbose)?;
 
-    let mut services = Vec::with_capacity(service_packages.len());
-    for package in service_packages {
-        let built_binary = hosted_target_root.join(package);
-        let staged_binary = runtime_bin_dir.join(package);
-        util::copy_file(&built_binary, &staged_binary)?;
+    // The hosted build populated the system image (UI assets + built-in apps)
+    // next to the source kernel; ship it so a fresh bundle boots with assets.
+    // The user volume (disk.dat) is created by the simulator launcher on first run.
+    util::copy_file(&built_system_image, &runtime_kernel_dir.join("disk_system.dat"))?;
+
+    // `xtask build --hosted` wrote the canonical services.json (path + app_id +
+    // syscall mask) listing exactly the hosted service binaries it built; it is
+    // the source of truth, so we don't duplicate the keyos-side service list.
+    // Stage each binary into bin/ and rewrite its path to that bundle location
+    // relative to the kernel's run dir, then ship the manifest as-is. The kernel
+    // reads it as argv[1] and resolves the relative paths against its cwd, so the
+    // manifest works wherever the bundle is unpacked.
+    let build_manifest = hosted_target_root.join("services.json");
+    let mut services: Vec<serde_json::Value> = serde_json::from_reader(
+        fs::File::open(&build_manifest)
+            .map_err(|e| boxed_err(format!("open {}: {e}", build_manifest.display())))?,
+    )
+    .map_err(|e| boxed_err(format!("parse {}: {e}", build_manifest.display())))?;
+    for service in &mut services {
+        let name = service["path"]
+            .as_str()
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| boxed_err(format!("bad service entry in {}", build_manifest.display())))?
+            .to_owned();
+        let staged_binary = runtime_bin_dir.join(&name);
+        util::copy_file(&hosted_target_root.join(&name), &staged_binary)?;
         maybe_strip_staged_binary(&staged_binary, should_strip_packaged_binaries(args), args.verbose)?;
-
-        let runtime_manifest = runtime_manifests.get(package).ok_or_else(|| {
-            boxed_err(format!(
-                "could not locate KeyOS simulator runtime manifest for hosted service '{package}'"
-            ))
-        })?;
-        services.push(HostedService {
-            package: package.to_string(),
-            app_id: runtime_manifest.app_id.clone(),
-            syscalls: 0,
-        });
+        service["path"] = serde_json::Value::String(format!("../../bin/{name}"));
     }
+    fs::write(runtime_root.join("services.json"), serde_json::to_string_pretty(&services)?)?;
 
-    // The hosted kernel reads a single `services.json` manifest (path + app_id +
-    // syscall mask). `xtask build --hosted` already wrote the canonical one next
-    // to the built kernel; read it to pick up each service's syscall mask and the
-    // canonically-formatted app_id, then the launcher regenerates the manifest at
-    // runtime with the installed paths.
-    let kernel_services = read_hosted_services_manifest(&hosted_target_root.join("services.json"))?;
-    for service in services.iter_mut() {
-        let (app_id, syscalls) = kernel_services.get(&service.package).ok_or_else(|| {
-            boxed_err(format!(
-                "hosted service '{}' is missing from the kernel services manifest at {}",
-                service.package,
-                hosted_target_root.join("services.json").display()
-            ))
-        })?;
-        service.app_id = app_id.clone();
-        service.syscalls = *syscalls;
-    }
-
-    let built_apps_dir = hosted_target_root.join("apps");
+    // build --hosted stages built-in bundles (manifest + app.elf) next to the
+    // source tree, not under CARGO_TARGET_DIR; ship the app.elf the simulator execs.
+    let built_apps_dir = keyos_root.join("target").join("hosted").join("keyos").join("apps");
     if built_apps_dir.exists() {
         util::copy_dir_contents(&built_apps_dir, &runtime_apps_dir)?;
         strip_staged_binaries_in_dir(&runtime_apps_dir, should_strip_packaged_binaries(args), args.verbose)?;
@@ -953,11 +919,7 @@ fn stage_simulator_runtime(
     stage_shared_ui_resources(keyos_root, &runtime_ui_resources_dir)?;
     stage_legacy_simulator_ui_assets(&legacy_ui_dir, &runtime_ui_dir)?;
 
-    write_simulator_launcher(
-        &stage_dir.join("bin").join(&entry.binary),
-        KEYOS_HOSTED_RUNTIME_ROOT,
-        &services,
-    )?;
+    write_simulator_launcher(&stage_dir.join("bin").join(&entry.binary), KEYOS_HOSTED_RUNTIME_ROOT)?;
 
     Ok(())
 }
@@ -1051,33 +1013,7 @@ fn is_strippable_binary_header(header: [u8; 4]) -> bool {
     )
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct HostedService {
-    package: String,
-    app_id: String,
-    syscalls: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RuntimeManifestInfo {
-    app_id: String,
-    manifest_path: PathBuf,
-}
-
-fn hosted_service_packages() -> Vec<&'static str> {
-    let mut packages =
-        Vec::with_capacity(KEYOS_HOSTED_MANDATORY_SERVICES.len() + KEYOS_HOSTED_DEFAULT_SERVICES.len());
-
-    for package in KEYOS_HOSTED_MANDATORY_SERVICES.iter().chain(KEYOS_HOSTED_DEFAULT_SERVICES.iter()) {
-        if !packages.contains(package) {
-            packages.push(*package);
-        }
-    }
-
-    packages
-}
-
-fn write_simulator_launcher(path: &Path, runtime_root_rel: &str, services: &[HostedService]) -> Result<()> {
+fn write_simulator_launcher(path: &Path, runtime_root_rel: &str) -> Result<()> {
     let mut script = String::new();
     script.push_str("#!/usr/bin/env bash\n");
     script.push_str("set -euo pipefail\n");
@@ -1086,208 +1022,28 @@ fn write_simulator_launcher(path: &Path, runtime_root_rel: &str, services: &[Hos
     script.push_str(&format!("RUNTIME_ROOT=\"$SDK_ROOT/{runtime_root_rel}\"\n"));
     script.push_str("KERNEL_DIR=\"$RUNTIME_ROOT/xous/kernel\"\n");
     script.push_str(&format!("KERNEL_BIN=\"$KERNEL_DIR/{}\"\n", KEYOS_HOSTED_KERNEL_PACKAGE));
-    script.push_str("mkdir -p \"$RUNTIME_ROOT/target/apps\"\n");
     script.push_str("if [ ! -x \"$KERNEL_BIN\" ]; then\n");
     script.push_str("  echo \"foundation-simulator: missing hosted kernel at $KERNEL_BIN\" >&2\n");
     script.push_str("  exit 1\n");
     script.push_str("fi\n");
+    // os/fs opens disk.dat unconditionally; the bundle ships only the system
+    // image, so create the user volume here or a direct launch (not driven by
+    // `foundation sim`) panics in fs before boot. fatfs-image ships alongside.
+    script.push_str("USER_IMAGE=\"$KERNEL_DIR/disk.dat\"\n");
+    script.push_str("if [ ! -f \"$USER_IMAGE\" ]; then\n");
+    script.push_str("  \"$SCRIPT_DIR/fatfs-image\" create \"$USER_IMAGE\" --size 8G --label USER\n");
+    script.push_str("fi\n");
+    // app-manager execs host app binaries from the runtime root (mirrors /keyos);
+    // export it so the bundle launches built-ins even without foundation sim.
+    script.push_str("export FOUNDATION_SIMULATOR_APP_ELF_ROOT=\"$RUNTIME_ROOT\"\n");
+    // The kernel takes services.json as argv[1]; its service paths are relative to
+    // this run dir, so the shipped manifest works wherever the bundle is unpacked.
     script.push_str("cd \"$KERNEL_DIR\"\n");
-    // The hosted kernel reads a single services.json manifest (path + app_id +
-    // syscall mask) as argv[1]. Generate it at runtime so service paths track the
-    // resolved $RUNTIME_ROOT (the SDK install is relocatable).
-    script.push_str("SERVICES_MANIFEST=\"$RUNTIME_ROOT/target/services.json\"\n");
-    script.push_str("{\n");
-    script.push_str("  printf '[\\n'\n");
-    for (index, service) in services.iter().enumerate() {
-        let leading = if index == 0 { "  ".to_string() } else { ",\\n  ".to_string() };
-        script.push_str(&format!(
-            "  printf '{leading}{{\"path\": \"%s/bin/{pkg}\", \"app_id\": \"{app_id}\", \"syscalls\": {syscalls}}}' \"$RUNTIME_ROOT\"\n",
-            leading = leading,
-            pkg = service.package,
-            app_id = service.app_id,
-            syscalls = service.syscalls,
-        ));
-    }
-    script.push_str("  printf '\\n]\\n'\n");
-    script.push_str("} > \"$SERVICES_MANIFEST\"\n");
-    script.push_str("exec \"$KERNEL_BIN\" \"$SERVICES_MANIFEST\"\n");
+    script.push_str("exec \"$KERNEL_BIN\" \"$RUNTIME_ROOT/services.json\"\n");
 
     fs::write(path, script)?;
     set_executable(path)?;
     Ok(())
-}
-
-/// Read the canonical hosted-mode `services.json` that `xtask build --hosted`
-/// writes next to the kernel, returning a map of service binary name to its
-/// `(app_id, syscall mask)`.
-fn read_hosted_services_manifest(path: &Path) -> Result<BTreeMap<String, (String, u64)>> {
-    let data = fs::read_to_string(path)
-        .map_err(|e| boxed_err(format!("couldn't read hosted services manifest {}: {e}", path.display())))?;
-    let value: serde_json::Value = serde_json::from_str(&data)
-        .map_err(|e| boxed_err(format!("couldn't parse hosted services manifest {}: {e}", path.display())))?;
-    let entries = value.as_array().ok_or_else(|| {
-        boxed_err(format!("hosted services manifest {} is not a JSON array", path.display()))
-    })?;
-
-    let mut map = BTreeMap::new();
-    for entry in entries {
-        let raw_path = entry.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
-            boxed_err(format!("hosted services manifest {} entry missing 'path'", path.display()))
-        })?;
-        let app_id = entry.get("app_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            boxed_err(format!("hosted services manifest {} entry missing 'app_id'", path.display()))
-        })?;
-        let syscalls = entry.get("syscalls").and_then(|v| v.as_u64()).ok_or_else(|| {
-            boxed_err(format!("hosted services manifest {} entry missing 'syscalls'", path.display()))
-        })?;
-        let package = Path::new(raw_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.strip_suffix(".exe").unwrap_or(n).to_string())
-            .unwrap_or_else(|| raw_path.to_string());
-        map.insert(package, (app_id.to_string(), syscalls));
-    }
-    Ok(map)
-}
-
-fn discover_runtime_manifests(keyos_root: &Path) -> Result<BTreeMap<String, RuntimeManifestInfo>> {
-    let mut manifests = BTreeMap::new();
-    scan_runtime_manifests(keyos_root, &mut manifests)?;
-    Ok(manifests)
-}
-
-fn scan_runtime_manifests(dir: &Path, manifests: &mut BTreeMap<String, RuntimeManifestInfo>) -> Result<()> {
-    let mut entries = fs::read_dir(dir)?.collect::<std::result::Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-
-        if path.is_dir() {
-            // Ignore repo metadata, sibling worktree mirrors, and build output when scanning
-            // for hosted runtime manifests.
-            if should_skip_runtime_manifest_dir(&file_name) {
-                continue;
-            }
-            scan_runtime_manifests(&path, manifests)?;
-            continue;
-        }
-
-        if file_name != "Cargo.toml" {
-            continue;
-        }
-
-        let manifest_dir =
-            path.parent().ok_or_else(|| boxed_err(format!("missing parent for {}", path.display())))?;
-        let runtime_manifest_path = manifest_dir.join("manifest.toml");
-        if !runtime_manifest_path.exists() {
-            continue;
-        }
-
-        let Some(app_id) = load_manifest_app_id_if_present(&runtime_manifest_path)? else {
-            continue;
-        };
-
-        if let Some(package_name) = cargo_package_name(&path)? {
-            insert_runtime_manifest(manifests, package_name, &app_id, &runtime_manifest_path)?;
-        }
-
-        let dir_name = manifest_dir
-            .file_name()
-            .ok_or_else(|| boxed_err(format!("missing directory name for {}", manifest_dir.display())))?
-            .to_string_lossy()
-            .into_owned();
-        insert_runtime_manifest(manifests, dir_name, &app_id, &runtime_manifest_path)?;
-    }
-
-    Ok(())
-}
-
-fn should_skip_runtime_manifest_dir(file_name: &str) -> bool {
-    file_name == "target" || file_name.starts_with('.')
-}
-
-fn insert_runtime_manifest(
-    manifests: &mut BTreeMap<String, RuntimeManifestInfo>,
-    key: String,
-    app_id: &str,
-    manifest_path: &Path,
-) -> Result<()> {
-    let info = RuntimeManifestInfo { app_id: app_id.to_string(), manifest_path: manifest_path.to_path_buf() };
-
-    if let Some(existing) = manifests.get(&key) {
-        if existing == &info {
-            return Ok(());
-        }
-
-        return Err(boxed_err(format!(
-            "conflicting simulator runtime manifest mapping for '{key}': {} vs {}",
-            existing.manifest_path.display(),
-            manifest_path.display()
-        )));
-    }
-
-    manifests.insert(key, info);
-    Ok(())
-}
-
-fn cargo_package_name(path: &Path) -> Result<Option<String>> {
-    let contents = fs::read_to_string(path)?;
-    let mut in_package = false;
-
-    for raw_line in contents.lines() {
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.starts_with('[') {
-            in_package = line == "[package]";
-            continue;
-        }
-        if !in_package {
-            continue;
-        }
-
-        if let Some(value) = parse_assignment_value(line, "name") {
-            return Ok(Some(value.to_string()));
-        }
-    }
-
-    Ok(None)
-}
-
-fn load_manifest_app_id_if_present(path: &Path) -> Result<Option<String>> {
-    let contents = fs::read_to_string(path)?;
-    for raw_line in contents.lines() {
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() || line.starts_with('[') {
-            continue;
-        }
-        if let Some(value) = parse_assignment_value(line, "appId") {
-            return Ok(Some(value.to_string()));
-        }
-        if let Some(value) = parse_assignment_value(line, "app_id") {
-            return Ok(Some(value.to_string()));
-        }
-    }
-
-    Ok(None)
-}
-
-fn parse_assignment_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
-    let remainder = line.strip_prefix(key)?.trim_start();
-    let remainder = remainder.strip_prefix('=')?.trim();
-    Some(remainder.trim_matches('"'))
-}
-
-fn strip_comment(line: &str) -> &str {
-    if let Some((value, _)) = line.split_once('#') {
-        value
-    } else {
-        line
-    }
 }
 
 fn set_executable(path: &Path) -> Result<()> {
@@ -2265,8 +2021,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        cargo_target_linker_env, discover_runtime_manifests, hosted_service_packages,
-        is_strippable_binary_header, keyos_slint_pin_from_manifest_and_lock,
+        cargo_target_linker_env, is_strippable_binary_header, keyos_slint_pin_from_manifest_and_lock,
         local_staged_workspace_dependency_override, nix_shell_active, parse_git_source_commit,
         parse_toolchain_channel, prune_nested_member_dirs, render_staged_keyos_workspace_manifest,
         render_staged_slint_workspace_manifest, rust_toolchain_channel, should_stage_simulator_for_target,
@@ -2398,6 +2153,7 @@ mod tests {
         for path in [
             stage_dir.join("bin").join("foundation"),
             stage_dir.join("bin").join("foundation-asset-tool"),
+            stage_dir.join("bin").join("fatfs-image"),
             stage_dir.join("bin").join("foundation-slint-viewer"),
             stage_dir.join("bin").join("foundation-keyos-log-viewer"),
             stage_dir.join("bin").join("foundation-passport-drive"),
@@ -2945,87 +2701,6 @@ serde = "1"
 
         fs::remove_dir_all(source_root).unwrap();
         fs::remove_dir_all(destination_root).unwrap();
-    }
-
-    #[test]
-    fn discover_runtime_manifests_ignores_api_manifests_without_app_id() {
-        let root = temp_stage_dir("runtime-manifests");
-        let api_nfc = root.join("api").join("nfc");
-        let os_nfc = root.join("os").join("nfc");
-        let os_gpio = root.join("os").join("gpio");
-        let logging_hosted = root.join("os").join("logging").join("hosted");
-
-        for dir in [&api_nfc, &os_nfc, &os_gpio, &logging_hosted] {
-            fs::create_dir_all(dir).unwrap();
-        }
-
-        fs::write(api_nfc.join("Cargo.toml"), "[package]\nname = \"nfc\"\n").unwrap();
-        fs::write(
-            api_nfc.join("manifest.toml"),
-            "[servers.\"os/nfc\"]\nReadNdef = { id = 0, type = \"blockingArchive\" }\n",
-        )
-        .unwrap();
-
-        fs::write(os_nfc.join("Cargo.toml"), "[package]\nname = \"nfc-server\"\n").unwrap();
-        fs::write(os_nfc.join("manifest.toml"), "appId = \"0x01\"\n").unwrap();
-
-        fs::write(os_gpio.join("Cargo.toml"), "[package]\nname = \"gpio-server\"\n").unwrap();
-        fs::write(os_gpio.join("manifest.toml"), "appId = \"0x02\"\n").unwrap();
-
-        fs::write(logging_hosted.join("Cargo.toml"), "[package]\nname = \"log-hosted\"\n").unwrap();
-        fs::write(logging_hosted.join("manifest.toml"), "appId = \"0x03\"\n").unwrap();
-
-        let manifests = discover_runtime_manifests(&root).unwrap();
-
-        assert_eq!(manifests.get("nfc").map(|manifest| manifest.app_id.as_str()), Some("0x01"));
-        assert_eq!(
-            manifests.get("nfc").map(|manifest| manifest.manifest_path.as_path()),
-            Some(os_nfc.join("manifest.toml").as_path())
-        );
-        assert_eq!(manifests.get("nfc-server").map(|manifest| manifest.app_id.as_str()), Some("0x01"));
-        assert_eq!(manifests.get("gpio-server").map(|manifest| manifest.app_id.as_str()), Some("0x02"));
-        assert_eq!(manifests.get("log-hosted").map(|manifest| manifest.app_id.as_str()), Some("0x03"));
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn discover_runtime_manifests_ignores_hidden_worktree_dirs() {
-        let root = temp_stage_dir("runtime-manifests-hidden-worktree");
-        let main_app = root.join("apps").join("gui-app-authenticator");
-        let hidden_worktree_app =
-            root.join(".worktrees").join("crypto-perf").join("apps").join("gui-app-authenticator");
-
-        for dir in [&main_app, &hidden_worktree_app] {
-            fs::create_dir_all(dir).unwrap();
-            fs::write(dir.join("Cargo.toml"), "[package]\nname = \"gui-app-authenticator\"\n").unwrap();
-            fs::write(dir.join("manifest.toml"), "appId = \"0x99\"\n").unwrap();
-        }
-
-        let manifests = discover_runtime_manifests(&root).unwrap();
-
-        assert_eq!(
-            manifests.get("gui-app-authenticator").map(|manifest| manifest.manifest_path.as_path()),
-            Some(main_app.join("manifest.toml").as_path())
-        );
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn hosted_service_packages_use_built_binary_names() {
-        let packages = hosted_service_packages();
-
-        for expected in ["nfc-server", "keycard-server", "camera-server"] {
-            assert!(packages.contains(&expected), "expected hosted service list to include {expected}");
-        }
-
-        for legacy in ["nfc", "keycard", "camera"] {
-            assert!(
-                !packages.contains(&legacy),
-                "legacy alias {legacy} should not be used for hosted binaries"
-            );
-        }
     }
 
     fn temp_stage_dir(label: &str) -> PathBuf {

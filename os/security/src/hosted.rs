@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use security::{messages::*, Seed, MAX_LOGIN_ATTEMPTS};
+use security::{messages::*, PinEntryMode, Seed, MAX_LOGIN_ATTEMPTS};
 use security::{
     AccessDenied, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, LoginFailed, MasterKeyState,
     ScProof, SecurityWord,
@@ -47,11 +47,31 @@ impl SecurityData {
         std::fs::write(DATA_FILE_NAME, serde_json::to_vec_pretty(self).unwrap())
             .expect("Could not save security data");
     }
+
+    fn set_seed_and_pin(
+        &mut self,
+        crypto: &CryptoApi,
+        seed: &Seed,
+        raw_pin: String,
+        pin_entry: PinEntryMode,
+    ) {
+        self.seed = seed.to_vec();
+        self.seed_fingerprint = seed_fingerprint(crypto, seed).unwrap().to_vec();
+        self.raw_pin = raw_pin;
+        self.pin_entry_mode = pin_entry.into();
+        self.save();
+    }
 }
 
 impl Default for Server {
     fn default() -> Self {
-        Self { data: SecurityData::new(), crypto: CryptoApi::default(), logged_in: false }
+        let crypto = CryptoApi::default();
+        let mut data = SecurityData::new();
+        if data.raw_pin.is_empty() {
+            let seed = Seed::from_bytes(&rand::random::<[u8; 32]>());
+            data.set_seed_and_pin(&crypto, &seed, "123456".to_string(), PinEntryMode::Pin);
+        }
+        Self { data, crypto, logged_in: false }
     }
 }
 
@@ -80,11 +100,7 @@ impl server::BlockingArchiveHandler<SetSeedAndPin> for Server {
         // Validate PIN length before processing
         validate_raw_pin(&msg.pin.0)?;
 
-        self.data.seed = msg.seed.to_vec();
-        self.data.seed_fingerprint = seed_fingerprint(&self.crypto, &msg.seed).unwrap().to_vec();
-        self.data.raw_pin = std::mem::take(&mut msg.pin.0);
-        self.data.pin_entry_mode = msg.pin_entry.into();
-        self.data.save();
+        self.data.set_seed_and_pin(&self.crypto, &msg.seed, std::mem::take(&mut msg.pin.0), msg.pin_entry);
         std::thread::sleep(std::time::Duration::from_millis(4000));
         Ok(())
     }

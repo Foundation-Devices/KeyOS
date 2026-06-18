@@ -3584,6 +3584,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fatfs-image"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.41",
+ "fatfs",
+ "fscommon",
+ "mbrs",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13963,6 +13974,7 @@ dependencies = [
  "colored 2.2.0",
  "crc 1.8.1",
  "fatfs",
+ "fatfs-image",
  "fscommon",
  "hex",
  "keyos",

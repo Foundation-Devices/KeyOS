@@ -79,6 +79,25 @@ pub struct FileSystem<P: CheckedPermissions> {
     write_access_granted: flags::AccessFlags,
 }
 
+/// Permissions [`FileSystem::map_file`] requires. The device sends one map
+/// message; the hosted build has no page-mirroring syscall and reads the file
+/// instead, so there it needs the file read messages.
+#[cfg(keyos)]
+pub trait MapFilePermissions: MessageAllowed<MapFileMessage> {}
+#[cfg(keyos)]
+impl<P: MessageAllowed<MapFileMessage>> MapFilePermissions for P {}
+
+#[cfg(not(keyos))]
+pub trait MapFilePermissions:
+    MessageAllowed<OpenFileMessage> + MessageAllowed<CloseFile> + MessageAllowed<ReadFile>
+{
+}
+#[cfg(not(keyos))]
+impl<P> MapFilePermissions for P where
+    P: MessageAllowed<OpenFileMessage> + MessageAllowed<CloseFile> + MessageAllowed<ReadFile>
+{
+}
+
 impl<P: CheckedPermissions> FileSystem<P> {
     pub fn open_file(
         &self,
@@ -235,11 +254,33 @@ impl<P: CheckedPermissions> FileSystem<P> {
 
     pub fn map_file(&self, location: Location, path: impl Into<String>) -> Result<xous::MemoryRange, Error>
     where
-        P: MessageAllowed<MapFileMessage>,
+        P: MapFilePermissions,
     {
         self.ensure_read_access(location)?;
-        let result = self.conn.send_blocking_archive(MapFileMessage { path: path.into(), location })?;
-        Ok(unsafe { xous::MemoryRange::new(result.addr, result.size).unwrap() })
+
+        #[cfg(keyos)]
+        {
+            let result = self.conn.send_blocking_archive(MapFileMessage { path: path.into(), location })?;
+            Ok(unsafe { xous::MemoryRange::new(result.addr, result.size).unwrap() })
+        }
+
+        // No hosted equivalent of mirror_memory_to_pid, so read the file into a
+        // page-aligned buffer (leaked like the device's mapping, never unmapped)
+        // and hand back a range over it.
+        #[cfg(not(keyos))]
+        {
+            let mut file = self.open_file(path, location, OpenFlags::READ_ONLY)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).map_err(|_| Error::Io)?;
+            if bytes.is_empty() {
+                return Err(Error::FileNotFound);
+            }
+
+            let mut buffer = xous::map_memory(None, None, bytes.len(), xous::MemoryFlags::W)
+                .map_err(|_| Error::OutOfMemory)?;
+            buffer.as_slice_mut()[..bytes.len()].copy_from_slice(&bytes);
+            Ok(buffer)
+        }
     }
 
     pub fn register_app_resources(

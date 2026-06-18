@@ -22,14 +22,39 @@ slint::include_modules!();
 
 */
 
-#[derive(Default)]
-struct FakeContext {
-    fs: (),
+use slint::{ComponentHandle, Image, SharedString};
+
+// Slintbook has no fs server, so resolve images straight off the host
+// filesystem by file stem; nine-slice edges and dark variants are ignored.
+fn find_image(roots: [&str; 2], name: SharedString) -> Image {
+    let stem = name.rsplit('/').next().unwrap_or(name.as_str());
+    for root in roots {
+        let path = std::path::Path::new(root).join(name.as_str());
+        let dir = path.parent().unwrap_or_else(|| std::path::Path::new(root));
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let candidate = entry.path();
+            if candidate.file_stem().and_then(|s| s.to_str()) == Some(stem) {
+                if let Ok(image) = Image::load_from_path(&candidate) {
+                    return image;
+                }
+            }
+        }
+    }
+    Image::default()
 }
+
 fn main() {
     let slintbook = SlintBook::new().unwrap();
-    let cx = FakeContext::default();
     slint_keyos_platform::_internal_init_ui_utils!(Utils, slintbook);
-    slint_keyos_platform::_internal_init_images!(Images, slintbook, cx);
+
+    let images = ["../../resources", "../../ui/ui"];
+    let icons = ["../../resources/icons", "../../ui/ui/icons"];
+    slintbook.global::<Images>().on_common(move |path| find_image(images, path));
+    slintbook.global::<Images>().on_nine_slice(move |path| find_image(images, path));
+    slintbook.global::<Images>().on_icon(move |name, _size| find_image(icons, name));
+
     slintbook.run().unwrap();
 }

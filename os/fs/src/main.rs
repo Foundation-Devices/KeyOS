@@ -57,9 +57,6 @@ fn main() {
 
     xous::set_thread_priority(xous::ThreadPriority::System4).unwrap();
 
-    #[cfg(not(keyos))]
-    disk::init_files().expect("init disk files in hosted mode");
-
     let fs_internal = Mount::new(system_disk()).unwrap();
     #[cfg(not(feature = "recovery-os"))]
     fixup_interrupted_update(fs_internal.fs());
