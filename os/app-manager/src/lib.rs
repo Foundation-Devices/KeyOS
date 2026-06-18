@@ -15,7 +15,8 @@ mod third_party_certs;
 
 use app_manager::{
     AppEvent, GetThirdPartyCertificates, ImportThirdPartyCertificate, ImportThirdPartyCertificateResult,
-    LaunchError, RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, ThirdPartyCertificateInfo,
+    LaunchError, RemoveInstalledApp, RemoveInstalledAppResult, RemoveThirdPartyCertificate,
+    RemoveThirdPartyCertificateResult, ThirdPartyCertificateInfo,
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, LaunchApp,
@@ -160,6 +161,53 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
             Err(e) => {
                 error!("failed to remove third-party certificate: {e:?}");
                 RemoveThirdPartyCertificateResult::InternalError
+            }
+        }
+    }
+}
+
+impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: RemoveInstalledApp,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> RemoveInstalledAppResult {
+        let app_id = match app_manager::decode_app_id_str(&msg.app_id) {
+            Ok(app_id) => app_id,
+            Err(e) => {
+                log::warn!("RemoveInstalledApp: invalid app id {:?}: {e:?}", msg.app_id);
+                return RemoveInstalledAppResult::NotFound;
+            }
+        };
+
+        if self.app_registry.is_running(&app_id) {
+            return RemoveInstalledAppResult::Running;
+        }
+
+        let Some(app_dir) = self.app_registry.sideloaded_bundle_dir(app_id) else {
+            return if self.app_registry.contains_app(app_id) {
+                RemoveInstalledAppResult::NotSideloaded
+            } else {
+                RemoveInstalledAppResult::NotFound
+            };
+        };
+
+        match FileSystem::default().remove(&app_dir, fs::Location::System) {
+            Ok(()) | Err(fs::Error::FileNotFound) => {}
+            Err(e) => {
+                error!("failed to remove sideloaded app bundle {app_dir}: {e:?}");
+                return RemoveInstalledAppResult::InternalError;
+            }
+        }
+
+        self.app_registry.clear_registered_manifest(app_id);
+
+        match self.app_registry.scan_installed_apps() {
+            Ok(()) => RemoveInstalledAppResult::Removed,
+            Err(e) => {
+                error!("failed to refresh installed apps after removing {app_dir}: {e:?}");
+                RemoveInstalledAppResult::InternalError
             }
         }
     }

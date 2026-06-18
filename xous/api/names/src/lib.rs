@@ -151,6 +151,27 @@ impl XousNames {
             Err(xous::Error::from_usize(error as usize))
         }
     }
+
+    pub fn remove_manifest(&self, app_id: xous::AppId) -> Result<(), xous::Error> {
+        let mut buf = DropDeallocate(xous::map_memory(None, None, 0x1000, MemoryFlags::W)?);
+        buf.0.as_slice_mut()[..app_id.0.len()].copy_from_slice(&app_id.0);
+        let msg = xous::MemoryMessage {
+            id: api::Opcode::RemoveManifest as usize,
+            buf: buf.0,
+            offset: None,
+            valid: NonZeroUsize::new(app_id.0.len()),
+        };
+        xous::send_message(self.conn, xous::Message::MutableBorrow(msg))?;
+
+        let buf_slice = buf.0.as_slice::<u8>();
+        let result = u32::from_le_bytes(buf_slice[0..4].try_into().unwrap());
+        if result == 0 {
+            Ok(())
+        } else {
+            let error = u32::from_le_bytes(buf_slice[4..8].try_into().unwrap());
+            Err(xous::Error::from_usize(error as usize))
+        }
+    }
 }
 
 impl Drop for XousNames {

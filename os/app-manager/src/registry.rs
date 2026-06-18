@@ -3,7 +3,9 @@
 
 use std::{collections::HashMap, io::Read};
 
-use app_manager::{AppQrMatchRules, InstalledAppInfo, ThirdPartyCertificateInfo};
+use app_manager::{
+    AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, ThirdPartyCertificateInfo,
+};
 use app_manifest::{Locale, Manifest};
 #[cfg(any(keyos, test))]
 use fs::messages::AppResourcesRoot;
@@ -292,7 +294,7 @@ impl AppRegistry {
                     version: binary_metadata.version.clone(),
                     size_bytes: binary_metadata.size_bytes,
                     description: app_info.description(),
-                    permissions: app_info.permission_lines(),
+                    permissions: app_info.permission_groups(),
                     name,
                 };
                 limit_installed_app_metadata(&mut installed_app);
@@ -364,6 +366,36 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).is_some_and(AppInfo::is_built_in)
     }
 
+    pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
+
+    pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
+        self.running_apps.values().any(|running_app| running_app.info.id == *app_id)
+    }
+
+    pub(crate) fn sideloaded_bundle_dir(&self, app_id: AppId) -> Option<String> {
+        let app_info = self.installed_apps.get(&app_id)?;
+        if app_info.source != AppSource::ThirdParty {
+            return None;
+        }
+
+        let elf_path = app_info.elf_path.as_deref()?;
+        let app_dir = sideloaded_app_dir_from_elf_path(elf_path)?;
+        if app_dir != hex::encode(app_id.0) {
+            return None;
+        }
+
+        Some(format!("{SIDELOADED_APPS_DIR}/{app_dir}"))
+    }
+
+    pub(crate) fn clear_registered_manifest(&self, app_id: AppId) {
+        if let Err(error) = clear_manifest_with_names(app_id) {
+            log::error!(
+                "Could not remove the manifest of removed app 0x{} from the name server: {error:?}",
+                hex::encode(app_id.0)
+            );
+        }
+    }
+
     pub(crate) fn register_running_app(&mut self, pid: PID, app_id: AppId, launched_by: PID) {
         self.installed_apps.get(&app_id).inspect(|app_info| {
             self.running_apps.insert(pid, RunningAppInfo { info: (*app_info).clone(), launched_by });
@@ -399,6 +431,19 @@ fn register_manifest_with_names(_manifest_bytes: &[u8], _app_label: &str) {
     // Plain Rust unit tests run outside the hosted Xous kernel.
 }
 
+#[cfg(any(keyos, all(not(test), not(keyos))))]
+fn clear_manifest_with_names(app_id: AppId) -> Result<(), xous::Error> {
+    let names =
+        server::xous_names::XousNames::new().expect("xous-names should be available during app scanning");
+    names.remove_manifest(app_id)
+}
+
+#[cfg(all(test, not(keyos)))]
+fn clear_manifest_with_names(_app_id: AppId) -> Result<(), xous::Error> {
+    // Plain Rust unit tests run outside the hosted Xous kernel.
+    Ok(())
+}
+
 impl AppInfo {
     fn localized_name(&self, locale: &str) -> String {
         self.manifest
@@ -409,12 +454,13 @@ impl AppInfo {
             .unwrap_or_else(|| format!("0x{}", self.id))
     }
 
-    fn permission_lines(&self) -> Vec<String> {
+    fn permission_groups(&self) -> Vec<InstalledAppPermissionGroup> {
         self.manifest
             .permissions
             .iter()
-            .flat_map(|(server, messages)| {
-                messages.iter().map(move |message| format!("{server} - {message}"))
+            .map(|(server, messages)| InstalledAppPermissionGroup {
+                server: server.clone(),
+                messages: messages.iter().cloned().collect(),
             })
             .collect()
     }
@@ -726,10 +772,23 @@ fn limit_installed_app_metadata(app: &mut InstalledAppInfo) {
     truncate_string_bytes(&mut app.version, INSTALLED_APP_VERSION_MAX_BYTES);
     truncate_string_bytes(&mut app.description, INSTALLED_APP_DESCRIPTION_MAX_BYTES);
 
-    app.permissions.truncate(INSTALLED_APP_PERMISSION_LINES_MAX);
-    for permission in &mut app.permissions {
-        truncate_string_bytes(permission, INSTALLED_APP_PERMISSION_LINE_MAX_BYTES);
-    }
+    let mut remaining_permissions = INSTALLED_APP_PERMISSION_LINES_MAX;
+    app.permissions.retain_mut(|group| {
+        truncate_string_bytes(&mut group.server, INSTALLED_APP_PERMISSION_LINE_MAX_BYTES);
+
+        if remaining_permissions == 0 {
+            return false;
+        }
+
+        group.messages.truncate(remaining_permissions);
+        remaining_permissions -= group.messages.len();
+
+        for message in &mut group.messages {
+            truncate_string_bytes(message, INSTALLED_APP_PERMISSION_LINE_MAX_BYTES);
+        }
+
+        !group.messages.is_empty()
+    });
 }
 
 fn truncate_string_bytes(value: &mut String, max_bytes: usize) {
@@ -914,6 +973,50 @@ mod tests {
             false
         ));
         assert!(installed_apps.is_empty());
+    }
+
+    #[test]
+    fn sideloaded_bundle_dir_returns_validated_app_directory() {
+        let registry =
+            registry_with(vec![app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH))]);
+
+        assert_eq!(
+            registry.sideloaded_bundle_dir(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()),
+            Some(format!("{SIDELOADED_APPS_DIR}/{THIRD_PARTY_APP_DIR}"))
+        );
+    }
+
+    #[test]
+    fn sideloaded_bundle_dir_rejects_non_sideloaded_apps() {
+        let registry = registry_with(vec![
+            built_in_app_info(THIRD_PARTY_APP_ID, "Built In App", Some("/keyos/apps/example/app.elf")),
+            app_info_with_source_and_icon(
+                "0xffeeddccbbaa99887766554433221100",
+                "Hosted App",
+                Some("/tmp/hosted-app/app.elf"),
+                AppSource::ThirdParty,
+                None,
+            ),
+        ]);
+
+        assert_eq!(registry.sideloaded_bundle_dir(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()), None);
+        assert_eq!(
+            registry.sideloaded_bundle_dir(decode_app_id_str("0xffeeddccbbaa99887766554433221100").unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn sideloaded_bundle_dir_rejects_path_that_does_not_match_app_id() {
+        let registry = registry_with(vec![app_info_with_source_and_icon(
+            THIRD_PARTY_APP_ID,
+            "Example App",
+            Some("/keyos/sideloaded-apps/ffeeddccbbaa99887766554433221100/app.elf"),
+            AppSource::ThirdParty,
+            None,
+        )]);
+
+        assert_eq!(registry.sideloaded_bundle_dir(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()), None);
     }
 
     struct TestSha256;
@@ -1248,10 +1351,12 @@ mod tests {
 
         assert_eq!(apps[0].name.len(), INSTALLED_APP_NAME_MAX_BYTES);
         assert_eq!(apps[0].description.len(), INSTALLED_APP_DESCRIPTION_MAX_BYTES);
-        assert_eq!(apps[0].permissions.len(), INSTALLED_APP_PERMISSION_LINES_MAX);
+        assert_eq!(apps[0].permissions.len(), 1);
+        assert_eq!(apps[0].permissions[0].messages.len(), INSTALLED_APP_PERMISSION_LINES_MAX);
         assert!(apps[0]
             .permissions
             .iter()
+            .flat_map(|group| group.messages.iter())
             .all(|permission| permission.len() <= INSTALLED_APP_PERMISSION_LINE_MAX_BYTES));
     }
 

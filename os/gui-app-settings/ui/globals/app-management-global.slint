@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+export struct AppPermissionGroup {
+    server: string,
+    permissions: [string],
+}
+
 export struct InstalledApp {
     app_id: string,
     name: string,
@@ -10,7 +15,7 @@ export struct InstalledApp {
     version: string,
     size: string,
     description: string,
-    permissions: string,
+    permission_groups: [AppPermissionGroup],
 }
 
 // A single row in the unified, virtualized apps list. The list mixes section
@@ -57,8 +62,10 @@ export enum TrustedPublisherImportResult {
 
 export global AppManagementGlobal {
     in property <[AppsListRow]> apps-list-rows: [];
+    in-out property <[AppPermissionGroup]> selected-app-permission-groups: [];
     callback refresh-installed-apps();
     callback launch-installed-app(string);
+    callback remove-installed-app(string) -> string;
     pure callback app-icon(string) -> image;
 
     in property <[TrustedPublisher]> trusted-publishers: [];

@@ -8,5 +8,6 @@ en = "Xous Names"
 [servers."os/nameserver"]
 Register = { id = 0, type = "lendMut" }
 AddManifest = { id = 1, type = "lendMut" }
+RemoveManifest = { id = 2, type = "lendMut" }
 BlockingConnect = { id = 6, type = "lendMut" }
 TryConnect = { id = 7, type = "lendMut" }

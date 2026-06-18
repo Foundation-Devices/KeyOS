@@ -328,6 +328,7 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     globals.on_import_trusted_publisher(move || import_trusted_publisher(state));
     globals
         .on_remove_trusted_publisher(move |public_key| remove_trusted_publisher(state, public_key.as_str()));
+    globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
 }
 
 fn refresh_installed_apps(state: StoredValue<AppState>) {
@@ -361,7 +362,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
                 version: app.version.into(),
                 size: format_app_size(app.size_bytes, lang).into(),
                 description: app.description.into(),
-                permissions: app.permissions.join("\n").into(),
+                permission_groups: app_permission_groups(app.permissions),
             }
         })
         .collect::<Vec<_>>();
@@ -426,6 +427,22 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
 
     let ui = state.borrow().ui();
     ui.global::<AppManagementGlobal>().set_apps_list_rows(ModelRc::new(VecModel::from(rows)));
+}
+
+fn app_permission_groups(
+    permissions: Vec<app_manager::InstalledAppPermissionGroup>,
+) -> ModelRc<AppPermissionGroup> {
+    let groups = permissions
+        .into_iter()
+        .map(|group| AppPermissionGroup {
+            server: group.server.into(),
+            permissions: ModelRc::new(VecModel::from(
+                group.messages.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+            )),
+        })
+        .collect::<Vec<_>>();
+
+    ModelRc::from(Rc::new(VecModel::from(groups)))
 }
 
 fn refresh_trusted_publishers(state: StoredValue<AppState>) {
@@ -556,6 +573,31 @@ fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> S
         Err(e) => {
             log::error!("failed to remove third-party certificate: {e:?}");
             tr::lookup_id(TrId::AppsTrustedPublisherRemoveFailed).into()
+        }
+    }
+}
+
+fn remove_installed_app(state: StoredValue<AppState>, app_id: &str) -> SharedString {
+    let result = { state.borrow().app_manager.remove_installed_app(app_id) };
+    match result {
+        Ok(app_manager::RemoveInstalledAppResult::Removed)
+        | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {
+            refresh_installed_apps(state);
+            state.borrow().ui().global::<AppManagementGlobal>().set_selected_app_permission_groups(
+                ModelRc::new(VecModel::from(Vec::<AppPermissionGroup>::new())),
+            );
+            SharedString::default()
+        }
+        Ok(app_manager::RemoveInstalledAppResult::Running) => {
+            tr::lookup_id(TrId::AppsRemoveAppRunning).into()
+        }
+        Ok(app_manager::RemoveInstalledAppResult::NotSideloaded)
+        | Ok(app_manager::RemoveInstalledAppResult::InternalError) => {
+            tr::lookup_id(TrId::AppsRemoveAppFailed).into()
+        }
+        Err(e) => {
+            log::error!("failed to remove installed app {app_id}: {e:?}");
+            tr::lookup_id(TrId::AppsRemoveAppFailed).into()
         }
     }
 }

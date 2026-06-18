@@ -64,6 +64,12 @@ pub struct AppQrMatchRules {
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InstalledAppPermissionGroup {
+    pub server: String,
+    pub messages: Vec<String>,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct InstalledAppInfo {
     pub app_id: String,
     pub name: String,
@@ -76,7 +82,7 @@ pub struct InstalledAppInfo {
     pub version: String,
     pub size_bytes: u64,
     pub description: String,
-    pub permissions: Vec<String>,
+    pub permissions: Vec<InstalledAppPermissionGroup>,
 }
 
 #[derive(
@@ -111,6 +117,15 @@ pub enum RemoveThirdPartyCertificateResult {
     Removed,
     NotFound,
     AppRequiresKey(String),
+    InternalError,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum RemoveInstalledAppResult {
+    Removed,
+    NotFound,
+    NotSideloaded,
+    Running,
     InternalError,
 }
 
@@ -208,4 +223,10 @@ pub struct ImportThirdPartyCertificate {
 pub struct RemoveThirdPartyCertificate {
     pub public_key: String,
     pub locale: String,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(RemoveInstalledAppResult)]
+pub struct RemoveInstalledApp {
+    pub app_id: String,
 }

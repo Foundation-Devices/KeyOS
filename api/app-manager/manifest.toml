@@ -15,3 +15,4 @@ RemoveThirdPartyCertificate = { id = 8, type = "blockingArchive" }
 GetAppIcon = { id = 9, type = "blockingArchive" }
 ListApps = { id = 10, type = "blockingArchive" }
 RefreshInstalledApps = { id = 11, type = "blockingScalar" }
+RemoveInstalledApp = { id = 12, type = "blockingArchive" }

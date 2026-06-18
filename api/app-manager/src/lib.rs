@@ -135,6 +135,16 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         })
     }
 
+    pub fn remove_installed_app(
+        &self,
+        app_id: impl Into<String>,
+    ) -> Result<RemoveInstalledAppResult, xous::Error>
+    where
+        P: MessageAllowed<RemoveInstalledApp>,
+    {
+        self.0.try_send_blocking_archive(RemoveInstalledApp { app_id: app_id.into() })
+    }
+
     /// Subscribe the calling server to app lifecycle events (launch/crash).
     ///
     /// The subscriber must implement `server::ArchiveEventHandler<AppEvent>`.

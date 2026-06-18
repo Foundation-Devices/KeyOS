@@ -3,7 +3,11 @@
 
 import {
     BasePage,
+    Button,
+    CollapsibleMenu,
+    ConfirmationModal,
     ContentSection,
+    ErrorModal,
     HLine,
     MenuSection,
     MenuSectionLayout,
@@ -11,9 +15,9 @@ import {
     TextMd,
     TextSm
 } from "@ui/widgets.slint";
-import { Palette, Size } from "@ui/theme.slint";
-import { Utils } from "@ui/utils.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
 
+import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { AppManagementGlobal } from "../../../../globals/app-management-global.slint";
 import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
@@ -94,13 +98,14 @@ component InfoRow inherits Rectangle {
 
 component PermissionRow inherits Rectangle {
     in property <string> permission;
+    in property <length> left-padding: Size.sz4;
 
     height: permission-text.preferred-height + Size.sz8;
 
     permission-text := TextSm {
-        x: Size.sz4;
+        x: root.left-padding;
         y: Size.sz4;
-        width: parent.width - (Size.sz4 * 2);
+        width: parent.width - root.left-padding - Size.sz4;
         text: root.permission;
         color: Palette.content-primary;
         wrap: word-wrap;
@@ -125,7 +130,8 @@ component DescriptionRow inherits Rectangle {
 export component AppDetailsPage inherits BasePage {
     in property <AppDetailsProps> props;
 
-    private property <[string]> permissions_list: props.permissions == "" ? [] : Utils.split(props.permissions, "\n");
+    private property <bool> remove-confirm-visible: false;
+    private property <string> remove-error-message: "";
     property <bool> at-top: flickable.viewport-y == 0;
     property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
     private property <length> shadow-gutter: Size.sz2;
@@ -202,17 +208,36 @@ export component AppDetailsPage inherits BasePage {
                 title: TR2.lookup(TrId.AppsRequestedPermissions);
 
                 MenuSectionLayout {
-                    if permissions_list.length == 0: PermissionRow {
+                    if AppManagementGlobal.selected-app-permission-groups.length == 0: PermissionRow {
                         permission: TR2.lookup(TrId.AppsNoRequestedPermissions);
                     }
 
-                    for permission[index] in permissions_list: VerticalLayout {
-                        PermissionRow {
-                            permission: permission;
+                    for group[index] in AppManagementGlobal.selected-app-permission-groups: VerticalLayout {
+                        group-menu := CollapsibleMenu {
+                            title: group.server;
+
+                            if group-menu.is-open: VerticalLayout {
+                                for permission[permission-index] in group.permissions: VerticalLayout {
+                                    PermissionRow {
+                                        permission: permission;
+                                        left-padding: Size.sz8;
+                                    }
+
+                                    if permission-index < group.permissions.length - 1: HLine { }
+                                }
+                            }
                         }
 
-                        if index < permissions_list.length - 1: HLine { }
+                        if index < AppManagementGlobal.selected-app-permission-groups.length - 1: HLine { }
                     }
+                }
+            }
+
+            Button {
+                label: TR2.lookup(TrId.AppsRemoveApp);
+                importance: Importance.negative;
+                clicked => {
+                    root.remove-confirm-visible = true;
                 }
             }
         }
@@ -232,5 +257,37 @@ export component AppDetailsPage inherits BasePage {
         y: flickable.y + flickable.height - self.height;
         visible: !at-bottom;
         background: @linear-gradient(0deg, Palette.background-primary 0%, #00000000 100%);
+    }
+
+    if remove-confirm-visible: ConfirmationModal {
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsRemoveAppDialogHeader);
+        text: TR2.format(TrId.AppsRemoveAppDialogContent, [props.name]);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+        confirm-button-label: TR2.lookup(TrId.AppsRemoveAppDialogRemove);
+        critical: true;
+
+        cancel-clicked => {
+            root.remove-confirm-visible = false;
+        }
+
+        confirm-clicked => {
+            root.remove-confirm-visible = false;
+            root.remove-error-message = AppManagementGlobal.remove-installed-app(props.app_id);
+            if root.remove-error-message == "" {
+                Navigate.backward();
+            }
+        }
+    }
+
+    if remove-error-message != "": ErrorModal {
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsUnableToRemoveApp);
+        text: root.remove-error-message;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.remove-error-message = "";
+        }
     }
 }

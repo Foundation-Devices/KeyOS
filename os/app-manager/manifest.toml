@@ -15,8 +15,10 @@ template = ["fs-generic", "crypto-sha"]
 "os/crypto" = ["ShaSetContext", "ShaUpdate", "ShaGetContext", "ShaDrop"]
 "os/fs" = [
     "GetSystemReadAccess",
+    "GetSystemWriteAccess",
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
+    "Remove",
     "RegisterAppResources",
 ]
-"os/nameserver" = ["AddManifest"]
+"os/nameserver" = ["AddManifest", "RemoveManifest"]

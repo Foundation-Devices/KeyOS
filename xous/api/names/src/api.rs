@@ -18,6 +18,18 @@ pub enum Opcode {
     /// and its length should be specified in the `valid` field.
     AddManifest = 1,
 
+    /// Remove a previously added manifest by app ID.
+    ///
+    /// # Message Types
+    ///
+    /// * MutableLend
+    ///
+    /// # Arguments
+    ///
+    /// The memory being pointed to should be the 16-byte app ID whose manifest state
+    /// should be removed, and its length should be specified in the `valid` field.
+    RemoveManifest = 2,
+
     /// Connect to a Server, blocking if the Server does not exist. When the Server is started,
     /// return with either the CID or an AuthenticationRequest
     ///

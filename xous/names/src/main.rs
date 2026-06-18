@@ -151,6 +151,25 @@ impl NameServer {
         Ok(())
     }
 
+    fn remove_manifest(&mut self, app_id: AppId) {
+        self.register_permissions.remove(&app_id);
+        self.connect_permissions.remove(&app_id);
+
+        let owned_names: HashSet<String> = self
+            .server_owners
+            .iter()
+            .filter_map(|(server_name, owner)| (*owner == app_id).then(|| server_name.clone()))
+            .collect();
+        self.server_owners.retain(|_, owner| *owner != app_id);
+        self.message_name_to_id.retain(|(server_name, _), _| !owned_names.contains(server_name));
+
+        let registered_names: HashSet<String> =
+            self.registered_names_by_pid.values().flat_map(|names| names.iter().cloned()).collect();
+        for server_name in owned_names.difference(&registered_names) {
+            self.name_table.remove(server_name);
+        }
+    }
+
     /// Connect to the server named in the message. If the server exists, attempt the connection
     /// and return either the connection ID or an error.
     ///
@@ -333,6 +352,43 @@ impl NameServer {
         Ok(())
     }
 
+    fn remove_manifest_impl(&mut self, msg: &MessageEnvelope) -> Result<(), xous::Error> {
+        let app_id = xous::get_app_id(msg.sender.pid().ok_or(xous::Error::ProcessNotFound)?)?
+            .ok_or(xous::Error::ProcessNotFound)?;
+        if !self
+            .connect_permissions
+            .get(&app_id)
+            .ok_or(xous::Error::AccessDenied)?
+            .get("os/nameserver")
+            .ok_or(xous::Error::AccessDenied)?
+            .contains(&(api::Opcode::RemoveManifest as usize))
+        {
+            return Err(xous::Error::AccessDenied);
+        }
+
+        let msg = msg.body.memory_message().ok_or(xous::Error::InvalidArguments)?;
+        let buf = msg.buf.as_slice::<u8>();
+        let valid_bytes = msg
+            .valid
+            .ok_or_else(|| {
+                log::error!("remove_manifest_impl: msg.valid is None; app ID length is required");
+                xous::Error::InvalidArguments
+            })?
+            .get();
+        if valid_bytes != app_manifest::APP_ID_BYTE_LEN || valid_bytes > buf.len() {
+            log::error!(
+                "remove_manifest_impl: invalid app ID length ({valid_bytes}), buffer length ({})",
+                buf.len()
+            );
+            return Err(xous::Error::InvalidArguments);
+        }
+
+        let mut target_app_id = [0u8; app_manifest::APP_ID_BYTE_LEN];
+        target_app_id.copy_from_slice(&buf[..valid_bytes]);
+        self.remove_manifest(AppId(target_app_id));
+        Ok(())
+    }
+
     fn run(&mut self) -> ! {
         // Init logging (may fail before logging server has started)
         log_server::init_wait(env!("CARGO_CRATE_NAME")).ok();
@@ -394,6 +450,10 @@ impl NameServer {
                     }
                 }
                 Some(api::Opcode::AddManifest) => match self.add_manifest_impl(&msg) {
+                    Ok(()) => respond_simple_success(msg),
+                    Err(err) => respond_error(msg, err),
+                },
+                Some(api::Opcode::RemoveManifest) => match self.remove_manifest_impl(&msg) {
                     Ok(()) => respond_simple_success(msg),
                     Err(err) => respond_error(msg, err),
                 },
@@ -600,6 +660,49 @@ mod tests {
 
         assert_eq!(names.process_manifest_servers(&colliding_manifest), Err(xous::Error::MemoryInUse));
         assert_eq!(names.server_owners.get("fixed/server"), Some(&AppId(APP_ID)));
+    }
+
+    #[test]
+    fn remove_manifest_clears_owned_manifest_state() {
+        let mut names = NameServer::default();
+        let mut manifest = manifest_with_servers(&["app/server"]);
+        manifest.permissions.insert("app/server".to_string(), BTreeSet::from(["Ping".to_string()]));
+        manifest.fixed_sids.insert("fixed/server".to_string(), "fixed-server-000".to_string());
+        let app_id = AppId(manifest.app_id);
+
+        names.process_manifest_update(&manifest).unwrap();
+        assert!(names.register_permissions.contains_key(&app_id));
+        assert!(names.connect_permissions.contains_key(&app_id));
+        assert!(names.server_owners.contains_key("app/server"));
+        assert!(names.message_name_to_id.contains_key(&message_key("app/server", "Ping")));
+        assert!(names.name_table.contains_key("fixed/server"));
+
+        names.remove_manifest(app_id);
+
+        assert!(!names.register_permissions.contains_key(&app_id));
+        assert!(!names.connect_permissions.contains_key(&app_id));
+        assert!(!names.server_owners.contains_key("app/server"));
+        assert!(!names.server_owners.contains_key("fixed/server"));
+        assert!(!names.message_name_to_id.contains_key(&message_key("app/server", "Ping")));
+        assert!(!names.name_table.contains_key("fixed/server"));
+    }
+
+    #[test]
+    fn remove_manifest_preserves_live_registered_servers() {
+        let mut names = NameServer::default();
+        let manifest = manifest_with_servers(&["live/server"]);
+        let app_id = AppId(manifest.app_id);
+        let pid = xous::PID::new(5).unwrap();
+        let sid = xous::SID::from_bytes(b"live-server-0000").unwrap();
+
+        names.process_manifest_update(&manifest).unwrap();
+        names.name_table.insert("live/server".to_string(), sid);
+        names.registered_names_by_pid.entry(pid).or_default().insert("live/server".to_string());
+
+        names.remove_manifest(app_id);
+
+        assert_eq!(names.name_table.get("live/server"), Some(&sid));
+        assert_eq!(names.registered_names_by_pid.get(&pid).unwrap(), &set(&["live/server"]));
     }
 }
 
