@@ -118,7 +118,7 @@ impl ApplicationHandler for EmulatorApp {
         self.update_scale_factor();
         let mut attributes = Window::default_attributes()
             .with_transparent(true)
-            .with_enabled_buttons(WindowButtons::MINIMIZE)
+            .with_enabled_buttons(WindowButtons::CLOSE | WindowButtons::MINIMIZE)
             .with_resizable(false)
             .with_inner_size(self.window_size)
             .with_title("Passport Simulator");
@@ -397,10 +397,9 @@ impl ApplicationHandler for EmulatorApp {
             }
 
             WindowEvent::CloseRequested => {
+                // Shutting gui-server down terminates every hosted process, so closing
+                // the device screen also closes the control panel.
                 self.capture_api.shutdown().ok();
-                // Any close (close button or Cmd-Q) of either simulator window
-                // quits the whole hosted sim, not just this one.
-                quit_whole_simulator();
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
@@ -434,9 +433,9 @@ impl ApplicationHandler for EmulatorApp {
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        // The winit event loop is exiting (e.g. Cmd-Q routed as a loop exit) —
-        // quit the whole hosted simulator, not just this window.
-        quit_whole_simulator();
+        // Cmd-Q can exit the loop without a per-window CloseRequested; shut gui-server
+        // down here too so the control panel goes with it.
+        self.capture_api.shutdown().ok();
     }
 }
 
@@ -464,24 +463,9 @@ pub(crate) fn run_window() {
         focus_seen: Arc::new(AtomicBool::new(false)),
     };
     event_loop.run_app(&mut app).unwrap();
-    // The loop exited (e.g. Cmd-Q routed as a loop-exit rather than a per-window
-    // CloseRequested) — tear down the rest of the hosted simulator too.
-    quit_whole_simulator();
-}
-
-/// Quit the whole hosted simulator (every process in our group) by mirroring the
-/// terminal Ctrl-C (SIGINT). The hosted kernel spawns all services in one
-/// process group, so this stops the control panel + kernel too — letting a close
-/// or Cmd-Q on either simulator window quit everything, not just this window.
-fn quit_whole_simulator() {
-    #[cfg(unix)]
-    // SAFETY: kill(2) with pid 0 sends SIGINT to our whole process group, the
-    // same teardown the terminal delivers on Ctrl-C.
-    unsafe {
-        libc::kill(0, libc::SIGINT);
-    }
-    #[cfg(not(unix))]
-    std::process::exit(0);
+    // Backstop if the loop exits without `exiting` firing: shut gui-server down so
+    // the control panel goes with it.
+    app.capture_api.shutdown().ok();
 }
 
 fn is_within_area(pos: LogicalPosition<f64>, x: usize, y: usize, w: usize, h: usize) -> bool {

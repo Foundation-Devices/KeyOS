@@ -33,11 +33,5 @@ core = { version = '1.0.0', optional = true, package = 'rustc-std-workspace-core
 [target.'cfg(keyos)'.dependencies]
 keyos = { path = "../../keyos" }
 
-# Hosted (PC) only: lets the process spawner watch the window-owning simulator
-# processes and tear the whole simulator process group down when one exits
-# (see arch/hosted/process.rs). Unused on the hardware (keyos) build.
-[target.'cfg(not(keyos))'.dependencies]
-libc = "0.2"
-
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

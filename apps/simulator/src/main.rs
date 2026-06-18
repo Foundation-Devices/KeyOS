@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use {
-    simulator::{screengrab, settings, theme, MainWindow, SIMULATOR_DIR},
+    simulator::{screengrab, settings as sim_settings, theme, MainWindow, SIMULATOR_DIR},
     slint::{winit_030::WinitWindowAccessor, ComponentHandle},
     std::{fs::create_dir_all, time::Duration},
 };
 
 gui_server_api::use_api!();
+settings::use_api!();
+
+type Sim = gui_server_api::simulator::SimulatorApi<gui_permissions::GuiPermissions>;
 
 fn main() {
     //slint::platform::set_platform(Box::new(i_slint_backend_winit::Backend::new().unwrap())).unwrap();
@@ -24,11 +27,15 @@ fn main() {
     // Critical error, nothing can happen without a window
     let window = MainWindow::new().unwrap();
 
-    screengrab::setup(&window);
-    settings::setup(&window);
-    theme::setup(&window);
+    let gui = GuiApiLight::connect();
+    let sim = Sim::connect();
+    let settings_api = SettingsApi::default();
 
-    let _position_timer = settings::setup_window_position(&window);
+    screengrab::setup(&window, gui.clone(), sim.clone());
+    sim_settings::setup(&window, sim);
+    theme::setup(&window, settings_api);
+
+    let _position_timer = sim_settings::setup_window_position(&window);
 
     // Launched from the `foundation` CLI, so on macOS the control panel can open
     // behind the terminal. Once the event loop is up and the window is visible,
@@ -44,10 +51,7 @@ fn main() {
 
     log::info!("Simulator starting");
     window.run().unwrap();
-    if let Some(gui) = GuiApiLight::try_connect_with_timeout(Duration::from_secs(1)) {
-        gui.shutdown().ok();
-    }
-    // If the event loop exited (e.g. Cmd-Q) without on_close_requested firing,
-    // tear down the rest of the hosted simulator too.
-    simulator::quit_simulator();
+    // gui-server's Shutdown terminates every hosted process, so this also closes the
+    // device window; harmless if gui-server is already gone.
+    gui.shutdown().ok();
 }

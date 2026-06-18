@@ -8,24 +8,41 @@ use std::{
     sync::mpsc,
 };
 
-use gui_server_api::consts::{DEVICE_HEIGHT, DEVICE_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH};
+use gui_server_api::{
+    consts::{DEVICE_HEIGHT, DEVICE_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH},
+    msg, simulator::SimulatorApi, GuiApiLight,
+};
 use image::{
     codecs::{gif::GifEncoder, png::PngEncoder},
     ExtendedColorType, ImageEncoder, RgbaImage,
 };
+use server::{CheckedPermissions, MessageAllowed};
 
-use crate::{
-    gui_permissions::GuiPermissions, MainWindow, GIF_DELAY_MS, SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV,
-};
+use crate::{MainWindow, GIF_DELAY_MS, SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV};
 
-pub fn setup(window: &MainWindow) {
-    window.on_screenshot(|grab_entire_device| {
-        screenshot(grab_entire_device).unwrap_or_else(|error| {
-            log::warn!("Failed to take screenshot: {}", error);
-        })
+/// Permissions for capturing the device frame and the composited screen.
+pub trait ScreenshotPermissions:
+    CheckedPermissions + MessageAllowed<msg::GetDeviceFrame> + MessageAllowed<msg::CaptureScreen>
+{
+}
+
+impl<P> ScreenshotPermissions for P where
+    P: CheckedPermissions + MessageAllowed<msg::GetDeviceFrame> + MessageAllowed<msg::CaptureScreen>
+{
+}
+
+pub fn setup<P: ScreenshotPermissions>(window: &MainWindow, gui: GuiApiLight<P>, sim: SimulatorApi<P>) {
+    window.on_screenshot({
+        let gui = gui.clone();
+        let sim = sim.clone();
+        move |grab_entire_device| {
+            screenshot(&gui, &sim, grab_entire_device).unwrap_or_else(|error| {
+                log::warn!("Failed to take screenshot: {}", error);
+            })
+        }
     });
 
-    let recording = match recording() {
+    let recording = match recording(gui, sim) {
         Ok(recording) => recording,
         Err(e) => {
             log::warn!("Failed to set up screen recording system: {}", e);
@@ -48,7 +65,11 @@ pub fn setup(window: &MainWindow) {
     });
 }
 
-pub fn screenshot(grab_entire_device: bool) -> anyhow::Result<()> {
+pub fn screenshot<P: ScreenshotPermissions>(
+    gui: &GuiApiLight<P>,
+    sim: &SimulatorApi<P>,
+    grab_entire_device: bool,
+) -> anyhow::Result<()> {
     let screenshots_dir = screenshots_dir();
     create_dir_all(&screenshots_dir)?;
 
@@ -58,9 +79,9 @@ pub fn screenshot(grab_entire_device: bool) -> anyhow::Result<()> {
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
     let frame = if grab_entire_device {
-        gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default().device_frame()?
+        sim.device_frame()?
     } else {
-        gui_server_api::GuiApiLight::<GuiPermissions>::default().capture_screen()?.as_slice().to_vec()
+        gui.capture_screen()?.as_slice().to_vec()
     };
 
     let Some(screen) = RgbaImage::from_vec(width as u32, height as u32, frame) else {
@@ -81,7 +102,10 @@ pub enum RecordingMessage {
     Stop,
 }
 
-pub fn recording() -> anyhow::Result<mpsc::Sender<RecordingMessage>> {
+pub fn recording<P: ScreenshotPermissions>(
+    gui: GuiApiLight<P>,
+    sim: SimulatorApi<P>,
+) -> anyhow::Result<mpsc::Sender<RecordingMessage>> {
     let (sender, receiver) = mpsc::channel();
 
     create_dir_all(screenshots_dir())?;
@@ -109,7 +133,7 @@ pub fn recording() -> anyhow::Result<mpsc::Sender<RecordingMessage>> {
                 Err(_) => {}
             }
             if let Some(ref mut encoder) = encoder {
-                record_frame(encoder, grab_entire_device).unwrap_or_else(|error| {
+                record_frame(&gui, &sim, encoder, grab_entire_device).unwrap_or_else(|error| {
                     log::warn!("Could not record frame: {}", error);
                 });
             }
@@ -136,13 +160,18 @@ fn start_recording(grab_entire_device: bool) -> anyhow::Result<(Option<GifEncode
     Ok((Some(encoder), file_name))
 }
 
-fn record_frame(encoder: &mut GifEncoder<File>, grab_entire_device: bool) -> anyhow::Result<()> {
+fn record_frame<P: ScreenshotPermissions>(
+    gui: &GuiApiLight<P>,
+    sim: &SimulatorApi<P>,
+    encoder: &mut GifEncoder<File>,
+    grab_entire_device: bool,
+) -> anyhow::Result<()> {
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
     let frame = if grab_entire_device {
-        gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default().device_frame()?
+        sim.device_frame()?
     } else {
-        gui_server_api::GuiApiLight::<GuiPermissions>::default().capture_screen()?.as_slice().to_vec()
+        gui.capture_screen()?.as_slice().to_vec()
     };
 
     let Some(screen) = RgbaImage::from_vec(width, height, frame) else {

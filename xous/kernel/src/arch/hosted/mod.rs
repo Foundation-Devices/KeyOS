@@ -7,6 +7,7 @@ pub mod process;
 pub mod rand;
 pub mod syscall;
 
+use core::sync::atomic::AtomicU64;
 use std::cell::RefCell;
 use std::convert::TryInto;
 use std::env;
@@ -46,114 +47,83 @@ pub fn set_send_addr(send_addr: Sender<SocketAddr>) {
     });
 }
 
-use core::sync::atomic::{AtomicU64, Ordering};
 static LOCAL_RNG_STATE: AtomicU64 = AtomicU64::new(2);
 
 #[allow(dead_code)]
 pub fn current_pid() -> PID { crate::arch::process::current_pid() }
 
 /// Each client gets its own connection and its own thread, which is handled here.
-fn handle_connection(
-    conn: TcpStream,
-    pid: PID,
-    chn: Sender<ThreadMessage>,
-    should_exit: std::sync::Arc<core::sync::atomic::AtomicBool>,
-) {
-    fn conn_thread(mut conn: TcpStream, sender: Sender<ThreadMessage>, pid: PID) {
-        loop {
-            let mut raw_data = [0u8; 9 * std::mem::size_of::<usize>()];
+/// Blocks reading syscalls off the socket until it closes (the kernel shutting down
+/// closes every client socket), then terminates the virtual process.
+fn handle_connection(mut conn: TcpStream, pid: PID, chn: Sender<ThreadMessage>) {
+    loop {
+        let mut raw_data = [0u8; 9 * std::mem::size_of::<usize>()];
 
-            // Read bytes from the connection. This will fail when the connection closes,
-            // so send a `Termination` message across the channel.
-            if let Err(e) = conn.read_exact(&mut raw_data) {
-                if e.kind() != std::io::ErrorKind::UnexpectedEof {
-                    eprintln!("KERNEL: PID {pid} client disconnected: {e} -- shutting down virtual process");
-                }
-                return;
+        // read_exact fails when the connection closes; stop and terminate the process.
+        if let Err(e) = conn.read_exact(&mut raw_data) {
+            if e.kind() != std::io::ErrorKind::UnexpectedEof {
+                eprintln!("KERNEL: PID {pid} client disconnected: {e} -- shutting down virtual process");
             }
-
-            let mut packet_data = [0usize; 9];
-            for (bytes, word) in
-                raw_data.chunks_exact(std::mem::size_of::<usize>()).zip(packet_data.iter_mut())
-            {
-                *word = usize::from_le_bytes(bytes.try_into().unwrap());
-            }
-            let thread_id = packet_data[0] as TID;
-            let mut call = match crate::SysCall::from_args(
-                packet_data[1],
-                packet_data[2],
-                packet_data[3],
-                packet_data[4],
-                packet_data[5],
-                packet_data[6],
-                packet_data[7],
-                packet_data[8],
-            ) {
-                Ok(call) => call,
-                Err(e) => {
-                    eprintln!("KERNEL: Received invalid syscall from PID {pid}: {e:?}");
-                    eprintln!(
-                        "Raw packet: {:08x} {} {} {} {} {} {} {}",
-                        packet_data[0],
-                        packet_data[1],
-                        packet_data[2],
-                        packet_data[3],
-                        packet_data[4],
-                        packet_data[5],
-                        packet_data[6],
-                        packet_data[7]
-                    );
-                    continue;
-                }
-            };
-
-            if let Some(mem) = call.memory() {
-                let mut data = vec![0u8; mem.len()];
-                if conn.read_exact(&mut data).is_err() {
-                    return;
-                }
-
-                let sliced_data = data.into_boxed_slice();
-                assert_eq!(
-                    sliced_data.len(),
-                    mem.len(),
-                    "deconstructed data {} != message buf length {}",
-                    sliced_data.len(),
-                    mem.len()
-                );
-                unsafe {
-                    call.replace_memory(
-                        xous::MemoryRange::new(Box::into_raw(sliced_data) as *mut u8 as usize, mem.len())
-                            .unwrap(),
-                    )
-                };
-            }
-
-            sender.send(ThreadMessage::SysCall(pid, thread_id, call)).unwrap();
+            break;
         }
-    }
 
-    let conn_sender = chn.clone();
-    let conn_thread = std::thread::Builder::new()
-        .name(format!("PID {}: client connection thread", pid))
-        .spawn(move || {
-            conn_thread(conn, conn_sender, pid);
-        })
-        .unwrap();
-
-    std::thread::Builder::new()
-        .name(format!("PID {}: client should_exit thread", pid))
-        .spawn(move || loop {
-            if should_exit.load(Ordering::Relaxed) {
-                eprintln!("KERNEL: PID {pid} should_exit == 1");
-                // WARNING: This functionality is unimplemented right now
-                return;
+        let mut packet_data = [0usize; 9];
+        for (bytes, word) in raw_data.chunks_exact(std::mem::size_of::<usize>()).zip(packet_data.iter_mut()) {
+            *word = usize::from_le_bytes(bytes.try_into().unwrap());
+        }
+        let thread_id = packet_data[0] as TID;
+        let mut call = match crate::SysCall::from_args(
+            packet_data[1],
+            packet_data[2],
+            packet_data[3],
+            packet_data[4],
+            packet_data[5],
+            packet_data[6],
+            packet_data[7],
+            packet_data[8],
+        ) {
+            Ok(call) => call,
+            Err(e) => {
+                eprintln!("KERNEL: Received invalid syscall from PID {pid}: {e:?}");
+                eprintln!(
+                    "Raw packet: {:08x} {} {} {} {} {} {} {}",
+                    packet_data[0],
+                    packet_data[1],
+                    packet_data[2],
+                    packet_data[3],
+                    packet_data[4],
+                    packet_data[5],
+                    packet_data[6],
+                    packet_data[7]
+                );
+                continue;
             }
-            std::thread::park_timeout(std::time::Duration::from_millis(100));
-        })
-        .unwrap();
+        };
 
-    conn_thread.join().unwrap();
+        if let Some(mem) = call.memory() {
+            let mut data = vec![0u8; mem.len()];
+            if conn.read_exact(&mut data).is_err() {
+                break;
+            }
+
+            let sliced_data = data.into_boxed_slice();
+            assert_eq!(
+                sliced_data.len(),
+                mem.len(),
+                "deconstructed data {} != message buf length {}",
+                sliced_data.len(),
+                mem.len()
+            );
+            unsafe {
+                call.replace_memory(
+                    xous::MemoryRange::new(Box::into_raw(sliced_data) as *mut u8 as usize, mem.len())
+                        .unwrap(),
+                )
+            };
+        }
+
+        chn.send(ThreadMessage::SysCall(pid, thread_id, call)).unwrap();
+    }
     eprintln!("KERNEL: PID {pid} exited");
     chn.send(ThreadMessage::SysCall(pid, 1, xous::SysCall::TerminateProcess(0))).unwrap();
 }
@@ -165,8 +135,6 @@ fn listen_thread(
     new_pid_channel: Receiver<NewPidMessage>,
     exit_channel: Receiver<ExitMessage>,
 ) {
-    let should_exit = std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));
-
     let listener = TcpListener::bind(listen_addr).unwrap_or_else(|e| {
         panic!("Unable to create server: {e}");
     });
@@ -182,7 +150,6 @@ fn listen_thread(
         chn: &Sender<ThreadMessage>,
         new_pid_channel: &Receiver<NewPidMessage>,
         clients: &mut Vec<(std::thread::JoinHandle<()>, TcpStream)>,
-        should_exit: &std::sync::Arc<core::sync::atomic::AtomicBool>,
     ) -> bool {
         let thr_chn = chn.clone();
 
@@ -202,20 +169,15 @@ fn listen_thread(
         let NewPidMessage::NewPid(new_pid) =
             new_pid_channel.recv().expect("couldn't receive message from main thread");
         let conn_copy = conn.try_clone().expect("couldn't duplicate connection");
-        let should_exit = should_exit.clone();
         let jh = std::thread::Builder::new()
             .name(format!("kernel PID {} listener", new_pid))
-            .spawn(move || handle_connection(conn, new_pid, thr_chn, should_exit))
+            .spawn(move || handle_connection(conn, new_pid, thr_chn))
             .expect("couldn't spawn listen thread");
         clients.push((jh, conn_copy));
         false
     }
 
-    fn exit_server(
-        should_exit: std::sync::Arc<core::sync::atomic::AtomicBool>,
-        clients: Vec<(std::thread::JoinHandle<()>, TcpStream)>,
-    ) {
-        should_exit.store(true, Ordering::Relaxed);
+    fn exit_server(clients: Vec<(std::thread::JoinHandle<()>, TcpStream)>) {
         for (jh, conn) in clients {
             use std::net::Shutdown;
             conn.shutdown(Shutdown::Both).ok();
@@ -285,7 +247,7 @@ fn listen_thread(
     for msg in receiver {
         match msg {
             ClientMessage::NewConnection(conn) => {
-                if accept_new_connection(conn, &chn, &new_pid_channel, &mut clients, &should_exit) {
+                if accept_new_connection(conn, &chn, &new_pid_channel, &mut clients) {
                     break;
                 }
             }
@@ -293,7 +255,7 @@ fn listen_thread(
         }
     }
     shutdown_listener.send(()).unwrap();
-    exit_server(should_exit, clients);
+    exit_server(clients);
 }
 
 /// The idle function is run when there are no directly-runnable processes
@@ -305,12 +267,15 @@ pub fn idle() -> bool {
     let (new_pid_sender, new_pid_receiver) = unbounded();
     let (exit_sender, exit_receiver) = unbounded();
 
-    let mut process_registry: std::collections::HashMap<PID, (AppId, String, xous::arch::ProcessHandle)> =
-        Default::default();
-    // Permanent record of every spawnable process: binary_name -> (app_id, binary_path).
-    // Unlike process_registry, entries here survive crashes so a crashed process can be
+    let mut process_registry: std::collections::HashMap<
+        PID,
+        (app_manifest::HostedService, xous::arch::ProcessHandle),
+    > = Default::default();
+    // Permanent record of every spawnable process: binary_name -> service. Unlike
+    // process_registry, entries here survive crashes so a crashed process can be
     // re-spawned by a hot-reload request even when it is no longer running.
-    let mut process_specs: std::collections::HashMap<String, (AppId, String)> = Default::default();
+    let mut process_specs: std::collections::HashMap<String, app_manifest::HostedService> =
+        Default::default();
     let mut pending_reloads: std::collections::HashSet<PID> = Default::default();
 
     let pid1_init = ProcessInit { app_id: AppId([0u8; 16]) };
@@ -374,15 +339,15 @@ pub fn idle() -> bool {
         let process_args = xous::ProcessArgs::new(app_id, "program", &service.path);
         let (pid, handle) =
             xous::arch::create_process_post(process_args, init, new_process).expect("couldn't spawn");
-        if let Some(name) = std::path::Path::new(&service.path).file_name() {
-            process_specs.insert(name.to_string_lossy().into_owned(), (app_id, service.path.clone()));
-        }
-        process_registry.insert(pid, (app_id, service.path.clone(), handle));
         if service.syscalls != 0 {
             SystemServices::with_mut(|ss| {
                 ss.process_mut(pid).unwrap().set_syscall_permissions(service.syscalls)
             });
         }
+        if let Some(name) = std::path::Path::new(&service.path).file_name() {
+            process_specs.insert(name.to_string_lossy().into_owned(), service.clone());
+        }
+        process_registry.insert(pid, (service, handle));
     }
 
     // Hot-reload socket: accepts crate names and triggers kill+relaunch
@@ -489,22 +454,23 @@ pub fn idle() -> bool {
                     break;
                 }
 
-                // Hot-reload: clean up registry entry; re-spawn if reload was requested
+                // Clean up the registry entry; re-spawn on hot-reload, or take the whole
+                // system down if a system service exited.
                 if is_terminate {
-                    if let Some((app_id, binary_path, _)) = process_registry.remove(&pid) {
+                    if let Some((service, _)) = process_registry.remove(&pid) {
+                        let app_id = AppId(service.app_id);
                         if pending_reloads.remove(&pid) {
                             let init = xous::ProcessInit { app_id };
                             match SystemServices::with_mut(|ss| ss.create_process(init)) {
                                 Ok(new_process) => {
-                                    let new_args = xous::ProcessArgs::new(app_id, "program", &binary_path);
+                                    let new_args = xous::ProcessArgs::new(app_id, "program", &service.path);
                                     match xous::arch::create_process_post(new_args, init, new_process) {
                                         Ok((new_pid, new_handle)) => {
                                             eprintln!(
                                                 "KERNEL: Hot-reloaded {} as PID {}",
-                                                binary_path, new_pid
+                                                service.path, new_pid
                                             );
-                                            process_registry
-                                                .insert(new_pid, (app_id, binary_path, new_handle));
+                                            process_registry.insert(new_pid, (service, new_handle));
                                         }
                                         Err(e) => {
                                             eprintln!("KERNEL: Failed to re-spawn process: {:?}", e)
@@ -513,33 +479,49 @@ pub fn idle() -> bool {
                                 }
                                 Err(e) => eprintln!("KERNEL: Failed to allocate process slot: {:?}", e),
                             }
+                        } else if service.system {
+                            eprintln!(
+                                "KERNEL: system service PID {pid} ({}) exited -- shutting down",
+                                service.path
+                            );
+                            exit_sender.send(ExitMessage::Exit).expect("couldn't send shutdown signal");
+                            break;
                         }
                     }
                 }
             }
             ThreadMessage::ReloadApp(crate_name) => {
-                let entry = process_registry.iter_mut().find(|(_, (_, path, _))| {
-                    std::path::Path::new(path).file_name().map_or(false, |n| n == crate_name.as_str())
+                // A system service exit is meant to take the whole sim down, so it can't
+                // be hot-reloaded in place.
+                if process_specs.get(&crate_name).is_some_and(|s| s.system) {
+                    eprintln!("KERNEL: refusing to hot-reload system service '{}'", crate_name);
+                    continue;
+                }
+                let entry = process_registry.iter_mut().find(|(_, (service, _))| {
+                    std::path::Path::new(&service.path)
+                        .file_name()
+                        .map_or(false, |n| n == crate_name.as_str())
                 });
-                if let Some((&pid, (_, _, handle))) = entry {
+                if let Some((&pid, (_, handle))) = entry {
                     eprintln!(
                         "KERNEL: Hot-reload requested for '{}' (PID {}), sending SIGKILL",
                         crate_name, pid
                     );
                     pending_reloads.insert(pid);
                     handle.kill().ok();
-                } else if let Some(&(app_id, ref binary_path)) = process_specs.get(&crate_name) {
+                } else if let Some(service) = process_specs.get(&crate_name) {
                     // Process is not running (crashed). Spawn it directly.
-                    let binary_path = binary_path.clone();
+                    let service = service.clone();
+                    let app_id = AppId(service.app_id);
                     eprintln!("KERNEL: '{}' not running (crashed?), re-spawning directly", crate_name);
                     let init = xous::ProcessInit { app_id };
                     match SystemServices::with_mut(|ss| ss.create_process(init)) {
                         Ok(new_process) => {
-                            let new_args = xous::ProcessArgs::new(app_id, "program", &binary_path);
+                            let new_args = xous::ProcessArgs::new(app_id, "program", &service.path);
                             match xous::arch::create_process_post(new_args, init, new_process) {
                                 Ok((new_pid, new_handle)) => {
-                                    eprintln!("KERNEL: Re-spawned {} as PID {}", binary_path, new_pid);
-                                    process_registry.insert(new_pid, (app_id, binary_path, new_handle));
+                                    eprintln!("KERNEL: Re-spawned {} as PID {}", service.path, new_pid);
+                                    process_registry.insert(new_pid, (service, new_handle));
                                 }
                                 Err(e) => eprintln!("KERNEL: Failed to re-spawn process: {:?}", e),
                             }

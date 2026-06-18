@@ -5,7 +5,6 @@ use {
     num_derive::FromPrimitive,
     num_traits::FromPrimitive,
     server::{AsScalar, CheckedConn, CheckedPermissions, FromScalar, MessageAllowed},
-    std::time::Duration,
     xous::{MemoryRange, CID, PID, SID},
 };
 
@@ -80,12 +79,6 @@ pub struct GuiApi<P: CheckedPermissions> {
 }
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
-    pub fn try_connect() -> Option<Self> { CheckedConn::try_connect().map(|conn| Self { conn }) }
-
-    pub fn try_connect_with_timeout(timeout: Duration) -> Option<Self> {
-        CheckedConn::try_connect_with_timeout(timeout).map(|conn| Self { conn })
-    }
-
     /// Blocking connect: waits until gui-server has registered its name. gui-server is a
     /// mandatory system service, so callers wait for it instead of timing out and failing.
     pub fn connect() -> Self { Self { conn: CheckedConn::default() } }

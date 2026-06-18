@@ -2,13 +2,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use {
-    crate::{gui_permissions::GuiPermissions, MainWindow, Settings, DEP_SETTINGS_FILE, SETTINGS_FILE},
+    crate::{MainWindow, Settings, DEP_SETTINGS_FILE, SETTINGS_FILE},
     anyhow::Context,
+    gui_server_api::{msg, simulator::SimulatorApi},
+    server::{CheckedPermissions, MessageAllowed},
     slint::{winit_030::WinitWindowAccessor, ComponentHandle},
     std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration},
 };
 
-pub fn setup(window: &MainWindow) {
+/// Permission to set the simulator's display scale factor.
+pub trait ScalePermissions: CheckedPermissions + MessageAllowed<msg::SetScaleFactor> {}
+
+impl<P> ScalePermissions for P where P: CheckedPermissions + MessageAllowed<msg::SetScaleFactor> {}
+
+pub fn setup<P: ScalePermissions>(window: &MainWindow, sim: SimulatorApi<P>) {
     let settings = match read_settings_file() {
         Ok(s) => s,
         Err(error) => {
@@ -21,32 +28,15 @@ pub fn setup(window: &MainWindow) {
         }
     };
 
-    set_scale_when_ready(settings.scale);
+    set_scale(&sim, settings.scale);
     window.set_settings(settings.into());
 
     window.on_scale_set({
         let window = window.clone_strong();
         move |scale_factor| {
-            set_scale(scale_factor);
+            set_scale(&sim, scale_factor);
             change_setting(&window, |settings| settings.scale = scale_factor);
         }
-    });
-}
-
-fn set_scale_when_ready(scale_factor: f32) {
-    std::thread::spawn(move || {
-        let Some(simulator_api) =
-            gui_server_api::simulator::SimulatorApi::<GuiPermissions>::try_connect_with_timeout(
-                std::time::Duration::from_secs(30),
-            )
-        else {
-            log::warn!("Timed out waiting for gui-server to apply initial scale factor");
-            return;
-        };
-
-        simulator_api.set_scale_factor(scale_factor).unwrap_or_else(|error| {
-            log::warn!("Could not set initial scale factor: {:?}", error);
-        });
     });
 }
 
@@ -82,13 +72,8 @@ pub fn write_settings_file(settings: &Settings) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn set_scale(scale_factor: f32) {
-    let Some(simulator_api) = gui_server_api::simulator::SimulatorApi::<GuiPermissions>::try_connect() else {
-        log::debug!("Skipping simulator scale update because gui-server is not ready yet");
-        return;
-    };
-
-    simulator_api.set_scale_factor(scale_factor).unwrap_or_else(|error| {
+pub fn set_scale<P: ScalePermissions>(sim: &SimulatorApi<P>, scale_factor: f32) {
+    sim.set_scale_factor(scale_factor).unwrap_or_else(|error| {
         log::warn!("Could not set scale factor: {:?}", error);
     })
 }
@@ -182,9 +167,9 @@ pub fn setup_window_position(window: &MainWindow) -> slint::Timer {
             if let Some(window) = window_weak.upgrade() {
                 save_window_position_if_moved(&window, &last_pos);
             }
-            // Any close (close button or Cmd-Q) quits the whole simulator, not
-            // just this control-panel window.
-            crate::quit_simulator();
+            // Stop the event loop so run() returns and main can send gui-server the
+            // Shutdown that tears the whole hosted simulator down.
+            let _ = slint::quit_event_loop();
             slint::CloseRequestResponse::HideWindow
         }
     });

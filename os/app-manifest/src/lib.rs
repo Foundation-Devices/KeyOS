@@ -118,6 +118,9 @@ pub struct HostedService {
     #[serde(with = "app_id_hex")]
     pub app_id: [u8; APP_ID_BYTE_LEN],
     pub syscalls: u64,
+    /// If this service exits, the hosted kernel shuts down with it.
+    #[serde(default)]
+    pub system: bool,
 }
 
 /// Serde `with` codec mapping `app_id` between its `"0x"`-prefixed hex wire form and

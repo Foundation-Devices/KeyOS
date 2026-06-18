@@ -13,6 +13,9 @@ use {
 };
 
 gui_server_api::use_api!();
+settings::use_api!();
+
+type Sim = gui_server_api::simulator::SimulatorApi<gui_permissions::GuiPermissions>;
 
 fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap_or_else(|error| {
@@ -23,7 +26,11 @@ fn main() {
 
     let stdin = io::stdin();
 
-    let recording = match recording() {
+    let gui = GuiApiLight::connect();
+    let sim = Sim::connect();
+    let settings_api = SettingsApi::default();
+
+    let recording = match recording(gui.clone(), sim.clone()) {
         Ok(recording) => recording,
         Err(e) => {
             log::warn!("Failed to set up screen recording system: {}", e);
@@ -44,12 +51,12 @@ fn main() {
         match input.trim() {
             "ping" => emit_line("ok ping proto=1 caps=run"),
             "d" => {
-                screenshot(true).unwrap_or_else(|error| {
+                screenshot(&gui, &sim, true).unwrap_or_else(|error| {
                     log::warn!("Failed to take screenshot: {}", error);
                 });
             }
             "s" => {
-                screenshot(false).unwrap_or_else(|error| {
+                screenshot(&gui, &sim, false).unwrap_or_else(|error| {
                     log::warn!("Failed to take screenshot: {}", error);
                 });
             }
@@ -68,15 +75,15 @@ fn main() {
                     log::warn!("Failed to stop recording: {}", error);
                 });
             }
-            "1x" => update_scale(1.0),
-            "1.5x" => update_scale(1.5),
-            "2x" => update_scale(2.0),
+            "1x" => update_scale(&sim, 1.0),
+            "1.5x" => update_scale(&sim, 1.5),
+            "2x" => update_scale(&sim, 2.0),
             "t" => {
-                let is_dark = theme::get_system_theme();
-                theme::set_system_theme(!is_dark);
+                let is_dark = theme::get_system_theme(&settings_api);
+                theme::set_system_theme(&settings_api, !is_dark);
             }
-            "td" => theme::set_system_theme(true),
-            "tl" => theme::set_system_theme(false),
+            "td" => theme::set_system_theme(&settings_api, true),
+            "tl" => theme::set_system_theme(&settings_api, false),
             "help" | "h" => {
                 log::info!(
                     "Simulator commands:
@@ -96,14 +103,14 @@ fn main() {
     h/help - show all commands"
                 );
             }
-            command if command.starts_with("run ") => handle_run_command(command),
+            command if command.starts_with("run ") => handle_run_command(&gui, command),
             _ => log::info!("unknown command"),
         }
     }
 }
 
-fn update_scale(scale: f32) {
-    set_scale(scale);
+fn update_scale(sim: &Sim, scale: f32) {
+    set_scale(sim, scale);
 
     let mut settings = match read_settings_file() {
         Ok(s) => s,
@@ -123,7 +130,7 @@ fn emit_line(line: &str) {
     let _ = io::stdout().flush();
 }
 
-fn handle_run_command(command: &str) {
+fn handle_run_command(gui: &GuiApiLight, command: &str) {
     let mut parts = command.split_whitespace();
     let _ = parts.next();
     let Some(app_id_str) = parts.next() else {
@@ -137,11 +144,6 @@ fn handle_run_command(command: &str) {
             emit_line(&format!("err run invalid-app-id {error}"));
             return;
         }
-    };
-
-    let Some(gui) = GuiApiLight::try_connect() else {
-        emit_line("err run not-ready");
-        return;
     };
 
     match gui.run_app(app_id) {

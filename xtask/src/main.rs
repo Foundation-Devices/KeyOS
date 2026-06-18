@@ -42,7 +42,7 @@ const LOGGING_SERVICE_USB_FILE: &str = "log-usb-file";
 
 const MANDATORY_SYSTEM_SERVICES_HW: &[&str] = &["xous-log", "xous-ticktimer", "xous-names", "trng"];
 
-const MANDATORY_SYSTEM_SERVICES_HOSTED: &[&str] =
+pub const MANDATORY_SYSTEM_SERVICES_HOSTED: &[&str] =
     &["xous-log", "log-hosted", "xous-ticktimer", "xous-names", "trng"];
 
 const DEFAULT_SERVICES_RECOVERY: &[&str] = &[
@@ -129,32 +129,46 @@ const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &[];
 
 const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[];
 
-const DEFAULT_SERVICES_HOSTED: &[&str] = &[
-    "gpio-server",
-    "i2c-server",
-    "spi-server",
-    "security-server",
-    "update-server",
-    "quantum-link-server",
+// Services whose exit should take the whole hosted system down with them. A service
+// belongs here when it runs a real hosted server (its `main` keeps listening), so an
+// exit means a crash rather than the intended hosted no-op. Services whose hosted
+// `main` returns immediately (hardware stubs gated on `keyos`) stay out, or the sim
+// would tear itself down at boot.
+pub const SYSTEM_SERVICES_HOSTED: &[&str] = &[
+    "app-manager-server",
     "backup-server",
-    "haptics-server",
-    "rgb-led-server",
-    "power-manager-server",
-    "dma-server",
     "bt-server",
-    "emmc",
-    "mass-storage-server",
+    "camera-server",
+    "crypto-server",
+    "fido",
     "fs-server",
+    "gui-server",
+    "haptics-server",
+    "legacy-hid",
     "log-file",
     "nfc-server",
-    "fido",
-    "legacy-hid",
-    "keycard-server",
+    "power-manager-server",
+    "quantum-link-server",
+    "rgb-led-server",
+    "security-server",
     "settings-server",
+    "update-server",
+    "simulator",
+    "simulator-cli",
+];
+
+const DEFAULT_SERVICES_HOSTED: &[&str] = &[
+    // The non-GUI services here have no hosted implementation; their `main` exits
+    // immediately, so they stay out of SYSTEM_SERVICES_HOSTED. They are built only so
+    // clients that reference their messages pass manifest validation.
+    "dma-server",
+    "emmc",
+    "gpio-server",
+    "i2c-server",
+    "keycard-server",
+    "mass-storage-server",
+    "spi-server",
     "usb-server",
-    "camera-server",
-    "gui-server",
-    "app-manager-server",
     "gui-app-control-center",
     "gui-app-lock-screen",
     "gui-app-qr-scanner",
@@ -176,9 +190,6 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "gui-app-file-picker-test",
     "gui-app-switcher",
     // "recovery-worker",
-    "simulator",
-    "simulator-cli",
-    "crypto-server",
 ];
 
 #[derive(Parser)]
@@ -439,13 +450,13 @@ fn process_services(build_args: &mut BuildArgs) {
         }
     }
     if build_args.services.is_empty() {
-        let additional_crates = if build_args.hosted {
+        let additional_crates: Vec<&str> = if build_args.hosted {
             if build_args.flux_apps.is_empty() {
                 build_args.flux_apps = DEFAULT_FLUX_APPS_HOSTED.iter().map(|s| s.to_string()).collect();
             }
-            DEFAULT_SERVICES_HOSTED
+            SYSTEM_SERVICES_HOSTED.iter().chain(DEFAULT_SERVICES_HOSTED.iter()).copied().collect()
         } else if build_args.is_recovery {
-            DEFAULT_SERVICES_RECOVERY
+            DEFAULT_SERVICES_RECOVERY.to_vec()
         } else {
             if build_args.apps.is_empty() {
                 build_args.apps = DEFAULT_APPS_NORMAL.iter().map(|s| s.to_string()).collect();
@@ -456,7 +467,7 @@ fn process_services(build_args: &mut BuildArgs) {
             if build_args.flux_apps.is_empty() {
                 build_args.flux_apps = DEFAULT_FLUX_APPS_NORMAL.iter().map(|s| s.to_string()).collect()
             };
-            DEFAULT_SERVICES_NORMAL
+            DEFAULT_SERVICES_NORMAL.to_vec()
         };
         build_args.services =
             mandatory_services.into_iter().chain(additional_crates.iter().map(|s| s.to_string())).collect();
@@ -498,6 +509,7 @@ fn check_crates(crates: Vec<String>) {
         all_crates.extend(DEFAULT_SERVICES_RECOVERY.iter().map(|s| s.to_string()));
         all_crates.extend(DEFAULT_SERVICES_NORMAL.iter().map(|s| s.to_string()));
         all_crates.extend(DEFAULT_SERVICES_HOSTED.iter().map(|s| s.to_string()));
+        all_crates.extend(SYSTEM_SERVICES_HOSTED.iter().map(|s| s.to_string()));
 
         // Add all apps
         all_crates.extend(DEFAULT_APPS_NORMAL.iter().map(|s| s.to_string()));

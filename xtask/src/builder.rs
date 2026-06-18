@@ -824,7 +824,10 @@ impl BuildResult {
     pub fn write_hosted_services_manifest(&self) -> PathBuf {
         let mut services: Vec<app_manifest::HostedService> = vec![];
         for service in self.built_services.iter() {
-            let manifest = load_manifest(Path::new(service).file_name().unwrap().to_str().unwrap());
+            let name = Path::new(service).file_name().unwrap().to_str().unwrap();
+            let manifest = load_manifest(name);
+            let system = crate::SYSTEM_SERVICES_HOSTED.contains(&name)
+                || crate::MANDATORY_SYSTEM_SERVICES_HOSTED.contains(&name);
             // Built binaries carry a `.exe` suffix on Windows.
             let service_path = if cfg!(windows) && !service.ends_with(".exe") {
                 format!("{service}.exe")
@@ -847,6 +850,7 @@ impl BuildResult {
                 path: service_path,
                 app_id: manifest.app_id,
                 syscalls: tags::permission::syscall_mask(&manifest.syscall),
+                system,
             });
         }
 

@@ -1,52 +1,84 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use server::{
+    CheckedPermissions, MessageAllowed, ScalarEventHandler, Server, ServerContext, ServerMessages,
+};
+use settings::{
+    global::SystemTheme,
+    messages::{GetSystemTheme, SetSystemTheme, SubscribeSystemTheme},
+    SettingsApi,
+};
 use slint::ComponentHandle;
 
 use crate::MainWindow;
 
-settings::use_api!();
+/// Permissions for reading and writing the system light/dark theme.
+pub trait ThemePermissions:
+    CheckedPermissions + MessageAllowed<GetSystemTheme> + MessageAllowed<SetSystemTheme>
+{
+}
+
+impl<P> ThemePermissions for P where
+    P: CheckedPermissions + MessageAllowed<GetSystemTheme> + MessageAllowed<SetSystemTheme>
+{
+}
 
 /// Set the system theme
-pub fn set_system_theme(is_dark: bool) {
-    let api = SettingsApi::default();
-    let theme =
-        if is_dark { settings::global::SystemTheme::Dark } else { settings::global::SystemTheme::Light };
+pub fn set_system_theme<P: ThemePermissions>(api: &SettingsApi<P>, is_dark: bool) {
+    let theme = if is_dark { SystemTheme::Dark } else { SystemTheme::Light };
     api.set_system_theme(theme);
 }
 
 /// Get the current system theme
-pub fn get_system_theme() -> bool {
-    let api = SettingsApi::default();
-    matches!(api.get_system_theme(), settings::global::SystemTheme::Dark)
+pub fn get_system_theme<P: ThemePermissions>(api: &SettingsApi<P>) -> bool {
+    matches!(api.get_system_theme(), SystemTheme::Dark)
 }
 
-pub fn setup(window: &MainWindow) {
-    // Initialize theme state
-    let is_dark = get_system_theme();
-    window.set_is_dark_theme(is_dark);
+pub fn setup<P>(window: &MainWindow, api: SettingsApi<P>)
+where
+    P: ThemePermissions + MessageAllowed<SubscribeSystemTheme>,
+{
+    window.set_is_dark_theme(get_system_theme(&api));
 
-    // Subscribe to theme changes
-    setup_theme_subscription(window);
+    let subscriber = ThemeSubscriber { window: window.as_weak(), api: api.clone() };
+    std::thread::spawn(move || server::listen(subscriber));
 
     window.on_theme_set(move |is_dark| {
-        set_system_theme(is_dark);
+        set_system_theme(&api, is_dark);
     });
 }
 
-fn setup_theme_subscription(window: &MainWindow) {
-    let window_weak = window.as_weak();
+/// Anonymous os/settings subscriber that mirrors system theme changes into the
+/// control-panel window.
+struct ThemeSubscriber<P: CheckedPermissions> {
+    window: slint::Weak<MainWindow>,
+    api: SettingsApi<P>,
+}
 
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let is_dark = get_system_theme();
+impl<P: CheckedPermissions> ServerMessages for ThemeSubscriber<P> {
+    const NAME: &'static str = "";
 
-        let window_weak_clone = window_weak.clone();
+    fn messages() -> &'static [server::MessageDef<Self>] { &[] }
+}
+
+impl<P: CheckedPermissions + MessageAllowed<SubscribeSystemTheme>> Server for ThemeSubscriber<P> {
+    fn on_start(&mut self, context: &mut ServerContext<Self>) {
+        self.api.server_subscribe_system_theme(context);
+    }
+}
+
+impl<P: CheckedPermissions + MessageAllowed<SubscribeSystemTheme>> ScalarEventHandler<SystemTheme>
+    for ThemeSubscriber<P>
+{
+    fn handle(&mut self, theme: SystemTheme, _sender: xous::PID, _context: &mut ServerContext<Self>) {
+        let window = self.window.clone();
+        let is_dark = matches!(theme, SystemTheme::Dark);
         slint::invoke_from_event_loop(move || {
-            if let Some(window) = window_weak_clone.upgrade() {
+            if let Some(window) = window.upgrade() {
                 window.set_is_dark_theme(is_dark);
             }
         })
         .ok();
-    });
+    }
 }

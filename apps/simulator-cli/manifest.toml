@@ -10,5 +10,8 @@ en = "Simulator CLI"
     "SetSystemTheme",
 ]
 "os/gui-server" = [
+    "CaptureScreen",
+    "GetDeviceFrame",
     "RunApp",
+    "SetScaleFactor",
 ]

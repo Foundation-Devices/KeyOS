@@ -3,16 +3,10 @@
 
 use crate::{consts, msg, GuiServerError};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SimulatorApi<P: server::CheckedPermissions>(server::CheckedConn<P>);
 
 impl<P: server::CheckedPermissions> SimulatorApi<P> {
-    pub fn try_connect() -> Option<Self> { server::CheckedConn::try_connect().map(Self) }
-
-    pub fn try_connect_with_timeout(timeout: std::time::Duration) -> Option<Self> {
-        server::CheckedConn::try_connect_with_timeout(timeout).map(Self)
-    }
-
     /// Blocking connect: waits until gui-server has registered its name. gui-server is a
     /// mandatory system service, so callers wait for it instead of timing out and failing.
     pub fn connect() -> Self { Self(server::CheckedConn::default()) }

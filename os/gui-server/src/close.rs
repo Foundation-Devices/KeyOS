@@ -130,6 +130,15 @@ impl Gui {
     }
 
     pub(crate) fn close_all_apps(&mut self) {
+        // With no windows registered, neither finalize path ever runs: on_app_disconnected
+        // (the graceful one) only fires when a window disconnects, and close_app_timed_out
+        // only force-shuts-down when a window fails to terminate. Arming the close timeout
+        // here would just leave the simulator running on its close button, so finalize now.
+        if self.windows.is_empty() {
+            self.finalize_shutdown();
+            return;
+        }
+
         for (pid, window) in &mut self.windows {
             if matches!(window.close_state, AppCloseState::Closing | AppCloseState::Terminating) {
                 continue;

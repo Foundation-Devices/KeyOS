@@ -13857,7 +13857,6 @@ name = "xous"
 version = "0.11.0"
 dependencies = [
  "keyos",
- "libc",
  "rustc-std-workspace-core",
 ]
 
