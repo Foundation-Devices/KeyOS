@@ -38,12 +38,14 @@ use usb::device::{
     api::{EndpointDirection, EndpointType},
     messages::EndpointProperties,
 };
-use usb_debug_protocol::Response;
+use usb_debug_protocol::{Response, USB_DEBUG_OUT_TRANSFER_MAX};
 
 usb::use_device_api!();
 settings::use_api!();
 
 const DEBUG_INTERFACE_NUMBER: u8 = usb::device::interface_numbers::USB_DEBUG;
+const DEBUG_OUT_BUFFER_SIZE: usize = USB_DEBUG_OUT_TRANSFER_MAX + 1;
+const DEBUG_OUT_READ_LEN: u16 = USB_DEBUG_OUT_TRANSFER_MAX as u16;
 
 /// Max pending log messages in the channel before the log drain starts dropping.
 /// Each chunk is up to 16 KB, so 8 chunks ≈ 128 KB max buffered.
@@ -120,12 +122,17 @@ fn debug_out_drain_thread(
 ) {
     let usb_api = UsbDeviceEmulation::default();
     let mut debug = dispatch::DebugProtocol::new();
-    let usb_recv_buffer =
-        xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W).expect("Could not allocate buffer");
+    let usb_recv_buffer = xous::map_memory(
+        None,
+        None,
+        DEBUG_OUT_BUFFER_SIZE,
+        xous::MemoryFlags::W | xous::MemoryFlags::POPULATE,
+    )
+    .expect("Could not allocate buffer");
 
     loop {
         gate.wait_enabled();
-        match ep_out.read_buf(usb_recv_buffer, 512) {
+        match ep_out.read_buf(usb_recv_buffer, DEBUG_OUT_READ_LEN) {
             Ok(l) => {
                 if gate.is_enabled() {
                     let data = &usb_recv_buffer.as_slice()[..l];
@@ -225,7 +232,7 @@ fn main() -> ! {
                         ep_direction: EndpointDirection::Out,
                         max_packet_len: 512,
                         interval: 0,
-                        use_dma: false,
+                        use_dma: true,
                     },
                     EndpointProperties {
                         ep_type: EndpointType::Bulk,

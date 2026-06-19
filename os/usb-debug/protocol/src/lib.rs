@@ -10,9 +10,9 @@
 //!     FRAME_TYPE Log      = 0x01 -- raw 0x1E-terminated log records
 //!     FRAME_TYPE Response = 0x02 -- `[STATUS:1][PAYLOAD...]`
 //!
-//! IN frames are terminated by USB short packets or ZLPs. Keep that framing:
-//! it avoids a protocol length prefix and lets the USB transfer boundary carry
-//! the packet end marker.
+//! OUT commands and IN frames are terminated by USB short packets, ZLPs, or the
+//! maximum requested transfer length. Keep that framing: it avoids a protocol
+//! length prefix and lets the USB transfer boundary carry the packet end marker.
 //!
 //! Source of truth for command bytes, status bytes, and payload encoding.
 //! The `client` feature additionally exposes `UsbDebugClient`, a `rusb`-based
@@ -129,9 +129,14 @@ const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
 const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
 
-pub const LOAD_APP_CHUNK_MAX: usize = 510;
+pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
+/// Maximum host -> device usb-debug transfer size. This is capped by the
+/// 16-bit length field in the device USB endpoint API.
+pub const USB_DEBUG_OUT_TRANSFER_MAX: usize = u16::MAX as usize;
+pub const LOAD_APP_CHUNK_MAX: usize = USB_DEBUG_OUT_TRANSFER_MAX - 1;
 /// Maximum UTF-8 bytes for a load-app relative filename. The device reads one
-/// 512-byte OUT transfer per command: 1 command byte + 8 size bytes + filename.
+/// bulk max packet for path setup commands: 1 command byte + 8 size bytes
+/// + filename. File bytes use the larger `LOAD_APP_CHUNK_MAX` data path.
 pub const LOAD_APP_FILE_PATH_MAX: usize = 512 - 1 - 8;
 
 /// Host -> device command.
@@ -537,6 +542,12 @@ mod tests {
         roundtrip(Command::LoadAppChunk(vec![1, 2, 3, 4]));
         roundtrip(Command::LoadAppEnd);
         roundtrip(Command::GetProcessList);
+    }
+
+    #[test]
+    fn load_app_chunk_fills_max_out_transfer() {
+        assert_eq!(LOAD_APP_CHUNK_MAX + 1, USB_DEBUG_OUT_TRANSFER_MAX);
+        assert!(USB_DEBUG_OUT_TRANSFER_MAX <= u16::MAX as usize);
     }
 
     #[test]

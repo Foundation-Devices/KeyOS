@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusb::{DeviceHandle, GlobalContext};
 
-use crate::{Command, FrameType, ProtocolError, RawResponse, Status};
+use crate::{Command, FrameType, ProtocolError, RawResponse, Status, USB_DEBUG_BULK_MAX_PACKET_LEN};
 
 /// Passport Prime VID:PID in normal mode.
 pub const PASSPORT_VID: u16 = 0x1307;
@@ -119,6 +119,9 @@ impl UsbDebugClient {
         let cmd_byte = cmd.cmd_byte();
 
         self.handle.write_bulk(self.ep_out, &out_buf, timeout).context("bulk OUT write")?;
+        if needs_out_zlp(out_buf.len()) {
+            self.handle.write_bulk(self.ep_out, &[], timeout).context("bulk OUT ZLP write")?;
+        }
 
         let resp = self
             .resp_rx
@@ -140,6 +143,8 @@ impl UsbDebugClient {
         self.log_rx.recv_timeout(timeout)
     }
 }
+
+fn needs_out_zlp(len: usize) -> bool { len > 0 && len % USB_DEBUG_BULK_MAX_PACKET_LEN == 0 }
 
 impl Drop for UsbDebugClient {
     fn drop(&mut self) {
@@ -257,5 +262,14 @@ mod tests {
         assert_eq!(log_rx.try_recv().expect("log"), vec![0xaa; READ_CHUNK_LEN - 1]);
         assert!(resp_rx.try_recv().is_err());
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn max_packet_aligned_out_writes_need_zlp() {
+        assert!(!needs_out_zlp(0));
+        assert!(!needs_out_zlp(USB_DEBUG_BULK_MAX_PACKET_LEN - 1));
+        assert!(needs_out_zlp(USB_DEBUG_BULK_MAX_PACKET_LEN));
+        assert!(needs_out_zlp(USB_DEBUG_BULK_MAX_PACKET_LEN * 2));
+        assert!(!needs_out_zlp(USB_DEBUG_BULK_MAX_PACKET_LEN * 2 + 1));
     }
 }

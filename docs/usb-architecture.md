@@ -237,7 +237,7 @@ TYPE 0x02 — Debug response:
 | `0x0A` | `GET_DEVELOPER_MODE` | — | 1 B: `0` disabled, `1` enabled |
 | `0x0B` | `LOAD_APP_BEGIN` | 16-byte AppId | Ack (empty) |
 | `0x0C` | `LOAD_APP_FILE_BEGIN` | expected size as 8 B LE + UTF-8 relative filename | Ack (empty) |
-| `0x0D` | `LOAD_APP_CHUNK` | File bytes, max 510 B per chunk | Ack; final chunk closes current file |
+| `0x0D` | `LOAD_APP_CHUNK` | File bytes, max 65,534 B per chunk | Ack; final chunk closes current file |
 | `0x0E` | `LOAD_APP_END` | — | Ack (empty) |
 | `0x0F` | `GET_PROCESS_LIST` | — | Compact process list output |
 
@@ -250,9 +250,11 @@ extend below the LCD in host tooling.
 `LOAD_APP_BEGIN` deletes/replaces `keyos/sideloaded-apps/<app-id>` and opens an
 upload session. Each file is sent as `LOAD_APP_FILE_BEGIN`, then `LOAD_APP_CHUNK`
 frames until the declared size is reached; the final chunk flushes and promotes
-the current `.part` file. Filenames are relative paths such as `app.elf`,
-`manifest.json`, `icon.bin`, or `resources/<path>`. `LOAD_APP_END` refreshes
-app-manager's installed app registry.
+the current `.part` file. Host tooling sends a ZLP after any max-packet-aligned
+OUT command so the device can use larger DMA reads without losing command
+boundaries. Filenames are relative paths such as `app.elf`, `manifest.json`,
+`icon.bin`, or `resources/<path>`. `LOAD_APP_END` refreshes app-manager's
+installed app registry.
 
 In production builds, the device rejects `REBOOT_SAMBA` and `KERNEL_CMD`.
 `CLOSE_APP` and the `LOAD_APP_*` commands additionally check Developer Mode
