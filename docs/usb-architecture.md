@@ -1,7 +1,8 @@
 # Passport Prime USB Interface Architecture
 
-Passport Prime presents itself as a USB 2.1 composite device using Interface Association
-Descriptors (IAD) to group its three functions under a single configuration.
+Passport Prime presents itself as a USB 2.1 composite device with a single
+configuration. Each USB-facing KeyOS server registers one interface with the
+central USB device server (`os/usb`).
 
 | Field | Value |
 |-------|-------|
@@ -11,11 +12,13 @@ Descriptors (IAD) to group its three functions under a single configuration.
 | Product | Passport Prime |
 | Max Power | 32 mA (self-powered) |
 
-Each KeyOS server registers its interface(s) at boot by calling `register_interface()`
-on the central USB device server (`os/usb`) with a fixed interface number.
+Each KeyOS server calls `register_interface()` with a fixed interface number.
 Class-specific setup responders are attached to interface registration and are
-routed by `wIndex`. The interface numbers below reflect the normal fixed
-assignment with Developer Mode enabled.
+routed by `wIndex`. Disabled interfaces are omitted from the active
+configuration descriptor, but enabled interfaces keep their fixed
+`bInterfaceNumber`; they are not compacted or renumbered. Endpoint numbers are
+allocated by `os/usb` when interfaces register, so diagrams below list endpoint
+types and directions rather than treating endpoint numbers as protocol constants.
 
 When Developer Mode is disabled, the debug interface is omitted from the active
 configuration descriptor and the device re-enumerates without it.
@@ -25,94 +28,109 @@ configuration descriptor and the device re-enumerates without it.
 ```mermaid
 graph TD
     DEV["<b>Device Descriptor</b><br/>VID: 0x1307 | PID: 0x0165<br/>Class: 0xEF · Sub: 0x02 · Proto: 0x01<br/>USB 2.1 · Self-Powered"]
-    CFG["<b>Configuration 1</b><br/>3 Interfaces"]
+    CFG["<b>Configuration 1</b><br/>4 Interfaces<br/><i>3 when Developer Mode is off</i>"]
 
     DEV --> CFG
 
-    IF0["<b>Interface 0 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
+    IF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Ledger APDU Transport"]
     IF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
-    IF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs"]
+    IF2["<b>Interface 2 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
+    IF3["<b>Interface 3 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
 
     CFG --> IF0
     CFG --> IF1
     CFG --> IF2
+    CFG --> IF3
 
-    EP1O["EP 1 OUT<br/>Interrupt · 64 B · 5 ms"]
-    EP2I["EP 2 IN<br/>Interrupt · 64 B · 5 ms"]
-    IF0 --> EP1O
-    IF0 --> EP2I
+    LEP_IN["Interrupt IN · 64 B · 1 ms"]
+    LEP_OUT["Interrupt OUT · 64 B · 1 ms"]
+    IF0 --> LEP_IN
+    IF0 --> LEP_OUT
+
+    LHID["HID Report Descriptor<br/>Usage Page: 0xFFA0 (Vendor)<br/>64-byte IN + OUT reports"]
+    IF0 --> LHID
+
+    EP_MS_IN["Bulk IN · 512 B · DMA"]
+    EP_MS_OUT["Bulk OUT · 512 B · DMA"]
+    IF1 --> EP_MS_IN
+    IF1 --> EP_MS_OUT
+
+    EP_CTAP_OUT["Interrupt OUT · 64 B · 5 ms"]
+    EP_CTAP_IN["Interrupt IN · 64 B · 5 ms"]
+    IF2 --> EP_CTAP_OUT
+    IF2 --> EP_CTAP_IN
 
     HID["HID Report Descriptor<br/>Usage Page: 0xF1D0 (FIDO Alliance)<br/>Usage: U2F Authenticator<br/>64-byte IN + OUT reports"]
-    IF0 --> HID
+    IF2 --> HID
 
-    EP4O["EP 4 OUT<br/>Bulk · 512 B · DMA"]
-    EP3I["EP 3 IN<br/>Bulk · 512 B · DMA"]
-    IF1 --> EP4O
-    IF1 --> EP3I
+    EP_DBG_OUT["Bulk OUT · 512 B"]
+    EP_DBG_IN["Bulk IN · 512 B · DMA"]
+    IF3 --> EP_DBG_OUT
+    IF3 --> EP_DBG_IN
 
-    EP8O["EP 8 OUT<br/>Bulk · 512 B"]
-    EP5I["EP 5 IN<br/>Bulk · 512 B · DMA"]
-    IF2 --> EP8O
-    IF2 --> EP5I
-
-    style IF2 stroke-dasharray: 5 5
+    style IF3 stroke-dasharray: 5 5
 ```
 
-> Interface 2 (dashed) is only visible at runtime when Developer Mode is enabled.
+> Interface 3 (dashed) is only visible at runtime when Developer Mode is enabled.
+> Interface 0 is registered by `os/legacy-hid` in normal mode too, but host
+> wallet compatibility relies on the Legacy VID:PID described below.
 
 ## USB Descriptor Tree — Legacy Mode (Flux Emulator Active)
 
-When a Flux app launches, `gui-app-emu-flux` switches the device to Ledger Flex
-identity. The Legacy HID interface is promoted to Interface 0 and the existing
-interfaces shift down. The VID:PID change triggers a USB disconnect / re-enumeration.
-When the Flux app exits, the normal identity is restored (another re-enumeration).
+When a Flux app launches, `gui-app-emu-flux` asks `os/legacy-hid` to switch the
+device to the Ledger Flex VID:PID. The interface layout does not shift: Legacy
+HID is already fixed at Interface 0, Mass Storage is Interface 1, CTAP HID is
+Interface 2, and usb-debug is Interface 3 when Developer Mode is enabled. The
+VID:PID change triggers a USB disconnect / re-enumeration. When the Flux app
+exits, the normal identity is restored (another re-enumeration).
 
 ```mermaid
 graph TD
     DEV2["<b>Device Descriptor</b><br/>VID: 0x2C97 | PID: 0x0007<br/>Class: 0xEF · Sub: 0x02 · Proto: 0x01<br/>USB 2.1 · Self-Powered"]
-    CFG2["<b>Configuration 1</b><br/>4 Interfaces"]
+    CFG2["<b>Configuration 1</b><br/>4 Interfaces<br/><i>3 when Developer Mode is off</i>"]
 
     DEV2 --> CFG2
 
     LIF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Ledger APDU Transport"]
-    LIF1["<b>Interface 1 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
-    LIF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
-    LIF3["<b>Interface 3 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
+    LIF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
+    LIF2["<b>Interface 2 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
+    LIF3["<b>Interface 3 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
 
     CFG2 --> LIF0
     CFG2 --> LIF1
     CFG2 --> LIF2
     CFG2 --> LIF3
 
-    LEP_OUT["EP OUT<br/>Interrupt · 64 B · 1 ms"]
-    LEP_IN["EP IN<br/>Interrupt · 64 B · 1 ms"]
-    LIF0 --> LEP_OUT
+    LEP_OUT["Interrupt OUT · 64 B · 1 ms"]
+    LEP_IN["Interrupt IN · 64 B · 1 ms"]
     LIF0 --> LEP_IN
+    LIF0 --> LEP_OUT
 
     LHID["HID Report Descriptor<br/>Usage Page: 0xFFA0 (Vendor)<br/>64-byte IN + OUT reports"]
     LIF0 --> LHID
 
-    LEP1O["EP 1 OUT<br/>Interrupt · 64 B · 5 ms"]
-    LEP2I["EP 2 IN<br/>Interrupt · 64 B · 5 ms"]
-    LIF1 --> LEP1O
-    LIF1 --> LEP2I
+    LMS_IN["Bulk IN · 512 B · DMA"]
+    LMS_OUT["Bulk OUT · 512 B · DMA"]
+    LIF1 --> LMS_IN
+    LIF1 --> LMS_OUT
 
-    LEP8O["EP 8 OUT<br/>Bulk · 512 B"]
-    LEP3I["EP 3 IN<br/>Bulk · 512 B · DMA"]
-    LIF2 --> LEP8O
-    LIF2 --> LEP3I
+    LCTAP_OUT["Interrupt OUT · 64 B · 5 ms"]
+    LCTAP_IN["Interrupt IN · 64 B · 5 ms"]
+    LIF2 --> LCTAP_OUT
+    LIF2 --> LCTAP_IN
 
-    LEP5O["EP 5 OUT<br/>Bulk · 512 B · DMA"]
-    LEP4I["EP 4 IN<br/>Bulk · 512 B · DMA"]
-    LIF3 --> LEP5O
-    LIF3 --> LEP4I
+    LDBG_OUT["Bulk OUT · 512 B"]
+    LDBG_IN["Bulk IN · 512 B · DMA"]
+    LIF3 --> LDBG_OUT
+    LIF3 --> LDBG_IN
 
-    style LIF2 stroke-dasharray: 5 5
+    style LIF3 stroke-dasharray: 5 5
     style LIF0 fill:#1d4ed8,stroke:#60a5fa,color:#fff
 ```
 
-> The Legacy HID interface (blue) is promoted to position 0 so that host wallets
-> (e.g. MoneroGUI) see it as the primary HID interface, matching a real Ledger Flex.
+> The Legacy HID interface (blue) is Interface 0 in both identities. The Legacy
+> VID:PID is what makes host wallets (e.g. MoneroGUI) treat it like a real
+> Ledger Flex.
 
 ## KeyOS Server Mapping
 
@@ -125,12 +143,14 @@ graph LR
     CTAP["<b>os/ctap-hid</b><br/>CTAP2 / U2F<br/>Authenticator"]
     DBG["<b>os/usb-debug</b><br/>Debug Commands<br/>+ Log Streaming"]
     MSE["<b>os/mass-storage-<br/>emulation</b><br/>Airlock Filesystem"]
-    FLUX["<b>gui-app-emu-flux</b><br/>Legacy HID<br/>Ledger APDU Transport<br/><i>when Flux app active</i>"]
+    LEGACY["<b>os/legacy-hid</b><br/>Legacy HID<br/>Ledger APDU Transport"]
+    FLUX["<b>gui-app-emu-flux</b><br/>Flux emulator<br/><i>subscribes while active</i>"]
 
-    USB -- "IF 0 · HID 0x03" --- CTAP
+    USB -- "IF 0 · HID 0x03" --- LEGACY
     USB -- "IF 1 · MSC 0x08" --- MSE
-    USB -- "IF 2 · Vendor 0xFF" --- DBG
-    USB -. "IF 0 · HID 0x03<br/>promotes to IF 0<br/>+ changes VID:PID" .- FLUX
+    USB -- "IF 2 · HID 0x03" --- CTAP
+    USB -- "IF 3 · Vendor 0xFF" --- DBG
+    FLUX -. "SetLegacyMode<br/>changes VID:PID" .- LEGACY
 
     FIDO["fido crate<br/>U2F + CTAP2"]
     GUI["gui-server<br/>Screen capture · Touch<br/>injection · App lifecycle"]
@@ -139,6 +159,7 @@ graph LR
     SETTINGS["settings<br/>Airlock mode"]
     SEPH["Flux app<br/>APDU processing"]
 
+    LEGACY --> SEPH
     CTAP --> FIDO
     DBG --> GUI
     DBG --> LOG
@@ -149,7 +170,9 @@ graph LR
     style FLUX stroke-dasharray: 5 5
 ```
 
-> The Legacy HID registration (dashed) only occurs while a Flux app is running.
+> `os/legacy-hid` registers Interface 0 at startup. Flux activation toggles the
+> USB identity and subscribes to inbound APDUs; without a subscriber, inbound
+> APDUs are dropped.
 
 ---
 
@@ -160,8 +183,10 @@ system logs on a single pair of bulk endpoints. It is only present when the
 `usb-debug` service is built and Developer Mode is enabled.
 
 **Source files:**
-- Device side: `os/usb-debug/src/main.rs`, `os/usb-debug/src/protocol.rs`
-- Host side: `utils/passport-drive/src/usb_transport.rs`
+- Shared protocol: `os/usb-debug/protocol/src/lib.rs`
+- Device side: `os/usb-debug/src/main.rs`, `os/usb-debug/src/dispatch.rs`
+- Host transport: `os/usb-debug/protocol/src/client.rs`
+- Host load-app helper: `utils/passport-drive/src/load_app.rs`
 
 ### Frame Format
 
@@ -193,7 +218,7 @@ TYPE 0x02 — Debug response:
 │ 0x02 │ STATUS │ Response data (0..N) │
 │ 1 B  │ 1 B    │                      │
 └──────┴────────┴──────────────────────┘
-  STATUS: 0x00 = OK, 0x01 = Error
+  STATUS: 0x00 = OK, 0x01 = Error, 0x02 = Locked
 ```
 
 ### Command Table
@@ -201,8 +226,8 @@ TYPE 0x02 — Debug response:
 | Byte | Name | Payload (Host → Device) | Response (Device → Host) |
 |------|------|-------------------------|--------------------------|
 | `0x01` | `SCREENSHOT` | — | 1,536,000 bytes (480 x 800 x 4, ARGB8888) |
-| `0x02` | `TAP` | `x_lo x_hi y_lo y_hi kind` (5 B, LE) | Ack (empty) |
-| `0x03` | `POWER_BTN` | 1 B: `0x00` = release, else = press | Ack (empty) |
+| `0x02` | `SWIPE` | `start_x start_y end_x end_y duration_ms steps` (11 B; u16 LE fields + u8 steps) | Ack (empty) |
+| `0x03` | `POWER_BTN` | 1 B: `0x00` = short press, else = long press | Ack (empty) |
 | `0x04` | `REBOOT_SAMBA` | — | Ack, then device reboots into SAM-BA |
 | `0x05` | `CLOSE_APP` | `pid_lo pid_hi` (2 B LE) | Ack (empty) |
 | `0x06` | `KERNEL_CMD` | 1 B: command character (see below) | Kernel debug output (variable) |
@@ -210,22 +235,28 @@ TYPE 0x02 — Debug response:
 | `0x08` | `GET_VERSION` | — | UTF-8 KeyOS version bytes |
 | `0x09` | `LAUNCH_APP` | 16-byte AppId | `pid_lo pid_hi status` (3 B; status `0` launched, `1` already running) |
 | `0x0A` | `GET_DEVELOPER_MODE` | — | 1 B: `0` disabled, `1` enabled |
-| `0x0B` | `LOAD_APP_BEGIN` | UTF-8 sideloaded app-id directory name | Ack (empty) |
-| `0x0C` | `LOAD_APP_FILE_BEGIN` | `kind:1` + expected size as 8 B LE | Ack (empty) |
+| `0x0B` | `LOAD_APP_BEGIN` | 16-byte AppId | Ack (empty) |
+| `0x0C` | `LOAD_APP_FILE_BEGIN` | expected size as 8 B LE + UTF-8 relative filename | Ack (empty) |
 | `0x0D` | `LOAD_APP_CHUNK` | File bytes, max 510 B per chunk | Ack; final chunk closes current file |
 | `0x0E` | `LOAD_APP_END` | — | Ack (empty) |
 | `0x0F` | `GET_PROCESS_LIST` | — | Compact process list output |
 
-`LOAD_APP_FILE_BEGIN` file kinds are `0x00` for `app.elf` and `0x01` for
-`manifest.json`. Normal uploads send `LOAD_APP_FILE_BEGIN`, then
-`LOAD_APP_CHUNK` frames until the declared size is reached; that final chunk
-flushes and promotes the current `.part` file. The `load_app` MCP tool drives
-`0x0B`, the per-file `0x0C`/`0x0D` uploads, and `0x0E`, then asks app-manager to
-rescan installed apps. In production builds, the device rejects `REBOOT_SAMBA`
-and `KERNEL_CMD`; the other commands above are allowed.
+`SWIPE` injects a press at the start coordinate, `steps` drag events spread over
+`duration_ms`, then a release at the end coordinate. Host-side `tap` is encoded
+as `SWIPE` with identical start/end coordinates and `steps = 0`. Screen
+coordinates use origin top-left, 480 x 800 pixels; the virtual button strip can
+extend below the LCD in host tooling.
 
-**TAP touch kinds:** `0` = Press, `1` = Release, `2` = Drag. Screen coordinates:
-origin top-left, 480 x 800 pixels.
+`LOAD_APP_BEGIN` deletes/replaces `keyos/sideloaded-apps/<app-id>` and opens an
+upload session. Each file is sent as `LOAD_APP_FILE_BEGIN`, then `LOAD_APP_CHUNK`
+frames until the declared size is reached; the final chunk flushes and promotes
+the current `.part` file. Filenames are relative paths such as `app.elf`,
+`manifest.json`, `icon.bin`, or `resources/<path>`. `LOAD_APP_END` refreshes
+app-manager's installed app registry.
+
+In production builds, the device rejects `REBOOT_SAMBA` and `KERNEL_CMD`.
+`CLOSE_APP` and the `LOAD_APP_*` commands additionally check Developer Mode
+and/or device lock state in the dispatcher.
 
 ### Kernel Debug Sub-Commands (CMD `0x06`)
 
@@ -260,9 +291,9 @@ sequenceDiagram
     Device->>Host: [0x02][0x00] + 1,536,000 B ARGB
     Note right of Host: Screenshot response
 
-    Host->>Device: [0x02][xL][xH][yL][yH][kind]
+    Host->>Device: [0x02] start_x start_y end_x end_y duration_ms steps
     Device->>Host: [0x02][0x00]
-    Note right of Host: TAP ack
+    Note right of Host: SWIPE ack<br/>(tap uses same start/end and steps=0)
 
     Host->>Device: [0x06][0x74]
     Note left of Host: KERNEL_CMD 't'
@@ -305,21 +336,22 @@ Two checked-in tools communicate with the USB-debug interface from the host.
 A Rust CLI and MCP (Model Context Protocol) server for driving Passport Prime
 over USB. It is the most feature-complete host tool.
 
-- **Transport:** `rusb` crate. Auto-detects the vendor-specific interface (class
-  `0xFF`) by iterating the USB config descriptor. A background reader thread
-  demuxes IN frames into separate `log_rx` and `resp_rx` channels.
+- **Transport:** `usb-debug-protocol`'s `UsbDebugClient` (`rusb` under the
+  `client` feature). Auto-detects the vendor-specific interface (class `0xFF`)
+  by iterating the USB config descriptor. A background reader thread demuxes IN
+  frames into separate `log_rx` and `resp_rx` channels.
 - **Debug commands used:** All device debug commands (`0x01`–`0x0F`) through the
   CLI and MCP server.
 - **MCP tools over the debug interface:** `connect`, `disconnect`, `get_logs`,
-  `clear_logs`, `screenshot`, `tap`, `touch`, `power_button`,
+  `clear_logs`, `screenshot`, `tap`, `swipe`, `power_button`,
   `send_debug_command`, `send_kernel_command`, `reboot_to_samba`, `input_text`,
   `close_app`, `load_app`, `launch_app`, `get_developer_mode`, `get_version`,
   `get_process_list`.
 - **Additional capabilities:**
   - Device discovery: `list_ports`.
   - SAM-BA bootloader mode: flash read / write / verify (via `sambuca` crate).
-  - HID APDU exchange: CTAP/FIDO mode (usage page `0xF1D0`) and Ledger mode
-    (VID `0x2C97`, usage page `0xFFA0`) on Interface 0.
+  - HID APDU exchange: CTAP/FIDO mode (normal VID:PID, usage page `0xF1D0`) and
+    Ledger mode (VID `0x2C97`, usage page `0xFFA0` on Interface 0).
 
 **MCP tools for SAM-BA mode:** `samba_list_devices`, `samba_connect`,
 `samba_disconnect`, `samba_version`, `samba_read_u32`, `samba_write_u32`,
@@ -335,8 +367,8 @@ over USB. It is the most feature-complete host tool.
 A Rust TUI application built with `ratatui` for real-time log streaming, filtering,
 and search.
 
-- **Transport:** `rusb` crate with the same vendor interface auto-detection.
-  Auto-reconnects on device disconnect.
+- **Transport:** the shared `usb-debug-protocol` `UsbDebugClient`, with the same
+  vendor interface auto-detection. Auto-reconnects on device disconnect.
 - **Debug commands used:** `0x06` only (`KERNEL_CMD` with character `'t'` for
   compact process list snapshots).
 - **Log parsing:** Accumulates bytes from TYPE `0x01` frames, splits on `0x1E`
@@ -350,18 +382,20 @@ The SDK CLI for Flux app developers.
 
 - **`foundation logs`** — Launches `keyos-log-viewer` as a subprocess (no direct
   USB usage).
-- **`foundation sideload`** — Builds and signs the app, copies the ELF and manifest
-  to mass storage (Interface 1), then launches it through the `passport-drive`
-  MCP server. The SDK package stages that helper as `foundation-passport-drive`.
-- **Debug commands used:** `0x0A` for Developer Mode preflight and `0x09` to
-  launch the installed app, via the `passport-drive` MCP server.
+- **`foundation sideload`** — Builds and signs the app, then uploads the signed
+  bundle (`app.elf`, `manifest.json`, required `icon.bin`, and optional
+  `resources/`) through the `passport-drive` MCP `load_app` tool. The SDK
+  package stages that helper as `foundation-passport-drive`.
+- **Debug commands used:** `0x0A` for Developer Mode preflight; `0x0B`–`0x0E`
+  for usb-debug app upload; and, unless `--no-run` is passed, `0x09` to launch
+  the installed app via the `passport-drive` MCP server.
 
 ### Tool Command Matrix
 
 | Capability | passport-drive | keyos-log-viewer | foundation sideload |
 |------------|:-:|:-:|:-:|
 | `0x01` SCREENSHOT | x | | |
-| `0x02` TAP | x | | |
+| `0x02` SWIPE / tap | x | | |
 | `0x03` POWER_BTN | x | | |
 | `0x04` REBOOT_SAMBA | x | | |
 | `0x05` CLOSE_APP | x | | |
@@ -370,15 +404,14 @@ The SDK CLI for Flux app developers.
 | `0x08` GET_VERSION | x | | |
 | `0x09` LAUNCH_APP | x | | x |
 | `0x0A` GET_DEVELOPER_MODE | x | | x |
-| `0x0B` LOAD_APP_BEGIN | x | | |
-| `0x0C` LOAD_APP_FILE_BEGIN | x | | |
-| `0x0D` LOAD_APP_CHUNK | x | | |
-| `0x0E` LOAD_APP_END | x | | |
+| `0x0B` LOAD_APP_BEGIN | x | | x |
+| `0x0C` LOAD_APP_FILE_BEGIN | x | | x |
+| `0x0D` LOAD_APP_CHUNK | x | | x |
+| `0x0E` LOAD_APP_END | x | | x |
 | `0x0F` GET_PROCESS_LIST | x | | |
 | Log Streaming (TYPE 0x01) | x | x | |
 | SAM-BA Flash R/W | x | | |
 | HID APDU (CTAP + Ledger) | x | | |
-| Mass Storage (IF 1) | | | x |
 
 ---
 
@@ -390,10 +423,11 @@ The SDK CLI for Flux app developers.
 | Legacy | `0x2C97:0x0007` | While the Flux emulator is on screen (Ledger Flex identity) |
 
 The device switches between identities at runtime. When a Flux app launches,
-`gui-app-emu-flux` calls `set_custom_vid_pid(0x2C97, 0x0007)` and the USB bus
-re-enumerates with the Ledger Flex identity. When the Flux app exits, the normal
-VID:PID is restored and the bus re-enumerates again. Each transition is visible
-to the host as a USB disconnect followed by a new device appearing.
+`gui-app-emu-flux` calls `LegacyHidApi::set_legacy_mode(true)`; `os/legacy-hid`
+then calls `set_custom_vid_pid(0x2C97, 0x0007)` and the USB bus re-enumerates
+with the Ledger Flex identity. When the Flux app exits, the normal VID:PID is
+restored and the bus re-enumerates again. Each transition is visible to the host
+as a USB disconnect followed by a new device appearing.
 
 The host tools try the normal VID:PID first, then fall back to the Legacy one.
 
