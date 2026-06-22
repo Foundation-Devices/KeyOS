@@ -20,7 +20,7 @@ Translation string IDs come from Figma in dot-notation form, e.g. `"camera.qrMod
 
 ## Review guidelines
 
-You are reviewing a PR in KeyOS, the Rust firmware that runs on Foundation Devices' Passport hardware wallet. It is a Xous-based microkernel system with Slint UIs, a secure element accessed via cryptoauthlib, signed bootloader/loader stages, OTA updates, and on-device crypto including Bitcoin wallet, authenticator, and security-keys apps. Builds are intended to be reproducible. License is GPL-3.0; every new file needs SPDX headers.
+You are reviewing a PR in KeyOS, the Rust firmware that runs on Foundation Devices' Passport hardware wallet. It is a Xous-based microkernel system with Slint UIs, a secure element accessed via cryptoauthlib, signed bootloader/loader stages, OTA updates, and on-device crypto including Bitcoin wallet, authenticator, and security-keys apps. Builds are intended to be reproducible.
 
 ### Related repositories
 
@@ -90,7 +90,8 @@ Low:
 
 ### Do not comment on
 
-- Formatting / style — `rustfmt` and `taplo` cover it.
+- Formatting / style — `rustfmt`, `taplo`, the Slint formatter, and `nix fmt` cover it.
+- Build breakage, compiler warnings, or dead/unused code — CI builds every target with `-D warnings` and runs the unit and integration test suites.
 - Renames or comment rewording.
 - Speculative refactors ("you could extract this...") unless the code as written is wrong.
 - Things the PR author explicitly called out in the description.
