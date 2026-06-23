@@ -23,6 +23,7 @@ use {
 
 // mod bitcoin_core;
 mod bitcoin_keeper;
+mod bitcoin_safe;
 mod blue_wallet;
 mod btcpay;
 mod bull;
@@ -41,6 +42,7 @@ mod zeus;
 use {
     // bitcoin_core::CONNECTOR as BitcoinCore,
     bitcoin_keeper::CONNECTOR as BitcoinKeeper,
+    bitcoin_safe::CONNECTOR as BitcoinSafe,
     blue_wallet::CONNECTOR as BlueWallet,
     btcpay::CONNECTOR as BtcPay,
     bull::CONNECTOR as Bull,
@@ -533,6 +535,7 @@ register_wallets! {
     // Envoy,
     // BitcoinCore,
     BitcoinKeeper,
+    BitcoinSafe,
     BlueWallet,
     BtcPay,
     Bull,
