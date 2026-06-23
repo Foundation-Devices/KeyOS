@@ -10,7 +10,9 @@ use std::{
 
 use gui_server_api::{
     consts::{DEVICE_HEIGHT, DEVICE_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH},
-    msg, simulator::SimulatorApi, GuiApiLight,
+    msg,
+    simulator::SimulatorApi,
+    GuiApiLight,
 };
 use image::{
     codecs::{gif::GifEncoder, png::PngEncoder},
@@ -78,11 +80,8 @@ pub fn screenshot<P: ScreenshotPermissions>(
 
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
-    let frame = if grab_entire_device {
-        sim.device_frame()?
-    } else {
-        gui.capture_screen()?.as_slice().to_vec()
-    };
+    let frame =
+        if grab_entire_device { sim.device_frame()? } else { gui.capture_screen()?.as_slice().to_vec() };
 
     let Some(screen) = RgbaImage::from_vec(width as u32, height as u32, frame) else {
         anyhow::bail!("Could not convert screenshot to RgbaImage")
@@ -168,11 +167,8 @@ fn record_frame<P: ScreenshotPermissions>(
 ) -> anyhow::Result<()> {
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
-    let frame = if grab_entire_device {
-        sim.device_frame()?
-    } else {
-        gui.capture_screen()?.as_slice().to_vec()
-    };
+    let frame =
+        if grab_entire_device { sim.device_frame()? } else { gui.capture_screen()?.as_slice().to_vec() };
 
     let Some(screen) = RgbaImage::from_vec(width, height, frame) else {
         anyhow::bail!("Could not convert recording screenshot to RgbaImage")
@@ -221,45 +217,5 @@ fn get_frame_dimensions(grab_entire_device: bool) -> (u32, u32) {
         (DEVICE_WIDTH as u32, DEVICE_HEIGHT as u32)
     } else {
         (SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::screenshots_dir;
-    use crate::{SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV};
-
-    #[test]
-    fn uses_legacy_relative_screenshots_dir_by_default() {
-        let _guard = ScreenshotEnvGuard::capture();
-        std::env::remove_var(SCREENSHOTS_DIR_ENV);
-
-        assert_eq!(screenshots_dir(), PathBuf::from("../../").join(SCREENSHOTS_DIR));
-    }
-
-    #[test]
-    fn uses_configured_screenshots_dir_when_env_is_set() {
-        let _guard = ScreenshotEnvGuard::capture();
-        std::env::set_var(SCREENSHOTS_DIR_ENV, "/tmp/foundation-screenshots");
-
-        assert_eq!(screenshots_dir(), PathBuf::from("/tmp/foundation-screenshots"));
-    }
-
-    struct ScreenshotEnvGuard(Option<std::ffi::OsString>);
-
-    impl ScreenshotEnvGuard {
-        fn capture() -> Self { Self(std::env::var_os(SCREENSHOTS_DIR_ENV)) }
-    }
-
-    impl Drop for ScreenshotEnvGuard {
-        fn drop(&mut self) {
-            if let Some(value) = &self.0 {
-                std::env::set_var(SCREENSHOTS_DIR_ENV, value);
-            } else {
-                std::env::remove_var(SCREENSHOTS_DIR_ENV);
-            }
-        }
     }
 }

@@ -330,39 +330,6 @@ impl Builder {
         artifacts
     }
 
-    /// Build a host-only crate that lives in its own workspace (stock crates.io
-    /// Slint + the femtovg GPU renderer rather than the device's software-
-    /// renderer fork) and stage its binary at `<target>/<pkg>`, the path the
-    /// kernel and hosted services manifest expect.
-    fn build_excluded_host_crate(&self, pkg: &str, manifest_rel: &str) -> String {
-        let manifest = project_root().join(manifest_rel);
-        let mut command = self.base_cargo_command();
-        // Build into the crate's OWN workspace target dir, not the hosted
-        // CARGO_TARGET_DIR the kernel/services share (the SDK packager redirects
-        // CARGO_TARGET_DIR; inheriting it would scatter the binary).
-        command.env_remove("CARGO_TARGET_DIR");
-        command.arg("build").arg("--manifest-path").arg(&manifest);
-        println!("    Command: cargo ({pkg} / own workspace): {command:?}");
-        if !command.status().expect("Running Cargo for excluded host crate failed").success() {
-            panic!("{pkg} build failed");
-        }
-
-        let built = manifest.parent().unwrap().join("target/debug").join(pkg);
-        // Stage where hosted consumers look: the firmware kernel reads
-        // `<root>/target/hosted/<pkg>`, but the SDK packager redirects
-        // CARGO_TARGET_DIR and reads `$CARGO_TARGET_DIR/hosted/<pkg>`. Honor it.
-        let hosted_root = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| project_root().join("target"))
-            .join(self.profile.as_str());
-        std::fs::create_dir_all(&hosted_root).ok();
-        let dest = hosted_root.join(pkg);
-        std::fs::copy(&built, &dest).unwrap_or_else(|e| {
-            panic!("staging {pkg} binary {} -> {}: {e}", built.display(), dest.display())
-        });
-        dest.to_string_lossy().into_owned()
-    }
-
     /// apply custom configurations for gui-app packages
     fn apply_gui_app_config(&self, command: &mut Command, pkg: &str) {
         if !pkg.starts_with("gui-app") {
@@ -447,27 +414,13 @@ impl Builder {
         let target_path = self.get_target_root().to_string_lossy().into_owned();
         let mut artifacts = Vec::<String>::new();
 
-        let mut local_pkgs: Vec<&str> = packages
+        let local_pkgs: Vec<&str> = packages
             .iter()
             .filter_map(|pkg| match pkg {
                 CrateSpec::Local(name) => Some(name.as_str()),
                 _ => None,
             })
             .collect();
-
-        // The simulator control panel and its CLI live in their own workspaces
-        // (stock crates.io Slint + the femtovg GPU renderer, not the device's
-        // software-renderer fork), so they can't be built with `-p` from this
-        // workspace. Build each from its own manifest and stage the binary where
-        // the kernel expects.
-        for (pkg, manifest) in
-            [("simulator", "apps/simulator/Cargo.toml"), ("simulator-cli", "apps/simulator-cli/Cargo.toml")]
-        {
-            if let Some(pos) = local_pkgs.iter().position(|p| *p == pkg) {
-                local_pkgs.remove(pos);
-                artifacts.push(self.build_excluded_host_crate(pkg, manifest));
-            }
-        }
 
         // Build local packages
         if !local_pkgs.is_empty() {
@@ -1082,13 +1035,6 @@ pub fn is_binary_crate(crate_name: &str) -> bool {
 }
 
 pub fn get_crate_dir(crate_name: &str) -> PathBuf {
-    // simulator / simulator-cli are excluded from this workspace (they have
-    // their own, stock-Slint workspaces), so they aren't in cargo metadata.
-    match crate_name {
-        "simulator" => return project_root().join("apps/simulator"),
-        "simulator-cli" => return project_root().join("apps/simulator-cli"),
-        _ => {}
-    }
     get_package_metadata(crate_name).manifest_path.parent().unwrap().to_path_buf().into_std_path_buf()
 }
 

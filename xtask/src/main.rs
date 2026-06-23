@@ -522,16 +522,7 @@ fn check_crates(crates: Vec<String>) {
     let mut arm_crates = Vec::new();
     let mut host_crates = Vec::new();
 
-    // simulator / simulator-cli live in their own workspaces (stock Slint + GPU
-    // renderer), so they can't be checked with `-p` from this workspace. Skip
-    // them here; check them via their own manifests (e.g. `cargo check
-    // --manifest-path apps/simulator/Cargo.toml`).
-    const SEPARATE_WORKSPACE_CRATES: &[&str] = &["simulator", "simulator-cli"];
-
     for crate_name in &crates_to_check {
-        if SEPARATE_WORKSPACE_CRATES.contains(&crate_name.as_str()) {
-            continue;
-        }
         let is_host_only = HOST_ONLY_CRATES.contains(&crate_name.as_str());
         let is_arm_only = ARM_ONLY_CRATES.contains(&crate_name.as_str());
 

@@ -41,6 +41,8 @@ members = [
     "apps/gui-app-seed-vault",
     "apps/gui-app-switcher",
     "apps/gui-app-system-actions",
+    "apps/simulator",
+    "apps/simulator-cli",
     "boot/charge-boot",
     "boot/common",
     "boot/keyos-boot",
@@ -177,10 +179,6 @@ members = [
     "xtask",
     "utils/passport-drive",
 ]
-
-# The simulator control panel + its CLI are their own workspace (host-only,
-# stock Slint + GPU renderer). See apps/simulator/Cargo.toml.
-exclude = ["apps/simulator", "apps/simulator-cli"]
 
 [workspace.dependencies]
 # workspace members

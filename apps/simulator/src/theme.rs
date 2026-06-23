@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use server::{
-    CheckedPermissions, MessageAllowed, ScalarEventHandler, Server, ServerContext, ServerMessages,
-};
+use server::{CheckedPermissions, MessageAllowed, ScalarEventHandler, Server, ServerContext, ServerMessages};
 use settings::{
     global::SystemTheme,
     messages::{GetSystemTheme, SetSystemTheme, SubscribeSystemTheme},

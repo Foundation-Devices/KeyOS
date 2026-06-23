@@ -6,13 +6,9 @@ name = "simulator-cli"
 version = "0.1.0"
 edition = "2024"
 
-# Excluded from the firmware workspace (it depends on the stock-Slint simulator
-# crate); its own workspace, with explicit path deps rather than `workspace = true`.
-[workspace]
-
 [dependencies]
-app-manager = { path = "../../api/app-manager" }
-gui-server-api = { path = "../../api/gui-server" }
+app-manager = { workspace = true }
+gui-server-api = { workspace = true }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 server = { path = "../../server" }
