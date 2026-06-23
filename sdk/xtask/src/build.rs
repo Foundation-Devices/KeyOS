@@ -254,7 +254,9 @@ pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
 
     util::ensure_clean_dir(&stage_root)?;
     let targets = selected_targets(config, &args.targets)?;
-    let resolver = submodules::resolve(root, config, &args.source_overrides)?;
+    let mut source_overrides = args.source_overrides.clone();
+    submodules::apply_env_overrides(config, &mut source_overrides);
+    let resolver = submodules::resolve(root, config, &source_overrides)?;
     ensure_layout(root, config, &resolver, args.verbose)?;
 
     let host_target = host_triple();
@@ -285,16 +287,20 @@ pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
 }
 
 pub fn check_layout(root: &Path, config: &Config, args: &CheckLayoutArgs) -> Result<()> {
-    submodules::check_all(root, config, &args.source_overrides)?;
-    let resolver = submodules::resolve(root, config, &args.source_overrides)?;
+    let mut source_overrides = args.source_overrides.clone();
+    submodules::apply_env_overrides(config, &mut source_overrides);
+    submodules::check_all(root, config, &source_overrides)?;
+    let resolver = submodules::resolve(root, config, &source_overrides)?;
     ensure_layout(root, config, &resolver, args.verbose)?;
     println!("layout OK");
     Ok(())
 }
 
 pub fn smoke_check(root: &Path, config: &Config, args: &SmokeCheckArgs) -> Result<()> {
-    submodules::check_all(root, config, &args.source_overrides)?;
-    let resolver = submodules::resolve(root, config, &args.source_overrides)?;
+    let mut source_overrides = args.source_overrides.clone();
+    submodules::apply_env_overrides(config, &mut source_overrides);
+    submodules::check_all(root, config, &source_overrides)?;
+    let resolver = submodules::resolve(root, config, &source_overrides)?;
     ensure_layout(root, config, &resolver, args.verbose)?;
 
     let resolved_sign_key =

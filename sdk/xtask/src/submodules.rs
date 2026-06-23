@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 use std::cmp::Reverse;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::config::{boxed_err, Config, Result, SubmoduleConfig};
+use crate::config::{boxed_err, Config, Result};
 use crate::util;
 
 pub type SourceOverrides = BTreeMap<String, PathBuf>;
@@ -73,12 +74,30 @@ impl SourceResolver {
     }
 }
 
+/// Fill `overrides` from the environment for any source not already set, so
+/// explicit flags win over `KEYOS_DIR` and the per-submodule env overrides.
+pub fn apply_env_overrides(config: &Config, overrides: &mut SourceOverrides) {
+    if let Entry::Vacant(entry) = overrides.entry(KEYOS_SOURCE_NAME.to_string()) {
+        if let Some(path) = env::var_os(KEYOS_OVERRIDE_ENV) {
+            entry.insert(PathBuf::from(path));
+        }
+    }
+
+    for (name, submodule) in &config.submodules {
+        if let Entry::Vacant(entry) = overrides.entry(name.clone()) {
+            if let Some(path) = env::var_os(&submodule.env_override) {
+                entry.insert(PathBuf::from(path));
+            }
+        }
+    }
+}
+
 pub fn resolve(root: &Path, config: &Config, overrides: &SourceOverrides) -> Result<SourceResolver> {
     let mut submodules = BTreeMap::new();
     let keyos_root = active_keyos_root(root, overrides.get(KEYOS_SOURCE_NAME).map(PathBuf::as_path))?;
 
     for (name, submodule) in &config.submodules {
-        let override_path = active_override(root, submodule, overrides.get(name).map(PathBuf::as_path));
+        let override_path = absolute_override(root, overrides.get(name).map(PathBuf::as_path));
         let resolved_from =
             if override_path.is_some() { ResolvedFrom::Override } else { ResolvedFrom::Submodule };
         let path = override_path.unwrap_or_else(|| root.join(&submodule.path));
@@ -97,7 +116,7 @@ pub fn check_all(root: &Path, config: &Config, overrides: &SourceOverrides) -> R
     let contents = gitmodules.exists().then(|| fs::read_to_string(&gitmodules)).transpose()?;
     let mut errors = Vec::new();
 
-    if let Some(path) = active_keyos_override(root, overrides.get(KEYOS_SOURCE_NAME).map(PathBuf::as_path)) {
+    if let Some(path) = absolute_override(root, overrides.get(KEYOS_SOURCE_NAME).map(PathBuf::as_path)) {
         if !path.exists() {
             errors
                 .push(format!("{KEYOS_OVERRIDE_ENV} override for keyos does not exist: {}", path.display()));
@@ -107,7 +126,7 @@ pub fn check_all(root: &Path, config: &Config, overrides: &SourceOverrides) -> R
     }
 
     for (name, submodule) in &config.submodules {
-        if let Some(path) = active_override(root, submodule, overrides.get(name).map(PathBuf::as_path)) {
+        if let Some(path) = absolute_override(root, overrides.get(name).map(PathBuf::as_path)) {
             if !path.exists() {
                 errors.push(format!(
                     "{} override for {} does not exist: {}",
@@ -189,7 +208,7 @@ pub fn check_all(root: &Path, config: &Config, overrides: &SourceOverrides) -> R
 }
 
 fn active_keyos_root(root: &Path, explicit_override: Option<&Path>) -> Result<PathBuf> {
-    if let Some(path) = active_keyos_override(root, explicit_override) {
+    if let Some(path) = absolute_override(root, explicit_override) {
         return Ok(path);
     }
 
@@ -198,24 +217,8 @@ fn active_keyos_root(root: &Path, explicit_override: Option<&Path>) -> Result<Pa
         .ok_or_else(|| boxed_err("sdk workspace root does not have a parent KeyOS source directory"))
 }
 
-fn active_keyos_override(root: &Path, explicit_override: Option<&Path>) -> Option<PathBuf> {
-    if let Some(path) = explicit_override {
-        return Some(util::absolute_path(root, path));
-    }
-
-    env::var_os(KEYOS_OVERRIDE_ENV).map(PathBuf::from).map(|path| util::absolute_path(root, &path))
-}
-
-fn active_override(
-    root: &Path,
-    submodule: &SubmoduleConfig,
-    explicit_override: Option<&Path>,
-) -> Option<PathBuf> {
-    if let Some(path) = explicit_override {
-        return Some(util::absolute_path(root, path));
-    }
-
-    env::var_os(&submodule.env_override).map(PathBuf::from).map(|path| util::absolute_path(root, &path))
+fn absolute_override(root: &Path, explicit_override: Option<&Path>) -> Option<PathBuf> {
+    explicit_override.map(|path| util::absolute_path(root, path))
 }
 
 #[cfg(test)]

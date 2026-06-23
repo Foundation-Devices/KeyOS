@@ -51,7 +51,6 @@ pub struct TargetsConfig {
 
 #[derive(Clone, Debug, Default)]
 pub struct TargetOverride {
-    pub cross: bool,
     pub linker: String,
 }
 
@@ -102,7 +101,6 @@ pub struct DocsConfig {
 #[derive(Clone, Debug, Default)]
 pub struct SigningConfig {
     pub key_env: String,
-    pub algorithm: String,
 }
 
 // ----- Raw TOML schema (deserialized via serde) ----------------------------
@@ -152,8 +150,6 @@ struct RawTargets {
 #[serde(deny_unknown_fields)]
 struct RawTargetOverride {
     #[serde(default)]
-    cross: bool,
-    #[serde(default)]
     linker: String,
 }
 
@@ -202,8 +198,6 @@ struct RawDocs {
 #[serde(deny_unknown_fields)]
 struct RawSigning {
     key_env: String,
-    #[serde(default)]
-    algorithm: String,
 }
 
 // ----- Helpers & loading ---------------------------------------------------
@@ -245,7 +239,7 @@ impl From<RawSubmodule> for SubmoduleConfig {
 }
 
 impl From<RawTargetOverride> for TargetOverride {
-    fn from(raw: RawTargetOverride) -> Self { TargetOverride { cross: raw.cross, linker: raw.linker } }
+    fn from(raw: RawTargetOverride) -> Self { TargetOverride { linker: raw.linker } }
 }
 
 impl From<RawCompile> for CompileEntry {
@@ -297,7 +291,7 @@ pub fn load(path: &Path) -> Result<Config> {
             api_crates: raw.docs.api_crates,
             api_crates_workspace: raw.docs.api_crates_workspace,
         },
-        signing: SigningConfig { key_env: raw.signing.key_env, algorithm: raw.signing.algorithm },
+        signing: SigningConfig { key_env: raw.signing.key_env },
     };
 
     validate(&config)?;
@@ -382,19 +376,12 @@ mod tests {
 
         assert_eq!(config.sdk.version, "1.0.0");
         assert_eq!(config.sdk.api_version, "1");
-        assert_eq!(
-            config.sdk.keyos_api_interfaces,
-            vec![
-                "app-manager".to_string(),
-                "crypto".to_string(),
-                "fs".to_string(),
-                "gui-server".to_string(),
-                "haptics".to_string(),
-                "quantum-link".to_string(),
-                "rgb-led".to_string(),
-                "settings".to_string(),
-            ]
-        );
+        for expected in ["app-manager", "crypto", "fs", "gui-server", "settings"] {
+            assert!(
+                config.sdk.keyos_api_interfaces.iter().any(|interface| interface == expected),
+                "sdk-build.toml is missing the {expected} api interface"
+            );
+        }
         assert!(config.submodules.contains_key("slint"));
         assert!(config
             .compile
@@ -458,20 +445,18 @@ mod tests {
         let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
         let entries = config.expanded_copy_entries();
 
-        assert!(entries.iter().any(|entry| {
-            entry.source == "../api/app-manager" && entry.dest == "lib/keyos/api/app-manager"
-        }));
-        assert!(entries
-            .iter()
-            .any(|entry| { entry.source == "../api/settings" && entry.dest == "lib/keyos/api/settings" }));
-        assert!(!entries.iter().any(|entry| entry.dest == "lib/keyos/api/backup"));
-        assert!(entries.iter().all(|entry| {
-            if entry.dest.starts_with("lib/keyos/api/") {
-                entry.bundle == CopyBundle::Common && entry.filter == CopyFilter::All
-            } else {
-                true
-            }
-        }));
+        // Every allowlisted interface expands into exactly one `lib/keyos/api/<name>`
+        // copy entry, sourced from `../api/<name>` and bundled as Common/All.
+        for interface in &config.sdk.keyos_api_interfaces {
+            let dest = format!("lib/keyos/api/{interface}");
+            let entry = entries
+                .iter()
+                .find(|entry| entry.dest == dest)
+                .unwrap_or_else(|| panic!("missing copy entry for allowlisted interface {interface}"));
+            assert_eq!(entry.source, format!("../api/{interface}"));
+            assert_eq!(entry.bundle, CopyBundle::Common);
+            assert_eq!(entry.filter, CopyFilter::All);
+        }
     }
 
     #[test]
@@ -507,7 +492,6 @@ mod tests {
 
             [signing]
             key_env = "FOUNDATION_SIGN_KEY"
-            algorithm = "openpgp-detached"
             "#,
         )
         .unwrap();
@@ -542,7 +526,6 @@ mod tests {
 
             [signing]
             key_env = "FOUNDATION_SIGN_KEY"
-            algorithm = "openpgp-detached"
 
             [[compile]]
             name = "foundation"

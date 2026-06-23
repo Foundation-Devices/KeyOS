@@ -33,6 +33,22 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/setup-nix-rust
-      
+
       - run: |
           nix develop .#build --command just check-recovery
+
+  test-sdk:
+    name: Test SDK workspaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-nix-rust
+
+      # The SDK is a self-contained Nix-first tree; enter its own maintainer
+      # flake (sdk/flake.nix) rather than the parent workspace shell.
+      - name: Test foundation CLI workspace
+        working-directory: sdk
+        run: nix develop --command cargo test --manifest-path crates/cli/Cargo.toml --workspace
+      - name: Test SDK xtask workspace
+        working-directory: sdk
+        run: nix develop --command cargo test --manifest-path Cargo.toml --workspace

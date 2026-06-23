@@ -57,7 +57,9 @@ fn run() -> Result<()> {
         }
         "clean" => clean(&root),
         "check-submodules" => {
-            submodules::check_all(&root, &config, &BTreeMap::new())?;
+            let mut overrides = BTreeMap::new();
+            submodules::apply_env_overrides(&config, &mut overrides);
+            submodules::check_all(&root, &config, &overrides)?;
             println!("submodules OK");
             Ok(())
         }

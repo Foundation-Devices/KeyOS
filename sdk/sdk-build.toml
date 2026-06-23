@@ -16,7 +16,6 @@ env_override = "SLINT_DIR"
 triples = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
 [targets.overrides."aarch64-unknown-linux-gnu"]
-cross = true
 linker = "aarch64-unknown-linux-gnu-gcc"
 
 [[compile]]
@@ -188,4 +187,3 @@ api_crates_workspace = ["foundation-manifest"]
 
 [signing]
 key_env = "FOUNDATION_SIGN_KEY"
-algorithm = "openpgp-detached"

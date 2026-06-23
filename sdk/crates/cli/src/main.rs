@@ -11,8 +11,6 @@ mod cargo_support;
 mod cli;
 mod commands;
 mod slint_codegen;
-#[cfg(test)]
-mod test_support;
 
 #[tokio::main]
 async fn main() {

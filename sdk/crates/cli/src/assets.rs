@@ -18,6 +18,15 @@ const IMAGES_DIR: &str = "images";
 const FONTS_DIR: &str = "fonts";
 
 pub fn stage_hardware_assets(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<PathBuf> {
+    stage_hardware_assets_with_tool(config, project_root, output_dir, &AssetTool::resolve()?)
+}
+
+fn stage_hardware_assets_with_tool(
+    config: &AppConfig,
+    project_root: &Path,
+    output_dir: &Path,
+    tool: &AssetTool,
+) -> Result<PathBuf> {
     let resources_dir = output_dir.join(RESOURCES_DIR);
     let legacy_assets_dir = output_dir.join(LEGACY_BUILD_ASSETS_DIR);
 
@@ -35,34 +44,39 @@ pub fn stage_hardware_assets(config: &AppConfig, project_root: &Path, output_dir
     fs::create_dir_all(&resources_dir)
         .with_context(|| format!("Failed to create app resources directory {}", resources_dir.display()))?;
 
-    stage_icon(config, project_root, output_dir)?;
-    stage_bundled_icon(config, project_root, output_dir)?;
-    stage_images(project_root, &resources_dir)?;
+    stage_icon(config, project_root, output_dir, tool)?;
+    stage_bundled_icon(config, project_root, output_dir, tool)?;
+    stage_images(project_root, &resources_dir, tool)?;
     stage_fonts(project_root, &resources_dir)?;
 
     Ok(resources_dir)
 }
 
-fn stage_icon(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<()> {
+fn stage_icon(config: &AppConfig, project_root: &Path, output_dir: &Path, tool: &AssetTool) -> Result<()> {
     let icon_source = project_root.join(&config.icon);
     let icon_destination = output_dir.join(config.manifest_icon_file());
-    convert_image_file(&icon_source, &icon_destination)
+    convert_image_file(&icon_source, &icon_destination, tool)
 }
 
-fn stage_bundled_icon(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<()> {
+fn stage_bundled_icon(
+    config: &AppConfig,
+    project_root: &Path,
+    output_dir: &Path,
+    tool: &AssetTool,
+) -> Result<()> {
     let icon_source = project_root.join(&config.icon);
     let icon_destination = output_dir.join(BUNDLED_ICON_FILE);
-    convert_image_file(&icon_source, &icon_destination)
+    convert_image_file(&icon_source, &icon_destination, tool)
 }
 
-fn stage_images(project_root: &Path, resources_dir: &Path) -> Result<()> {
+fn stage_images(project_root: &Path, resources_dir: &Path, tool: &AssetTool) -> Result<()> {
     let output_root = resources_dir.join(IMAGES_DIR);
 
-    stage_image_source_dir(&project_root.join(RESOURCES_DIR).join(IMAGES_DIR), &output_root)?;
-    stage_image_source_dir(&project_root.join(IMAGES_DIR), &output_root)
+    stage_image_source_dir(&project_root.join(RESOURCES_DIR).join(IMAGES_DIR), &output_root, tool)?;
+    stage_image_source_dir(&project_root.join(IMAGES_DIR), &output_root, tool)
 }
 
-fn stage_image_source_dir(images_dir: &Path, output_root: &Path) -> Result<()> {
+fn stage_image_source_dir(images_dir: &Path, output_root: &Path, tool: &AssetTool) -> Result<()> {
     if should_skip_asset_source_dir(&images_dir)? {
         return Ok(());
     }
@@ -76,7 +90,7 @@ fn stage_image_source_dir(images_dir: &Path, output_root: &Path) -> Result<()> {
             .parent()
             .and_then(|parent| parent.strip_prefix(&images_dir).ok())
             .unwrap_or_else(|| Path::new(""));
-        convert_image_to_raw_dir(&image_path, &output_root.join(relative_parent))?;
+        convert_image_to_raw_dir(&image_path, &output_root.join(relative_parent), tool)?;
     }
 
     Ok(())
@@ -108,8 +122,9 @@ fn stage_font_source_dir(fonts_dir: &Path, output_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn convert_image_file(source: &Path, destination: &Path) -> Result<()> {
-    let output = asset_tool_command()?
+fn convert_image_file(source: &Path, destination: &Path, tool: &AssetTool) -> Result<()> {
+    let output = tool
+        .command()
         .arg("raw-image-file")
         .arg(source)
         .arg(destination)
@@ -119,8 +134,9 @@ fn convert_image_file(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn convert_image_to_raw_dir(source: &Path, destination_dir: &Path) -> Result<()> {
-    let output = asset_tool_command()?
+fn convert_image_to_raw_dir(source: &Path, destination_dir: &Path, tool: &AssetTool) -> Result<()> {
+    let output = tool
+        .command()
         .arg("raw-image-dir")
         .arg(source)
         .arg(destination_dir)
@@ -130,31 +146,50 @@ fn convert_image_to_raw_dir(source: &Path, destination_dir: &Path) -> Result<()>
     Ok(())
 }
 
-fn asset_tool_command() -> Result<Command> {
-    if let Some(path) = std::env::var_os(ASSET_TOOL_ENV) {
-        return Ok(Command::new(path));
+/// A resolved invocation of the asset-conversion helper. Resolved once per
+/// staging run so the lookup (env override, SDK tree, sibling binary, source
+/// build) happens a single time rather than per converted asset.
+enum AssetTool {
+    Binary(PathBuf),
+    CargoManifest(PathBuf),
+}
+
+impl AssetTool {
+    fn resolve() -> Result<Self> {
+        if let Some(path) = std::env::var_os(ASSET_TOOL_ENV) {
+            return Ok(Self::Binary(path.into()));
+        }
+
+        if let Ok(sdk) = SdkRoot::discover() {
+            if let Some(path) = sdk.tool_path(&[ASSET_TOOL_BINARY]) {
+                return Ok(Self::Binary(path));
+            }
+        }
+
+        if let Some(path) = current_exe_sibling_asset_tool() {
+            return Ok(Self::Binary(path));
+        }
+
+        let source_manifest = source_asset_tool_manifest();
+        if source_manifest.exists() {
+            return Ok(Self::CargoManifest(source_manifest));
+        }
+
+        bail!(
+            "{ASSET_TOOL_BINARY} not found. Reinstall the Foundation SDK or set {ASSET_TOOL_ENV} to the helper binary path."
+        )
     }
 
-    if let Ok(sdk) = SdkRoot::discover() {
-        if let Some(path) = sdk.tool_path(&[ASSET_TOOL_BINARY]) {
-            return Ok(Command::new(path));
+    fn command(&self) -> Command {
+        match self {
+            Self::Binary(path) => Command::new(path),
+            Self::CargoManifest(manifest) => {
+                let mut command = Command::new("cargo");
+                command.arg("run").arg("--quiet").arg("--manifest-path").arg(manifest).arg("--");
+                command
+            }
         }
     }
-
-    if let Some(path) = current_exe_sibling_asset_tool() {
-        return Ok(Command::new(path));
-    }
-
-    let source_manifest = source_asset_tool_manifest();
-    if source_manifest.exists() {
-        let mut command = Command::new("cargo");
-        command.arg("run").arg("--quiet").arg("--manifest-path").arg(source_manifest).arg("--");
-        return Ok(command);
-    }
-
-    bail!(
-        "{ASSET_TOOL_BINARY} not found. Reinstall the Foundation SDK or set {ASSET_TOOL_ENV} to the helper binary path."
-    )
 }
 
 fn current_exe_sibling_asset_tool() -> Option<PathBuf> {
@@ -277,13 +312,56 @@ fn is_supported_font(path: &Path) -> bool {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::{AppId, PermissionsConfig, PublisherConfig};
     use semver::Version;
 
-    use super::stage_hardware_assets;
+    use super::{stage_hardware_assets_with_tool, AssetTool};
     use crate::assets::{is_supported_font, is_supported_image};
+
+    const ASSET_TOOL_STUB: &str = r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'foundation-asset-tool 1.0.0-fake'
+  exit 0
+fi
+cmd="$1"
+source="$2"
+destination="$3"
+case "$cmd" in
+  raw-image-file)
+    mkdir -p "$(dirname "$destination")"
+    cp "$source" "$destination"
+    ;;
+  raw-image-dir)
+    mkdir -p "$destination"
+    base=$(basename "$source")
+    stem=${base%.*}
+    cp "$source" "$destination/$stem.raw"
+    ;;
+esac
+"#;
+
+    // A stub script standing in for the conversion helper, so the test stays in
+    // process and never reaches for the unbuilt helper binary.
+    fn asset_tool_stub() -> AssetTool {
+        static STUB: OnceLock<PathBuf> = OnceLock::new();
+        let script = STUB.get_or_init(|| {
+            let dir = make_temp_dir("asset-tool-stub");
+            let script = dir.join("foundation-asset-tool");
+            fs::write(&script, ASSET_TOOL_STUB).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&script).unwrap().permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&script, perms).unwrap();
+            }
+            script
+        });
+        AssetTool::Binary(script.clone())
+    }
 
     #[test]
     fn stages_icon_images_and_fonts_for_hardware() {
@@ -296,7 +374,8 @@ mod tests {
         fs::write(root.join("fonts").join("Brand.ttf"), b"font").unwrap();
 
         let output_dir = root.join("target").join("keyos").join("demo-app");
-        let resources_dir = stage_hardware_assets(&app_config(), &root, &output_dir).unwrap();
+        let resources_dir =
+            stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
 
         assert!(resources_dir.join(".foundation").join("icon.raw").exists());
         assert!(output_dir.join("icon.bin").exists());
@@ -316,7 +395,8 @@ mod tests {
         create_dir_symlink(&sdk_shared.join("images"), &root.join("resources").join("images")).unwrap();
 
         let output_dir = root.join("target").join("keyos").join("demo-app");
-        let resources_dir = stage_hardware_assets(&app_config(), &root, &output_dir).unwrap();
+        let resources_dir =
+            stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
 
         assert!(resources_dir.join(".foundation").join("icon.raw").exists());
         assert!(output_dir.join("icon.bin").exists());

@@ -67,7 +67,7 @@ pub fn execute() -> Result<()> {
     inject_sideloaded_app(&sdk, config, project_root, sideloaded_dir)?;
 
     println!("Starting KeyOS simulator...");
-    launch_simulator(&sdk, &dest_dir, app_id_hex, project_root, &app_elf_root)?;
+    launch_simulator(&sdk, &dest_dir, app_id_hex, project_root, &app_elf_root, &find_in_path)?;
 
     println!();
     println!("Application deployed and simulator started.");
@@ -244,6 +244,7 @@ fn launch_simulator(
     app_id_hex: &str,
     project_root: &Path,
     app_elf_root: &Path,
+    find_tool: &dyn Fn(&str) -> Option<PathBuf>,
 ) -> Result<()> {
     let screenshots_dir = simulator_screenshots_dir(sdk, project_root);
 
@@ -263,21 +264,23 @@ fn launch_simulator(
     // the same target/apps/ directory where we staged the app. The bundled
     // foundation-simulator on PATH uses its own directory layout that won't find apps
     // staged for repo development.
-    if matches!(sdk.layout(), SdkLayout::Repo) && find_in_path("just").is_some() {
-        let mut command = Command::new("just");
-        command.arg("sim");
-        return run_simulator_command(
-            command,
-            format!("`just sim` from {}", sdk.keyos_root().display()),
-            &sdk.keyos_root(),
-            staged_dir,
-            app_id_hex,
-            None,
-            app_elf_root,
-        );
+    if matches!(sdk.layout(), SdkLayout::Repo) {
+        if let Some(just) = find_tool("just") {
+            let mut command = Command::new(&just);
+            command.arg("sim");
+            return run_simulator_command(
+                command,
+                format!("`just sim` from {}", sdk.keyos_root().display()),
+                &sdk.keyos_root(),
+                staged_dir,
+                app_id_hex,
+                None,
+                app_elf_root,
+            );
+        }
     }
 
-    if let Some(path) = find_in_path("foundation-simulator") {
+    if let Some(path) = find_tool("foundation-simulator") {
         return run_simulator_command(
             Command::new(&path),
             format!("simulator on PATH at {}", path.display()),
@@ -584,7 +587,6 @@ fn simulator_screenshots_dir(sdk: &SdkRoot, project_root: &Path) -> Option<PathB
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
@@ -596,11 +598,9 @@ mod tests {
         drain_pending_control_events, launch_simulator, parse_control_line, simulator_screenshots_dir,
         ControlEvent, APP_ELF_ROOT_ENV, SCREENSHOTS_DIR_ENV,
     };
-    use crate::test_support::PROCESS_LOCK;
 
     #[test]
     fn launches_bundled_simulator_from_bundle_layout() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
         let sdk_root = make_bundle_sdk_root("bundle-launch");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let staged_dir = sdk_root.join("target").join("apps").join("demo");
@@ -629,8 +629,15 @@ mod tests {
         }
 
         let app_elf_root = sdk_root.join("elf-root");
-        launch_simulator(&sdk, &staged_dir, "0x00112233", &sdk_root.join("example-app"), &app_elf_root)
-            .unwrap();
+        launch_simulator(
+            &sdk,
+            &staged_dir,
+            "0x00112233",
+            &sdk_root.join("example-app"),
+            &app_elf_root,
+            &|_| None,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::canonicalize(fs::read_to_string(sdk_root.join("simulator.log")).unwrap().trim()).unwrap(),
@@ -651,8 +658,6 @@ mod tests {
 
     #[test]
     fn falls_back_to_just_sim_for_repo_layout() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-        let _path_guard = PathGuard::capture();
         let sdk_root = make_repo_sdk_root("repo-launch");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let staged_dir = sdk_root.join("staged-app");
@@ -682,12 +687,17 @@ mod tests {
             fs::set_permissions(&just, perms).unwrap();
         }
 
-        let path = std::env::join_paths([fake_bin.clone()]).unwrap();
-        std::env::set_var("PATH", path);
-
         let app_elf_root = sdk_root.join("elf-root");
-        launch_simulator(&sdk, &staged_dir, "0xaabbccdd", &sdk_root.join("example-app"), &app_elf_root)
-            .unwrap();
+        let find_tool = |command: &str| (command == "just").then(|| just.clone());
+        launch_simulator(
+            &sdk,
+            &staged_dir,
+            "0xaabbccdd",
+            &sdk_root.join("example-app"),
+            &app_elf_root,
+            &find_tool,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::canonicalize(fs::read_to_string(sdk_root.join("just-sim.log")).unwrap().trim()).unwrap(),
@@ -750,22 +760,6 @@ mod tests {
         assert_eq!(simulator_screenshots_dir(&sdk, &sdk_root.join("demo-app")), None);
 
         cleanup(sdk_root.parent().unwrap());
-    }
-
-    struct PathGuard(Option<OsString>);
-
-    impl PathGuard {
-        fn capture() -> Self { Self(std::env::var_os("PATH")) }
-    }
-
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            if let Some(path) = &self.0 {
-                std::env::set_var("PATH", path);
-            } else {
-                std::env::remove_var("PATH");
-            }
-        }
     }
 
     fn make_bundle_sdk_root(label: &str) -> PathBuf {

@@ -433,7 +433,6 @@ mod tests {
 
     use super::{apply_template, initialize_git_repo, is_git_available, GitInitStatus, PromptConfig};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
-    use crate::test_support::PROCESS_LOCK;
 
     #[test]
     fn apply_template_uses_explicit_sdk_keyos_root_variable() {
@@ -500,11 +499,10 @@ mod tests {
     #[test]
     #[ignore = "requires ~/.foundation/themes/rust populated and nightly cargo; run with --ignored"]
     fn scaffolded_default_app_compiles_with_generated_theme_module() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         let project_root = make_temp_dir("scaffold-compile");
         let project_path = project_root.join("demo-app");
+        let home = project_root.join("home");
 
         fs::create_dir_all(&project_path).unwrap();
         let config = PromptConfig {
@@ -526,14 +524,15 @@ mod tests {
         prepare_project_for_build(&project_path, &sdk).unwrap();
 
         // The scaffolded app's build.rs resolves FOUNDATION_THEMES_RUST_DIR,
-        // falling back to ~/.foundation/themes/rust, which is exactly where
+        // falling back to <home>/.foundation/themes/rust, which is exactly where
         // `foundation themes build` writes in real use. Generate the base
         // themes there so the compile check mirrors a real environment.
-        generate_base_themes_into_home(&sdk);
+        generate_base_themes_into_home(&sdk, &home);
 
         let output = Command::new("cargo")
             .arg("check")
             .current_dir(&project_path)
+            .env("HOME", &home)
             .env(
                 "FOUNDATION_THEMES_RUST_DIR",
                 project_path.join("target").join("foundation").join("themes").join("rust"),
@@ -552,13 +551,12 @@ mod tests {
         cleanup(&project_root);
     }
 
-    /// Generate the SDK's base theme JSON into ~/.foundation/themes/rust, the
-    /// default location the template build.rs falls back to. Used by the
+    /// Generate the SDK's base theme JSON into `<home>/.foundation/themes/rust`,
+    /// the default location the template build.rs falls back to. Used by the
     /// scaffold compile tests (which build through a nix shell that scrubs the
     /// FOUNDATION_THEMES_RUST_DIR override, leaving only the fallback path).
-    fn generate_base_themes_into_home(sdk: &SdkRoot) {
-        let home = std::env::var("HOME").expect("HOME is set");
-        let rust_dir = Path::new(&home).join(".foundation").join("themes").join("rust");
+    fn generate_base_themes_into_home(sdk: &SdkRoot, home: &Path) {
+        let rust_dir = home.join(".foundation").join("themes").join("rust");
         let json_dir = sdk.keyos_root().join("sdk").join("crates").join("foundation-themes").join("themes");
         let manifest =
             sdk.keyos_root().join("sdk").join("crates").join("foundation-themes").join("Cargo.toml");
@@ -577,7 +575,7 @@ mod tests {
             // Pin HOME so a nix-wrapped `cargo run` doesn't write to a build
             // sandbox home. The scaffolded app's build.rs falls back to
             // $HOME/.foundation/themes/rust, so both must agree.
-            .env("HOME", &home)
+            .env("HOME", home)
             .output()
             .unwrap();
         assert!(gen.status.success(), "theme compiler failed:\n{}", String::from_utf8_lossy(&gen.stderr));
@@ -593,11 +591,10 @@ mod tests {
     #[test]
     #[ignore = "requires ~/.foundation/themes/rust populated and nightly cargo; run with --ignored"]
     fn scaffolded_multi_page_app_compiles_with_light_template_theme() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         let project_root = make_temp_dir("scaffold-multi-page-compile");
         let project_path = project_root.join("demo-app");
+        let home = project_root.join("home");
 
         fs::create_dir_all(&project_path).unwrap();
         let config = PromptConfig {
@@ -623,11 +620,12 @@ mod tests {
         assert!(theme_rs.contains("foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);"));
         assert!(!project_path.join("theme").join("theme.json").exists());
 
-        generate_base_themes_into_home(&sdk);
+        generate_base_themes_into_home(&sdk, &home);
 
         let output = Command::new("cargo")
             .arg("check")
             .current_dir(&project_path)
+            .env("HOME", &home)
             .env(
                 "FOUNDATION_THEMES_RUST_DIR",
                 project_path.join("target").join("foundation").join("themes").join("rust"),
@@ -648,7 +646,6 @@ mod tests {
 
     #[test]
     fn initialize_git_repo_runs_git_init_when_available() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
         if !is_git_available() {
             return;
         }

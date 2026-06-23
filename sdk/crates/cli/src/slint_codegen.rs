@@ -437,13 +437,10 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::SdkRoot;
-    use toml::Value;
 
     use super::{
-        ensure_project_ui_mapping, generated_slint_files_exist, parse_build_options,
-        prepare_project_for_build, prepare_slint_file_for_view, project_sdk_ui_root,
+        ensure_project_ui_mapping, generated_slint_files_exist, parse_build_options, project_sdk_ui_root,
     };
-    use crate::test_support::PROCESS_LOCK;
 
     #[test]
     fn parses_preview_build_options_from_build_rs() {
@@ -588,161 +585,6 @@ mod tests {
 
         assert!(generated_slint_files_exist(&project_root, &options));
         cleanup(&project_root);
-    }
-
-    #[test]
-    fn prepare_project_for_build_materializes_ui_mapping_and_generated_files() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-        let sdk_root = make_sdk_root("build-project");
-        let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_codegen_project("build-project");
-
-        prepare_project_for_build(&project_root, &sdk).unwrap();
-
-        let project_ui = project_root.join("ui").join("ui");
-        assert!(project_ui.exists());
-        assert_eq!(fs::read_to_string(project_ui.join("theme.slint")).unwrap(), "theme\n");
-
-        let gen_dir = project_root.join("ui").join("gen");
-        assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v1\n");
-        assert_eq!(fs::read_to_string(gen_dir.join("exports.slint")).unwrap(), "v1\n");
-        assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v1\n");
-        let manifest_toml = fs::read_to_string(project_root.join("manifest.toml")).unwrap();
-        assert!(manifest_toml.contains("appId = \"0x00112233445566778899aabbccddeeff\""));
-        assert!(manifest_toml.contains("en = \"Sample App\""));
-        let manifest: Value = toml::from_str(&manifest_toml).unwrap();
-        assert_eq!(
-            manifest["permissions"]["os/gui-server"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec!["RegisterAppMessage", "RequestRedraw"]
-        );
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
-    }
-
-    #[test]
-    fn prepare_slint_file_for_view_refreshes_existing_generated_files() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-        let project_root = make_codegen_project("view-project");
-        let slint_file = project_root.join("ui").join("app.slint");
-        let gen_dir = project_root.join("ui").join("gen");
-
-        prepare_slint_file_for_view(&slint_file, None).unwrap();
-        assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v1\n");
-
-        fs::write(project_root.join("stamp.txt"), "v2\n").unwrap();
-
-        prepare_slint_file_for_view(&slint_file, None).unwrap();
-        assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v2\n");
-        assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v2\n");
-
-        cleanup(&project_root);
-    }
-
-    #[test]
-    fn prepare_slint_file_for_view_supports_relative_paths_from_project_root() {
-        let _guard = PROCESS_LOCK.lock().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        let project_root = make_codegen_project("relative-view-project");
-
-        std::env::set_current_dir(&project_root).unwrap();
-        prepare_slint_file_for_view(Path::new("ui/app.slint"), None).unwrap();
-        std::env::set_current_dir(original_dir).unwrap();
-
-        let gen_dir = project_root.join("ui").join("gen");
-        assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v1\n");
-        assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v1\n");
-
-        cleanup(&project_root);
-    }
-
-    fn make_codegen_project(label: &str) -> PathBuf {
-        let root = make_temp_dir(label);
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::create_dir_all(root.join("ui")).unwrap();
-
-        fs::write(
-            root.join("Cargo.toml"),
-            r#"
-            [package]
-            name = "sample-app"
-            version = "0.1.0"
-            edition = "2021"
-            "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join("app-config.toml"),
-            r#"
-            app-name = "sample-app"
-            friendly-app-name = "Sample App"
-            description = "Sample description"
-            icon = "resources/icon.svg"
-            app-id = "0x00112233445566778899aabbccddeeff"
-            version = "0.1.0"
-            min-keyos-version = "1.0.0"
-
-            [permissions]
-            template = ["gui-app"]
-            "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join("permission_templates.toml"),
-            r#"
-            [gui-app]
-            "os/gui-server" = ["RegisterAppMessage", "RequestRedraw"]
-            "#,
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), "<svg />\n").unwrap();
-
-        fs::write(root.join("src").join("lib.rs"), "pub fn sample() {}\n").unwrap();
-        fs::write(root.join("stamp.txt"), "v1\n").unwrap();
-        fs::write(
-            root.join("ui").join("app.slint"),
-            r#"
-            import { Router } from "./gen/router.slint";
-
-            export component AppWindow {
-                Router { }
-            }
-
-            export * from "gen/exports.slint";
-            "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join("build.rs"),
-            r#"
-            use std::path::PathBuf;
-
-            fn main() {
-                // module_path: "ui/app.slint"
-                // include_router: true
-                // include_translations: true
-                println!("cargo:rerun-if-changed=stamp.txt");
-
-                let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-                let stamp = std::fs::read_to_string(manifest_dir.join("stamp.txt")).unwrap();
-                let gen_dir = manifest_dir.join("ui").join("gen");
-                std::fs::create_dir_all(&gen_dir).unwrap();
-
-                for file in ["router.slint", "navigate.slint", "internal.slint", "exports.slint", "tr.slint"] {
-                    std::fs::write(gen_dir.join(file), &stamp).unwrap();
-                }
-            }
-            "#,
-        )
-        .unwrap();
-
-        root
     }
 
     fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }

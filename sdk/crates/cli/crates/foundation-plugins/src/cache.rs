@@ -4,7 +4,7 @@
 //! Plugin cache management
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,13 +22,14 @@ impl PluginCache {
         dirs::cache_dir().unwrap_or_else(|| PathBuf::from(".")).join("foundation").join("plugin-cache.json")
     }
 
-    /// Load cache from disk, or return empty cache. Logs a warning to stderr
+    /// Load the cache from its default path. See [`load_from`](Self::load_from).
+    pub fn load() -> Self { Self::load_from(&Self::path()) }
+
+    /// Load cache from `path`, or return empty cache. Logs a warning to stderr
     /// when the cache exists but can't be parsed or has the wrong version, so
     /// users see why their plugin list got rebuilt unexpectedly.
-    pub fn load() -> Self {
-        let path = Self::path();
-
-        let contents = match std::fs::read_to_string(&path) {
+    pub fn load_from(path: &Path) -> Self {
+        let contents = match std::fs::read_to_string(path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::empty(),
             Err(e) => {
@@ -62,10 +63,11 @@ impl PluginCache {
     /// Create an empty cache
     pub fn empty() -> Self { Self { version: CACHE_VERSION, commands: HashMap::new() } }
 
-    /// Save cache to disk
-    pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::path();
+    /// Save the cache to its default path. See [`save_to`](Self::save_to).
+    pub fn save(&self) -> std::io::Result<()> { self.save_to(&Self::path()) }
 
+    /// Save cache to `path`, creating parent directories as needed.
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

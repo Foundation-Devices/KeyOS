@@ -66,6 +66,7 @@ struct GitHubAsset {
 pub struct PluginInstaller {
     bin_dir: PathBuf,
     index_path: PathBuf,
+    cache_path: PathBuf,
     github_api_base: String,
     client: reqwest::Client,
 }
@@ -95,7 +96,12 @@ impl PluginInstaller {
             .map(PathBuf::from)
             .unwrap_or_else(|_| foundation_dir.join(DEFAULT_INDEX_FILE));
 
-        Self::from_parts(bin_dir, index_path, DEFAULT_GITHUB_API_BASE.to_string())
+        Self::from_parts(
+            bin_dir,
+            index_path,
+            crate::cache::PluginCache::path(),
+            DEFAULT_GITHUB_API_BASE.to_string(),
+        )
     }
 
     /// Create a plugin installer with a custom index path
@@ -105,6 +111,7 @@ impl PluginInstaller {
         Self::from_parts(
             foundation_dir.join("plugins"),
             index_path.into(),
+            crate::cache::PluginCache::path(),
             DEFAULT_GITHUB_API_BASE.to_string(),
         )
     }
@@ -183,9 +190,9 @@ impl PluginInstaller {
         std::fs::remove_file(&path)?;
 
         // Clear from plugin cache
-        let mut cache = crate::cache::PluginCache::load();
+        let mut cache = crate::cache::PluginCache::load_from(&self.cache_path);
         cache.commands.remove(name);
-        cache.save()?;
+        cache.save_to(&self.cache_path)?;
 
         Ok(())
     }
@@ -271,22 +278,30 @@ impl PluginInstaller {
         install_binary_atomically(&install_path, &bytes)?;
 
         // Update plugin cache
-        let mut cache = crate::cache::PluginCache::load();
+        let mut cache = crate::cache::PluginCache::load_from(&self.cache_path);
         cache.commands.insert(name.to_string(), install_path);
-        cache.save()?;
+        cache.save_to(&self.cache_path)?;
 
         Ok(self.bin_dir.join(binary_name))
     }
 
-    fn from_parts(bin_dir: PathBuf, index_path: PathBuf, github_api_base: String) -> Self {
-        Self { bin_dir, index_path, github_api_base, client: reqwest::Client::new() }
+    fn from_parts(
+        bin_dir: PathBuf,
+        index_path: PathBuf,
+        cache_path: PathBuf,
+        github_api_base: String,
+    ) -> Self {
+        Self { bin_dir, index_path, cache_path, github_api_base, client: reqwest::Client::new() }
     }
 
     #[cfg(test)]
-    fn with_index_and_api_base(index_path: impl Into<PathBuf>, github_api_base: impl Into<String>) -> Self {
-        let foundation_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".foundation");
-
-        Self::from_parts(foundation_dir.join("plugins"), index_path.into(), github_api_base.into())
+    fn for_test(
+        bin_dir: impl Into<PathBuf>,
+        index_path: impl Into<PathBuf>,
+        cache_path: impl Into<PathBuf>,
+        github_api_base: impl Into<String>,
+    ) -> Self {
+        Self::from_parts(bin_dir.into(), index_path.into(), cache_path.into(), github_api_base.into())
     }
 }
 
@@ -431,15 +446,10 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use once_cell::sync::Lazy;
-
     use super::{current_target, install_binary_atomically, plugin_name_from_repo, PluginInstaller};
-
-    static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn strips_foundation_prefix_from_repo_name() {
@@ -468,12 +478,9 @@ mod tests {
 
     #[tokio::test]
     async fn installs_plugin_from_mocked_release_server() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let original_home = std::env::var_os("HOME");
         let temp_root = make_temp_dir("plugin-install");
-        let home = temp_root.join("home");
-        fs::create_dir_all(&home).unwrap();
-        std::env::set_var("HOME", &home);
+        let bin_dir = temp_root.join("plugins");
+        let cache_path = temp_root.join("plugin-cache.json");
 
         let index_path = temp_root.join("plugin-index.toml");
         fs::write(
@@ -491,40 +498,22 @@ mod tests {
 
         let asset_name = format!("foundation-demo-{}{}", current_target(), std::env::consts::EXE_SUFFIX);
         let server = MockReleaseServer::spawn(asset_name.clone(), 200, b"plugin-binary".to_vec());
-        let installer = PluginInstaller::with_index_and_api_base(index_path, server.base_url());
+        let installer = PluginInstaller::for_test(&bin_dir, index_path, &cache_path, server.base_url());
 
         let installed = installer.install("demo").await.unwrap();
 
         assert_eq!(installed.name, "demo");
-        assert_eq!(
-            installed.path,
-            home.join(".foundation")
-                .join("plugins")
-                .join(format!("foundation-demo{}", std::env::consts::EXE_SUFFIX))
-        );
+        assert_eq!(installed.path, bin_dir.join(format!("foundation-demo{}", std::env::consts::EXE_SUFFIX)));
         assert_eq!(fs::read(&installed.path).unwrap(), b"plugin-binary");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         cleanup(&temp_root);
     }
 
     #[tokio::test]
     async fn rejects_failed_plugin_asset_download_before_installing() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let original_home = std::env::var_os("HOME");
-        let original_cache_home = std::env::var_os("XDG_CACHE_HOME");
         let temp_root = make_temp_dir("plugin-install-failed-download");
-        let home = temp_root.join("home");
-        let cache_home = temp_root.join("cache");
-        fs::create_dir_all(&home).unwrap();
-        fs::create_dir_all(&cache_home).unwrap();
-        std::env::set_var("HOME", &home);
-        std::env::set_var("XDG_CACHE_HOME", &cache_home);
+        let bin_dir = temp_root.join("plugins");
+        let cache_path = temp_root.join("plugin-cache.json");
 
         let index_path = temp_root.join("plugin-index.toml");
         fs::write(
@@ -542,7 +531,7 @@ mod tests {
 
         let asset_name = format!("foundation-demo-{}{}", current_target(), std::env::consts::EXE_SUFFIX);
         let server = MockReleaseServer::spawn(asset_name, 404, b"not found".to_vec());
-        let installer = PluginInstaller::with_index_and_api_base(index_path, server.base_url());
+        let installer = PluginInstaller::for_test(&bin_dir, index_path, &cache_path, server.base_url());
 
         let err = installer.install("demo").await.unwrap_err();
 
@@ -551,18 +540,7 @@ mod tests {
             .bin_dir()
             .join(format!("foundation-demo{}", std::env::consts::EXE_SUFFIX))
             .exists());
-        assert!(crate::cache::PluginCache::load().commands.get("demo").is_none());
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        if let Some(cache_home) = original_cache_home {
-            std::env::set_var("XDG_CACHE_HOME", cache_home);
-        } else {
-            std::env::remove_var("XDG_CACHE_HOME");
-        }
+        assert!(crate::cache::PluginCache::load_from(&cache_path).commands.get("demo").is_none());
 
         cleanup(&temp_root);
     }

@@ -5,16 +5,10 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use once_cell::sync::Lazy;
-
-static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[test]
 fn built_in_commands_expose_help() {
-    let _guard = ENV_LOCK.lock().unwrap();
     for command in [
         "new",
         "develop",
@@ -66,7 +60,6 @@ fn built_in_commands_expose_help() {
 
 #[test]
 fn removed_legacy_command_names_fail() {
-    let _guard = ENV_LOCK.lock().unwrap();
     for command in ["undevelop", "genkey", "gen-cert", "view", "install", "uninstall", "search"] {
         let output = Command::new(foundation_bin()).arg(command).arg("--help").output().unwrap();
 
@@ -80,7 +73,6 @@ fn removed_legacy_command_names_fail() {
 
 #[test]
 fn environment_commands_work_in_smoke_env() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
     env.install_fake_nix();
     env.install_fake_git();
@@ -111,7 +103,6 @@ fn environment_commands_work_in_smoke_env() {
 
 #[test]
 fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
     env.install_fake_nix();
     env.install_fake_git();
@@ -124,6 +115,7 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     env.install_bundle_viewer();
     env.install_bundle_theme_compiler();
     env.install_bundle_simulator();
+    env.install_bundle_fatfs_image();
     env.install_fake_passport_drive();
     env.write_smoke_app();
 
@@ -190,16 +182,23 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 
     let sim = env.command_in(env.app_root()).arg("sim").output().unwrap();
     assert!(sim.status.success(), "sim failed: {}", stderr(&sim));
-    let simulator_app = env
+    let app_id_dir = "00112233445566778899aabbccddeeff";
+    // The host-exec'd app.elf and reference manifest land under the simulator's
+    // sideloaded-apps dir, keyed by the bare hex app id.
+    let host_staged = env
         .bundle_root()
         .join("lib")
         .join("keyos")
         .join("simulator")
-        .join("target")
-        .join("apps")
-        .join("smoke-app");
-    assert!(simulator_app.join("manifest.json").exists());
-    assert!(simulator_app.join("resources").join(".foundation").join("icon.svg").exists());
+        .join("sideloaded-apps")
+        .join(app_id_dir);
+    assert!(host_staged.join("app.elf").exists());
+    assert!(host_staged.join("manifest.json").exists());
+    // The device-format bundle (manifest + converted resources, no app.elf) that
+    // gets injected into the simulator system image.
+    let injected = env.app_root().join("target").join("foundation").join("sim-sideload").join(app_id_dir);
+    assert!(injected.join("manifest.json").exists());
+    assert!(injected.join("resources").join(".foundation").join("icon.raw").exists());
     assert!(env.read_log("simulator.log").contains(env.bundle_root().display().to_string().as_str()));
     assert!(env.read_log("simulator-stdin.log").contains("run 0x00112233445566778899aabbccddeeff"));
     let cargo_log = env.read_log("cargo.log");
@@ -216,7 +215,6 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 
 #[test]
 fn logs_command_launches_bundled_log_viewer() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
     env.install_bundle_log_viewer();
 
@@ -229,7 +227,6 @@ fn logs_command_launches_bundled_log_viewer() {
 
 #[test]
 fn theme_command_creates_app_theme_and_launches_bundled_editor() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
     env.install_bundle_theme_editor();
     env.write_smoke_app();
@@ -256,7 +253,6 @@ fn theme_command_creates_app_theme_and_launches_bundled_editor() {
 
 #[test]
 fn plugin_and_completion_commands_work_in_smoke_env() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
     env.install_fake_git();
     env.install_fake_nix();
@@ -302,7 +298,6 @@ fn plugin_and_completion_commands_work_in_smoke_env() {
 
 #[test]
 fn english_commands_still_work_when_locale_is_non_english() {
-    let _guard = ENV_LOCK.lock().unwrap();
     let env = TestEnv::new();
 
     let top_level_help = env.command().env("FOUNDATION_LANG", "es").arg("--help").output().unwrap();
@@ -508,7 +503,32 @@ exit 0
     }
 
     fn install_bundle_cosign2(&self) {
-        self.write_script(self.bundle.join("bin").join("cosign2"), "#!/bin/sh\nexit 0\n");
+        // Emulate signing by prepending a minimal cosign2 header (magic + the
+        // binary version at the version offset, zero-padded to the default
+        // header size) so `build`'s ensure_cosign2_header guard accepts the elf.
+        self.write_script(
+            self.bundle.join("bin").join("cosign2"),
+            r#"#!/bin/sh
+elf=""
+version="0.0.0"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -i) elf="$2"; shift 2 ;;
+    --binary-version) version="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -z "$elf" ]; then
+  exit 0
+fi
+header="$(mktemp)"
+dd if=/dev/zero of="$header" bs=2048 count=1 2>/dev/null
+printf 'PRM1' | dd of="$header" bs=1 seek=0 conv=notrunc 2>/dev/null
+printf '%s' "$version" | dd of="$header" bs=1 seek=22 conv=notrunc 2>/dev/null
+cat "$elf" >> "$header"
+mv "$header" "$elf"
+"#,
+        );
     }
 
     fn install_bundle_asset_tool(&self) {
@@ -636,6 +656,13 @@ printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
                 self.root.join("simulator.log").display(),
                 self.root.join("simulator-stdin.log").display()
             ),
+        );
+    }
+
+    fn install_bundle_fatfs_image(&self) {
+        self.write_script(
+            self.bundle.join("bin").join("fatfs-image"),
+            "#!/bin/sh\nif [ \"$1\" = \"create\" ]; then : > \"$2\"; fi\nexit 0\n",
         );
     }
 
