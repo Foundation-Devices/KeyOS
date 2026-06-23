@@ -217,7 +217,8 @@ fn main() -> ! {
     xous::set_thread_priority(xous::ThreadPriority::AppBackground0).unwrap();
 
     let mut usb_api = UsbDeviceEmulation::default();
-    let gate = EnabledGate::new(false);
+    let initial_enabled = !cfg!(feature = "production");
+    let gate = EnabledGate::new(initial_enabled);
 
     let (debug_interface, [debug_ep_out, mut ep_in]) = usb_api
         .register_interface(
@@ -255,6 +256,8 @@ fn main() -> ! {
         )
         .expect("Error registering debug interface");
 
+    debug_interface.set_enabled(initial_enabled).expect("Error setting initial debug interface state");
+
     // Bounded channel for both debug responses and log data.
     // The capacity provides backpressure: log_drain_thread blocks when full.
     let (tx, rx) = std::sync::mpsc::sync_channel::<usb_debug_protocol::Response>(MAX_PENDING_LOGS);
@@ -279,11 +282,13 @@ fn main() -> ! {
         xous::map_memory(None, None, scratch_size, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
             .expect("scratch alloc");
 
-    std::thread::spawn({
-        let gate = gate.clone();
-        let interface = debug_interface.clone();
-        move || server::listen(DeveloperModeWatcher { interface, gate })
-    });
+    if cfg!(feature = "production") {
+        std::thread::spawn({
+            let gate = gate.clone();
+            let interface = debug_interface.clone();
+            move || server::listen(DeveloperModeWatcher { interface, gate })
+        });
+    }
 
     // Main loop: blocking recv on the unified channel.
     loop {
