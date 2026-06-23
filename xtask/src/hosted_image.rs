@@ -9,8 +9,9 @@
 //! system volume's derived asset trees (`keyos/common`, `keyos/apps`) are
 //! refreshed in place.
 
+use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::bootimage::{ADDITIONAL_ICON_SIZES, DEFAULT_ICON_SIZES};
@@ -48,7 +49,10 @@ pub fn build_hosted_disk_images() {
         .expect("create disk_system.dat");
     }
 
-    let hosted = project_root().join("target").join("hosted");
+    let hosted = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_root().join("target"))
+        .join("hosted");
     let common_seed = hosted.join("sim-seed").join("keyos").join("common");
     render_common_assets(&common_seed);
     let host_apps = hosted.join("keyos").join("apps");

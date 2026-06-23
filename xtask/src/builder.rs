@@ -232,7 +232,9 @@ impl Builder {
     }
 
     fn get_target_root(&self) -> PathBuf {
-        let mut root = project_root().join("target");
+        let mut root = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| project_root().join("target"));
         root = match self.target {
             Some(ref t) => root.join(t),
             None => root,
@@ -853,7 +855,7 @@ impl BuildResult {
             println!("Starting hosted mode...");
             println!("    Command: {} {}", self.built_kernel, services_path.display());
             // app-manager execs host app binaries from here (mirrors the image /keyos dir).
-            let app_elf_root = project_root().join("target").join("hosted").join("keyos");
+            let app_elf_root = services_path.parent().unwrap().join("keyos");
             let exec_err = Command::new(self.built_kernel)
                 .current_dir(project_root().join("xous/kernel"))
                 .env("FOUNDATION_SIMULATOR_APP_ELF_ROOT", app_elf_root)

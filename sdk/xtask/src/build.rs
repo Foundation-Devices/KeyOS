@@ -913,9 +913,9 @@ fn stage_simulator_runtime(
     }
     fs::write(runtime_root.join("services.json"), serde_json::to_string_pretty(&services)?)?;
 
-    // build --hosted stages built-in bundles (manifest + app.elf) next to the
-    // source tree, not under CARGO_TARGET_DIR; ship the app.elf the simulator execs.
-    let built_apps_dir = keyos_root.join("target").join("hosted").join("keyos").join("apps");
+    // build --hosted stages built-in bundles (manifest + app.elf) under the
+    // hosted target root; ship the app.elf files the simulator execs.
+    let built_apps_dir = hosted_target_root.join("keyos").join("apps");
     if built_apps_dir.exists() {
         util::copy_dir_contents(&built_apps_dir, &runtime_apps_dir)?;
         strip_staged_binaries_in_dir(&runtime_apps_dir, should_strip_packaged_binaries(args), args.verbose)?;
