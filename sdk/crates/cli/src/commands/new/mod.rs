@@ -17,6 +17,10 @@ use dialoguer::{Input, Select};
 use foundation_core::SdkRoot;
 use template::TemplateProcessor;
 
+use crate::sdk_mapping::{
+    ensure_project_sdk_mapping, project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path,
+};
+
 /// Application configuration from user prompts
 struct PromptConfig {
     name: String,
@@ -293,10 +297,13 @@ fn apply_template(
     variables.insert("version".to_string(), config.version.clone());
     variables.insert("min_keyos_version".to_string(), config.min_keyos_version.clone());
 
-    variables.insert("sdk_root".to_string(), sdk.root().display().to_string());
-    variables.insert("sdk_keyos_root".to_string(), sdk.keyos_root().display().to_string());
-    variables.insert("sdk_ui_root".to_string(), sdk.ui_library_path().display().to_string());
-    variables.insert("sdk_path".to_string(), sdk.keyos_root().display().to_string());
+    // `sdk_keyos_root` is the preferred variable for bundled templates. The
+    // other SDK path variables remain part of the template API for external
+    // SDK/user templates that already consume them.
+    variables.insert("sdk_root".to_string(), project_sdk_root_path().to_string());
+    variables.insert("sdk_keyos_root".to_string(), project_sdk_keyos_root_path().to_string());
+    variables.insert("sdk_ui_root".to_string(), project_sdk_ui_root_path().to_string());
+    variables.insert("sdk_path".to_string(), project_sdk_keyos_root_path().to_string());
     variables.insert("selected_theme_id".to_string(), config.selected_theme_id.clone());
 
     // Get template path
@@ -312,6 +319,7 @@ fn apply_template(
     processor
         .process_directory(&template_files_path, project_path)
         .with_context(|| format!("Failed to apply template '{}'", template_name))?;
+    ensure_project_sdk_mapping(project_path, sdk)?;
     crate::commands::themes::write_editable_app_theme(
         &config.selected_theme_id,
         sdk,
@@ -432,10 +440,11 @@ mod tests {
     use foundation_core::SdkRoot;
 
     use super::{apply_template, initialize_git_repo, is_git_available, GitInitStatus, PromptConfig};
+    use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
     #[test]
-    fn apply_template_uses_explicit_sdk_keyos_root_variable() {
+    fn apply_template_uses_project_sdk_keyos_root_variable() {
         let sdk_root = make_sdk_root("template-sdk");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let project_root = make_temp_dir("scaffold-project");
@@ -460,9 +469,12 @@ mod tests {
         apply_template(&project_path, "default-app", &config, &sdk).unwrap();
 
         let cargo_toml = fs::read_to_string(project_path.join("Cargo.toml")).unwrap();
-        assert!(cargo_toml.contains(&sdk.keyos_root().display().to_string()));
+        assert!(cargo_toml.contains(project_sdk_keyos_root_path()));
+        assert!(!cargo_toml.contains(&sdk.keyos_root().display().to_string()));
         assert!(!cargo_toml.contains("{{sdk_keyos_root}}"));
         assert!(cargo_toml.contains("[workspace]"));
+        assert!(cargo_toml.contains(r#"exclude = [".foundation-sdk"]"#));
+        assert!(project_path.join(project_sdk_keyos_root_path()).exists());
         let theme_rs = fs::read_to_string(project_path.join("src").join("theme.rs")).unwrap();
         assert!(theme_rs.contains("slint_keyos_platform::settings::use_api!("));
         assert!(theme_rs.contains("slint_keyos_platform::settings,"));
@@ -485,6 +497,57 @@ mod tests {
         assert!(project_path.join("app-config.toml").exists());
         assert!(project_path.join("permission_templates.toml").exists());
         assert!(project_path.join("resources").join("icon.svg").exists());
+
+        cleanup(&project_root);
+        cleanup(sdk_root.parent().unwrap());
+    }
+
+    #[test]
+    fn apply_template_keeps_sdk_path_variables_for_external_templates() {
+        let sdk_root = make_sdk_root("compat-template-sdk");
+        let template_dir =
+            sdk_root.join("crates").join("cli").join("templates").join("compat-vars").join("files");
+        fs::create_dir_all(&template_dir).unwrap();
+        fs::write(
+            template_dir.join("paths.txt"),
+            "root={{sdk_root}}\nkeyos={{sdk_keyos_root}}\nui={{sdk_ui_root}}\npath={{sdk_path}}\n",
+        )
+        .unwrap();
+
+        let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
+        let project_root = make_temp_dir("compat-scaffold-project");
+        let project_path = project_root.join("demo-app");
+
+        fs::create_dir_all(&project_path).unwrap();
+        let config = PromptConfig {
+            name: "demo-app".to_string(),
+            friendly_app_name: "Demo App".to_string(),
+            launcher_app_name: "Demo".to_string(),
+            description: "Demo app".to_string(),
+            publisher_name: "Demo Publisher".to_string(),
+            contact_email: "support@example.com".to_string(),
+            support_url: "https://example.com".to_string(),
+            icon: "resources/icon.svg".to_string(),
+            app_id: "0x00112233445566778899aabbccddeeff".to_string(),
+            version: "0.1.0".to_string(),
+            min_keyos_version: "1.0.0".to_string(),
+            selected_theme_id: "default_theme".to_string(),
+        };
+
+        apply_template(&project_path, "compat-vars", &config, &sdk).unwrap();
+
+        let paths = fs::read_to_string(project_path.join("paths.txt")).unwrap();
+        assert_eq!(
+            paths,
+            format!(
+                "root={}\nkeyos={}\nui={}\npath={}\n",
+                project_sdk_root_path(),
+                project_sdk_keyos_root_path(),
+                project_sdk_ui_root_path(),
+                project_sdk_keyos_root_path()
+            )
+        );
+        assert!(project_path.join(project_sdk_keyos_root_path()).exists());
 
         cleanup(&project_root);
         cleanup(sdk_root.parent().unwrap());

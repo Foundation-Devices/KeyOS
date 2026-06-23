@@ -10,6 +10,7 @@ mod assets;
 mod cargo_support;
 mod cli;
 mod commands;
+mod sdk_mapping;
 mod slint_codegen;
 
 #[tokio::main]

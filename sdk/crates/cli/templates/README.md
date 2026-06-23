@@ -40,10 +40,12 @@ Templates use `{{variable}}` syntax for placeholders that get replaced during pr
 - `{{app_id}}` - Unique 16-byte hex app ID
 - `{{version}}` - App version (semver)
 - `{{min_keyos_version}}` - Minimum required KeyOS version
-- `{{sdk_root}}` - Root of the discovered Foundation SDK
-- `{{sdk_keyos_root}}` - Root of the shipped KeyOS sources inside the SDK
-- `{{sdk_ui_root}}` - Root of the shipped shared Slint UI library inside the SDK
+- `{{sdk_keyos_root}}` - Preferred project-relative KeyOS source root inside the SDK mapping
+- `{{sdk_root}}` - Compatibility/advanced variable for the SDK mapping root (`.foundation-sdk/current`)
+- `{{sdk_ui_root}}` - Compatibility/advanced variable for the shared Slint UI library inside the SDK mapping
 - `{{sdk_path}}` - Compatibility alias for `{{sdk_keyos_root}}`
+
+Bundled templates should prefer `{{sdk_keyos_root}}` for KeyOS crate path dependencies. The other SDK path variables remain available for SDK-provided and user templates that already consume them.
 
 ## File Processing
 

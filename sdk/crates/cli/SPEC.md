@@ -239,12 +239,13 @@ Template variables currently provided by `foundation new`:
 - `app_id`
 - `version`
 - `min_keyos_version`
-- `sdk_root`
-- `sdk_keyos_root`
-- `sdk_ui_root`
-- `sdk_path`
+- `sdk_keyos_root` - preferred for Cargo path dependencies on KeyOS crates
+- `sdk_root` - compatibility/advanced variable for the project-local SDK mapping root
+- `sdk_ui_root` - compatibility/advanced variable for the shared Slint UI library
+- `sdk_path` - compatibility alias for `sdk_keyos_root`
 
-`sdk_path` is a compatibility alias for `sdk_keyos_root`.
+The SDK path variables expand to project-relative paths under `.foundation-sdk/current`, which `foundation new`, `build`, `sim`, and `preview` create or refresh from the active SDK. For installed SDKs this targets the installer-managed `current` symlink instead of a concrete `foundation-sdk-<version>-<target>` directory. Generated Cargo workspaces exclude `.foundation-sdk` so SDK path dependencies keep their own workspace metadata instead of inheriting from the app workspace.
+Shipped templates should use `sdk_keyos_root` for KeyOS source dependencies; the other SDK path variables remain available for SDK-provided and user templates that already consume them.
 
 ## Command Specifications
 
@@ -404,6 +405,7 @@ Behavior:
   - `target/` - cargo output plus the generated `target/foundation/**` UI, resources, and sim-resources trees, the generated theme `target/foundation/themes/{json,rust,slint}` files, and the `target/keyos/<app-name>/**` hardware bundles
   - `manifest.toml` - the compatibility manifest written before each cargo build
   - `ui/ui` - the SDK UI library mapping (symlink or copied snapshot)
+  - `.foundation-sdk/` - the project-local SDK dependency mapping
 - Never touches authored content under `resources/` (app icon, theme JSON, images, fonts)
 - Treats a missing path as a no-op and reports step-by-step status
 - Does not touch the shared theme cache under `~/.foundation/themes`
@@ -454,7 +456,7 @@ RUSTFLAGS="--cfg keyos"
 - Launch resolution order:
   1. bundled `foundation-simulator`
   2. `foundation-simulator` on `PATH`
-  3. repo-layout fallback to `just sim` in `sdk_keyos_root`
+  3. repo-layout fallback to `just sim` in the SDK KeyOS root
 - If launch fails after staging, the error includes the staged app path
 
 ### `sideload`

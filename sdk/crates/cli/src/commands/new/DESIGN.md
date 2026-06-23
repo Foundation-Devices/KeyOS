@@ -74,12 +74,13 @@ The command currently expands these variables:
 - `app_id`
 - `version`
 - `min_keyos_version`
-- `sdk_root`
-- `sdk_keyos_root`
-- `sdk_ui_root`
-- `sdk_path`
+- `sdk_keyos_root` - preferred for Cargo path dependencies on KeyOS crates
+- `sdk_root` - compatibility/advanced variable for the project-local SDK mapping root
+- `sdk_ui_root` - compatibility/advanced variable for the shared Slint UI library
+- `sdk_path` - compatibility alias for `sdk_keyos_root`
 
-`sdk_path` is a compatibility alias for `sdk_keyos_root`.
+The SDK path variables are project-relative paths under `.foundation-sdk/current`, a generated SDK mapping refreshed by `foundation new`, `build`, `sim`, and `preview`. For installed SDKs this mapping points at the installer-managed `current` symlink instead of a concrete versioned SDK directory. Generated Cargo workspaces exclude `.foundation-sdk` so Cargo does not auto-enroll SDK path dependencies into the app workspace.
+Shipped templates should use `sdk_keyos_root` for KeyOS source dependencies; the other SDK path variables remain available for SDK-provided and user templates that already consume them.
 
 ## Config Contract
 

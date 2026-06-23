@@ -11,6 +11,7 @@
 //!   `target/keyos/<app-name>/**` hardware bundles.
 //! - `manifest.toml` - the compatibility manifest written before each cargo build.
 //! - `ui/ui` - the SDK UI library mapping (symlink or copied snapshot).
+//! - `.foundation-sdk/` - the project-local SDK dependency mapping.
 //!
 //! Authored content under `resources/` (the app icon, theme JSON, images, and
 //! fonts) is never touched; builds copy it into `target/foundation/resources/`.
@@ -20,6 +21,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use foundation_core::APP_CONFIG_FILE;
+
+use crate::sdk_mapping::project_sdk_dir;
 
 /// Execute the `foundation clean` command.
 pub fn execute() -> Result<()> {
@@ -69,6 +72,9 @@ fn clean_project(project_root: &Path) -> Result<()> {
     // Snapshot/symlink of the SDK UI library materialized into the app tree.
     removed_any |= remove_path(&project_root.join("ui").join("ui"), "ui/ui")?;
 
+    // Project-local SDK dependency mapping created by `foundation new`/build/sim/preview.
+    removed_any |= remove_path(&project_sdk_dir(project_root), ".foundation-sdk/")?;
+
     println!();
     if removed_any {
         println!("Clean complete. Run 'foundation build' or 'foundation sim' to regenerate.");
@@ -81,10 +87,10 @@ fn clean_project(project_root: &Path) -> Result<()> {
 
 /// Remove a generated file or directory if present, reporting the outcome.
 ///
-/// Uses `symlink_metadata` so a symlinked `ui/ui` mapping is removed as a link
-/// rather than recursing into the SDK source it points at. Output goes through
-/// plain `println!` so the removal summary is visible in non-interactive runs
-/// (piped output, CI, agents), matching how `foundation build` reports steps.
+/// Uses `symlink_metadata` so symlinked SDK mappings are removed as links rather
+/// than recursing into the SDK source they point at. Output goes through plain
+/// `println!` so the removal summary is visible in non-interactive runs (piped
+/// output, CI, agents), matching how `foundation build` reports steps.
 fn remove_path(path: &Path, label: &str) -> Result<bool> {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return Ok(false);
@@ -141,6 +147,8 @@ mod tests {
         // Other generated mapping/manifest files.
         fs::create_dir_all(project_root.join("ui").join("ui")).unwrap();
         fs::write(project_root.join("ui").join("ui").join("theme.slint"), "theme\n").unwrap();
+        fs::create_dir_all(project_root.join(".foundation-sdk").join("current")).unwrap();
+        fs::write(project_root.join(".foundation-sdk").join("current").join("marker"), "sdk\n").unwrap();
         fs::write(project_root.join("manifest.toml"), "appId = \"0x0\"\n").unwrap();
 
         // Authored source that must survive a clean.
@@ -156,6 +164,7 @@ mod tests {
         assert!(!project_root.join("target").exists());
         assert!(!project_root.join("manifest.toml").exists());
         assert!(!project_root.join("ui").join("ui").exists());
+        assert!(!project_root.join(".foundation-sdk").exists());
 
         // Authored source is untouched.
         assert!(project_root.join("app-config.toml").exists());

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target/
+.foundation-sdk/
 ui/ui
 resources/fonts
 resources/icons

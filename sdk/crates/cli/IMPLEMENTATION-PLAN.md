@@ -32,7 +32,8 @@ This plan has now largely been executed. It remains in the repo as a compact com
   - `sdk_keyos_root`
   - `sdk_ui_root`
 - [x] Keep `sdk_path` as a compatibility alias
-- [x] Update shipped templates to use the explicit SDK variables
+- [x] Update shipped templates to use the preferred `sdk_keyos_root` variable
+- [x] Keep the other SDK path variables available for SDK/user template compatibility
 - [x] Add deterministic scaffold smoke coverage
 
 ### Command behavior

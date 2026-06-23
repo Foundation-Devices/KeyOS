@@ -1,4 +1,5 @@
 target/
+.foundation-sdk/
 ui/ui
 resources/fonts
 resources/icons

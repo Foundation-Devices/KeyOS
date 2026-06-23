@@ -1330,10 +1330,14 @@ fn collect_staged_keyos_member_dirs(
 }
 
 fn should_scan_for_keyos_member(dest: &str) -> bool {
-    dest.starts_with("lib/keyos/")
-        && !dest.starts_with("lib/keyos/keyos")
-        && !dest.starts_with("lib/keyos/ui")
-        && !dest.starts_with(KEYOS_HOSTED_RUNTIME_ROOT)
+    is_path_or_child(dest, "lib/keyos")
+        && !is_path_or_child(dest, "lib/keyos/keyos")
+        && !is_path_or_child(dest, STAGED_KEYOS_SDK_UI_ROOT)
+        && !is_path_or_child(dest, KEYOS_HOSTED_RUNTIME_ROOT)
+}
+
+fn is_path_or_child(path: &str, root: &str) -> bool {
+    path == root || path.strip_prefix(root).map(|suffix| suffix.starts_with('/')).unwrap_or(false)
 }
 
 fn scan_member_dirs(
@@ -2030,10 +2034,10 @@ mod tests {
         cargo_target_linker_env, is_strippable_binary_header, keyos_slint_pin_from_manifest_and_lock,
         local_staged_workspace_dependency_override, nix_shell_active, parse_git_source_commit,
         parse_toolchain_channel, prune_nested_member_dirs, render_staged_keyos_workspace_manifest,
-        render_staged_slint_workspace_manifest, rust_toolchain_channel, should_stage_simulator_for_target,
-        should_strip_packaged_binaries, stage_cargo_package_snapshot, stage_shared_ui_artifact,
-        stage_slint_sdk_snapshot, verify_common_stage, verify_target_stage, BuildArgs, SmokeCheckArgs,
-        StageDirLock,
+        render_staged_slint_workspace_manifest, rust_toolchain_channel, should_scan_for_keyos_member,
+        should_stage_simulator_for_target, should_strip_packaged_binaries, stage_cargo_package_snapshot,
+        stage_shared_ui_artifact, stage_slint_sdk_snapshot, verify_common_stage, verify_target_stage,
+        BuildArgs, SmokeCheckArgs, StageDirLock,
     };
     use crate::config::workspace_root;
 
@@ -2368,7 +2372,7 @@ source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-founda
         let manifest = render_staged_keyos_workspace_manifest(
             &keyos_root,
             &keyos_root,
-            &["server".to_string(), "server/macro".to_string()],
+            &["server".to_string(), "server/macro".to_string(), "ui2/components".to_string()],
         )
         .unwrap();
 
@@ -2381,12 +2385,23 @@ source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-founda
             .iter()
             .filter_map(toml::Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(members, vec!["server", "server/macro"]);
+        assert_eq!(members, vec!["server", "server/macro", "ui2/components"]);
 
         let dependencies = workspace.get("dependencies").and_then(toml::Value::as_table).unwrap();
         for dependency in ["defer", "log", "log-server", "rkyv", "whence", "xous-names"] {
             assert!(dependencies.contains_key(dependency));
         }
+        assert!(dependencies.contains_key("slint"));
+    }
+
+    #[test]
+    fn staged_keyos_member_scan_includes_ui2_components_but_not_generated_ui() {
+        assert!(should_scan_for_keyos_member("lib/keyos/ui2/components"));
+        assert!(should_scan_for_keyos_member("lib/keyos/ui2/components/src"));
+        assert!(!should_scan_for_keyos_member("lib/keyos/ui/ui"));
+        assert!(!should_scan_for_keyos_member("lib/keyos/ui/ui/theme.slint"));
+        assert!(!should_scan_for_keyos_member("lib/keyos/keyos"));
+        assert!(!should_scan_for_keyos_member("lib/keyos/simulator"));
     }
 
     #[test]
