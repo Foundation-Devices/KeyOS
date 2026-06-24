@@ -49,7 +49,7 @@ struct ShaContext {
 
 struct AesContext {
     key_slot: usize,
-    got_unaligned_execute: bool,
+    finalized: bool,
     mode: AesContextMode,
 }
 
@@ -175,8 +175,7 @@ impl CryptoServer {
                     }
                 };
 
-                self.aes_contexts
-                    .insert((sender, id), AesContext { key_slot, got_unaligned_execute: false, mode });
+                self.aes_contexts.insert((sender, id), AesContext { key_slot, finalized: false, mode });
                 return Ok(id as usize);
             }
         }
@@ -214,7 +213,7 @@ impl CryptoServer {
         let context =
             self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
 
-        if context.got_unaligned_execute {
+        if context.finalized {
             return Err(CryptoError::InvalidState);
         }
 
@@ -275,7 +274,7 @@ impl CryptoServer {
             padded_in[..msg.len - aligned_len].copy_from_slice(&buf_part.as_slice()[aligned_len..]);
             self.aes.process(&padded_in, &mut padded_out);
             buf_part.as_slice_mut()[aligned_len..].copy_from_slice(&padded_out[..msg.len - aligned_len]);
-            context.got_unaligned_execute = true;
+            context.finalized = true;
         }
 
         match &mut context.mode {
@@ -307,6 +306,9 @@ impl CryptoServer {
         self.ensure_aes_idle();
         let context =
             self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
+        if context.finalized {
+            return Err(CryptoError::InvalidState);
+        }
         let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
         let AesContextMode::Gcm { iv, ctr, ghash, aadlen, datalen } = &mut context.mode else {
             return Err(CryptoError::InvalidMode);
@@ -334,17 +336,16 @@ impl CryptoServer {
         self.ensure_aes_idle();
         let context =
             self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
-        let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
-        let AesContextMode::Gcm { iv, ctr, ghash, aadlen, datalen } = &context.mode else {
-            return Err(CryptoError::InvalidMode);
+        let (iv, ctr, ghash, aadlen, datalen) = match &context.mode {
+            AesContextMode::Gcm { iv, ctr, ghash, aadlen, datalen } => (*iv, *ctr, *ghash, *aadlen, *datalen),
+            _ => return Err(CryptoError::InvalidMode),
         };
+        // Seal the context: a second tag under the same nonce would leak the GHASH key (the GCM
+        // "forbidden attack") and let an attacker forge tags.
+        context.finalized = true;
+        let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
         self.power_manager.enable_peripheral(PeripheralId::Aes)?;
-        self.aes.init_encrypt(atsama5d27::aes::AesMode::Gcm {
-            key: key.clone(),
-            iv: iv.clone(),
-            ctr: *ctr,
-            ghash: *ghash,
-        });
+        self.aes.init_encrypt(atsama5d27::aes::AesMode::Gcm { key: key.clone(), iv, ctr, ghash });
         let mut postfix = [0; 16];
         postfix[4..8].copy_from_slice(&(aadlen * 8).to_be_bytes());
         postfix[12..16].copy_from_slice(&(datalen * 8).to_be_bytes());
@@ -355,7 +356,7 @@ impl CryptoServer {
             s_bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
         self.aes
-            .init_encrypt(atsama5d27::aes::AesMode::Counter { key, ctr_value: Iv::from_gcm_params(*iv, 1) });
+            .init_encrypt(atsama5d27::aes::AesMode::Counter { key, ctr_value: Iv::from_gcm_params(iv, 1) });
         let mut tag = [0; 16];
         self.aes.process(&s_bytes, &mut tag);
         Ok(tag)

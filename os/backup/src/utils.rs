@@ -6,7 +6,7 @@ use std::io::{Read, Seek};
 /// read data from a reader in fixed-size chunks
 pub struct ChunkedReader<R, const CHUNK_SIZE: usize> {
     reader: R,
-    buffer: [u8; CHUNK_SIZE],
+    buffer: Box<[u8]>,
 }
 
 pub const DEFAULT_CHUNK_SIZE: usize = 65536;
@@ -15,7 +15,7 @@ pub type DefaultChunkedReader<R> = ChunkedReader<R, DEFAULT_CHUNK_SIZE>;
 impl<R: Read, const CHUNK_SIZE: usize> ChunkedReader<R, CHUNK_SIZE> {
     pub fn new(reader: R) -> Self {
         assert!(CHUNK_SIZE > 0, "CHUNK_SIZE must be greater than 0");
-        Self { reader, buffer: [0; CHUNK_SIZE] }
+        Self { reader, buffer: vec![0; CHUNK_SIZE].into_boxed_slice() }
     }
 
     pub fn next_chunk(&mut self) -> std::io::Result<Option<&[u8]>> {
