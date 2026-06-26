@@ -116,6 +116,10 @@ To disable UART console I/O, supply any build command with (among other flags) a
 
     cargo xtask build-all --no-logging
 
+## Passport Udev Rules
+
+Passport Prime can be debugged and flashed via USB, add these [udev rules](utils/passport-drive/99-passport.rules) on Linux systems to enable these options.
+
 ## Simulator
 
 Run the simulator:
