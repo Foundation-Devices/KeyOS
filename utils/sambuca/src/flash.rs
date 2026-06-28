@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
-use crate::Sambuca;
+use crate::{DiffStats, Sambuca};
 
 /// Sector size used in the boot image layout.
 pub const SECTOR_SIZE: usize = 512;
@@ -99,6 +99,31 @@ impl Sambuca {
         }
 
         Ok(())
+    }
+
+    /// Flash only the chunks that differ from what is already on the device.
+    pub fn flash_image_diff(
+        &mut self,
+        data: &[u8],
+        offset: u64,
+        verify: bool,
+        mut progress: impl FnMut(usize),
+    ) -> Result<DiffStats> {
+        std::thread::sleep(Duration::from_millis(500));
+
+        let mut flash_app =
+            self.initialize_flash_applet(0, 1, 0, 8, 3).context("initializing flash applet")?;
+
+        let mut last_pct = 0;
+        flash_app
+            .write_flash_diff(offset, data, verify, |processed| {
+                let pct = processed * 100 / data.len();
+                if pct != last_pct {
+                    last_pct = pct;
+                    progress(pct);
+                }
+            })
+            .context("writing flash diff")
     }
 
     /// Dump flash contents to a writer.

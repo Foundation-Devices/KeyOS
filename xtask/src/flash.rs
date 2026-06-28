@@ -37,6 +37,10 @@ pub struct FlashArgs {
     /// Don't verify after flashing
     #[arg(long)]
     no_verify: bool,
+
+    /// Flash only the chunks that differ; each chunk is read back to compare
+    #[arg(long)]
+    diff: bool,
 }
 
 #[derive(Args)]
@@ -144,33 +148,58 @@ pub fn flash_firmware(args: FlashArgs) -> anyhow::Result<()> {
     let mut last_progress = Instant::now();
     let mut counter = 0;
 
-    sambuca
-        .flash_image(data, offset as u64, !args.no_verify, |p| match p {
-            FlashProgress::Writing { percent } => {
-                if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
-                    print_progress_bar("Flashing", percent, counter);
+    if args.diff {
+        let stats = sambuca
+            .flash_image_diff(data, offset as u64, !args.no_verify, |pct| {
+                if last_progress.elapsed() > Duration::from_millis(100) || pct == 100 {
+                    print_progress_bar("Flashing (diff)", pct, counter);
                     last_progress = Instant::now();
                     counter += 1;
                 }
-            }
-            FlashProgress::Verifying { percent } => {
-                if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
-                    print_progress_bar("Verifying", percent, counter);
-                    last_progress = Instant::now();
-                    counter += 1;
+            })
+            .context("flashing image (diff)")?;
+        let verify_note = if args.no_verify {
+            ", check skipped".to_string()
+        } else {
+            format!(", {} retries", stats.rewrites)
+        };
+        println!();
+        println!(
+            "{} Wrote {} chunk(s), skipped {} unchanged{}",
+            "✓".green(),
+            stats.written,
+            stats.skipped,
+            verify_note,
+        );
+    } else {
+        sambuca
+            .flash_image(data, offset as u64, !args.no_verify, |p| match p {
+                FlashProgress::Writing { percent } => {
+                    if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
+                        print_progress_bar("Flashing", percent, counter);
+                        last_progress = Instant::now();
+                        counter += 1;
+                    }
                 }
-            }
-            FlashProgress::Patched { chunks, attempts } => {
-                println!();
-                println!(
-                    "{} Fixed {} chunk(s) during verification in {} attempt(s)",
-                    "⚠".yellow(),
-                    chunks,
-                    attempts + 1
-                );
-            }
-        })
-        .context("flashing image")?;
+                FlashProgress::Verifying { percent } => {
+                    if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
+                        print_progress_bar("Verifying", percent, counter);
+                        last_progress = Instant::now();
+                        counter += 1;
+                    }
+                }
+                FlashProgress::Patched { chunks, attempts } => {
+                    println!();
+                    println!(
+                        "{} Fixed {} chunk(s) during verification in {} attempt(s)",
+                        "⚠".yellow(),
+                        chunks,
+                        attempts + 1
+                    );
+                }
+            })
+            .context("flashing image")?;
+    }
 
     println!();
     println!("{} Done in {:.02}s", "✓".green(), start_time.elapsed().as_secs_f32());

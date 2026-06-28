@@ -22,6 +22,7 @@ const SDMMC_APPLET_MAILBOX_ADDR: u32 = 0x220004;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const SHORT_TIMEOUT: Duration = Duration::from_millis(100);
 const FLASH_TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
+const MAX_CHUNK_WRITE_ATTEMPTS: usize = 8;
 #[cfg(target_os = "macos")]
 const MACOS_READ_CHUNK_SIZE: usize = 1024;
 #[cfg(target_os = "macos")]
@@ -39,6 +40,7 @@ impl Sambuca {
                 if usb_port_info.vid == VID && usb_port_info.pid == PID {
                     let mut result = Self {
                         connection: serialport::new(serial.port_name, 921600)
+                            .flow_control(serialport::FlowControl::None)
                             .timeout(DEFAULT_TIMEOUT)
                             .open()?,
                     };
@@ -79,6 +81,7 @@ impl Sambuca {
     }
 
     pub fn read_u32(&mut self, address: u32) -> Result<u32> {
+        self.connection.clear(serialport::ClearBuffer::Input).ok();
         self.connection.write_all(format!("w{address:x},#").as_bytes())?;
         self.connection.flush()?;
         let mut bytes = [0u8; 4];
@@ -258,6 +261,12 @@ pub struct VerificationStats {
     pub num_attempts: usize,
 }
 
+pub struct DiffStats {
+    pub written: usize,
+    pub skipped: usize,
+    pub rewrites: usize,
+}
+
 impl<'a> FlashApplet<'a> {
     fn transfer_chunk_size(&self) -> usize {
         let applet_pages = self.buffer_size / self.page_size;
@@ -312,23 +321,81 @@ impl<'a> FlashApplet<'a> {
                         "Flash page difference at page range {page_offset}..{}",
                         page_offset + pages_to_read
                     );
-                } else {
-                    loop {
-                        self.write_chunk(page_offset, chunk)?;
-                        if self.verify_chunk(page_offset, chunk)? {
-                            num_chunks_patched += 1;
-                            break;
-                        } else {
-                            num_attempts += 1;
-                        }
+                }
+                let mut write_attempts = 0;
+                loop {
+                    self.write_chunk(page_offset, chunk)?;
+                    write_attempts += 1;
+                    if self.verify_chunk(page_offset, chunk)? {
+                        break;
+                    }
+                    if write_attempts > MAX_CHUNK_WRITE_ATTEMPTS {
+                        bail!(
+                            "Flash page range {page_offset}..{} did not verify after {write_attempts} writes",
+                            page_offset + pages_to_read
+                        );
                     }
                 }
+                num_chunks_patched += 1;
+                num_attempts += write_attempts - 1;
             }
 
             page_offset += pages_to_read;
             progress(page_offset as usize * self.page_size as usize - offset as usize);
         }
         Ok(VerificationStats { num_chunks_patched, num_attempts })
+    }
+
+    /// Only rewrite chunks that differ from the device's current contents.
+    pub fn write_flash_diff(
+        &mut self,
+        offset: u64,
+        data: &[u8],
+        verify_after_write: bool,
+        mut progress: impl FnMut(usize),
+    ) -> Result<DiffStats> {
+        if offset & (self.page_size as u64 - 1) != 0 {
+            bail!("Offset is not aligned");
+        }
+        if data.len() & (self.page_size as usize - 1) != 0 {
+            bail!("Data length is not aligned");
+        }
+        let mut page_offset = (offset / self.page_size as u64) as u32;
+        let chunk_size = self.transfer_chunk_size();
+
+        let mut written = 0;
+        let mut skipped = 0;
+        let mut rewrites = 0;
+
+        for chunk in data.chunks(chunk_size) {
+            let pages = (chunk.len() / self.page_size as usize) as u32;
+
+            let mut write_attempts = 0;
+            while !self.verify_chunk(page_offset, chunk)? {
+                self.write_chunk(page_offset, chunk)?;
+                write_attempts += 1;
+                if !verify_after_write {
+                    break;
+                }
+                if write_attempts > MAX_CHUNK_WRITE_ATTEMPTS {
+                    bail!(
+                        "Flash page range {page_offset}..{} did not verify after {write_attempts} writes",
+                        page_offset + pages
+                    );
+                }
+            }
+
+            if write_attempts == 0 {
+                skipped += 1;
+            } else {
+                written += 1;
+                rewrites += write_attempts - 1;
+            }
+
+            page_offset += pages;
+            progress(page_offset as usize * self.page_size as usize - offset as usize);
+        }
+        Ok(DiffStats { written, skipped, rewrites })
     }
 
     fn verify_chunk(&mut self, page_offset: u32, chunk: &[u8]) -> Result<bool> {
