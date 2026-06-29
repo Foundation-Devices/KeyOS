@@ -3,7 +3,7 @@
 
 use std::time::SystemTime;
 
-use server::rkyv_with::WithUnixTimestamp;
+use server::WithUnixTimestamp;
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct PeriodicBackup;

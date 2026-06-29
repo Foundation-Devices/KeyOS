@@ -8,9 +8,9 @@ mod scalar;
 
 use rkyv::bytecheck::CheckBytes;
 use whence::WhenceExt;
-use xous_ipc::{XousDeserializer, XousValidator};
 
 use crate::{Error, WrongMessageTypeError};
+use crate::{XousDeserializer, XousValidator};
 
 pub trait SubscriptionError
 where
@@ -43,7 +43,7 @@ where
 {
     #[inline]
     pub fn send_scalar(self, cid: xous::CID) -> whence::Result<Result<(), T::Error>, Error> {
-        let mut buf = xous_ipc::Buffer::into_buf(&self).whence()?;
+        let mut buf = crate::Buffer::into_buf(&self).whence()?;
         buf.lend_mut(cid, T::ID as u32).whence()?;
         buf.to_original::<Result<(), T::Error>>().whence()
     }
@@ -55,7 +55,7 @@ where
 {
     #[inline]
     pub fn send_archive(self, cid: xous::CID) -> whence::Result<Result<(), T::Error>, Error> {
-        let mut buf = xous_ipc::Buffer::into_buf(&self).whence()?;
+        let mut buf = crate::Buffer::into_buf(&self).whence()?;
         buf.lend_mut(cid, T::ID as u32).whence()?;
         buf.to_original::<Result<(), T::Error>>().whence()
     }

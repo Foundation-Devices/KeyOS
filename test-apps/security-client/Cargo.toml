@@ -14,4 +14,3 @@ log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 rand = "0.8"
 security = { workspace = true }
 server = { path = "../../server" }
-xous-ipc = { path = "../../xous/ipc" }

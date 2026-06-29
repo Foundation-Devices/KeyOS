@@ -14,7 +14,6 @@ log-server = { workspace = true }
 security = { workspace = true }
 server = { workspace = true }
 usb = { workspace = true }
-xous-ipc = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

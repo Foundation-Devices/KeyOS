@@ -1,5 +1,4 @@
 use super::{Message, MessageId, MessageSender};
-use crate::{MemoryAddress, MemoryRange, MemorySize};
 
 #[repr(C)]
 #[derive(Debug, PartialEq)]
@@ -40,29 +39,6 @@ impl Envelope {
     }
 
     pub fn id(&self) -> MessageId { self.body.id() }
-
-    /// Set the buffer a `BlockingMove` moves back to its sender, with its offset and
-    /// valid, and return the range that was set before. Nothing is freed: the prior
-    /// range is the caller's to reuse or drop, so it can hand back the same buffer, a
-    /// fresh one, or a sub-range and free the rest.
-    ///
-    /// Callers must only use this on a `BlockingMove`; it panics otherwise, since
-    /// there is no buffer to swap.
-    pub fn set_response(
-        &mut self,
-        buf: MemoryRange,
-        offset: Option<MemoryAddress>,
-        valid: Option<MemorySize>,
-    ) -> MemoryRange {
-        let Message::BlockingMove(mem) = &mut self.body else {
-            panic!("set_response requires a BlockingMove");
-        };
-        let previous = mem.buf;
-        mem.buf = buf;
-        mem.offset = offset;
-        mem.valid = valid;
-        previous
-    }
 }
 
 #[cfg(not(feature = "forget-memory-messages"))]
@@ -75,8 +51,8 @@ impl Drop for Envelope {
             Message::Borrow(x) | Message::MutableBorrow(x) => {
                 crate::syscall::return_memory_offset_valid(self.sender, x.buf, x.offset, x.valid).ok(); // avoid panicking if the process is gone before returning memory
             }
-            // Move whatever buffer is currently set back to the sender: the reply that
-            // set_response swapped in, or else the moved-in buffer echoed back.
+            // Move whatever buffer is currently set back to the sender: a reply that
+            // replaced it, or else the moved-in buffer echoed back.
             Message::BlockingMove(x) => {
                 crate::syscall::return_memory_offset_valid(self.sender, x.buf, x.offset, x.valid).ok();
             }

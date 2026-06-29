@@ -80,3 +80,18 @@ where
     .whence()?;
     Ok(())
 }
+
+/// Deserialize the payload of an incoming `Move` message.
+#[inline]
+pub(crate) fn decode_move<T>(raw: &xous::MessageEnvelope) -> core::result::Result<T, rkyv::rancor::Error>
+where
+    T: rkyv::Archive,
+    T::Archived: rkyv::Portable
+        + for<'a> rkyv::bytecheck::CheckBytes<crate::XousValidator<'a>>
+        + rkyv::Deserialize<T, crate::XousDeserializer>,
+{
+    match &raw.body {
+        xous::Message::Move(mem) => crate::Buffer::deserialize(mem),
+        _ => rkyv::rancor::fail!(crate::WrongMessageTypeError),
+    }
+}

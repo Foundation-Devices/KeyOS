@@ -14,7 +14,6 @@ rkyv = { workspace = true }
 server-macro = { path = "../server/macro" }
 whence = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-names = { workspace = true }
 
 [lints.rust]

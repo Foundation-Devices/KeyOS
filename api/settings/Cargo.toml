@@ -19,7 +19,6 @@ rkyv = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 server = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

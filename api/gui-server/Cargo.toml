@@ -19,7 +19,6 @@ rkyv = { workspace = true }
 server = { path = "../../server" }
 thiserror = "1.0"
 xous = { path = "../../xous/xous-rs" }
-xous-ipc = { path = "../../xous/ipc" }
 xous-names = { package = "xous-api-names", path = "../../xous/api/names" }
 
 [target.'cfg(not(keyos))'.dependencies]

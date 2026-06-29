@@ -29,7 +29,6 @@ server = { path = "../../server" }
 settings = { workspace = true }
 simple-easing = "1.0.1"
 xous = { path = "../../xous/xous-rs" }
-xous-ipc = { workspace = true }
 xous-ticktimer = { package = "xous-api-ticktimer", path = "../../xous/api/ticktimer" }
 
 [target.'cfg(keyos)'.dependencies]

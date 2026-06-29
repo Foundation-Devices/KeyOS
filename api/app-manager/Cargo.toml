@@ -19,7 +19,6 @@ serde = { workspace = true }
 server = { workspace = true }
 thiserror = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 
 [target.'cfg(not(keyos))'.dependencies]
 fs = { workspace = true }

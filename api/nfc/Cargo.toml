@@ -15,7 +15,6 @@ rkyv = { workspace = true }
 server = { workspace = true }
 thiserror = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
 gpio = { workspace = true }

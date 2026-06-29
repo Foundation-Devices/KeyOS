@@ -35,11 +35,18 @@ impl KeyboardWindow {
     /// Forward already-archived `UpdateKeyboard` args to the keyboard
     /// process and remember them as the latest known state.
     pub(crate) fn forward_update(&mut self, args: &[u8]) {
-        self.last_update_args = args.into();
-        let buf = xous_ipc::Buffer::from_bytes(args);
+        let buf = match server::Buffer::from_bytes(args) {
+            Ok(buf) => buf,
+            Err(e) => {
+                error!("Failed to allocate buffer for UpdateKeyboard: {e:?}");
+                return;
+            }
+        };
         if let Err(e) = buf.send(self.input_cid, InputMessage::Custom1 as u32) {
             error!("Failed to send UpdateKeyboard to keyboard app: {e:?}");
+            return;
         }
+        self.last_update_args = args.into();
     }
 
     pub(crate) fn notify_keyboard(&self, msg: InputMessage) {

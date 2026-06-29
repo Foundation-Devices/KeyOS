@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use num_traits::{FromPrimitive, ToPrimitive};
-use server::{rkyv_with::WithAppId, SimpleMemoryMessage};
+use server::{SimpleMemoryMessage, WithAppId};
 use xous::{AppId, MemoryRange};
 
 use crate::{

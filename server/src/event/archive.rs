@@ -5,9 +5,9 @@ use std::{any::type_name, marker::PhantomData};
 
 use rkyv::bytecheck::CheckBytes;
 use whence::WhenceExt;
-use xous_ipc::{XousDeserializer, XousValidator};
 
-use crate::{utils, ArchiveCodec, Error, EventSubscriptionMessage, Owned, Server, ServerContext};
+use crate::{ArchiveCodec, Error, EventSubscriptionMessage, Owned, Server, ServerContext};
+use crate::{XousDeserializer, XousValidator};
 
 /// Handle for a single event subscriber
 pub struct ArchiveEventSubscriber<M>
@@ -38,14 +38,14 @@ where
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     pub fn send(&self, msg: &M) -> Result<xous::Result, xous::Error> {
-        xous_ipc::Buffer::into_buf(msg)
+        crate::Buffer::into_buf(msg)
             .map_err(|_| xous::Error::InternalError)?
             .send(self.cid, self.msg_id as u32)
     }
 
     /// Send the event to the subscriber.
     pub fn send_nowait(&self, msg: &M) -> Result<xous::Result, xous::Error> {
-        xous_ipc::Buffer::into_buf(msg)
+        crate::Buffer::into_buf(msg)
             .map_err(|_| xous::Error::InternalError)?
             .send_nowait(self.cid, self.msg_id as u32)
     }
@@ -150,8 +150,8 @@ where
     <M as rkyv::Archive>::Archived:
         rkyv::Deserialize<M, XousDeserializer> + for<'a> CheckBytes<XousValidator<'a>>,
 {
-    let mut buf = utils::extract_borrow_mut_message(&mut raw).whence()?;
-    let msg: EventSubscriptionMessage<M> = buf.to_original().whence()?;
+    let mem = crate::lend_mut::borrow_mut(&mut raw).whence()?;
+    let msg: EventSubscriptionMessage<M> = crate::Buffer::deserialize(mem).whence()?;
     let res = handler.handle(
         msg.msg,
         ArchiveEventSubscriber::<M::Event> {
@@ -163,8 +163,7 @@ where
         },
         context,
     );
-    buf.replace(&res).whence()?;
-    Ok(())
+    crate::Buffer::reply(mem, &res).whence()
 }
 
 pub fn decode_archive_event<M>(raw: xous::MessageEnvelope) -> M
@@ -176,14 +175,13 @@ where
     try_decode_archive_event(raw).unwrap()
 }
 
-pub fn try_decode_archive_event<M>(mut raw: xous::MessageEnvelope) -> whence::Result<M, Error>
+pub fn try_decode_archive_event<M>(raw: xous::MessageEnvelope) -> whence::Result<M, Error>
 where
     M: ArchiveEvent,
     <M as rkyv::Archive>::Archived:
         rkyv::Deserialize<M, XousDeserializer> + for<'a> CheckBytes<XousValidator<'a>>,
 {
-    let buffer = utils::extract_move_message(&mut raw).whence()?;
-    buffer.to_original::<M>().whence()
+    crate::r#move::decode_move::<M>(&raw).whence()
 }
 
 pub(crate) fn archive_event_handler<M, S>(

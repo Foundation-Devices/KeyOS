@@ -26,7 +26,6 @@ rkyv = { workspace = true }
 security = { workspace = true }
 server = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-names = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]

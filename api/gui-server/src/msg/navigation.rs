@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use server::rkyv_with::WithAppId;
+use server::WithAppId;
 use xous::AppId;
 
 use crate::{error::NavigationError, ModalStyle};

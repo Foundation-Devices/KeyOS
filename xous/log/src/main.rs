@@ -198,7 +198,7 @@ impl LogServer {
 
     fn run(&mut self) -> ! {
         xous::set_thread_priority(xous::ThreadPriority::System8).unwrap();
-        log!(self, "[LOG] Starting with PID {}", xous::process::id());
+        log!(self, "[LOG] Starting with PID {}", xous::current_pid().unwrap().get());
         let server_addr = xous::create_server_with_sid(
             xous::SID::from_bytes(b"xous-log-server ").unwrap(),
             0..api::Opcode::ReadLogs as _,

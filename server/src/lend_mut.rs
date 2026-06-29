@@ -106,3 +106,14 @@ pub fn lend_mut<M: LendMut>(cid: xous::CID, msg: M) -> M::Response {
         _ => panic!("Unexpected return from send_message: {result:?}"),
     }
 }
+
+/// The `MutableBorrow` payload of an incoming message, for reading then replying in place.
+#[inline]
+pub(crate) fn borrow_mut(
+    raw: &mut xous::MessageEnvelope,
+) -> core::result::Result<&mut xous::MemoryMessage, rkyv::rancor::Error> {
+    match &mut raw.body {
+        xous::Message::MutableBorrow(mem) => Ok(mem),
+        _ => rkyv::rancor::fail!(crate::WrongMessageTypeError),
+    }
+}

@@ -4,8 +4,8 @@
 use std::any::type_name;
 
 use whence::WhenceExt;
-use xous_ipc::XousValidator;
 
+use crate::XousValidator;
 use crate::{Error, Owned, Server, ServerContext};
 
 /// A [`Archive`] message handler.
@@ -59,7 +59,7 @@ pub fn send_archive<M>(cid: xous::CID, msg: M) -> Result<(), xous::Error>
 where
     M: Archive,
 {
-    xous_ipc::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?.send(cid, M::ID as u32)?;
+    crate::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?.send(cid, M::ID as u32)?;
     Ok(())
 }
 
@@ -70,7 +70,7 @@ pub fn send_archive_nowait<M>(cid: xous::CID, msg: M) -> Result<(), xous::Error>
 where
     M: Archive,
 {
-    let buf = xous_ipc::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?;
+    let buf = crate::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?;
     buf.send_nowait(cid, M::ID as u32)?;
     Ok(())
 }

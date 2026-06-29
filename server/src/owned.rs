@@ -4,9 +4,9 @@
 use std::{marker::PhantomData, ops::Deref};
 
 use rkyv::{bytecheck::CheckBytes, rancor};
-use xous_ipc::{XousDeserializer, XousValidator};
 
 use crate::WrongMessageTypeError;
+use crate::{XousDeserializer, XousValidator};
 
 pub struct Owned<T> {
     envelope: xous::MessageEnvelope,
@@ -57,11 +57,14 @@ where
     where
         T::Archived: rkyv::Deserialize<T, XousDeserializer>,
     {
-        rkyv::api::low::deserialize(self.access())
+        rkyv::api::low::deserialize::<T, rancor::Error>(self.access())
     }
 
     #[inline]
-    pub fn access(&self) -> &T::Archived { unsafe { rkyv::access_unchecked(self.as_slice()) } }
+    pub fn access(&self) -> &T::Archived {
+        // SAFETY: the archive was validated in `Owned::new`/`new_move`.
+        unsafe { rkyv::access_unchecked::<T::Archived>(self.as_slice()) }
+    }
 }
 
 impl<T> Owned<T>
@@ -95,6 +98,5 @@ where
 #[inline]
 fn as_slice(mem: &xous::MemoryMessage) -> &[u8] {
     let slice = mem.buf.as_slice();
-    let used = mem.offset.map_or(0, |v| v.get()).min(slice.len());
-    &slice[..used]
+    &slice[..crate::Buffer::message_len(mem)]
 }

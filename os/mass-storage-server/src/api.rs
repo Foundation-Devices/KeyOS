@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use server::{CheckedConn, CheckedPermissions, MessageAllowed, ServerContext};
+use xous::{map_memory, DropDeallocate, MemoryFlags};
 
 use crate::{error::MassStorageError, messages::*, MassStorageEvent};
 
@@ -22,11 +23,17 @@ macro_rules! use_api {
 #[derive(Debug)]
 pub struct MassStorageApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
-    block_buffer: xous_ipc::Buffer<'static>,
+    block_buffer: DropDeallocate,
 }
 
 impl<P: CheckedPermissions> Default for MassStorageApi<P> {
-    fn default() -> Self { Self { conn: Default::default(), block_buffer: xous_ipc::Buffer::new(0x1000) } }
+    fn default() -> Self { Self { conn: Default::default(), block_buffer: block_scratch(0x1000) } }
+}
+
+/// A page-aligned scratch region for transfers whose buffer isn't page-aligned.
+fn block_scratch(min_len: usize) -> DropDeallocate {
+    let len = min_len.next_multiple_of(0x1000).max(0x1000);
+    DropDeallocate::new(map_memory(None, None, len, MemoryFlags::W).expect("mass-storage block buffer"))
 }
 
 impl<P: CheckedPermissions> MassStorageApi<P> {
@@ -40,9 +47,9 @@ impl<P: CheckedPermissions> MassStorageApi<P> {
             (&mut *block_data, false)
         } else {
             if self.block_buffer.len() < block_data.len() {
-                self.block_buffer = xous_ipc::Buffer::new(block_data.len());
+                self.block_buffer = block_scratch(block_data.len());
             }
-            (&mut self.block_buffer as &mut [u8], true)
+            (self.block_buffer.as_slice_mut::<u8>(), true)
         };
 
         self.conn.lend_mut(ReadBlocks {
@@ -52,7 +59,7 @@ impl<P: CheckedPermissions> MassStorageApi<P> {
         })?;
 
         if slow_path {
-            block_data.copy_from_slice(&self.block_buffer[..block_data.len()])
+            block_data.copy_from_slice(&self.block_buffer.as_slice::<u8>()[..block_data.len()])
         }
 
         Ok(())
@@ -68,10 +75,10 @@ impl<P: CheckedPermissions> MassStorageApi<P> {
             block_data
         } else {
             if self.block_buffer.len() < block_data.len() {
-                self.block_buffer = xous_ipc::Buffer::new(block_data.len());
+                self.block_buffer = block_scratch(block_data.len());
             }
-            self.block_buffer[..block_data.len()].copy_from_slice(block_data);
-            &self.block_buffer as &[u8]
+            self.block_buffer.as_slice_mut::<u8>()[..block_data.len()].copy_from_slice(block_data);
+            self.block_buffer.as_slice::<u8>()
         };
 
         self.conn.lend_mut(WriteBlocks {

@@ -16,4 +16,3 @@ log-server = { workspace = true }
 rkyv = { workspace = true }
 server = { workspace = true }
 settings = { workspace = true }
-xous-ipc = { workspace = true }

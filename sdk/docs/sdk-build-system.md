@@ -320,10 +320,6 @@ source = "../xous/api"
 dest = "lib/keyos/xous/api"
 
 [[copy]]
-source = "../xous/ipc"
-dest = "lib/keyos/xous/ipc"
-
-[[copy]]
 source = "../xous/xous-rs"
 dest = "lib/keyos/xous/xous-rs"
 

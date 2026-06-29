@@ -15,7 +15,6 @@ num-derive = "0.4.2"
 num-traits = "0.2.18"
 xous = { path = "../xous-rs" }
 xous-api-log = { package = "xous-api-log", path = "../api/log" }
-xous-ipc = { path = "../ipc" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

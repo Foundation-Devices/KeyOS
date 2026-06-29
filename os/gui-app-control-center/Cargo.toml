@@ -29,7 +29,6 @@ server = { workspace = true }
 shared-fut = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-names = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]

@@ -21,7 +21,6 @@ server = { workspace = true }
 settings = { workspace = true, optional = true }
 usb = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-names = { workspace = true }
 xous-ticktimer = { workspace = true }
 

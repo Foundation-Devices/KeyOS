@@ -4,10 +4,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use rkyv::bytecheck::CheckBytes;
-use server::{
-    xous_ipc::{XousDeserializer, XousValidator},
-    CheckedPermissions, MessageAllowed,
-};
+use server::{CheckedPermissions, MessageAllowed, XousDeserializer, XousValidator};
 use worker::{StreamWatch, WorkerHandle};
 
 use crate::{messages::SubscribeConnectionStatus, ConnectionStatus};

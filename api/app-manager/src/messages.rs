@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use num_traits::{FromPrimitive, ToPrimitive};
-use server::{rkyv_with::WithAppId, AsScalar, FromScalar};
+use server::{AsScalar, FromScalar, WithAppId};
 use xous::{AppId, PID};
 
 use crate::error::{AppManagerError, LaunchError};

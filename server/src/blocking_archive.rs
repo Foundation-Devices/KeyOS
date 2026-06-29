@@ -10,9 +10,9 @@ use rkyv::{
     rancor::{self, Source as _},
 };
 use whence::WhenceExt;
-use xous_ipc::{SizeOfSerializer, XousDeserializer, XousSerializer, XousValidator};
 
-use crate::{utils, AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
+use crate::{AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
+use crate::{SizeOfSerializer, XousDeserializer, XousSerializer, XousValidator};
 
 // ==================== core ====================
 
@@ -159,7 +159,7 @@ pub fn try_send_blocking_archive<M>(cid: xous::CID, msg: M) -> whence::Result<M:
 where
     M: BlockingArchive,
 {
-    let mut buf = xous_ipc::Buffer::into_buf(&msg).whence()?;
+    let mut buf = crate::Buffer::into_buf(&msg).whence()?;
     buf.blocking_move(cid, M::ID as u32).whence()?;
     buf.to_original().whence()
 }
@@ -197,10 +197,7 @@ where
     match &mut raw.body {
         xous::Message::BlockingMove(mem) => {
             // sync case - extract message directly (no AsyncMessageInit wrapper)
-            let message: M = {
-                let buf = unsafe { xous_ipc::Buffer::from_memory_message_mut(mem) };
-                buf.to_original::<M>().whence()?
-            };
+            let message: M = crate::Buffer::deserialize::<M>(mem).whence()?;
             let request =
                 ArchiveResponse { responder: Some(Responder::Sync(raw)), pid, default: S::default_response };
             let request = ArchiveRequest { message, response: request };
@@ -209,8 +206,7 @@ where
         }
         xous::Message::Move(mem) => {
             // async case - extract async wrapper
-            let buf = unsafe { xous_ipc::Buffer::from_memory_message(mem) };
-            let init: AsyncMessageInit<M> = buf.to_original().whence()?;
+            let init: AsyncMessageInit<M> = crate::Buffer::deserialize(mem).whence()?;
             let request = ArchiveResponse {
                 responder: Some(Responder::Async { cid: init.cid, msg_id: init.msg_id }),
                 pid,
@@ -233,14 +229,13 @@ where
     try_decode_archive_async_response(raw).unwrap()
 }
 
-pub fn try_decode_archive_async_response<M>(mut raw: xous::MessageEnvelope) -> whence::Result<M, Error>
+pub fn try_decode_archive_async_response<M>(raw: xous::MessageEnvelope) -> whence::Result<M, Error>
 where
     M: ArchiveCodec,
     <M as rkyv::Archive>::Archived:
         rkyv::Deserialize<M, XousDeserializer> + for<'a> CheckBytes<XousValidator<'a>>,
 {
-    let buf = utils::extract_move_message(&mut raw).whence()?;
-    Ok(buf.to_original::<M>().whence()?)
+    crate::r#move::decode_move::<M>(&raw).whence()
 }
 
 // ==================== internal ====================
@@ -260,33 +255,14 @@ impl Responder {
     {
         match self {
             Responder::Sync(mut envelope) => {
-                let existing = envelope.body.memory_message_mut().expect("blocking move carries memory").buf;
-                let (reply, used) = xous_ipc::Buffer::serialize_reply(existing, response).whence()?;
-                let old = envelope.set_response(
-                    reply,
-                    xous::MemoryAddress::new(used),
-                    xous::MemorySize::new(reply.len()),
-                );
-                // Free whatever of the moved-in buffer the reply doesn't cover: the tail
-                // when we reused the front, or all of it when we allocated a new buffer.
-                if reply.as_ptr() == old.as_ptr() {
-                    let tail_len = old.len() - reply.len();
-                    if tail_len > 0 {
-                        let tail =
-                            unsafe { xous::MemoryRange::new(old.as_ptr() as usize + reply.len(), tail_len) }
-                                .whence()?;
-                        xous::unmap_memory(tail).whence()?;
-                    }
-                } else {
-                    xous::unmap_memory(old).whence()?;
-                }
-                Ok(())
+                let mem = envelope.body.memory_message_mut().expect("blocking move carries memory");
+                crate::Buffer::reply_move(mem, response).whence()
             }
             Responder::Async { cid, msg_id } => {
                 let _disconnect = defer::defer(|| {
                     xous::disconnect(cid).ok();
                 });
-                xous_ipc::Buffer::into_buf(response).whence()?.send_nowait(cid, msg_id as u32).whence()?;
+                crate::Buffer::into_buf(response).whence()?.send_nowait(cid, msg_id as u32).whence()?;
                 Ok(())
             }
         }

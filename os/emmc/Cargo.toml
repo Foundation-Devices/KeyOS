@@ -15,7 +15,6 @@ server = { path = "../../server" }
 thiserror = "1.0"
 ticktimer = { package = "xous-api-ticktimer", path = "../../xous/api/ticktimer" }
 xous = { path = "../../xous/xous-rs" }
-xous-ipc = { path = "../../xous/ipc" }
 
 [target.'cfg(keyos)'.dependencies]
 atsama5d27 = { workspace = true, default-features = false }

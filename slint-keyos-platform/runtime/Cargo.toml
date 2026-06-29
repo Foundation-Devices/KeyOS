@@ -51,7 +51,6 @@ thiserror = { version = "1.0" }
 toml = "0.8.14"
 worker = { path = "../../worker" }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-ticktimer = { workspace = true }
 
 [dependencies.slint]

@@ -4,7 +4,7 @@
 //! QR code scanner navigation request and response formats.
 
 use app_manifest::QrPriority;
-use server::rkyv_with::WithAppId;
+use server::WithAppId;
 use xous::AppId;
 
 /// Options for the QR Scanner navigation request.

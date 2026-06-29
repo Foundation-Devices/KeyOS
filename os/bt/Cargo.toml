@@ -18,7 +18,6 @@ server = { workspace = true }
 settings = { workspace = true }
 thiserror = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
 atsama5d27 = { workspace = true }

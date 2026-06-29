@@ -239,9 +239,6 @@ impl MemoryRange {
     pub fn len(&self) -> usize { self.size.get() }
 
     #[inline]
-    pub fn is_empty(&self) -> bool { self.size.get() > 0 }
-
-    #[inline]
     pub fn as_ptr(&self) -> *const u8 { self.addr.get() as *const u8 }
 
     #[inline]

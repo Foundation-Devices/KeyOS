@@ -26,7 +26,6 @@ security = { workspace = true }
 server = { path = "../../server" }
 sha2 = "0.10"
 xous = { path = "../../xous/xous-rs" }
-xous-ipc = { path = "../../xous/ipc" }
 xous-names = { package = "xous-api-names", path = "../../xous/api/names" }
 zeroize = { version = "1.8.1", default-features = false, features = ["zeroize_derive"] }
 

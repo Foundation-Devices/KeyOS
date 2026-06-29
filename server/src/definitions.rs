@@ -24,7 +24,7 @@ where
 {
     #[inline]
     pub fn send_blocking_archive(self, cid: xous::CID) -> whence::Result<(), crate::Error> {
-        let buf = xous_ipc::Buffer::into_buf(&self).whence()?;
+        let buf = crate::Buffer::into_buf(&self).whence()?;
         buf.send(cid, T::ID as u32).whence()?;
         Ok(())
     }
@@ -38,7 +38,7 @@ where
     pub fn send_scalar(self, cid: xous::CID) -> whence::Result<(), crate::Error> {
         let msg_init: AsyncMessageInit<[u32; 4]> =
             AsyncMessageInit { cid: self.cid, msg_id: self.msg_id, msg: self.msg.as_scalar() };
-        let buf = xous_ipc::Buffer::into_buf(&msg_init).whence()?;
+        let buf = crate::Buffer::into_buf(&msg_init).whence()?;
         buf.send(cid, T::ID as u32).whence()?;
         Ok(())
     }

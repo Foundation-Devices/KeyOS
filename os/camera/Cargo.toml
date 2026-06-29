@@ -17,7 +17,6 @@ server = { path = "../../server" }
 settings = { workspace = true }
 thiserror = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 xous-names = { package = "xous-api-names", path = "../../xous/api/names" }
 
 [target.'cfg(keyos)'.dependencies]

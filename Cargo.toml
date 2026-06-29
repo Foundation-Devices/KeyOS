@@ -169,7 +169,6 @@ members = [
     "xous/api/log",
     "xous/api/names",
     "xous/api/ticktimer",
-    "xous/ipc",
     "xous/kernel",
     "xous/log",
     "xous/names",
@@ -226,7 +225,6 @@ utralib = { path = "utralib" }
 whence = { path = "utils/whence" }
 worker = { path = "worker" }
 xous = { path = "xous/xous-rs" }
-xous-ipc = { path = "xous/ipc" }
 xous-names = { package = "xous-api-names", path = "xous/api/names" }
 xous-ticktimer = { package = "xous-api-ticktimer", path = "xous/api/ticktimer" }
 

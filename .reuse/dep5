@@ -114,12 +114,6 @@ Copyright:
   2023 Foundation Devices, Inc. <hello@foundation.xyz>
 License: MIT OR Apache-2.0
 
-Files: xous/ipc/*
-Copyright:
-  2021 bunnie <bunnie@kosagi.com>
-  2021 Sean Cross <sean@xobs.io>
-License: MIT OR Apache-2.0
-
 Files: xous/xous-rs/*
 Copyright:
   2020 bunnie <bunnie@kosagi.com>

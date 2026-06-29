@@ -8,7 +8,7 @@ use std::any::type_name;
 use rkyv::rancor::{self, Source as _};
 use whence::WhenceExt;
 
-use crate::{utils, AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
+use crate::{AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
 
 // ==================== core ====================
 
@@ -142,7 +142,7 @@ pub fn try_send_blocking_scalar<M>(cid: xous::CID, msg: M) -> whence::Result<M::
 where
     M: BlockingScalar,
 {
-    let msg = xous::Message::BlockingScalar(utils::scalar_to_message(&msg, M::ID));
+    let msg = xous::Message::BlockingScalar(scalar_to_message(&msg, M::ID));
     let result = xous::send_message(cid, msg).whence()?;
     match result {
         xous::Result::Scalar5(arg1, arg2, arg3, arg4, _) => {
@@ -215,7 +215,7 @@ where
     match &mut raw.body {
         xous::Message::BlockingScalar(scalar) => {
             // sync case - extract message and create request
-            let message = utils::scalar_from_message::<M>(scalar);
+            let message = scalar_from_message::<M>(scalar);
             let request = BlockingScalarResponse {
                 responder: Some(Responder::Sync(raw)),
                 pid,
@@ -228,8 +228,7 @@ where
         }
         xous::Message::Move(mem) => {
             // async case - extract async wrapper
-            let buf = unsafe { xous_ipc::Buffer::from_memory_message(mem) };
-            let init: AsyncMessageInit<[u32; 4]> = buf.to_original().whence()?;
+            let init: AsyncMessageInit<[u32; 4]> = crate::Buffer::deserialize(mem).whence()?;
             let AsyncMessageInit { cid, msg_id, msg } = init;
             let request = BlockingScalarResponse {
                 responder: Some(Responder::Async { cid, msg_id }),
@@ -258,7 +257,7 @@ pub fn try_decode_scalar_async_response<R>(mut raw: xous::MessageEnvelope) -> wh
 where
     R: ScalarCodec,
 {
-    let scalar = utils::extract_scalar_message(&mut raw).whence()?;
+    let scalar = extract_scalar_message(&mut raw).whence()?;
     Ok(R::from_scalar(scalar))
 }
 
@@ -270,7 +269,7 @@ pub trait Scalar: ScalarCodec + crate::MessageId {
     where
         Self: Sized,
     {
-        utils::scalar_to_message(self, Self::ID)
+        scalar_to_message(self, Self::ID)
     }
 }
 
@@ -330,7 +329,7 @@ pub fn handle_scalar_message<M, S>(
 
     match &mut raw.body {
         xous::Message::Scalar(scalar) => {
-            let message = utils::scalar_from_message(scalar);
+            let message = scalar_from_message(scalar);
             handler.handle(message, pid, context);
         }
         _ => {
@@ -385,7 +384,7 @@ impl Responder {
                 let _disconnect = defer::defer(|| {
                     xous::disconnect(cid).ok();
                 });
-                let msg = utils::scalar_to_message(&response, msg_id);
+                let msg = scalar_to_message(&response, msg_id);
                 xous::try_send_message(cid, xous::Message::Scalar(msg)).whence()?;
                 Ok(())
             }
@@ -618,4 +617,29 @@ mod codec {
             }
         }
     }
+}
+
+#[inline]
+pub(crate) fn extract_scalar_message(
+    raw: &mut xous::MessageEnvelope,
+) -> core::result::Result<[u32; 4], rkyv::rancor::Error> {
+    match &mut raw.body {
+        xous::Message::Scalar(scalar) => {
+            let [_, arg1, arg2, arg3, arg4] = scalar.to_usize().map(|a| a as u32);
+            Ok([arg1, arg2, arg3, arg4])
+        }
+        _ => rkyv::rancor::fail!(crate::WrongMessageTypeError),
+    }
+}
+
+#[inline]
+pub(crate) fn scalar_to_message(s: &impl crate::AsScalar<4>, msg_id: usize) -> xous::ScalarMessage {
+    let [arg1, arg2, arg3, arg4] = s.as_scalar().map(|a| a as usize);
+    xous::ScalarMessage { id: msg_id, arg1, arg2, arg3, arg4 }
+}
+
+#[inline]
+pub(crate) fn scalar_from_message<M: crate::FromScalar<4>>(msg: &xous::ScalarMessage) -> M {
+    let [_, arg1, arg2, arg3, arg4] = msg.to_usize().map(|a| a as u32);
+    M::from_scalar([arg1, arg2, arg3, arg4])
 }

@@ -5,9 +5,9 @@ use std::{any::type_name, marker::PhantomData};
 
 use rkyv::bytecheck::CheckBytes;
 use whence::WhenceExt;
-use xous_ipc::{XousDeserializer, XousValidator};
 
-use crate::{utils, Error, EventSubscriptionMessage, ScalarCodec, Server, ServerContext};
+use crate::{Error, EventSubscriptionMessage, ScalarCodec, Server, ServerContext};
+use crate::{XousDeserializer, XousValidator};
 
 /// Handle for a single event subscriber
 pub struct ScalarEventSubscriber<M>
@@ -37,7 +37,7 @@ where
     /// Send the event to the subscriber.
     /// Can be used in an IRQ handler context.
     pub fn send(&self, msg: &M) -> Result<xous::Result, xous::Error> {
-        let msg = xous::Message::Scalar(utils::scalar_to_message(msg, self.msg_id));
+        let msg = xous::Message::Scalar(crate::scalar::scalar_to_message(msg, self.msg_id));
         xous::try_send_message(self.cid, msg)
     }
 
@@ -135,8 +135,8 @@ where
     <M as rkyv::Archive>::Archived:
         rkyv::Deserialize<M, XousDeserializer> + for<'a> CheckBytes<XousValidator<'a>>,
 {
-    let mut buf = utils::extract_borrow_mut_message(&mut raw).whence()?;
-    let msg: EventSubscriptionMessage<M> = buf.to_original().whence()?;
+    let mem = crate::lend_mut::borrow_mut(&mut raw).whence()?;
+    let msg: EventSubscriptionMessage<M> = crate::Buffer::deserialize(mem).whence()?;
     let res = handler.handle(
         msg.msg,
         ScalarEventSubscriber::<M::Event> {
@@ -148,8 +148,7 @@ where
         },
         context,
     );
-    buf.replace(&res).whence()?;
-    Ok(())
+    crate::Buffer::reply(mem, &res).whence()
 }
 
 pub fn decode_scalar_event<M>(raw: xous::MessageEnvelope) -> M
@@ -163,7 +162,7 @@ pub fn try_decode_scalar_event<M>(mut raw: xous::MessageEnvelope) -> whence::Res
 where
     M: ScalarEvent,
 {
-    let scalar = utils::extract_scalar_message(&mut raw).whence()?;
+    let scalar = crate::scalar::extract_scalar_message(&mut raw).whence()?;
     Ok(M::from_scalar(scalar))
 }
 

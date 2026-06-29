@@ -13,7 +13,6 @@ num-derive = "0.4.2"
 num-traits = "0.2.18"
 ticktimer-server = { package = "xous-api-ticktimer", path = "../api/ticktimer" }
 xous = { path = "../xous-rs" }
-xous-ipc = { path = "../ipc" }
 xous-names = { package = "xous-api-names", path = "../api/names" }
 
 [target.'cfg(keyos)'.dependencies]
