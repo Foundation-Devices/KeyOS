@@ -23,6 +23,8 @@ power_manager::use_api!();
 security::use_api!();
 settings::use_api!();
 
+use app_manager::ImportThirdPartyCertificateResult;
+
 const POWER_BUTTON_SHORT_PRESS_MS: u64 = 200;
 const POWER_BUTTON_LONG_PRESS_MS: u64 = 3000;
 
@@ -179,6 +181,7 @@ impl DebugProtocol {
             Command::LoadAppChunk(data) => self.load_app_chunk(&data),
             Command::LoadAppEnd => self.load_app_end(),
             Command::GetProcessList => self.get_process_list(),
+            Command::InstallCertificate { certificate_pem } => self.install_certificate(certificate_pem),
             Command::KernelCmd { cmd_byte } => {
                 let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
                     Ok(buf) => xous::DropDeallocate::new(buf),
@@ -256,6 +259,39 @@ impl DebugProtocol {
 
         log::info!("debug: get process list 't'");
         Response::KernelOutput(payload_from_mapped(buf, len))
+    }
+
+    fn install_certificate(&mut self, certificate_pem: Vec<u8>) -> Response {
+        match self.gui.is_locked() {
+            Ok(false) => {}
+            Ok(true) => {
+                log::warn!("debug: install_certificate rejected: device is locked");
+                return Response::Locked;
+            }
+            Err(e) => {
+                log::error!("debug: install_certificate lock-state check failed: {e:?}");
+                return Response::Err;
+            }
+        }
+
+        if !self.developer_mode_enabled() {
+            log::warn!("debug: install_certificate rejected: Developer Mode is disabled");
+            return Response::Err;
+        }
+        match self.app_manager.import_third_party_certificate(certificate_pem) {
+            Ok(ImportThirdPartyCertificateResult::Imported(cert)) => {
+                log::info!("debug: installed trusted publisher certificate {}", cert.name);
+                Response::Ack
+            }
+            Ok(ImportThirdPartyCertificateResult::Invalid) => {
+                log::warn!("debug: install_certificate rejected: invalid certificate");
+                Response::Err
+            }
+            Err(e) => {
+                log::error!("debug: install_certificate app-manager request failed: {e:?}");
+                Response::Err
+            }
+        }
     }
 
     fn close_app(&mut self, pid: u16) -> Response {
@@ -620,6 +656,7 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::LoadAppChunk(_)
             | Command::LoadAppEnd
             | Command::GetProcessList
+            | Command::InstallCertificate { .. }
     )
 }
 

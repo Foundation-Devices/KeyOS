@@ -46,7 +46,7 @@ fn built_in_commands_expose_help() {
         );
     }
 
-    for subcommand in ["gen", "print"] {
+    for subcommand in ["gen", "print", "install"] {
         let output =
             Command::new(foundation_bin()).arg("cert").arg(subcommand).arg("--help").output().unwrap();
         assert!(output.status.success(), "help failed for cert {subcommand}: {}", stderr(&output));
@@ -142,6 +142,19 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     let print_cert = env.command().arg("cert").arg("print").arg("Smoke Publisher").output().unwrap();
     assert!(print_cert.status.success(), "cert print failed: {}", stderr(&print_cert));
     assert!(stdout(&print_cert).contains("Certificate contents"));
+
+    let install_cert = env.command().arg("cert").arg("install").arg("Smoke Publisher").output().unwrap();
+    assert!(install_cert.status.success(), "cert install failed: {}", stderr(&install_cert));
+    assert!(stdout(&install_cert).contains("Certificate installed successfully"));
+    let passport_drive_log = env.read_log("passport-drive.log");
+    assert!(
+        passport_drive_log.contains("\"name\":\"install_certificate\""),
+        "missing install_certificate call: {passport_drive_log}"
+    );
+    assert!(
+        passport_drive_log.contains("Smoke Publisher.crt"),
+        "install_certificate did not receive generated certificate: {passport_drive_log}"
+    );
 
     let preview =
         env.command_in(env.app_root()).arg("preview").arg("--style").arg("fluent").output().unwrap();

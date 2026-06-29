@@ -39,5 +39,6 @@ template = ["fs-generic"]
     "SubscribeDeveloperMode",
 ]
 "os/app-manager" = [
+    "ImportThirdPartyCertificate",
     "RefreshInstalledApps",
 ]

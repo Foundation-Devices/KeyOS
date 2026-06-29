@@ -3,11 +3,13 @@
 
 //! Sideload command - build, sign, upload, and optionally launch an app on hardware over USB.
 
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use foundation_core::ProjectContext;
 use foundation_mcp::PassportDriveMcpClient;
+use foundation_ui::TerminalUI;
 
 use crate::assets::BUNDLED_ICON_FILE;
 use crate::commands::build;
@@ -30,19 +32,28 @@ pub fn execute(release: bool, no_run: bool) -> Result<()> {
     let mut mcp = PassportDriveMcpClient::connect().map_err(|error| {
         anyhow::anyhow!("Could not start passport-drive MCP control. Make sure Passport Prime is unlocked, connected by USB, and Developer Mode is enabled: {error}")
     })?;
-    mcp.is_developer_mode_enabled().map_err(|error| {
-        anyhow::anyhow!("Developer Mode must be enabled before sideloading. On Passport Prime, open Settings > Apps and turn on Developer Mode, then reconnect USB and try again: {error}")
-    })?;
     println!("passport-drive MCP control connected.");
 
-    println!("Uploading signed app bundle via usb-debug...");
-    let load_response = mcp.load_app(&artifact_dir).map_err(|error| {
-        anyhow::anyhow!(
-            "Could not upload {} over usb-debug. Make sure Developer Mode is enabled and no other process is using the Passport USB debug interface. Reason: {}",
-            artifact_dir.display(),
-            error
-        )
-    })?;
+    let ui = TerminalUI::new();
+    let upload_message = match directory_size_bytes(&artifact_dir) {
+        Ok(bytes) => format!("Uploading signed app bundle via usb-debug ({})...", format_bytes(bytes)),
+        Err(_) => "Uploading signed app bundle via usb-debug...".to_string(),
+    };
+    let upload_spinner = ui.spinner(&upload_message);
+    let load_response = match mcp.load_app(&artifact_dir) {
+        Ok(response) => {
+            upload_spinner.finish_success("Upload complete");
+            response
+        }
+        Err(error) => {
+            upload_spinner.finish_clear();
+            return Err(anyhow::anyhow!(
+                "Could not upload {} over usb-debug. Make sure Developer Mode is enabled and no other process is using the Passport USB debug interface. Reason: {}",
+                artifact_dir.display(),
+                error
+            ));
+        }
+    };
     println!("{load_response}");
 
     if no_run {
@@ -71,5 +82,39 @@ fn ensure_exists(path: &Path) -> Result<()> {
         Ok(())
     } else {
         anyhow::bail!("Expected build artifact is missing: {}", path.display());
+    }
+}
+
+fn directory_size_bytes(path: &Path) -> Result<u64> {
+    let metadata = fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+
+    let mut total = 0u64;
+    for entry in fs::read_dir(path).with_context(|| format!("Failed to read {}", path.display()))? {
+        let entry = entry?;
+        total = total.saturating_add(directory_size_bytes(&entry.path())?);
+    }
+    Ok(total)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = UNITS[0];
+
+    for next_unit in UNITS.iter().skip(1) {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = *next_unit;
+    }
+
+    if unit == "B" {
+        format!("{bytes} {unit}")
+    } else {
+        format!("{value:.1} {unit}")
     }
 }

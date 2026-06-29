@@ -7,6 +7,7 @@
 //! Provides tools for AI integration (Claude Code).
 
 use std::collections::VecDeque;
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,7 +17,9 @@ use base64::Engine;
 use hidapi::HidDevice;
 use rusb::UsbContext as _;
 use serde_json::{json, Value};
-use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient};
+use usb_debug_protocol::{
+    Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient, INSTALL_CERTIFICATE_BYTES_MAX,
+};
 
 use crate::{LOG_TERMINATOR, SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -235,6 +238,17 @@ fn tool_definitions() -> Value {
                 "required": ["app_path"]
             }
         },
+        {
+            "name": "install_certificate",
+            "description": "Send a local publisher certificate over usb-debug and install it as a trusted publisher.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "certificate_path": { "type": "string", "description": "Local PEM certificate file to install as a trusted publisher" }
+                },
+                "required": ["certificate_path"]
+            }
+        },
         // SAM-BA tools
         {
             "name": "samba_list_devices",
@@ -430,6 +444,7 @@ fn handle_tool(state: &mut McpState, name: &str, args: &Value) -> Value {
         "launch_app" => handle_launch_app(state, args),
         "close_app" => handle_close_app(state, args),
         "load_app" => handle_load_app(state, args),
+        "install_certificate" => handle_install_certificate(state, args),
         "samba_list_devices" => handle_samba_list_devices(),
         "samba_connect" => handle_samba_connect(state),
         "samba_disconnect" => handle_samba_disconnect(state),
@@ -840,6 +855,48 @@ fn handle_load_app(state: &McpState, args: &Value) -> Value {
         )),
         Err(e) => error_result(&format!("load_app failed: {e:#}")),
     }
+}
+
+fn handle_install_certificate(state: &McpState, args: &Value) -> Value {
+    let dev = match state.require_device() {
+        Ok(d) => d,
+        Err(e) => return error_result(&e),
+    };
+
+    let certificate_path = match args.get("certificate_path").and_then(|v| v.as_str()) {
+        Some(path) => PathBuf::from(path),
+        None => return error_result("Missing required parameter: certificate_path"),
+    };
+
+    let certificate_pem = match read_certificate_for_install(&certificate_path) {
+        Ok(bytes) => bytes,
+        Err(e) => return error_result(&format!("Could not read certificate: {e:#}")),
+    };
+
+    match dev.send(Command::InstallCertificate { certificate_pem }, Duration::from_secs(10)) {
+        Ok(_) => text_result(&format!(
+            "Installed {} as a trusted publisher certificate.",
+            certificate_path.display()
+        )),
+        Err(e) => error_result(&format!("install_certificate failed: {e}")),
+    }
+}
+
+fn read_certificate_for_install(certificate_path: &PathBuf) -> Result<Vec<u8>> {
+    let metadata = fs::metadata(certificate_path)
+        .with_context(|| format!("reading metadata for {}", certificate_path.display()))?;
+    if metadata.len() == 0 {
+        anyhow::bail!("certificate is empty: {}", certificate_path.display());
+    }
+    if metadata.len() > INSTALL_CERTIFICATE_BYTES_MAX as u64 {
+        anyhow::bail!(
+            "certificate is too large: {} bytes (maximum {} bytes)",
+            metadata.len(),
+            INSTALL_CERTIFICATE_BYTES_MAX
+        );
+    }
+
+    fs::read(certificate_path).with_context(|| format!("reading {}", certificate_path.display()))
 }
 
 // HID APDU handler

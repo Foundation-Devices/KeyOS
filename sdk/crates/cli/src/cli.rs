@@ -22,6 +22,7 @@ pub const CMD_PLUGIN: &str = "plugin";
 pub const CMD_COMPLETIONS: &str = "completions";
 pub const CMD_CERT_GEN: &str = "gen";
 pub const CMD_CERT_PRINT: &str = "print";
+pub const CMD_CERT_INSTALL: &str = "install";
 pub const CMD_THEMES_BUILD: &str = "build";
 pub const CMD_THEMES_LIST: &str = "list";
 pub const CMD_THEMES_NEW: &str = "new";
@@ -135,11 +136,12 @@ fn build_clean_command() -> Command {
 fn build_cert_command() -> Command {
     Command::new(CMD_CERT)
         .about("Manage signing certificates")
-        .long_about("Generate and inspect publisher certificates used for Foundation app signing")
+        .long_about("Generate, inspect, and install publisher certificates used for Foundation app signing")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(build_cert_gen_command())
         .subcommand(build_cert_print_command())
+        .subcommand(build_cert_install_command())
 }
 
 fn build_theme_command() -> Command {
@@ -214,6 +216,20 @@ fn build_cert_print_command() -> Command {
             Arg::new("name")
                 .help(
                     "Publisher identity name to print (defaults to the current app publisher when available)",
+                )
+                .required(false)
+                .index(1),
+        )
+}
+
+fn build_cert_install_command() -> Command {
+    Command::new(CMD_CERT_INSTALL)
+        .about("Install a publisher certificate on hardware")
+        .long_about("Installs a stored publisher certificate as a trusted publisher on a connected Passport Prime over usb-debug")
+        .arg(
+            Arg::new("name")
+                .help(
+                    "Publisher identity name to install (defaults to the current app publisher when available)",
                 )
                 .required(false)
                 .index(1),

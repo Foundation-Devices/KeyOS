@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use foundation_core::{
     list_signing_identities, signing_identity_paths, ProjectContext, PublisherConfig, SigningIdentityPaths,
 };
+use foundation_mcp::PassportDriveMcpClient;
 use foundation_ui::Prompts;
 use serde::Serialize;
 
@@ -154,6 +155,40 @@ pub fn execute_print(cert_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Execute `foundation cert install`.
+pub fn execute_install(cert_name: Option<&str>) -> Result<()> {
+    println!("Installing signing certificate...");
+    println!();
+
+    let identity = resolve_identity_for_print(cert_name)?;
+    let certificate_len = certificate_len_for_install(&identity.certificate)?;
+    println!("  {STATUS_OK} {}", format!("Using publisher identity {}", identity.identity_name));
+    println!(
+        "  {STATUS_OK} {}",
+        format!("Using certificate {} ({certificate_len} bytes)", identity.certificate.display())
+    );
+    println!();
+
+    println!("Checking passport-drive MCP control...");
+    let mut mcp = PassportDriveMcpClient::connect().map_err(|error| {
+        anyhow::anyhow!("Could not start passport-drive MCP control. Make sure Passport Prime is unlocked, connected by USB, and Developer Mode is enabled: {error}")
+    })?;
+    println!("passport-drive MCP control connected.");
+
+    println!("Installing certificate via usb-debug...");
+    let install_response = mcp.install_certificate(&identity.certificate).map_err(|error| {
+        anyhow::anyhow!(
+            "Could not install {} over usb-debug. Make sure Developer Mode is enabled and no other process is using the Passport USB debug interface. Reason: {}",
+            identity.certificate.display(),
+            error
+        )
+    })?;
+    println!("{install_response}");
+    println!("Certificate installed successfully!");
+
+    Ok(())
+}
+
 fn resolve_identity(
     defaults: Option<&PublisherConfig>,
     publisher_name: Option<&str>,
@@ -276,6 +311,15 @@ fn select_existing_certificate_path(identity: &mut SigningIdentityPaths) {
             identity.certificate = legacy_certificate;
         }
     }
+}
+
+fn certificate_len_for_install(certificate_path: &Path) -> Result<u64> {
+    let metadata = fs::metadata(certificate_path)
+        .with_context(|| format!("Failed to read certificate metadata: {}", certificate_path.display()))?;
+    if metadata.len() == 0 {
+        anyhow::bail!("Certificate is empty: {}", certificate_path.display());
+    }
+    Ok(metadata.len())
 }
 
 fn ensure_directory(path: &Path) -> Result<()> {

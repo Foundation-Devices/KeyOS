@@ -92,6 +92,10 @@ async fn run() -> Result<()> {
                     let key_name = sub_matches.get_one::<String>("name").map(|s| s.as_str());
                     commands::cert::execute_print(key_name)?;
                 }
+                Some((cert_command_name, sub_matches)) if cert_command_name == cli::CMD_CERT_INSTALL => {
+                    let key_name = sub_matches.get_one::<String>("name").map(|s| s.as_str());
+                    commands::cert::execute_install(key_name)?;
+                }
                 _ => cli::print_help(),
             }
         }

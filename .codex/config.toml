@@ -63,3 +63,6 @@ approval_mode = "approve"
 
 [mcp_servers.passport-drive.tools.swipe]
 approval_mode = "approve"
+
+[mcp_servers.passport-drive.tools.install_certificate]
+approval_mode = "approve"

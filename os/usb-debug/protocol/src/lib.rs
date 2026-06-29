@@ -128,6 +128,7 @@ const CMD_LOAD_APP_FILE_BEGIN: u8 = 0x0c;
 const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
 const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
+const CMD_INSTALL_CERTIFICATE: u8 = 0x10;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
@@ -138,6 +139,8 @@ pub const LOAD_APP_CHUNK_MAX: usize = USB_DEBUG_OUT_TRANSFER_MAX - 1;
 /// bulk max packet for path setup commands: 1 command byte + 8 size bytes
 /// + filename. File bytes use the larger `LOAD_APP_CHUNK_MAX` data path.
 pub const LOAD_APP_FILE_PATH_MAX: usize = 512 - 1 - 8;
+/// Maximum PEM certificate payload accepted for trusted-publisher import.
+pub const INSTALL_CERTIFICATE_BYTES_MAX: usize = 4 * 1024;
 
 /// Host -> device command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +182,9 @@ pub enum Command {
     LoadAppChunk(Vec<u8>),
     LoadAppEnd,
     GetProcessList,
+    InstallCertificate {
+        certificate_pem: Vec<u8>,
+    },
 }
 
 impl Command {
@@ -200,6 +206,7 @@ impl Command {
             Command::LoadAppChunk(_) => CMD_LOAD_APP_CHUNK,
             Command::LoadAppEnd => CMD_LOAD_APP_END,
             Command::GetProcessList => CMD_GET_PROCESS_LIST,
+            Command::InstallCertificate { .. } => CMD_INSTALL_CERTIFICATE,
         }
     }
 
@@ -245,6 +252,9 @@ impl Command {
             }
             Command::LoadAppChunk(data) => {
                 out.extend_from_slice(data);
+            }
+            Command::InstallCertificate { certificate_pem } => {
+                out.extend_from_slice(certificate_pem);
             }
         }
     }
@@ -314,6 +324,19 @@ impl Command {
             CMD_LOAD_APP_CHUNK => Ok(Command::LoadAppChunk(payload.to_vec())),
             CMD_LOAD_APP_END => Ok(Command::LoadAppEnd),
             CMD_GET_PROCESS_LIST => Ok(Command::GetProcessList),
+            CMD_INSTALL_CERTIFICATE => {
+                if payload.is_empty() {
+                    return Err(ProtocolError::InvalidPayloadLength { cmd, need: 1, got: 0 });
+                }
+                if payload.len() > INSTALL_CERTIFICATE_BYTES_MAX {
+                    return Err(ProtocolError::InvalidPayloadLength {
+                        cmd,
+                        need: INSTALL_CERTIFICATE_BYTES_MAX,
+                        got: payload.len(),
+                    });
+                }
+                Ok(Command::InstallCertificate { certificate_pem: payload.to_vec() })
+            }
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
@@ -542,12 +565,37 @@ mod tests {
         roundtrip(Command::LoadAppChunk(vec![1, 2, 3, 4]));
         roundtrip(Command::LoadAppEnd);
         roundtrip(Command::GetProcessList);
+        roundtrip(Command::InstallCertificate {
+            certificate_pem: b"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_vec(),
+        });
     }
 
     #[test]
     fn load_app_chunk_fills_max_out_transfer() {
         assert_eq!(LOAD_APP_CHUNK_MAX + 1, USB_DEBUG_OUT_TRANSFER_MAX);
         assert!(USB_DEBUG_OUT_TRANSFER_MAX <= u16::MAX as usize);
+    }
+
+    #[test]
+    fn install_certificate_payload_is_capped() {
+        let mut bytes = Vec::from([CMD_INSTALL_CERTIFICATE]);
+        bytes.extend(vec![b'a'; INSTALL_CERTIFICATE_BYTES_MAX]);
+        assert!(matches!(Command::decode(&bytes), Ok(Command::InstallCertificate { .. })));
+
+        bytes.push(b'a');
+        assert!(matches!(
+            Command::decode(&bytes),
+            Err(ProtocolError::InvalidPayloadLength {
+                cmd: CMD_INSTALL_CERTIFICATE,
+                need: INSTALL_CERTIFICATE_BYTES_MAX,
+                got
+            }) if got == INSTALL_CERTIFICATE_BYTES_MAX + 1
+        ));
+
+        assert!(matches!(
+            Command::decode(&[CMD_INSTALL_CERTIFICATE]),
+            Err(ProtocolError::InvalidPayloadLength { cmd: CMD_INSTALL_CERTIFICATE, need: 1, got: 0 })
+        ));
     }
 
     #[test]

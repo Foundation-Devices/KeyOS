@@ -75,23 +75,12 @@ impl PassportDriveMcpClient {
         Ok(tool_text(&result).unwrap_or_else(|| result.to_string()))
     }
 
-    /// Ask the device whether Developer Mode is enabled. Returns `Ok(())` only
-    /// when the setting is on; an explicit "disabled" reply from the device or
-    /// any transport error is mapped to `Err`. The previous implementation
-    /// sent a kernel `h` debug command and treated any reply as proof of
-    /// Developer Mode being on — which only proved the USB debug transport
-    /// responded, not that the actual `DeveloperMode` setting was true. On
-    /// devices where the debug interface stays reachable while Developer Mode
-    /// is off, that left sideload free to upload/launch instead of failing
-    /// early with the user-friendly i18n message.
-    pub fn is_developer_mode_enabled(&mut self) -> Result<()> {
-        let result = self.call_tool("get_developer_mode", json!({}))?;
-        match tool_text(&result).as_deref() {
-            Some("enabled") => Ok(()),
-            Some("disabled") => bail!("Developer Mode is disabled on the device"),
-            Some(other) => bail!("unexpected get_developer_mode reply: {other}"),
-            None => bail!("get_developer_mode returned an empty reply"),
-        }
+    pub fn install_certificate(&mut self, certificate_path: &Path) -> Result<String> {
+        let result = self.call_tool(
+            "install_certificate",
+            json!({ "certificate_path": certificate_path.display().to_string() }),
+        )?;
+        Ok(tool_text(&result).unwrap_or_else(|| result.to_string()))
     }
 
     fn spawn_candidate(command: &OsStr) -> Result<Self> {
