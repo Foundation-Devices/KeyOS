@@ -389,7 +389,7 @@ impl Gui {
                 #[cfg(not(feature = "recovery-os"))]
                 camera_state: crate::camera::CameraState::default(),
                 input_cid: msg.cid,
-                buffers: BufferChain::new(msg.cid, u16::try_from(SCREEN_HEIGHT).unwrap()),
+                buffers: BufferChain::new(msg.cid, u16::try_from(SCREEN_HEIGHT).unwrap(), pid),
                 notified_shown: false,
             },
         );
@@ -445,7 +445,7 @@ impl Gui {
         self.keyboard_window = Some(KeyboardWindow {
             input_cid: cid,
             pid,
-            buffers: BufferChain::new(cid, u16::try_from(DEFAULT_KEYBOARD_HEIGHT).unwrap()),
+            buffers: BufferChain::new(cid, u16::try_from(DEFAULT_KEYBOARD_HEIGHT).unwrap(), pid),
             blur_state: BlurBufferState::default(),
             last_update_args: Vec::new(),
             last_drawn_args: Vec::new(),
@@ -549,6 +549,7 @@ impl Gui {
             if *wait_pid == pid {
                 let nav = core::mem::take(nav);
                 self.switch_to_window_with_nav(pid, nav);
+                self.notify_switcher_update_app_fb(pid);
                 self.waiting_for_pid = None;
             }
         }
@@ -985,10 +986,6 @@ impl Gui {
                 if let NextFrameAnimationState::Animating { progress, .. } = next_frame_animation {
                     if *progress < 100 - NEXT_FRAME_TICK {
                         *progress += NEXT_FRAME_TICK;
-                    } else if *progress < 100 {
-                        // Do one last frame with the animation finished so we don't drop
-                        // the framebuffer too early.
-                        *progress = 100;
                     } else {
                         *next_frame_animation = NextFrameAnimationState::NotAnimating;
                     }

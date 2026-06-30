@@ -158,6 +158,10 @@ impl Layer {
         self.crop_width != self.dst_width || self.crop_height != self.dst_height
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.crop_width == 0 || self.crop_height == 0 || self.dst_width == 0 || self.dst_height == 0
+    }
+
     pub fn src(&self) -> SourceType { self.src }
 
     pub fn src_dimensions(&self) -> (usize, usize) { (self.src_width, self.src_height) }
@@ -191,6 +195,9 @@ fn source_len_for_dimensions(width: usize, height: usize, pixel_format: LayerPix
 
 impl LayerStack {
     pub fn push(&mut self, layer: Layer) {
+        if layer.is_empty() {
+            return;
+        }
         for (i, o) in &mut self.layers.iter_mut().enumerate() {
             match o {
                 Some(o) => {

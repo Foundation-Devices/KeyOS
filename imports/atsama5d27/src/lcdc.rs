@@ -742,7 +742,7 @@ impl Lcdc {
         }
     }
 
-    fn set_vertical_front_porch_width(&mut self, margin: u16) {
+    pub fn set_vertical_front_porch_width(&mut self, margin: u16) {
         let mut lcdc_csr = CSR::new(self.base_addr as *mut u32);
         lcdc_csr.rmwf(LCDCFG2_VFPW, margin as u32);
     }
@@ -784,6 +784,18 @@ impl Lcdc {
             LcdcLayerId::Ovr2 => lcdc_csr.rmwf(ATTR_OVR2, 1),
             LcdcLayerId::Heo => lcdc_csr.rmwf(ATTR_HEO, 1),
         }
+    }
+
+    /// Arms the attribute update for every layer in a single register write.
+    /// The four UPDATEEN bits share the ATTR register, so writing them together
+    /// keeps a start-of-frame from latching only part of a commit.
+    pub fn update_all_attributes(&self) {
+        let mut lcdc_csr = CSR::new(self.base_addr as *mut u32);
+        let value = lcdc_csr.ms(ATTR_BASE, 1)
+            | lcdc_csr.ms(ATTR_OVR1, 1)
+            | lcdc_csr.ms(ATTR_OVR2, 1)
+            | lcdc_csr.ms(ATTR_HEO, 1);
+        lcdc_csr.wo(ATTR, value);
     }
 
     #[inline]
@@ -870,6 +882,27 @@ impl Lcdc {
     }
 
     #[inline]
+    pub fn enable_dma_transfer_done_interrupt(&self, layer: LcdcLayerId, enable: bool) {
+        let mut lcdc_csr = CSR::new(self.base_addr as *mut u32);
+
+        if enable {
+            match layer {
+                LcdcLayerId::Base => lcdc_csr.wfo(BASEIER_DMA, 1),
+                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IER_DMA, 1),
+                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IER_DMA, 1),
+                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIER_DMA, 1),
+            }
+        } else {
+            match layer {
+                LcdcLayerId::Base => lcdc_csr.wfo(BASEIDR_DMA, 1),
+                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IDR_DMA, 1),
+                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IDR_DMA, 1),
+                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIDR_DMA, 1),
+            }
+        }
+    }
+
+    #[inline]
     pub fn is_add_to_queue_pending(&self, layer: LcdcLayerId) -> bool {
         let lcdc_csr = CSR::new(self.base_addr as *mut u32);
 
@@ -878,6 +911,20 @@ impl Lcdc {
             LcdcLayerId::Ovr1 => OVR1CHSR_A2QSR,
             LcdcLayerId::Ovr2 => OVR2CHSR_A2QSR,
             LcdcLayerId::Heo => HEOCHSR_A2QSR,
+        };
+
+        lcdc_csr.rf(field) != 0
+    }
+
+    #[inline]
+    pub fn is_update_pending(&self, layer: LcdcLayerId) -> bool {
+        let lcdc_csr = CSR::new(self.base_addr as *mut u32);
+
+        let field = match layer {
+            LcdcLayerId::Base => BASECHSR_UPDATESR,
+            LcdcLayerId::Ovr1 => OVR1CHSR_UPDATESR,
+            LcdcLayerId::Ovr2 => OVR2CHSR_UPDATESR,
+            LcdcLayerId::Heo => HEOCHSR_UPDATESR,
         };
 
         lcdc_csr.rf(field) != 0

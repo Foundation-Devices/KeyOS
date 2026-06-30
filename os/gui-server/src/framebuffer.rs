@@ -10,6 +10,8 @@ use crate::{layers::LayerPixelFormat, Gui};
 pub struct BufferChain {
     cid: CID,
     height: u16,
+    // Stored only for logging purposes
+    pid: PID,
     state: BufferChainState,
     // The application is sending updates faster than we can render them.
     // Switches on if two updates happen within one VSync period,
@@ -47,10 +49,11 @@ enum BufferChainState {
 }
 
 impl BufferChain {
-    pub fn new(cid: CID, height: u16) -> Self {
+    pub fn new(cid: CID, height: u16, pid: PID) -> Self {
         Self {
             cid,
             height,
+            pid,
             throttle_framerate: false,
             buffer_in_flight: false,
             state: BufferChainState::Hidden,
@@ -71,7 +74,7 @@ impl BufferChain {
             | BufferChainState::ShownFrontOnly { .. }
             | BufferChainState::Shown { .. }
             | BufferChainState::ShownUpdatePending { .. } => {
-                log::warn!("BufferChain::show called twice (state: {:?})", state);
+                log::warn!("BufferChain::show called twice for PID={} (state: {:?})", self.pid, state);
                 state
             }
             BufferChainState::Invalid => unreachable!(),
@@ -89,7 +92,7 @@ impl BufferChain {
                 BufferChainState::ToBeHidden { front }
             }
             BufferChainState::Hidden { .. } | BufferChainState::ToBeHidden { .. } => {
-                log::warn!("BufferChain::hide called twice (state: {:?})", state);
+                log::warn!("BufferChain::hide called twice for PID={} (state: {:?})", self.pid, state);
                 state
             }
             BufferChainState::Invalid => unreachable!(),
@@ -112,13 +115,13 @@ impl BufferChain {
 
     pub fn buffer_requested(&mut self, vsync_time: u64) {
         if self.buffer_in_flight {
-            log::warn!("Buffer already in flight when it was requested");
+            log::warn!("Buffer already in flight when it was requested for PID={}", self.pid);
             return;
         }
         let state = self.state.take();
         self.state = match state {
             BufferChainState::Hidden { .. } | BufferChainState::ToBeHidden { .. } => {
-                log::trace!("Not giving buffer to hidden window");
+                log::trace!("Not giving buffer to hidden window for PID={}", self.pid);
                 state
             }
             BufferChainState::ToBeShown => {
@@ -158,14 +161,14 @@ impl BufferChain {
         }
 
         if !self.buffer_in_flight {
-            log::warn!("No buffer was in flight when buffer_received was called");
+            log::warn!("No buffer was in flight when buffer_received was called for PID={}", self.pid);
             return false;
         }
         self.buffer_in_flight = false;
         let state = self.state.take();
         self.state = match state {
             BufferChainState::Hidden { .. } | BufferChainState::ToBeHidden { .. } => {
-                log::trace!("Dropping update buffer for hidden window");
+                log::trace!("Dropping update buffer for hidden window for PID={}", self.pid);
                 state
             }
             BufferChainState::ToBeShown => BufferChainState::ShownFrontOnly { front: buffer },
@@ -175,7 +178,10 @@ impl BufferChain {
             // These two cases should never happen, but a panic!() is a bit harsh,
             // because this is recoverable.
             BufferChainState::Shown { front, .. } | BufferChainState::ShownUpdatePending { front, .. } => {
-                log::warn!("Three framebuffers on a single window. Dropping last update");
+                log::warn!(
+                    "Three framebuffers on a single window for PID={}. Dropping last update",
+                    self.pid
+                );
                 BufferChainState::ShownUpdatePending { front, next: buffer, requested_buffer: false }
             }
             BufferChainState::Invalid => unreachable!(),
@@ -217,7 +223,7 @@ impl BufferChain {
                 self.send_framebuffer(DropDeallocate::new(buf), true, 0);
             }
             Err(e) => {
-                log::error!("Could not allocate framebuffer: {e:?}");
+                log::error!("Could not allocate framebuffer for PID={}: {e:?}", self.pid);
             }
         }
     }
@@ -234,7 +240,7 @@ impl BufferChain {
         match xous::send_message(self.cid, msg) {
             Ok(_) => self.buffer_in_flight = true,
             Err(e) => {
-                log::error!("Failed to send buffer to app: {e:?}");
+                log::error!("Failed to send buffer to app PID={}: {e:?}", self.pid);
                 xous::unmap_memory(buffer).ok();
             }
         }
@@ -278,10 +284,10 @@ mod tests {
     fn wrong_sized_submit_is_rejected_before_becoming_visible() {
         let height = u16::try_from(DEFAULT_KEYBOARD_HEIGHT).unwrap();
         let expected = required_framebuffer_len(height);
-        let mut buffers = BufferChain::new(0, height);
+        let pid = PID::new(1).unwrap();
+        let mut buffers = BufferChain::new(0, height, pid);
         buffers.state = BufferChainState::ToBeShown;
         buffers.buffer_in_flight = true;
-        let pid = PID::new(1).unwrap();
 
         assert!(!buffers.buffer_received(pid, map_test_buffer(xous::PAGE_SIZE)));
         assert!(matches!(buffers.state, BufferChainState::ToBeShown));

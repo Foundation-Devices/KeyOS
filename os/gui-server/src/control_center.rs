@@ -58,7 +58,7 @@ pub(crate) struct ControlCenterWindow {
 impl ControlCenterWindow {
     pub fn new(input_cid: CID, pid: PID) -> Result<Self, xous::Error> {
         let mut buffers =
-            BufferChain::new(input_cid, u16::try_from(CONTROL_CENTER_HEIGHT_EXPANDED_PX).unwrap());
+            BufferChain::new(input_cid, u16::try_from(CONTROL_CENTER_HEIGHT_EXPANDED_PX).unwrap(), pid);
         // Control center starts out as visible
         buffers.show();
         Gui::send_visible_event(pid, input_cid);
