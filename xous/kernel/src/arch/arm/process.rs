@@ -18,8 +18,8 @@ use crate::mem::MemoryManager;
 use crate::platform::atsama5d2::cache::{clean_cache_l1, invalidate_instruction_cache};
 use crate::process::{INITIAL_TID, IRQ_TID};
 
-static mut PROCESS: *mut ProcessImpl = THREAD_CONTEXT_AREA as *mut ProcessImpl;
-pub const MAX_THREAD_COUNT: TID = 7;
+static mut THREADS: *mut [Thread; MAX_THREAD_COUNT] = THREAD_CONTEXT_AREA as *mut _;
+pub const MAX_THREAD_COUNT: TID = 8;
 pub const MAX_PROCESS_COUNT: usize = 64;
 
 /// This is the address a thread will return to when it exits.
@@ -39,39 +39,28 @@ pub struct ProcessSetup {
     pub aslr_slide: usize,
 }
 
-// ProcessImpl occupies a multiple of pages mapped to virtual address `0xff80_4000` (THREAD_CONTEXT_AREA).
-// Each thread is 256 bytes (64 4-byte registers). The first "thread" does not exist,
-// and instead is any bookkeeping information related to the process.
-#[derive(Debug, Clone)]
-#[repr(C)]
-struct ProcessImpl {
-    /// Used by the interrupt handler to calculate offsets
-    scratch: usize,
-
-    /// The currently-active thread for this process. This must
-    /// be the 2nd item, because the ISR directly accesses this value.
-    hardware_thread: usize,
-
-    /// The last thread ID that was allocated
-    last_tid_allocated: u8,
-
-    /// Pad everything to size_of::<Thread>() bytes, so the Thread slice starts at
-    /// an offset of 1 x Thread.
-    _padding: [u32; 125],
-
-    /// This enables the kernel to keep track of threads in the
-    /// target process, and know which threads are ready to
-    /// receive messages.
-    threads: [Thread; MAX_THREAD_COUNT],
-}
-
-// A compile-time check that the process structure doesn't overflow
+// A compile-time check that the thread array exactly fills the context page
 const _: () = {
-    if mem::size_of::<ProcessImpl>() != PAGE_SIZE {
-        const _SIZE: [u8; mem::size_of::<ProcessImpl>()] = [0; PAGE_SIZE]; // This will produce a compile error with the actual size
-        panic!("Incorrect size of ProcessImpl structure. Ensure correct padding");
+    if mem::size_of::<[Thread; MAX_THREAD_COUNT]>() != PAGE_SIZE {
+        panic!("Thread array must fill the THREAD_CONTEXT_AREA page exactly");
     }
 };
+
+/// TPIDRPRW holds the address of the current thread's [`Thread`] context;
+/// the trap handler saves registers through it directly.
+fn current_thread_ptr() -> *mut Thread {
+    let thread: *mut Thread;
+    unsafe {
+        core::arch::asm!("mrc p15, 0, {}, c13, c0, 4", out(reg) thread);
+    }
+    thread
+}
+
+fn set_current_thread_ptr(thread: *mut Thread) {
+    unsafe {
+        core::arch::asm!("mcr p15, 0, {}, c13, c0, 4", in(reg) thread);
+    }
+}
 
 static CURRENT_PROCESS: AtomicU8 = AtomicU8::new(1);
 
@@ -116,61 +105,40 @@ impl Process {
         f(&mut process)
     }
 
-    pub fn current_thread_mut(&mut self) -> &mut Thread {
-        let process = unsafe { &mut *PROCESS };
-        assert!(process.hardware_thread != 0, "thread number was 0");
-        &mut process.threads[process.hardware_thread - 1]
-    }
+    pub fn current_thread_mut(&mut self) -> &mut Thread { unsafe { &mut *current_thread_ptr() } }
 
-    pub fn current_thread(&self) -> &Thread {
-        let process = unsafe { &mut *PROCESS };
-        assert!(process.hardware_thread != 0, "thread number was 0");
-        &mut process.threads[process.hardware_thread - 1]
-    }
+    pub fn current_thread(&self) -> &Thread { unsafe { &*current_thread_ptr() } }
 
     pub fn current_tid(&self) -> TID {
-        let process = unsafe { &*PROCESS };
-        process.hardware_thread - 1
+        let tid = (current_thread_ptr() as usize - THREAD_CONTEXT_AREA) / mem::size_of::<Thread>();
+        debug_assert!(tid < MAX_THREAD_COUNT, "current thread pointer is invalid");
+        tid
     }
 
     /// Set the current thread number.
     pub fn set_tid(&mut self, thread: TID) {
-        let process = unsafe { &mut *PROCESS };
+        let threads = unsafe { &mut *THREADS };
         klog!("Switching to thread {}", thread);
-        assert!(thread <= process.threads.len(), "attempt to switch to an invalid thread {}", thread);
-        process.hardware_thread = thread + 1;
+        assert!(thread < threads.len(), "attempt to switch to an invalid thread {}", thread);
+        set_current_thread_ptr(&mut threads[thread]);
     }
 
     pub fn thread_mut(&mut self, thread: TID) -> &mut Thread {
-        let process = unsafe { &mut *PROCESS };
-        assert!(thread <= process.threads.len(), "attempt to retrieve an invalid thread {}", thread);
-        &mut process.threads[thread]
+        let threads = unsafe { &mut *THREADS };
+        assert!(thread < threads.len(), "attempt to retrieve an invalid thread {}", thread);
+        &mut threads[thread]
     }
 
     #[cfg(any(not(feature = "production"), feature = "log-serial"))]
     pub fn thread(&self, thread: TID) -> &Thread {
-        let process = unsafe { &mut *PROCESS };
-        assert!(thread <= process.threads.len(), "attempt to retrieve an invalid thread {}", thread);
-        &process.threads[thread]
+        let threads = unsafe { &*THREADS };
+        assert!(thread < threads.len(), "attempt to retrieve an invalid thread {}", thread);
+        &threads[thread]
     }
 
     pub fn find_free_thread(&self) -> Option<TID> {
-        let process = unsafe { &mut *PROCESS };
-        let start_tid = process.last_tid_allocated as usize;
-        let a = &process.threads[start_tid..process.threads.len()];
-        let b = &process.threads[0..start_tid];
-        for (index, thread) in a.iter().chain(b.iter()).enumerate() {
-            let mut tid = index + start_tid;
-            if tid >= process.threads.len() {
-                tid -= process.threads.len()
-            }
-
-            if tid != IRQ_TID && thread.pc == 0 {
-                process.last_tid_allocated = tid as _;
-                return Some(tid as TID);
-            }
-        }
-        None
+        let threads = unsafe { &*THREADS };
+        (0..threads.len()).find(|&tid| tid != IRQ_TID && threads[tid].pc == 0)
     }
 
     pub fn set_thread_result(&mut self, thread_nr: TID, result: xous::Result) {
@@ -179,8 +147,7 @@ impl Process {
     }
 
     pub fn retry_swi_instruction(&mut self, tid: TID) -> Result<(), xous::Error> {
-        let process = unsafe { &mut *PROCESS };
-        let thread = &mut process.threads[tid];
+        let thread = self.thread_mut(tid);
         thread.pc = thread.previous_instr_pc();
         Ok(())
     }
@@ -191,7 +158,7 @@ impl Process {
         setup: ProcessSetup,
         services: &mut crate::SystemServices,
     ) -> Result<(), xous::Error> {
-        let process = unsafe { &mut *PROCESS };
+        let threads = unsafe { &mut *THREADS };
         if setup.pid.get() > 1 {
             assert_eq!(setup.pid, crate::arch::current_hw_pid(), "hardware pid does not match setup pid");
         }
@@ -202,29 +169,14 @@ impl Process {
             setup.entry_point,
             setup.stack
         );
-        let size = mem::size_of::<ProcessImpl>();
-        assert_eq!(
-            size,
-            PAGE_SIZE,
-            "Process size is {}, not PAGE_SIZE ({}) (Thread size: {}, array: {})",
-            mem::size_of::<ProcessImpl>(),
-            PAGE_SIZE,
-            mem::size_of::<Thread>(),
-            mem::size_of::<[Thread; MAX_THREAD_COUNT + 1]>(),
-        );
-
-        // By convention, thread 0 is the trap thread. Therefore, thread 1 is
-        // the first default thread. There is an offset of 1 due to how the
-        // interrupt handler functions.
-        process.hardware_thread = INITIAL_TID + 1;
 
         // Reset the thread state, since it's possibly uninitialized memory
-        for thread in process.threads.iter_mut() {
+        for thread in threads.iter_mut() {
             *thread = Default::default();
         }
 
         let processor_mode = if setup.pid.get() == 1 { ProcessorMode::System } else { ProcessorMode::User };
-        let initial_thread = &mut process.threads[INITIAL_TID];
+        let initial_thread = &mut threads[INITIAL_TID];
         initial_thread.init_process_params();
         initial_thread.set_processor_mode(processor_mode);
         if setup.pid.get() == 1 {
@@ -235,7 +187,7 @@ impl Process {
         initial_thread.stack = Some(setup.stack);
         initial_thread.sp = setup.stack.as_ptr() as usize + setup.stack.len();
 
-        let irq_thread = &mut process.threads[IRQ_TID];
+        let irq_thread = &mut threads[IRQ_TID];
         irq_thread.set_processor_mode(processor_mode);
         irq_thread.disable_interrupts();
         irq_thread.stack = Some(setup.irq_stack);
@@ -454,15 +406,19 @@ pub struct Thread {
     /// A hardware "thread pointer" for TLS (see ARM ARM B3.12.46)
     pub tp: usize, // 17
 
-    pub fpscr: usize,         // 18
-    pub s0_s31: [usize; 32],  // 19
-    pub s32_s63: [usize; 32], // 51
+    pub fpscr: usize, // 18
+
+    /// Nonzero when the FPU registers below hold saved state.
+    pub fp_regs_saved: usize, // 19
+
+    pub s0_s31: [usize; 32],  // 20
+    pub s32_s63: [usize; 32], // 52
 
     /// A virtual memory range where the allocated stack is
     pub stack: Option<MemoryRange>,
 
     // Pad to 512 bytes in size
-    _padding: [usize; 43],
+    _padding: [usize; 42],
 }
 
 // A compile-time check that the thread structure doesn't overflow
@@ -554,10 +510,11 @@ impl Default for Thread {
             psr: 0,
             tp: 0,
             fpscr: 0,
+            fp_regs_saved: 0,
             s0_s31: [0; 32],
             s32_s63: [0; 32],
             stack: None,
-            _padding: [0; 43],
+            _padding: [0; 42],
         }
     }
 }
@@ -597,7 +554,7 @@ impl core::fmt::Debug for Thread {
             "\tIP:    {:08x}   LR:    {:08x}  SPSR: {:08x} | {}",
             self.ip, self.lr, self.psr, psr_str,
         )?;
-        if self.fpscr != 0 {
+        if self.fpscr != 0 && self.fp_regs_saved != 0 {
             writeln!(f, "\t [ VFP/NEON context ]")?;
             writeln!(f, "\tFPSCR: {:08x}", self.fpscr,)?;
             for (i, s) in self.s0_s31.chunks_exact(4).enumerate() {

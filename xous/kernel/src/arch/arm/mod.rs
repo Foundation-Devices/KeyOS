@@ -31,6 +31,10 @@ pub fn current_hw_pid() -> PID {
     }
 }
 pub fn init() {
+    // The boot thread is never dispatched via set_tid, so seed it here, or
+    // else PID1's first trap saves registers through a garbage TPIDRPRW.
+    process::Process::current().set_tid(crate::process::INITIAL_TID);
+
     unsafe {
         let pid = 1;
         let contextidr = (pid << 8) | pid;

@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use atsama5d27::pit::{Pit, PIV_MAX};
 use keyos::{
-    KERNEL_STACK_BOTTOM, KERNEL_STACK_PAGE_COUNT, RSTC_KERNEL_ADDR, RTT_BUFFERS_START_VIRT_ADDR,
+    PID1_STACK_BOTTOM, PID1_STACK_PAGE_COUNT, RSTC_KERNEL_ADDR, RTT_BUFFERS_START_VIRT_ADDR,
     RTT_CONTROL_BLOCK_VIRT_ADDR,
 };
 #[cfg(all(feature = "trace-systemview", feature = "trace-aborts-systemview"))]
@@ -102,8 +102,8 @@ extern "C" fn send_system_description() {
 
 #[no_mangle]
 extern "C" fn send_task_list() {
-    let kernel_stack_start = KERNEL_STACK_BOTTOM;
-    let kernel_stack_size = PAGE_SIZE * KERNEL_STACK_PAGE_COUNT;
+    let kernel_stack_start = PID1_STACK_BOTTOM;
+    let kernel_stack_size = PAGE_SIZE * PID1_STACK_PAGE_COUNT;
     let stack = unsafe { MemoryRange::new(kernel_stack_start, kernel_stack_size).expect("stack") };
 
     // At this point only the kernel process is set up and available, send its info and that it's running

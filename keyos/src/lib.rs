@@ -93,23 +93,19 @@ pub const UART_ADDR: usize = 0xffcf_0000;
 pub const KERNEL_LOAD_OFFSET: usize = 0xffd0_0000;
 pub const NUM_KERNEL_PAGES_MAX: usize = 128;
 
-pub const KERNEL_STACK_BOTTOM: usize = 0xfff8_0000;
-pub const KERNEL_STACK_PAGE_COUNT: usize = 16;
-pub const KERNEL_STACK_TOP_GUARD: usize = KERNEL_STACK_BOTTOM - PAGE_SIZE * (KERNEL_STACK_PAGE_COUNT + 1);
+pub const PID1_STACK_BOTTOM: usize = 0xfff8_0000;
+pub const PID1_STACK_PAGE_COUNT: usize = 16;
+pub const PID1_STACK_TOP_GUARD: usize = PID1_STACK_BOTTOM - PAGE_SIZE * (PID1_STACK_PAGE_COUNT + 1);
 
-pub const IRQ_STACK_BOTTOM: usize = 0xfffe_4000;
-pub const IRQ_STACK_PAGE_COUNT: usize = 4;
-pub const IRQ_STACK_TOP_GUARD: usize = IRQ_STACK_BOTTOM - PAGE_SIZE * (IRQ_STACK_PAGE_COUNT + 1);
+pub const PID1_IRQ_HANDLER_STACK_BOTTOM: usize = 0xfffe_8000;
+pub const PID1_IRQ_HANDLER_STACK_PAGE_COUNT: usize = 4;
+pub const PID1_IRQ_HANDLER_STACK_TOP_GUARD: usize =
+    PID1_IRQ_HANDLER_STACK_BOTTOM - PAGE_SIZE * (PID1_IRQ_HANDLER_STACK_PAGE_COUNT + 1);
 
-pub const KERNEL_IRQ_HANDLER_STACK_BOTTOM: usize = 0xfffe_8000;
-pub const KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT: usize = 4;
-pub const KERNEL_IRQ_HANDLER_STACK_TOP_GUARD: usize =
-    KERNEL_IRQ_HANDLER_STACK_BOTTOM - PAGE_SIZE * (KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT + 1);
-
-pub const EXCEPTION_STACK_BOTTOM: usize = 0xffff_0000;
-pub const EXCEPTION_STACK_PAGE_COUNT: usize = 8;
-pub const EXCEPTION_STACK_TOP_GUARD: usize =
-    EXCEPTION_STACK_BOTTOM - PAGE_SIZE * (EXCEPTION_STACK_PAGE_COUNT + 1);
+pub const KERNEL_MODE_STACK_BOTTOM: usize = 0xffff_0000;
+pub const KERNEL_MODE_STACK_PAGE_COUNT: usize = 8;
+pub const KERNEL_MODE_STACK_TOP_GUARD: usize =
+    KERNEL_MODE_STACK_BOTTOM - PAGE_SIZE * (KERNEL_MODE_STACK_PAGE_COUNT + 1);
 
 // ------------------------ Physical addresses ------------------------
 

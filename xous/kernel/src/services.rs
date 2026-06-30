@@ -116,8 +116,8 @@ impl SystemServices {
     #[cfg(keyos)]
     pub fn init_from_memory(&mut self, args: &crate::args::KernelArguments) {
         use keyos::{
-            KERNEL_IRQ_HANDLER_STACK_BOTTOM, KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT, KERNEL_STACK_BOTTOM,
-            KERNEL_STACK_PAGE_COUNT, PAGE_SIZE,
+            PAGE_SIZE, PID1_IRQ_HANDLER_STACK_BOTTOM, PID1_IRQ_HANDLER_STACK_PAGE_COUNT, PID1_STACK_BOTTOM,
+            PID1_STACK_PAGE_COUNT,
         };
         use xous::AppId;
 
@@ -137,15 +137,15 @@ impl SystemServices {
 
         let stack = unsafe {
             MemoryRange::new(
-                KERNEL_STACK_BOTTOM - KERNEL_STACK_PAGE_COUNT * PAGE_SIZE,
-                KERNEL_STACK_PAGE_COUNT * PAGE_SIZE,
+                PID1_STACK_BOTTOM - PID1_STACK_PAGE_COUNT * PAGE_SIZE,
+                PID1_STACK_PAGE_COUNT * PAGE_SIZE,
             )
             .expect("stack")
         };
         let irq_stack = unsafe {
             MemoryRange::new(
-                KERNEL_IRQ_HANDLER_STACK_BOTTOM - KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT * PAGE_SIZE,
-                KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT * PAGE_SIZE,
+                PID1_IRQ_HANDLER_STACK_BOTTOM - PID1_IRQ_HANDLER_STACK_PAGE_COUNT * PAGE_SIZE,
+                PID1_IRQ_HANDLER_STACK_PAGE_COUNT * PAGE_SIZE,
             )
             .expect("irq stack")
         };

@@ -13,13 +13,13 @@ reset:
 
 _exception_vectors_kernel:
   b   reset_vector          /* Entrypoint */
-  b   trap_handler          /* Undefined Instruction */
-  b   trap_handler          /* Supervisor Call (used in syscalls) */
-  b   trap_handler          /* Prefetch Abort */
-  b   trap_handler          /* Data Abort */
+  b   undef_handler         /* Undefined Instruction */
+  b   svc_handler           /* Supervisor Call (used in syscalls) */
+  b   abort_handler         /* Prefetch Abort */
+  b   abort_handler         /* Data Abort */
 .word  0 /* Empty */
-  b   trap_handler           /* IRQ */
-  b   fiq_handler            /* FIQ */
+  b   irq_handler           /* IRQ */
+  b   fiq_handler           /* FIQ */
 
 fiq_handler:
   bkpt /* FIQs aren't supported yet */
@@ -44,19 +44,15 @@ _branch_main:
     /* Save received stack pointer for later use */
     mov r4, sp
 
-    /* Configure IRQ/FIQ stack pointers */
+    /* Configure exception mode stack pointers */
     msr cpsr_c, #0x12
-    ldr sp, =({IRQ_STACK_TOP})
-    ldr sp, [sp]
+    ldr sp, =({KERNEL_MODE_STACK_TOP})
     msr cpsr_c, #0x11
-    ldr sp, =({IRQ_STACK_TOP})
-    ldr sp, [sp]
+    ldr sp, =({KERNEL_MODE_STACK_TOP})
     msr cpsr_c, #0x17
-    ldr sp, =({EXCEPTION_STACK_TOP})
-    ldr sp, [sp]
+    ldr sp, =({KERNEL_MODE_STACK_TOP})
     msr cpsr_c, #0x1b
-    ldr sp, =({EXCEPTION_STACK_TOP})
-    ldr sp, [sp]
+    ldr sp, =({KERNEL_MODE_STACK_TOP})
 
     msr cpsr_c, #(0x1f | 0x80 | 0x40) /* Switch to System mode (IRQs disabled) */
 
@@ -69,25 +65,18 @@ _branch_main:
     b .
 
 /*
-    Syscall/IRQ/Abort trap handler.
+    Exception handlers.
 
-    Saves all process context into a structure that is
-    mapped to each thread at THREAD_CONTEXT_AREA.
-    Return happens elsewhere.
+    Each one saves process context into the Thread slot pointed to by
+    TPIDRPRW and continues in its Rust counterpart on the kernel stack.
+    Syscalls skip the FPU state: the syscall ABI clobbers it (see the
+    xous-rs syscall stub), so the resume path zeroes it instead of
+    restoring it. Return happens elsewhere.
 */
-trap_handler:
-
-    ldr sp, =({THREAD_CONTEXT_AREA})
-    ldr sp, [sp]
-    str lr, [sp]            /* Store LR into scratch area before clobbering it */
-    ldr lr, [sp, #4]        /* Load current context number */
-    add sp, sp, lr, lsl #9  /* ip = THREAD_CONTEXT_AREA + (context_number * 128) */
-    stm sp, {{r0 - r14}}^   /* 0-14: Saved user registers (R0 and R1 saved below) */
+.macro save_context fp_regs
+    mrc p15, 0, sp, c13, c0, 4  /* TPIDRPRW holds the current thread's context address */
+    stm sp, {{r0 - r14}}^   /* 0-14: Saved user registers */
     add sp, #(4 * 15)
-
-    ldr lr, =({THREAD_CONTEXT_AREA})
-    ldr lr, [lr]
-    ldr lr, [lr]
     stm sp!, {{lr}}         /* 15: This context's LR is the PC of the original one */
 
     # Special registers
@@ -96,43 +85,31 @@ trap_handler:
     vmrs r3, fpscr          /* 18: Floating point control reg */
     stm sp!, {{r1 - r3}}    /* Save special registers read above */
 
-    # Floating point
-    vstm sp!, {{d0 - d15}}  /* 19-50: FPU registers */
-    vstm sp!, {{d16 - d31}} /* 51-82: FPU registers */
+    mov r1, #\fp_regs
+    str r1, [sp], #4        /* 19: fp_regs_saved */
+.if \fp_regs
+    vstm sp!, {{d0 - d15}}  /* 20-51: FPU registers */
+    vstm sp!, {{d16 - d31}} /* 52-83: FPU registers */
+.endif
 
-    # Set a default stack pointer
-    ldr sp, =({EXCEPTION_STACK_TOP})
-    ldr sp, [sp]
+    ldr sp, =({KERNEL_MODE_STACK_TOP})
+.endm
 
-    # Choose where to go next depending on the current mode: SVC (syscall), abort or IRQ
-    mrs ip, cpsr                /* Access the current mode register */
-    and ip, ip, #0x1f           /* Extract the mode field */
+undef_handler:
+    save_context fp_regs=1
+    blx _undef_handler_rust
 
-    cmp ip, #0x13               /* Compare with 'SVC' mode */
-    ldreq lr, =(_swi_handler_rust)
-    bxeq lr                     /* Jump to SVC handler */
+svc_handler:
+    save_context fp_regs=0
+    blx _swi_handler_rust
 
-    cmp ip, #0x17               /* Compare with 'Abort' mode */
-    ldreq lr, =(_abort_handler_rust)
-    bxeq lr                     /* Jump to abort handler */
+abort_handler:
+    save_context fp_regs=1
+    blx _abort_handler_rust
 
-    cmp ip, #0x1b               /* Compare with 'Undefined' mode */
-    ldreq lr, =(_undef_handler_rust)
-    bxeq lr                     /* Jump to undefined instruction handler */
-
-    cmp ip, #0x12               /* Compare with 'IRQ' mode */
-    bne _skip_irq_handler
-
-    msr cpsr_c, #(0x13 | 0x80 | 0x40) /* Handle IRQs in supervisor mode (IRQs disabled) */
-    ldr sp, =({IRQ_STACK_TOP})        /* Reset the stack */
-    ldr sp, [sp]
-    ldr lr, =(_irq_handler_rust)
-    bx lr                       /* Jump to IRQ handler */
-
-    _skip_irq_handler:
-    # Any other unhandled exception goes here
-    bkpt
-    b .
+irq_handler:
+    save_context fp_regs=1
+    blx _irq_handler_rust
 
 /*
    A thread resume routine.
@@ -151,12 +128,24 @@ _resume_trampoline:
     mcr p15, 0, r2, c13, c0, 2  /* 17: Hardware thread pointer register */
     vmsr    fpscr, r3           /* 18: Floating point control */
 
-    vldm    ip!, {{d0 - d15}}   /* 19-50: FPU registers */
-    vldm    ip!, {{d16 - d31}}  /* 51-82: FPU registers */
+    ldm ip!, {{r1}}             /* 19: fp_regs_saved */
+    cmp r1, #0
+    bne _resume_restore_fp_regs
 
+    /* No FPU state in the frame. The regs are ABI-clobbered, but kernel
+       NEON may have left secrets in them, so zero instead of restore. */
+.irp reg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    veor q\reg, q\reg, q\reg
+.endr
+
+_resume_to_thread:
     ldm r0, {{r0 - r14}}^       /* 0-14: Saved user registers */
-
     movs pc, lr
+
+_resume_restore_fp_regs:
+    vldm    ip!, {{d0 - d15}}   /* 20-51: FPU registers */
+    vldm    ip!, {{d16 - d31}}  /* 52-83: FPU registers */
+    b _resume_to_thread
 
 .global __aeabi_unwind_cpp_pr0
 __aeabi_unwind_cpp_pr0:

@@ -8,9 +8,9 @@ use armv7::structures::paging::TranslationTableMemory;
 use keyos::THREAD_CONTEXT_AREA;
 
 use super::consts::{
-    EXCEPTION_STACK_BOTTOM, EXCEPTION_STACK_PAGE_COUNT, FLG_DEV, FLG_NO_CACHE, FLG_R, FLG_VALID, FLG_W,
-    FLG_X, IRQ_STACK_BOTTOM, IRQ_STACK_PAGE_COUNT, KERNEL_IRQ_HANDLER_STACK_BOTTOM,
-    KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT, KERNEL_LOAD_OFFSET, KERNEL_STACK_BOTTOM, KERNEL_STACK_PAGE_COUNT,
+    FLG_DEV, FLG_NO_CACHE, FLG_R, FLG_VALID, FLG_W, FLG_X, KERNEL_LOAD_OFFSET, KERNEL_MODE_STACK_BOTTOM,
+    KERNEL_MODE_STACK_PAGE_COUNT, PID1_IRQ_HANDLER_STACK_BOTTOM, PID1_IRQ_HANDLER_STACK_PAGE_COUNT,
+    PID1_STACK_BOTTOM, PID1_STACK_PAGE_COUNT,
 };
 use crate::{bzero, memcpy, println, BootConfig, PAGE_SIZE, VDBG};
 
@@ -119,14 +119,16 @@ impl ProgramDescription {
         println!("Mapping PID 1 into offset {:08x}", load_offset);
         let flag_defaults = FLG_R | FLG_W | FLG_VALID;
         let flag_defaults_text = FLG_R | FLG_VALID; // read-only for .text
-        let stack_addr = KERNEL_STACK_BOTTOM;
+        let stack_addr = PID1_STACK_BOTTOM;
         println!(
             "self.text_offset: {:08x}, KERNEL_LOAD_OFFSET: {:08x}",
             self.text_offset, KERNEL_LOAD_OFFSET
         );
         assert_eq!(self.text_offset as usize, KERNEL_LOAD_OFFSET);
-        assert!(((self.text_offset + self.text_size) as usize) < EXCEPTION_STACK_BOTTOM);
-        assert!(((self.data_offset + self.data_size + self.bss_size) as usize) < EXCEPTION_STACK_BOTTOM - 16);
+        assert!(((self.text_offset + self.text_size) as usize) < KERNEL_MODE_STACK_BOTTOM);
+        assert!(
+            ((self.data_offset + self.data_size + self.bss_size) as usize) < KERNEL_MODE_STACK_BOTTOM - 16
+        );
         assert!(self.data_offset as usize >= KERNEL_LOAD_OFFSET);
 
         // Allocate physical pages for L1 translation table
@@ -152,28 +154,27 @@ impl ProgramDescription {
         );
 
         // Allocate stack pages.
-        let total_stack_pages = KERNEL_STACK_PAGE_COUNT;
+        let total_stack_pages = PID1_STACK_PAGE_COUNT;
 
         if VDBG {
             println!("Mapping {} stack pages for PID 1", total_stack_pages);
         }
 
         // Allocate some continuous physical pages for stack first
-        self.allocate_stack(cfg, translation_table, flag_defaults, KERNEL_STACK_BOTTOM, total_stack_pages);
+        self.allocate_stack(cfg, translation_table, flag_defaults, PID1_STACK_BOTTOM, total_stack_pages);
         self.allocate_stack(
             cfg,
             translation_table,
             flag_defaults,
-            EXCEPTION_STACK_BOTTOM,
-            EXCEPTION_STACK_PAGE_COUNT,
+            KERNEL_MODE_STACK_BOTTOM,
+            KERNEL_MODE_STACK_PAGE_COUNT,
         );
-        self.allocate_stack(cfg, translation_table, flag_defaults, IRQ_STACK_BOTTOM, IRQ_STACK_PAGE_COUNT);
         self.allocate_stack(
             cfg,
             translation_table,
             flag_defaults,
-            KERNEL_IRQ_HANDLER_STACK_BOTTOM,
-            KERNEL_IRQ_HANDLER_STACK_PAGE_COUNT,
+            PID1_IRQ_HANDLER_STACK_BOTTOM,
+            PID1_IRQ_HANDLER_STACK_PAGE_COUNT,
         );
 
         assert_eq!((self.text_offset as usize & (PAGE_SIZE - 1)), 0);
@@ -181,12 +182,10 @@ impl ProgramDescription {
 
         // FIXME (SFT-4004): restore the stack guard pages mapping
         println!("Mapping stack guard pages");
-        //println!("kernel stack bottom guard: {:08x}", KERNEL_STACK_BOTTOM_GUARD);
-        // allocator.map_page(translation_table, 0, KERNEL_STACK_BOTTOM_GUARD, FLG_GUARD | FLG_VALID);
-        //println!("Exception stack bottom guard: {:08x}", EXCEPTION_STACK_BOTTOM_GUARD);
-        // allocator.map_page(translation_table, 0, EXCEPTION_STACK_BOTTOM_GUARD, FLG_GUARD | FLG_VALID);
-        //println!("IRQ stack bottom guard: {:08x}", IRQ_STACK_BOTTOM_GUARD);
-        // allocator.map_page(translation_table, 0, IRQ_STACK_BOTTOM_GUARD, FLG_GUARD | FLG_VALID);
+        //println!("PID1 stack guard: {:08x}", PID1_STACK_TOP_GUARD);
+        // allocator.map_page(translation_table, 0, PID1_STACK_TOP_GUARD, FLG_GUARD | FLG_VALID);
+        //println!("Kernel mode stack guard: {:08x}", KERNEL_MODE_STACK_TOP_GUARD);
+        // allocator.map_page(translation_table, 0, KERNEL_MODE_STACK_TOP_GUARD, FLG_GUARD | FLG_VALID);
         println!("Finished mapping stack guard pages");
 
         // Map the process text section into RAM.

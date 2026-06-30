@@ -80,7 +80,8 @@ pub fn enable_irq(irq_no: IrqNumber) {
                 name_buf[max_len..].copy_from_slice(suffix);
             }
 
-            let stack = unsafe { xous::MemoryRange::new(keyos::IRQ_STACK_BOTTOM, PAGE_SIZE).expect("stack") };
+            let stack =
+                unsafe { xous::MemoryRange::new(keyos::KERNEL_MODE_STACK_BOTTOM, PAGE_SIZE).expect("stack") };
             let name = core::str::from_utf8(&name_buf).expect("process name");
             let irq_str = irq_number_to_str(irq_no);
             let irq_str = core::str::from_utf8(&irq_str).expect("irq str");
