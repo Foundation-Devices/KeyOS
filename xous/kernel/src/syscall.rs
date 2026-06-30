@@ -464,6 +464,15 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
                     return Err(Error::InvalidArguments);
                 }
 
+                // A fresh populated mapping needs its pages zeroed; offload that to a DMA channel and park
+                // the calling thread until it completes (see MemoryManager::map_with_deferred_zeroing). Only
+                // an allocating request (phys == 0) on a parkable thread (not the IRQ handler) can defer;
+                // everything else falls through to the synchronous path below.
+                #[cfg(keyos)]
+                if req_flags.is_set(MemoryFlags::POPULATE) && phys_ptr == 0 && tid != IRQ_TID {
+                    return mm.map_with_deferred_zeroing(tid, virt_ptr, size.get(), req_flags);
+                }
+
                 let range = mm.map_range(phys_ptr, virt_ptr, size.get(), req_flags, true)?;
 
                 Ok(Result::MemoryRange(range))

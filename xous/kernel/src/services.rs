@@ -947,6 +947,17 @@ impl SystemServices {
             crate::debug::serial::with_output(|stream| self.print_current_process(stream).unwrap());
         }
 
+        // Stop any in-flight DMA page-zeroing owned by this process before terminate() reclaims its pages,
+        // or the DMA would keep writing zeros into memory handed to another process. The owning thread is in
+        // this process and gets freed below; only the waiters in other processes need waking.
+        #[cfg(keyos)]
+        crate::mem::MemoryManager::with_mut(|mm| {
+            if mm.map_zero_ongoing() == Some(pid) {
+                mm.cancel_map_zero();
+                self.wake_threads_with_state(ThreadState::RetryMapZero, usize::MAX);
+            }
+        });
+
         self.process_mut(pid)?.terminate(ret)?;
         self.free_process(pid);
 
@@ -1084,6 +1095,8 @@ impl SystemServices {
                         }
                     }
                     ThreadState::WaitFutex { addr: _addr } => writeln!(output, "WaitFutex({_addr:08x})").ok(),
+                    ThreadState::WaitMapZero => writeln!(output, "WaitMapZero").ok(),
+                    ThreadState::RetryMapZero => writeln!(output, "RetryMapZero").ok(),
                 };
                 writeln!(output, "\tASLR:  {:08x}", process.aslr_slide).ok();
                 write!(output, "{:?}", arch_process.thread(tid)).ok();

@@ -12,9 +12,15 @@ use keyos::{
     to_plaintext_phys_addr, ENCRYPTED_DRAM_BASE, ENCRYPTED_DRAM_END, PLAINTEXT_DRAM_BASE, PLAINTEXT_DRAM_END,
     RAM_PAGES,
 };
+#[cfg(keyos)]
+use xous::TID;
 use xous::{Error, MemoryFlags, MemoryRange, PID};
 
 pub use crate::arch::mem::MemoryMapping;
+#[cfg(keyos)]
+use crate::process::{current_pid, ThreadState};
+#[cfg(keyos)]
+use crate::scheduler::Scheduler;
 use crate::services::SystemServices;
 
 /// Number of bytes of free memory we should have normally. Start killing processes below this amount
@@ -80,6 +86,24 @@ pub struct MemoryManager {
     num_free_pages: usize,
     /// True if currently in a low memory state.
     low_memory: bool,
+    /// The map_memory() zeroing job whose DMA is in flight, if any. Its presence means the single DMA
+    /// zeroing channel is busy.
+    pending_map_zero: Option<PendingMapZero>,
+}
+
+/// A map_memory() page-zeroing job whose DMA is in flight. The pages are allocated and owned by `pid` but
+/// deliberately left unmapped; the zeroing-completion interrupt maps them and hands the resulting range to
+/// the waiting `(pid, tid)`. The whole request is captured because the interrupt finishes the mapping itself
+/// and has no access to the original syscall arguments.
+#[cfg(keyos)]
+#[derive(Clone, Copy)]
+pub struct PendingMapZero {
+    pub phys: usize,
+    pub virt: usize,
+    pub size: usize,
+    pub flags: MemoryFlags,
+    pub pid: PID,
+    pub tid: TID,
 }
 
 #[cfg(not(keyos))]
@@ -105,6 +129,7 @@ impl MemoryManager {
             next_zeroed_page_hint: 0,
             num_free_pages: 0,
             low_memory: false,
+            pending_map_zero: None,
         }
     }
 
@@ -256,19 +281,35 @@ impl MemoryManager {
         }
     }
 
-    /// Allocate a contiguous block of encrypted physical pages to the given process.
+    /// Allocate a contiguous block of physical pages for a mapping with `flags`, returning the physical
+    /// address to map and whether the pages still need zeroing.
     #[cfg(keyos)]
-    #[inline(always)]
-    pub fn alloc_range(&mut self, num_pages: usize, pid: PID) -> Result<(usize, bool), Error> {
-        if num_pages == 1 {
-            self.alloc_single_page(pid)
+    pub fn alloc_range(
+        &mut self,
+        num_pages: usize,
+        pid: PID,
+        flags: MemoryFlags,
+    ) -> Result<(usize, bool), Error> {
+        let (allocated, zeroed) = if num_pages == 1 {
+            self.alloc_single_page(pid)?
         } else {
-            self.alloc_range_aligned::<1>(num_pages, pid)
+            self.alloc_range_aligned::<1>(num_pages, pid)?
+        };
+        if flags.is_set(MemoryFlags::PLAINTEXT)
+            || flags.is_set(MemoryFlags::NO_CACHE)
+            || flags.is_set(MemoryFlags::DEV)
+        {
+            // Plaintext mappings always need re-zeroing, since the pages are encrypted-zeroed
+            // and would read back as ciphertext
+            Ok((to_plaintext_phys_addr(allocated), true))
+        } else {
+            Ok((allocated, !zeroed))
         }
     }
 
+    /// Allocate a single encrypted physical page, returning its address and whether it is already zeroed.
     #[cfg(keyos)]
-    fn alloc_single_page(&mut self, pid: PID) -> Result<(usize, bool), Error> {
+    pub fn alloc_single_page(&mut self, pid: PID) -> Result<(usize, bool), Error> {
         /// Area at the end of the RAM mostly reserved for POPULATE allocs. 40MB corresponds to 12 apps
         /// (including control center and keyboard), 2 framebuffer each, + 2 internal buffers for gui server,
         /// and some margin for other buffers.
@@ -430,19 +471,10 @@ impl MemoryManager {
             }
             #[cfg(keyos)]
             {
-                let (allocated, zeroed) = self.alloc_range(size / PAGE_SIZE, current_mapping.get_pid())?;
-                zero_after_alloc = !zeroed;
-                if flags.is_set(MemoryFlags::PLAINTEXT)
-                    || flags.is_set(MemoryFlags::NO_CACHE)
-                    || flags.is_set(MemoryFlags::DEV)
-                {
-                    // Pages are "encrypted zeroed". If we read them as plaintext, they would be garbage, so
-                    // we need to zero it again.
-                    zero_after_alloc = true;
-                    phys = to_plaintext_phys_addr(allocated)
-                } else {
-                    phys = allocated;
-                }
+                let (allocated, needs_zero) =
+                    self.alloc_range(size / PAGE_SIZE, current_mapping.get_pid(), flags)?;
+                phys = allocated;
+                zero_after_alloc = needs_zero;
             }
         } else if phys != 0 {
             // A wrapping range would leave the claim loop empty, mapping pages below
@@ -460,28 +492,7 @@ impl MemoryManager {
             }
         }
         // Actually perform the map.  At this stage, every physical page should be owned by us.
-        for offset in (0..size).step_by(PAGE_SIZE) {
-            let phys_page = if phys == 0 { 0 } else { phys + offset };
-            if let Err(e) = current_mapping.map_page(
-                self,
-                phys_page,
-                virt.wrapping_add(offset / core::mem::size_of::<usize>()),
-                flags,
-                map_user,
-            ) {
-                for unmap_offset in (0..offset).step_by(PAGE_SIZE) {
-                    current_mapping
-                        .unmap_page(virt.wrapping_add(unmap_offset / core::mem::size_of::<usize>()))
-                        .ok();
-                }
-                if phys != 0 {
-                    for rel_phys in (phys..(phys + size)).step_by(PAGE_SIZE) {
-                        self.release_page(rel_phys, current_mapping.get_pid()).ok();
-                    }
-                }
-                return Err(e);
-            }
-        }
+        self.map_allocated_range(&mut current_mapping, phys, virt, size, flags, map_user)?;
 
         let mut mem = unsafe { MemoryRange::new(virt as usize, size)? };
 
@@ -492,6 +503,147 @@ impl MemoryManager {
             current_mapping.flush_cache(mem, xous::CacheOperation::Clean)?;
         }
         Ok(mem)
+    }
+
+    /// Map `size` bytes of physical pages to `virt`, tearing the partial mapping back down on failure.
+    ///
+    /// A `phys` of 0 maps unbacked pages; otherwise the pages must already be owned by `mapping`'s process,
+    /// and a failure additionally releases them.
+    fn map_allocated_range(
+        &mut self,
+        mapping: &mut MemoryMapping,
+        phys: usize,
+        virt: *mut usize,
+        size: usize,
+        flags: MemoryFlags,
+        map_user: bool,
+    ) -> Result<(), Error> {
+        for offset in (0..size).step_by(PAGE_SIZE) {
+            let phys_page = if phys == 0 { 0 } else { phys + offset };
+            if let Err(e) = mapping.map_page(
+                self,
+                phys_page,
+                virt.wrapping_add(offset / core::mem::size_of::<usize>()),
+                flags,
+                map_user,
+            ) {
+                for unmap_offset in (0..offset).step_by(PAGE_SIZE) {
+                    mapping.unmap_page(virt.wrapping_add(unmap_offset / core::mem::size_of::<usize>())).ok();
+                }
+                self.release_range(phys, size, mapping.get_pid());
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Release `size` bytes of pages from `phys`; a `phys` of 0 is a no-op.
+    fn release_range(&mut self, phys: usize, size: usize, pid: PID) {
+        if phys == 0 {
+            return;
+        }
+        for rel_phys in (phys..phys + size).step_by(PAGE_SIZE) {
+            self.release_page(rel_phys, pid).ok();
+        }
+    }
+
+    #[cfg(keyos)]
+    pub fn map_zero_ongoing(&self) -> Option<PID> { self.pending_map_zero.as_ref().map(|p| p.pid) }
+
+    #[cfg(keyos)]
+    pub fn cancel_map_zero(&mut self) {
+        self.pending_map_zero = None;
+        crate::platform::page_zeroer::cancel_map_zero();
+    }
+
+    /// Service a POPULATE map_memory() request.
+    ///
+    /// Pages come back encrypted-zeroed, so a freshly populated mapping that the caller will read as
+    /// plaintext has to be re-zeroed. Rather than burn CPU cycles on it, the zeroing is handed to a DMA
+    /// channel and the caller is parked: the pages stay unmapped until the DMA finishes (the completion
+    /// interrupt maps them via [`Self::map_zero_finished`] and wakes us), so no sibling thread can unmap,
+    /// send, or lend them mid-zero. A single channel serializes concurrent mappers. When the allocator
+    /// happens to hand back already-zeroed pages no DMA is needed and the mapping is done immediately.
+    #[cfg(keyos)]
+    pub fn map_with_deferred_zeroing(
+        &mut self,
+        tid: TID,
+        virt: *mut usize,
+        size: usize,
+        flags: MemoryFlags,
+    ) -> Result<xous::Result, Error> {
+        if !flags.is_set(MemoryFlags::W | MemoryFlags::POPULATE) {
+            return Err(Error::InvalidArguments);
+        }
+        if size > crate::platform::page_zeroer::MAX_MAP_ZERO_BYTES {
+            return Err(Error::OutOfMemory);
+        }
+        if self.map_zero_ongoing().is_some() {
+            // Nothing is allocated yet, so just wait our turn and re-run the whole syscall.
+            return SystemServices::with_mut(|ss| ss.retry_syscall(tid, ThreadState::RetryMapZero));
+        }
+        let (phys, needs_zero) = self.alloc_range(size / PAGE_SIZE, current_pid(), flags)?;
+        if !needs_zero {
+            // The allocator handed back already-zeroed pages; map them right away.
+            let mut mapping = crate::arch::mem::MemoryMapping::current();
+            let virt = match SystemServices::with_mut(|ss| {
+                ss.current_process_mut().find_virtual_address(virt, size)
+            }) {
+                Ok(virt) => virt,
+                Err(e) => {
+                    self.release_range(phys, size, current_pid());
+                    return Err(e);
+                }
+            };
+            self.map_allocated_range(&mut mapping, phys, virt, size, flags, true)?;
+            return Ok(xous::Result::MemoryRange(unsafe { MemoryRange::new(virt as usize, size)? }));
+        }
+        self.pending_map_zero =
+            Some(PendingMapZero { phys, virt: virt as usize, size, flags, pid: current_pid(), tid });
+        crate::platform::page_zeroer::start_map_zero(phys, size);
+        // Park until the completion interrupt maps the pages and delivers the result. The PC stays past the
+        // SWI, so the thread returns with that result instead of re-running the syscall.
+        SystemServices::with_mut(|ss| {
+            ss.current_process_mut().set_thread_state(tid, ThreadState::WaitMapZero);
+            Scheduler::with_mut(|s| s.activate_current(ss))
+        })
+    }
+
+    /// Finish a deferred map_memory() whose DMA page-zeroing just completed: map the now-zeroed pages into
+    /// the owner's address space and deliver the result (range or error) to the parked thread, then free
+    /// the channel for the next waiter. Called from the zeroing-completion interrupt.
+    #[cfg(keyos)]
+    pub fn map_zero_finished(&mut self) {
+        let Some(job) = self.pending_map_zero.take() else {
+            return;
+        };
+        SystemServices::with_mut(|ss| ss.process(job.pid).expect("map-zero owner gone").activate());
+        let mut mapping = crate::arch::mem::MemoryMapping::current();
+        let virt = SystemServices::with_mut(|ss| {
+            ss.current_process_mut().find_virtual_address(job.virt as *mut usize, job.size)
+        });
+        let result = match virt {
+            Ok(virt) => self
+                .map_allocated_range(&mut mapping, job.phys, virt, job.size, job.flags, true)
+                .and_then(|()| unsafe { MemoryRange::new(virt as usize, job.size) })
+                .map_or_else(xous::Result::Error, xous::Result::MemoryRange),
+            Err(e) => {
+                self.release_range(job.phys, job.size, job.pid);
+                xous::Result::Error(e)
+            }
+        };
+        SystemServices::with_mut(|ss| {
+            ss.set_thread_result(job.pid, job.tid, result).ok();
+            ss.process_mut(job.pid)
+                .expect("map-zero owner gone")
+                .set_thread_state(job.tid, ThreadState::Ready);
+            // The channel is free again; wake all waiters. One makes progress and the rest re-park (a woken
+            // waiter may finish without starting a new job -- e.g. it got pre-zeroed pages -- so waking only
+            // one could strand the others).
+            ss.wake_threads_with_state(ThreadState::RetryMapZero, usize::MAX);
+            // Let the scheduler decide who has the highest priority
+            Scheduler::with_mut(|s| s.activate_current(ss)).ok();
+        });
     }
 
     /// Attempt to map the given physical address into the virtual address space

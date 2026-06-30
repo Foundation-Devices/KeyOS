@@ -94,9 +94,7 @@ pub fn idle() -> bool {
     }
 
     unsafe {
-        if REQUESTED_IDLE_MODE == DramIdleMode::LowPower
-            && !super::page_zeroer::RUNNING.load(core::sync::atomic::Ordering::SeqCst)
-        {
+        if REQUESTED_IDLE_MODE == DramIdleMode::LowPower && !super::page_zeroer::busy() {
             klog!("Deep idle");
             clean_cache_l1();
             clean_cache_l2();

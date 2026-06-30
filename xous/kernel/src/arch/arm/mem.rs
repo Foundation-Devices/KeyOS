@@ -246,7 +246,7 @@ impl MemoryMapping {
                 // a time, so an Invalid entry guarantees its siblings are Invalid too;
                 // no need to check them.
                 const L2_TABLE_BYTES: u32 = 256 * 4;
-                let (page_phys, zeroed) = mm.alloc_range(1, self.pid)?;
+                let (page_phys, zeroed) = mm.alloc_single_page(self.pid)?;
                 klog!("Allocated a new page for four L2 tables: phys={:08x?}", page_phys);
                 let page_phys = page_phys as u32;
 
@@ -655,7 +655,7 @@ impl MemoryMapping {
         if !flags.is_set(MemoryFlags::W) {
             return Err(Error::AccessDenied);
         }
-        let (mut phys, mut zeroed) = mm.alloc_range(1, self.pid)?;
+        let (mut phys, mut zeroed) = mm.alloc_single_page(self.pid)?;
         if flags.is_set(MemoryFlags::PLAINTEXT)
             || flags.is_set(MemoryFlags::NO_CACHE)
             || flags.is_set(MemoryFlags::DEV)

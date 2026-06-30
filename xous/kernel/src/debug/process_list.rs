@@ -78,6 +78,8 @@ pub(crate) fn for_each_process_row(mut on_row: impl FnMut(ProcessListRow<'_>)) -
                     ThreadState::WaitBlocking { .. } => 'b',
                     ThreadState::WaitReceive { .. } => 'w',
                     ThreadState::WaitFutex { .. } => 'f',
+                    ThreadState::WaitMapZero => 'z',
+                    ThreadState::RetryMapZero => 'Z',
                 };
             }
 

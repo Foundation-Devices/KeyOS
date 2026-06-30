@@ -110,6 +110,15 @@ pub enum ThreadState {
     /// Retrying a send() call because the server's queue was full. PC is on the SWI instruction, so once
     /// it's marked ready, the connect() syscall will be executed again.
     RetryQueueFull { sidx: usize },
+    /// Owner of an in-flight map_memory() DMA page-zeroing. The pages are allocated but deliberately not yet
+    /// mapped. The thread is parked past the SWI; the zeroing-completion interrupt maps the pages, delivers
+    /// the resulting range (or error) as the syscall result, and marks the thread ready.
+    #[allow(dead_code)]
+    WaitMapZero,
+    /// Waiting for the single map_memory() zeroing channel to become free. Nothing is allocated yet. PC is
+    /// on the SWI instruction, so the syscall re-runs once a turn opens up.
+    #[allow(dead_code)]
+    RetryMapZero,
 }
 
 #[derive(Debug, Clone)]
@@ -347,7 +356,7 @@ impl Process {
         if n == 0 {
             return;
         }
-        for tid in 1..MAX_THREAD_COUNT - 1 {
+        for tid in 1..MAX_THREAD_COUNT {
             if self.thread_state(tid) == state {
                 self.set_thread_state(tid, ThreadState::Ready);
                 n -= 1;
