@@ -30,6 +30,9 @@ pub fn emit_stderr_if_present(project_root: &Path, sdk_root: &Path, stderr: &[u8
 pub fn configure_host_build_environment(cmd: &mut Command) {
     #[cfg(target_os = "macos")]
     configure_macos_host_build_environment(cmd);
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = cmd;
 }
 
 pub(crate) fn rendered_compiler_message(line: &str, project_root: &Path, sdk_root: &Path) -> Option<String> {

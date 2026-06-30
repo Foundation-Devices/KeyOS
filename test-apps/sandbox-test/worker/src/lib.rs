@@ -551,54 +551,6 @@ pub const TESTS: &[Test] = &[
         },
         runner_fn: |_| {},
     },
-    Test {
-        name: "Read mirror",
-        crash: false,
-        worker_fn: |sid| {
-            let msg = xous::receive_message(sid).unwrap();
-            let scalar = msg.body.scalar_message().unwrap();
-            let slice = unsafe { core::slice::from_raw_parts(scalar.arg1 as *const u32, scalar.arg2 / 4) };
-            assert_eq!(slice[0], TEST_PATTERN);
-        },
-        runner_fn: |cid| {
-            let range = check_alloc(None, None);
-            let worker_pid = xous::get_remote_pid(cid).unwrap();
-            let mirrored_range = xous::mirror_memory_to_pid(range, worker_pid).unwrap();
-            xous::send_message(
-                cid,
-                xous::Message::Scalar(xous::ScalarMessage {
-                    arg1: mirrored_range.as_ptr() as usize,
-                    arg2: mirrored_range.len(),
-                    ..Default::default()
-                }),
-            )
-            .unwrap();
-        },
-    },
-    Test {
-        name: "Write mirror",
-        crash: true,
-        worker_fn: |sid| {
-            let msg = xous::receive_message(sid).unwrap();
-            let scalar = msg.body.scalar_message().unwrap();
-            let slice = unsafe { core::slice::from_raw_parts_mut(scalar.arg1 as *mut u32, scalar.arg2 / 4) };
-            slice[0] = 0x654321;
-        },
-        runner_fn: |cid| {
-            let range = check_alloc(None, None);
-            let worker_pid = xous::get_remote_pid(cid).unwrap();
-            let mirrored_range = xous::mirror_memory_to_pid(range, worker_pid).unwrap();
-            xous::send_message(
-                cid,
-                xous::Message::Scalar(xous::ScalarMessage {
-                    arg1: mirrored_range.as_ptr() as usize,
-                    arg2: mirrored_range.len(),
-                    ..Default::default()
-                }),
-            )
-            .unwrap();
-        },
-    },
     Test { name: "Ending Smoke test", worker_fn: |_| {}, runner_fn: |_| {}, crash: false },
 ];
 

@@ -25,13 +25,7 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #![allow(internal_features, unused_imports, dead_code)]
-#![cfg_attr(
-    all(
-        target_arch = "arm",
-        target_feature = "neon"
-    ),
-    feature(simd_ffi, abi_unadjusted, link_llvm_intrinsics, stdarch_arm_neon_intrinsics))
-]
+#![cfg_attr(all(target_arch = "arm", target_feature = "neon"), feature(stdarch_arm_neon_intrinsics))]
 
 mod r#box;
 mod channels_configuration;

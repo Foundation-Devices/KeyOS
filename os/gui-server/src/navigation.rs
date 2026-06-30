@@ -10,7 +10,6 @@ use log::{debug, error, warn};
 use server::ArchiveRequest;
 use xous::{AppId, PID};
 
-use crate::registry::AppRole;
 use crate::{AppManagerApi, Gui, GuiState, StartupState};
 
 impl Gui {
@@ -53,7 +52,7 @@ impl Gui {
         }
 
         #[cfg(not(feature = "recovery-os"))]
-        if self.is_locked() || self.active_app_role() == Some(AppRole::Onboarding) {
+        if self.is_locked() || self.active_app_role() == Some(crate::registry::AppRole::Onboarding) {
             return RunAppResponse::Locked;
         }
 

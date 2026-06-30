@@ -453,7 +453,14 @@ fn extract_public_key(private_key_pem: &[u8]) -> Result<String> {
         .context("Failed to extract public key")?;
 
     if let Some(mut stdin) = openssl_ec.stdin.take() {
-        stdin.write_all(private_key_pem)?;
+        // openssl can exit before reading the whole key (e.g. a bad key),
+        // surfacing here as a broken pipe; ignore it so the status check below
+        // reports openssl's real error instead of an opaque EPIPE.
+        if let Err(err) = stdin.write_all(private_key_pem) {
+            if err.kind() != io::ErrorKind::BrokenPipe {
+                return Err(err).context("Failed to write private key to openssl");
+            }
+        }
     }
 
     let output = openssl_ec.wait_with_output()?;

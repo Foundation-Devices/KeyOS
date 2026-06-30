@@ -21,7 +21,8 @@ use crate::xous_arguments::XousArguments;
 use crate::{tags, BuildArgs};
 
 /// An override to `.cargo/config.toml`-provided `RUSTFLAGS` for when PIC/PIE is enabled for the compilation.
-const RUSTFLAGS_OVERRIDE_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie";
+const RUSTFLAGS_OVERRIDE_PIC: &str =
+    "--cfg keyos -C relocation-model=pic -C link-arg=-pie -Z stack-protector=strong -Zunstable-options";
 pub(crate) const KEYOS_APPS_DIR: &str = "keyos/apps";
 pub(crate) const FLUX_PARENT_APP_DIR: &str = "gui-app-emu-flux";
 pub(crate) const FLUX_APPS_DIR: &str = "keyos/apps/gui-app-emu-flux/apps";

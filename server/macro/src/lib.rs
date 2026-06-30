@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
-#![feature(track_path)]
+#![feature(proc_macro_tracked_path)]
 
 use std::{
     collections::HashMap,
@@ -356,7 +356,7 @@ fn get_attr_value<'a>(attrs: &'a [Attribute], name: &'static str) -> Option<&'a 
 
 fn load_api_manifest(dir: String) -> ApiManifest {
     ApiManifest::load_with_tracking(&PathBuf::from(&dir), |path| {
-        proc_macro::tracked_path::path(path.to_string_lossy());
+        proc_macro::tracked::path(path);
     })
 }
 
@@ -373,7 +373,7 @@ fn load_server_manifest(dir: String) -> Manifest {
     }
 
     Manifest::load_with_tracking(&PathBuf::from(dir), &templates_dir, |path| {
-        proc_macro::tracked_path::path(path.to_string_lossy());
+        proc_macro::tracked::path(path);
     })
 }
 

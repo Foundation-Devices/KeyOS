@@ -12,4 +12,4 @@ install:
 # The crate builds on stable, but rustfmt.toml uses unstable options, so
 # formatting needs the pinned nightly even though `rust-toolchain.toml` is stable.
 fmt *args:
-    cargo +nightly-2025-09-11 fmt {{args}}
+    cargo +nightly-2026-04-11 fmt {{args}}

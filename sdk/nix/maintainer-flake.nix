@@ -22,7 +22,7 @@
     # Single source of truth for the toolchain so plain rustup and nix agree.
     rustToolchainFile = root + "/rust-toolchain.toml";
     rustToolchainChannel = (builtins.fromTOML (builtins.readFile rustToolchainFile)).toolchain.channel;
-    rustToolchainSha256 = "sha256-mEgn8v8xFz241fdSjNB1CxBHwm3aZz0svD9IqZVZeEA=";
+    rustToolchainSha256 = "sha256-NvWKV8CXj8AQXESvz5uGr6qv0JF0UHUdjYb2murEG/A=";
     sdkBuildConfig = builtins.fromTOML (builtins.readFile (root + "/sdk-build.toml"));
     foundationSlintVersion = sdkBuildConfig.submodules.slint.ref;
     foundationSlintHash = "sha256-7vZ3LnTm1l3+Q4tRSogesNzGp/iCy4IIpkP0w5/l/9k=";
@@ -58,8 +58,8 @@
           }
         else null;
       customTargetLib = pkgs.fetchzip {
-        url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.91.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
-        sha256 = "sha256-/69j8t7mcFk3o0BA+yW7NMLw0T9/CvKl4tBB5w+s7vI=";
+        url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.96.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
+        sha256 = "sha256-BvQyJ6BfMeaqGjSeE28iMKXpiQcuIMuW02XxMS9Pcrw=";
         stripRoot = false;
       };
       rustKeyos = fenix.packages.${system}.combine (

@@ -6,7 +6,7 @@
   pkgs,
   fenix,
 }: let
-  toolchainSha256 = "sha256-mEgn8v8xFz241fdSjNB1CxBHwm3aZz0svD9IqZVZeEA=";
+  toolchainSha256 = "sha256-NvWKV8CXj8AQXESvz5uGr6qv0JF0UHUdjYb2murEG/A=";
 
   baseToolchain = fenix.packages.${system}.fromToolchainFile {
     file = self + "/rust-toolchain.toml";
@@ -20,8 +20,8 @@
 
   channel = (builtins.fromTOML (builtins.readFile (self + "/rust-toolchain.toml"))).toolchain.channel;
   customTargetLib = pkgs.fetchzip {
-    url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.91.0-${channel}/armv7a-unknown-xous-elf_${channel}.zip";
-    sha256 = "sha256-/69j8t7mcFk3o0BA+yW7NMLw0T9/CvKl4tBB5w+s7vI=";
+    url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.96.0-${channel}/armv7a-unknown-xous-elf_${channel}.zip";
+    sha256 = "sha256-BvQyJ6BfMeaqGjSeE28iMKXpiQcuIMuW02XxMS9Pcrw=";
     stripRoot = false;
   };
 in {

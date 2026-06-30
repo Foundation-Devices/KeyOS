@@ -127,7 +127,7 @@ impl Backtrace {
     pub fn iter(&self) -> impl Iterator<Item = &usize> { self.frames[..self.depth].iter() }
 }
 
-fn is_valid_code_addr(addr: usize, allow_kernel_addrs: bool) -> bool {
+pub fn is_valid_code_addr(addr: usize, allow_kernel_addrs: bool) -> bool {
     if addr >= KERNEL_LOAD_OFFSET {
         return allow_kernel_addrs;
     }

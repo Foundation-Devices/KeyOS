@@ -267,7 +267,7 @@ enum QueuedMessage {
 
 // Size should be exactly 8 words / 32 bytes, yielding 128 queued messages per server
 #[cfg(keyos)]
-pub const _: () = assert!(core::mem::size_of::<QueuedMessage>() == 32);
+const _: () = assert!(core::mem::size_of::<QueuedMessage>() == 32);
 
 #[derive(Debug, Clone, Default)]
 pub struct MessagePermissions {

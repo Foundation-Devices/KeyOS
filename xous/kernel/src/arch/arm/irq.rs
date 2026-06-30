@@ -16,6 +16,10 @@ use crate::{
     SystemServices,
 };
 
+// First halfword of LLVM's udf abort trap (panic = "abort", __builtin_trap):
+// 0xdefe in Thumb, and the low halfword of the ARM encoding 0xe7ffdefe.
+const ABORT_TRAP: u16 = 0xdefe;
+
 /// Formats how far `addr` is from `stack`, suppressing output beyond
 /// half a default stack size from either edge.
 struct StackDistance {
@@ -376,8 +380,20 @@ pub extern "C" fn _irq_handler_rust() {
 #[export_name = "_undef_handler_rust"]
 pub extern "C" fn undef_handler() {
     let pid = current_pid();
-    let pc = ArchProcess::with_current(|p| p.current_thread().pc.saturating_sub(4));
-    crash_current_process!("PID {pid} issued an undefined or forbidden instruction at address 0x{pc:08x}");
+    let pc = ArchProcess::with_current(|p| p.current_thread().previous_instr_pc());
+
+    // SAFETY: is_valid_code_addr confirms pc is mapped and executable, and Thumb/ARM
+    // instructions are at least 2-byte aligned, so the read is in bounds and aligned.
+    let aborted =
+        super::backtrace::is_valid_code_addr(pc, false) && ABORT_TRAP == unsafe { *(pc as *const u16) };
+
+    if aborted {
+        crash_current_process!("PID {pid} aborted at 0x{pc:08x}");
+    } else {
+        crash_current_process!(
+            "PID {pid} issued an undefined or forbidden instruction at address 0x{pc:08x}"
+        );
+    }
 }
 
 extern "C" {

@@ -18,9 +18,6 @@ git-fetch-with-cli = true
 [target.'armv7a-unknown-xous-elf']
 rustflags = [
     "--cfg", "keyos",
-    '--cfg=curve25519_dalek_backend="serial"',
     '-Z', 'stack-protector=strong',
+    '-Z', 'unstable-options',
 ]
-
-[build]
-rustflags = ['--cfg=curve25519_dalek_backend="serial"']

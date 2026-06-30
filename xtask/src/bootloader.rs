@@ -91,8 +91,7 @@ pub fn build_at91bootstrap(args: BootloaderBuildArgs, bl_type: BootloaderType) -
     command.args(["build", "--profile", "bootloader"]);
     command.args(["--package", package_name]);
     command.args(["--target", "armv7a-none-eabi"]);
-    command.args(["-Z", "build-std=panic_abort"]);
-    command.args(["-Z", "build-std-features=panic_immediate_abort"]);
+    command.args(["-Z", "build-std=core"]);
     if args.production_bootloader {
         command.args(["--features", "production"]);
     }

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-cargo-features = ["trim-paths"]
+cargo-features = ["trim-paths", "panic-immediate-abort"]
 
 [workspace]
 resolver = "2"
@@ -319,8 +319,8 @@ incremental = true
 inherits = "release"
 strip = true
 lto = true
-opt-level = "s"      # Optimize for size
-panic = "abort"
+opt-level = "s"           # Optimize for size
+panic = "immediate-abort"
 codegen-units = 1
 
 [patch.crates-io]

@@ -16,8 +16,8 @@
     nixpkgs,
     fenix,
   }: let
-    rustToolchainChannel = "nightly-2025-09-11";
-    rustToolchainSha256 = "sha256-mEgn8v8xFz241fdSjNB1CxBHwm3aZz0svD9IqZVZeEA=";
+    rustToolchainChannel = "nightly-2026-04-11";
+    rustToolchainSha256 = "sha256-NvWKV8CXj8AQXESvz5uGr6qv0JF0UHUdjYb2murEG/A=";
     rustToolchainFile = builtins.toFile "foundation-sdk-rust-toolchain.toml" ''
       [toolchain]
       channel = "${rustToolchainChannel}"
@@ -45,8 +45,8 @@
           sha256 = rustToolchainSha256;
         };
         customTargetLib = pkgs.fetchzip {
-          url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.91.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
-          sha256 = "sha256-/69j8t7mcFk3o0BA+yW7NMLw0T9/CvKl4tBB5w+s7vI=";
+          url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.96.0-${rustToolchainChannel}/armv7a-unknown-xous-elf_${rustToolchainChannel}.zip";
+          sha256 = "sha256-BvQyJ6BfMeaqGjSeE28iMKXpiQcuIMuW02XxMS9Pcrw=";
           stripRoot = false;
         };
         rustKeyos = fenix.packages.${system}.combine [

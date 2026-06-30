@@ -2284,9 +2284,9 @@ mod tests {
     fn parse_toolchain_channel_reads_rust_toolchain_toml() {
         let stage_dir = temp_stage_dir("toolchain-channel");
         let toolchain = stage_dir.join("rust-toolchain.toml");
-        fs::write(&toolchain, "[toolchain]\nchannel = \"nightly-2025-09-11\"\n").unwrap();
+        fs::write(&toolchain, "[toolchain]\nchannel = \"nightly-2026-04-11\"\n").unwrap();
 
-        assert_eq!(parse_toolchain_channel(&toolchain).as_deref(), Some("nightly-2025-09-11"));
+        assert_eq!(parse_toolchain_channel(&toolchain).as_deref(), Some("nightly-2026-04-11"));
         fs::remove_dir_all(stage_dir).unwrap();
     }
 
@@ -2295,10 +2295,10 @@ mod tests {
         let root = temp_stage_dir("toolchain-search");
         let nested = root.join("a").join("b");
         fs::create_dir_all(&nested).unwrap();
-        fs::write(root.join("rust-toolchain.toml"), "[toolchain]\nchannel = \"nightly-2025-09-11\"\n")
+        fs::write(root.join("rust-toolchain.toml"), "[toolchain]\nchannel = \"nightly-2026-04-11\"\n")
             .unwrap();
 
-        assert_eq!(rust_toolchain_channel(&nested).as_deref(), Some("nightly-2025-09-11"));
+        assert_eq!(rust_toolchain_channel(&nested).as_deref(), Some("nightly-2026-04-11"));
         fs::remove_dir_all(root).unwrap();
     }
 

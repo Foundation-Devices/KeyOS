@@ -181,13 +181,7 @@ impl Process {
     pub fn retry_swi_instruction(&mut self, tid: TID) -> Result<(), xous::Error> {
         let process = unsafe { &mut *PROCESS };
         let thread = &mut process.threads[tid];
-        if thread.is_in_thumb_mode() {
-            // Processor was in thumb mode, SWI is 2 bytes
-            thread.pc = thread.pc.saturating_sub(2);
-        } else {
-            // Processor was in ARM mode, SWI is 4 bytes
-            thread.pc = thread.pc.saturating_sub(4);
-        }
+        thread.pc = thread.previous_instr_pc();
         Ok(())
     }
 
@@ -484,6 +478,12 @@ impl Thread {
     fn clean(&mut self) { *self = Default::default(); }
 
     pub fn is_in_thumb_mode(&self) -> bool { self.psr & (1 << 5) != 0 }
+
+    /// PC of the instruction preceding the saved return address. To be used for
+    /// the SVC and Undefined exceptions only.
+    pub fn previous_instr_pc(&self) -> usize {
+        self.pc.saturating_sub(if self.is_in_thumb_mode() { 2 } else { 4 })
+    }
 
     pub fn set_pc(&mut self, pc: usize) {
         // Function pointers to thumb functions have the lowest bit set,
