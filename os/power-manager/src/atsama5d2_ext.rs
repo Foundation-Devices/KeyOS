@@ -98,6 +98,35 @@ impl PowerManagerServerExt {
             last_status: None,
         })
     }
+
+    fn set_usb_boost(&mut self, enabled: bool) -> SetUsbBoostResponse {
+        let mut ctrl = match self.charger.control() {
+            Ok(ctrl) => ctrl,
+            Err(e) => {
+                log::error!("Error getting control register: {e:?}");
+                return SetUsbBoostResponse { success: false, previous_state: false };
+            }
+        };
+        let previous_state = ctrl.opa_mode();
+        ctrl.set_opa_mode(enabled);
+        match self.charger.set_control(ctrl) {
+            Ok(()) => SetUsbBoostResponse { success: true, previous_state },
+            Err(e) => {
+                log::error!("Error setting control register: {e:?}");
+                SetUsbBoostResponse { success: false, previous_state }
+            }
+        }
+    }
+
+    fn set_fuel_gauge_hibernate(&mut self) -> bool {
+        match self.fuel_gauge.set_hibernate() {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!("Error setting fuel gauge hibernate mode: {e:?}");
+                false
+            }
+        }
+    }
 }
 
 impl BlockingScalarHandler<GetStatus> for PowerManagerServerExt {
@@ -126,22 +155,7 @@ impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServerExt {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> SetUsbBoostResponse {
-        let mut ctrl = match self.charger.control() {
-            Ok(ctrl) => ctrl,
-            Err(e) => {
-                log::error!("Error getting control register: {e:?}");
-                return SetUsbBoostResponse { success: false, previous_state: false };
-            }
-        };
-        let previous_state = ctrl.opa_mode();
-        ctrl.set_opa_mode(msg.enabled);
-        match self.charger.set_control(ctrl) {
-            Ok(()) => SetUsbBoostResponse { success: true, previous_state },
-            Err(e) => {
-                log::error!("Error setting control register: {e:?}");
-                SetUsbBoostResponse { success: false, previous_state }
-            }
-        }
+        self.set_usb_boost(msg.enabled)
     }
 }
 
@@ -186,6 +200,20 @@ impl ScalarHandler<ClearChargeFault> for PowerManagerServerExt {
         _context: &mut server::ServerContext<Self>,
     ) {
         self.last_reported_charge_fault = None;
+    }
+}
+
+impl BlockingScalarHandler<Shutdown> for PowerManagerServerExt {
+    fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        // Disable USB boost before shutting down, so we don't
+        // continue draining the battery into a connected slave device.
+        self.set_usb_boost(false);
+        if !self.set_fuel_gauge_hibernate() {
+            log::error!("Failed to set fuel gauge hibernate mode before shutdown");
+        }
+
+        xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
+        panic!("Shutdown syscall did not shut down");
     }
 }
 

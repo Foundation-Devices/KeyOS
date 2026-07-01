@@ -40,11 +40,6 @@ pub struct PowerManagerServer {
     utmi_clock_enabled: bool,
 }
 
-#[derive(server::Permissions, Clone, Default)]
-#[all_permissions]
-#[server_name = "os/power-manager-ext"]
-struct ExtPermissions;
-
 impl server::Server for PowerManagerServer {}
 
 impl PowerManagerServer {
@@ -121,18 +116,6 @@ impl PowerManagerServer {
             xous::DramIdleMode::LowPower
         })
         .ok();
-    }
-}
-
-impl BlockingScalarHandler<Shutdown> for PowerManagerServer {
-    fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        // Disable USB boost before shutting down, so we don't
-        // continue draining the battery into a connected slave device.
-        let ext_api = power_manager::PowerManagerExtApi::<ExtPermissions>::default();
-        ext_api.set_usb_boost(false).ok();
-
-        xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
-        panic!("Shutdown syscall did not shut down");
     }
 }
 

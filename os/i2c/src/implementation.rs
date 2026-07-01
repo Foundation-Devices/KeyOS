@@ -94,28 +94,33 @@ impl I2cServer {
             return;
         }
         while let Some(request) = self.queue.pop_front() {
-            self.twi.setup_write_read(
-                request.message.peripheral.i2c_addr(),
-                request.message.write_data.len(),
-                request.message.read_len,
-            );
-            if let Err(e) = self.twi.send_bytes(&request.message.write_data) {
-                request.response.respond(Err(convert_i2c_error(e))).ok();
-                continue;
-            };
+            let address = request.message.peripheral.i2c_addr();
             if request.message.read_len <= 4 {
                 let mut buffer = vec![0; request.message.read_len];
-                if let Err(e) = self.twi.receive_bytes(&mut buffer) {
-                    request.response.respond(Err(convert_i2c_error(e))).ok();
+                let result = if request.message.read_len == 0 {
+                    self.twi.write_bytes(address, &request.message.write_data).map(|()| buffer)
                 } else {
-                    request.response.respond(Ok(buffer)).ok();
-                }
+                    self.twi
+                        .write_read_bytes(address, &request.message.write_data, &mut buffer)
+                        .map(|()| buffer)
+                };
+
+                request.response.respond(result.map_err(convert_i2c_error)).ok();
                 // There appears to be a minimum wait time, or else we
                 // hammer the peripherals too fast and they get confused.
                 // On the other branch there is enough overhead to take care
                 // of this.
                 std::thread::sleep(Duration::from_millis(1));
             } else {
+                self.twi.setup_write_read(
+                    address,
+                    request.message.write_data.len(),
+                    request.message.read_len,
+                );
+                if let Err(e) = self.twi.send_bytes(&request.message.write_data) {
+                    request.response.respond(Err(convert_i2c_error(e))).ok();
+                    continue;
+                };
                 let buffer: Box<[u8]> = std::iter::repeat(0).take(request.message.read_len).collect();
                 let buffer_range =
                     unsafe { MemoryRange::new(buffer.as_ptr() as usize, buffer.len()).unwrap() };

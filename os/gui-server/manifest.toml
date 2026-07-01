@@ -1,7 +1,7 @@
 manifestVersion = "0"
 appId = "0x6775692d736572766572000000000000"
 memory = ["LCDC"]
-syscall = ["VirtToPhys", "VirtToPhysPid", "TerminatePid", "ClaimInterrupt", "GetSystemStats", "SetThreadPriority", "Shutdown"]
+syscall = ["VirtToPhys", "VirtToPhysPid", "TerminatePid", "ClaimInterrupt", "GetSystemStats", "SetThreadPriority"]
 extends = "../../api/gui-server"
 
 [appName]
@@ -24,8 +24,8 @@ ForceShutdownTimeout = { id = 50, type = "scalar" }
 "os/fs" = ["SubscribeFilesystemEvent"]
 "os/camera" = ["NotifyVisible", "Subscribe"]
 "os/haptics" = ["Vibrate"]
-"os/power-manager" = ["SetPeripheralEnabled", "Shutdown", "Reboot"]
-"os/power-manager-ext" = ["GetStatus"]
+"os/power-manager" = ["SetPeripheralEnabled", "Reboot"]
+"os/power-manager-ext" = ["GetStatus", "Shutdown"]
 "os/rgb-server" = ["AnimateAllTo", "SetAllTo", "SubscribeColorUpdates"]
 "os/security" = ["Logout", "GetMasterKeyState"]
 "os/settings" = [

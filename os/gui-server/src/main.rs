@@ -751,12 +751,10 @@ impl Gui {
         std::thread::sleep(Duration::from_millis(50));
 
         let reboot = self.shutting_down.take().unwrap_or_default();
-        let pwr = PowerManagerApi::default();
-
         if reboot {
-            pwr.reboot();
+            PowerManagerApi::default().reboot();
         } else {
-            pwr.shutdown();
+            PowerManagerExtApi::default().shutdown();
         }
     }
 

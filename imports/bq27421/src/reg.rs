@@ -20,6 +20,7 @@ pub enum ControlCommand {
     DeviceType = 0x0001,
     #[allow(dead_code)]
     Flags = 0x0006,
+    SetHibernate = 0x0011,
 }
 
 bitfield! {

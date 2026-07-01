@@ -33,6 +33,10 @@ impl<I2C: embedded_hal::i2c::I2c> Bq27421<I2C> {
         Ok(Status(self.read_reg(Registers::Control)?))
     }
 
+    pub fn set_hibernate(&mut self) -> Result<(), Bq27421Error<I2C::Error>> {
+        self.write_reg(Registers::Control, ControlCommand::SetHibernate as u16)
+    }
+
     pub fn flags(&mut self) -> Result<Flags, Bq27421Error<I2C::Error>> {
         Ok(Flags(self.read_reg(Registers::Flags)?))
     }

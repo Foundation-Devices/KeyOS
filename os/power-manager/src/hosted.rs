@@ -42,16 +42,16 @@ impl PowerManagerServerExt {
     }
 }
 
-impl BlockingScalarHandler<Shutdown> for PowerManagerServer {
-    fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        log::info!("[!] Shutting down");
+impl BlockingScalarHandler<Reboot> for PowerManagerServer {
+    fn handle(&mut self, _msg: Reboot, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        log::info!("[!] Reboot requested, shutting down instead");
         xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
     }
 }
 
-impl BlockingScalarHandler<Reboot> for PowerManagerServer {
-    fn handle(&mut self, _msg: Reboot, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        log::info!("[!] Reboot requested, shutting down instead");
+impl BlockingScalarHandler<Shutdown> for PowerManagerServerExt {
+    fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        log::info!("[!] Shutting down");
         xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
     }
 }

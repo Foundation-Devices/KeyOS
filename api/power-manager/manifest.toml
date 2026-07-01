@@ -1,7 +1,6 @@
 manifestVersion = "0"
 [servers."os/power-manager"]
 SetPeripheralEnabled = { id = 0, type = "blockingScalar", cfg = "keyos" }
-Shutdown = { id = 1, type = "blockingScalar" }
 Reboot = { id = 2, type = "blockingScalar" }
 
 [servers."os/power-manager-ext"]
@@ -11,4 +10,5 @@ SetOtgPriority = { id = 3, type = "scalar", cfg = "keyos" }
 GetExtendedStatus = { id = 4, type = "blockingArchive" }
 ClearChargeFault = { id = 5, type = "scalar" }
 StatusSubscribe = { id = 6, type = "scalarEvent" }
+Shutdown = { id = 7, type = "blockingScalar" }
 SetBatteryPercent = { id = 20, type = "scalar", cfg = "not(keyos)" }

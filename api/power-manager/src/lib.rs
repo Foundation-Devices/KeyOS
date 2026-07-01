@@ -48,13 +48,6 @@ impl<P: CheckedPermissions> PowerManagerApi<P> {
         self.conn.send_blocking_scalar(Reboot)
     }
 
-    pub fn shutdown(&self)
-    where
-        P: MessageAllowed<Shutdown>,
-    {
-        self.conn.send_blocking_scalar(Shutdown)
-    }
-
     #[cfg(keyos)]
     pub fn enable_peripheral(&self, peripheral: atsama5d27::pmc::PeripheralId) -> Result<(), xous::Error>
     where
@@ -78,6 +71,13 @@ pub struct PowerManagerExtApi<P: CheckedPermissions> {
 }
 
 impl<P: CheckedPermissions> PowerManagerExtApi<P> {
+    pub fn shutdown(&self)
+    where
+        P: MessageAllowed<Shutdown>,
+    {
+        self.conn.send_blocking_scalar(Shutdown)
+    }
+
     pub fn status(&self) -> Result<Status, xous::Error>
     where
         P: MessageAllowed<GetStatus>,
