@@ -21,8 +21,6 @@ pub struct ManifestV0 {
     #[serde(with = "crate::app_id_hex")]
     pub app_id: [u8; crate::APP_ID_BYTE_LEN],
     #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
     pub publisher: Option<String>,
     #[serde(default)]
     pub description: Option<String>,

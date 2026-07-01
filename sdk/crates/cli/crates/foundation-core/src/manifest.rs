@@ -14,7 +14,6 @@ use crate::config::{AppConfig, PermissionEntries};
 pub struct AppManifest {
     pub app_name: BTreeMap<String, String>,
     pub app_id: String,
-    pub icon: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publisher: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -29,7 +28,6 @@ impl AppManifest {
         Self {
             app_name: config.manifest_app_names(),
             app_id: config.app_id.as_hex().to_lowercase(),
-            icon: config.manifest_icon_file(),
             publisher: config.publisher.name_value().map(ToOwned::to_owned),
             description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
             version: config.version.to_string(),
@@ -70,7 +68,6 @@ mod tests {
 
         assert_eq!(manifest.app_name, BTreeMap::from([("en".to_string(), "Demo Friendly".to_string())]));
         assert_eq!(manifest.app_id, "0xaabbccddeeff00112233445566778899");
-        assert_eq!(manifest.icon, "resources/.foundation/icon.raw");
         assert_eq!(manifest.publisher.as_deref(), Some("Demo Corp"));
         assert_eq!(manifest.description.as_deref(), Some("Demo"));
         assert_eq!(manifest.version, "0.1.0");

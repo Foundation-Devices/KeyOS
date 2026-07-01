@@ -11,6 +11,8 @@ use tiny_skia::{
     BlendMode, FillRule, FilterQuality, Mask, PathBuilder, PixmapMut, PixmapPaint, PixmapRef, Transform,
 };
 
+use super::scale::scale_buffer;
+
 fn create_mask(border_radius: f32, width: f32, height: f32) -> Mask {
     let mut mask = Mask::new(width as u32, height as u32).unwrap();
 
@@ -190,38 +192,16 @@ pub fn round_corners_scaling(source_image: Image, border_radius: f32, width: f32
         return Image::default();
     }
 
-    let (ow, oh) = source_image.size().to_tuple();
-
-    let buffer = unsafe {
-        let inner = std::mem::transmute::<Image, ImageInner>(source_image); //  pretend that source_image is our ImageInner
-        let buf = inner.render_to_buffer(None); //  get pixels from this image
-        let _ = std::mem::transmute::<ImageInner, Image>(inner); //  roll back, so it can be deallocated properly
-        buf
+    let Some(source) = source_image.to_rgba8_premultiplied() else {
+        return Image::default();
     };
 
-    if buffer.is_none() {
-        Image::default() // no input image provided, return empty image
-    } else {
-        let buffer = buffer.unwrap();
-        let src = buffer.data();
+    // Mask after scaling: the corner radius is in output pixels, so masking the
+    // source first would scale the radius along with the image and distort it.
+    let mut scaled = scale_buffer(&source, width, height, false);
+    let mut pixmap = PixmapMut::from_bytes(scaled.make_mut_bytes(), w, h).unwrap();
+    let mask = create_mask(border_radius, w as f32, h as f32);
+    pixmap.apply_mask(&mask);
 
-        let src_pixmap = PixmapRef::from_bytes(src, ow, oh).unwrap();
-        let mut pixel_buffer = SharedPixelBuffer::<Rgba8Pixel>::new(w, h);
-        let mut pixmap = PixmapMut::from_bytes(pixel_buffer.make_mut_bytes(), w, h).unwrap();
-
-        // draw source image to the destination
-        let mut pmp = PixmapPaint::default();
-        pmp.opacity = 1.0;
-        pmp.blend_mode = BlendMode::Source;
-        pmp.quality = FilterQuality::Nearest;
-
-        // Scale the image first and then apply mask over it, because we can't apply mask with scaling
-        let scale = Transform::from_scale(width / ow as f32, height / oh as f32);
-
-        let mask = create_mask(border_radius, w as f32, h as f32);
-        pixmap.draw_pixmap(0, 0, src_pixmap, &pmp, scale, None);
-        pixmap.apply_mask(&mask);
-
-        Image::from_rgba8(pixel_buffer)
-    }
+    Image::from_rgba8_premultiplied(scaled)
 }

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use foundation_core::{AppConfig, AppManifest, ProjectContext, SdkLayout, SdkRoot};
 
-use crate::assets::stage_hardware_assets;
+use crate::assets::{stage_bundled_icon, stage_hardware_assets};
 use crate::cargo_support::{configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present};
 use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
@@ -125,6 +125,10 @@ fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path, dest_na
 
     let manifest_json = generate_manifest_json(config, project_root)?;
     fs::write(dest_dir.join("manifest.json"), manifest_json)?;
+
+    // Stage icon.bin next to app.elf so the simulator's app-manager serves it
+    // over the same GetAppIcon IPC as hardware.
+    stage_bundled_icon(config, project_root, &dest_dir)?;
 
     Ok(dest_dir)
 }

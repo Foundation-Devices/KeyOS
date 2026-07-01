@@ -238,14 +238,6 @@ impl AppConfig {
         app_names
     }
 
-    /// Get the app-bundle-local path for the converted manifest icon.
-    pub fn manifest_icon_file(&self) -> String { "resources/.foundation/icon.raw".to_string() }
-
-    /// Get the manifest icon path without the `.raw` suffix.
-    pub fn manifest_icon_image_name(&self) -> String {
-        self.manifest_icon_file().trim_end_matches(".raw").to_string()
-    }
-
     /// Expand permission templates and merge them with explicit permission entries.
     pub fn resolved_permissions(&self, project_root: &Path) -> Result<PermissionEntries, ConfigError> {
         self.permissions.resolve(project_root)
@@ -427,8 +419,6 @@ mod tests {
         assert_eq!(permissions["os/settings"], vec!["GetDeviceName", "GetLocale"]);
         assert_eq!(config.launcher_name(), "Demo");
         assert_eq!(config.manifest_app_names()["en"], "Demo");
-        assert_eq!(config.manifest_icon_file(), "resources/.foundation/icon.raw");
-        assert_eq!(config.manifest_icon_image_name(), "resources/.foundation/icon");
         assert_eq!(config.theme, None);
         assert_eq!(config.publisher.name_value(), Some("Demo Corp"));
         assert_eq!(config.publisher.contact_email_value(), Some("support@example.com"));

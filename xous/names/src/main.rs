@@ -558,7 +558,6 @@ mod tests {
         let mut manifest = Manifest {
             app_name,
             app_id,
-            icon: None,
             publisher: None,
             description: None,
             version: None,

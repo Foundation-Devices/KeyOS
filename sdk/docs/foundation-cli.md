@@ -44,7 +44,7 @@ Use the canonical English command names in generated commands and docs.
 
 ## Project Files Agents Should Know
 
-- `app-config.toml`: app metadata, app ID, icon path, theme path, version, permissions, and optional signing identity. The `icon` file is converted to `resources/.foundation/icon.raw` and bundled as `icon.bin` during hardware builds. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
+- `app-config.toml`: app metadata, app ID, icon path, theme path, version, permissions, and optional signing identity. The `icon` file is converted into the bundled `icon.bin` placed next to `app.elf`. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
 - `permission_templates.toml`: named permission bundles expanded by `app-config.toml`.
 - `.foundation-sdk/current`: generated SDK dependency mapping used by template `Cargo.toml` path dependencies. It is ignored and refreshed by `foundation new`, `build`, `sim`, and `preview`.
 - `ui/app.slint`: default UI entrypoint for `foundation preview`.

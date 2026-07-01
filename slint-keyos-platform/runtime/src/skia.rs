@@ -9,6 +9,7 @@ pub(crate) mod graph;
 pub(crate) mod loader;
 pub(crate) mod panel;
 pub(crate) mod picker;
+pub(crate) mod scale;
 
 pub use arc::doughnut;
 pub use card::line_card;
@@ -24,6 +25,7 @@ pub use panel::SlintGradientStop;
 pub use picker::color_palette;
 pub use picker::hue_slider;
 pub use picker::pick_color;
+pub use scale::scale_image;
 use slint::Color as SlintColor;
 use tiny_skia::{Color, Paint};
 

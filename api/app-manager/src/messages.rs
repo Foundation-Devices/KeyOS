@@ -73,10 +73,6 @@ pub struct InstalledAppPermissionGroup {
 pub struct InstalledAppInfo {
     pub app_id: String,
     pub name: String,
-    /// On-disk path/reference for the app's bundled icon when it exists. Icon
-    /// bytes are fetched separately via [`GetAppIcon`] on device so a single
-    /// large icon (or many apps) cannot overflow the listing's IPC buffer.
-    pub bundled_icon_path: Option<String>,
     pub publisher: String,
     pub can_launch: bool,
     pub version: String,

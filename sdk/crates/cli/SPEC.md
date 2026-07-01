@@ -183,7 +183,6 @@ Example:
     "en": "My App"
   },
   "appId": "0x00112233445566778899aabbccddeeff",
-  "icon": "resources/.foundation/icon.raw",
   "permissions": {
     "os/gui-server": ["RegisterAppMessage", "RequestRedraw"],
     "os/settings": ["GetDeviceName"]
@@ -195,7 +194,6 @@ Observed behavior:
 
 - `appId` is lowercased in emitted JSON
 - `appName.en` comes from `launcher-app-name`, falling back to `friendly-app-name`
-- `icon` is the generated app-bundle-local path for the app icon
 - `permissions` contains resolved concrete KeyOS permission entries
 
 ### App assets
@@ -378,7 +376,6 @@ target/keyos/<app-name>/icon.bin
 target/keyos/<app-name>/resources/
 ```
 
-  - `app-config.toml` `icon` -> `resources/.foundation/icon.raw`
   - `app-config.toml` `icon` -> `target/keyos/<app-name>/icon.bin`
   - `resources/images/**/*.{svg,png,jpg,jpeg,webp,bmp}` -> `resources/images/**/*.raw`
   - `resources/fonts/**/*.{ttf,otf,ttc}` -> `resources/fonts/**/*`

@@ -25,7 +25,7 @@ const FOUNDATION_PUBLISHER: &str = "Foundation Devices, Inc.";
 const BUNDLED_ICON_FILE: &str = "icon.bin";
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
 pub const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
-const MAX_APP_ICON_SIZE_BYTES: u64 = 256 * 1024;
+const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
 #[cfg(keyos)]
 const MAX_THIRD_PARTY_KEY_CHECK_APP_SIZE: u64 = 16 * 1024 * 1024;
 const INSTALLED_APP_NAME_MAX_BYTES: usize = 128;
@@ -247,7 +247,6 @@ impl AppRegistry {
                 let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
                 let mut installed_app = InstalledAppInfo {
                     app_id: format!("0x{}", app_info.id),
-                    bundled_icon_path: app_info.bundled_icon_file_path(),
                     publisher,
                     can_launch,
                     version,
@@ -314,15 +313,12 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).and_then(AppInfo::elf_path)
     }
 
+    /// Blind-read the app's bundled `icon.bin`, returning `None` when the app ships
+    /// no icon (the common case) or it can't be read.
     pub(crate) fn app_icon_bytes(&self, app_id: AppId) -> Option<Vec<u8>> {
-        let path = self.installed_apps.get(&app_id)?.bundled_icon_file_path()?;
-        match read_app_icon_bytes(&path, MAX_APP_ICON_SIZE_BYTES) {
-            Ok(data) => Some(data),
-            Err(e) => {
-                log::warn!("failed to read bundled app icon for app_id=0x{app_id}: {e:?}");
-                None
-            }
-        }
+        let app_dir = self.installed_apps.get(&app_id)?.app_dir.as_deref()?;
+        let path = format!("{app_dir}/{BUNDLED_ICON_FILE}");
+        read_app_icon_bytes(&path, MAX_APP_ICON_SIZE_BYTES).ok()
     }
 
     pub(crate) fn app_resources_location(&self, app_id: AppId) -> Option<AppResourcesLocation> {
@@ -496,24 +492,6 @@ impl AppInfo {
 
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
 
-    /// On-disk path of the app's bundled raw icon, if one exists. The
-    /// auto-discovered `icon.bin` takes precedence over a manifest-declared icon
-    /// that resolves into the app bundle. Only existence is checked here; the
-    /// bytes are read lazily via [`AppRegistry::app_icon_bytes`].
-    fn bundled_icon_file_path(&self) -> Option<String> {
-        if let Some(path) = self.bundled_icon_path().filter(|path| app_icon_exists(path)) {
-            return Some(path);
-        }
-
-        let icon = self.manifest.icon.as_deref().map(str::trim).filter(|icon| !icon.is_empty())?;
-        self.app_bundle_icon_path(icon).filter(|path| app_icon_exists(path))
-    }
-
-    fn bundled_icon_path(&self) -> Option<String> {
-        let app_dir = self.app_dir.as_deref()?;
-        Some(format!("{app_dir}/{BUNDLED_ICON_FILE}"))
-    }
-
     fn app_resources_location(&self) -> Option<AppResourcesLocation> {
         let app_dir = self.app_dir.as_deref()?;
         let app_dir = app_dir.rsplit('/').next()?;
@@ -531,15 +509,6 @@ impl AppInfo {
         };
 
         Some(AppResourcesLocation { root, app_dir })
-    }
-
-    fn app_bundle_icon_path(&self, icon: &str) -> Option<String> {
-        let app_dir = self.app_dir.as_deref()?;
-        let icon = icon.trim_start_matches('/');
-        if icon.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..") {
-            return None;
-        }
-        Some(format!("{app_dir}/{icon}"))
     }
 
     fn binary_size(&mut self) -> u64 {
@@ -591,10 +560,8 @@ impl AppInfo {
     }
 }
 
-/// The bundled icon lives in the image on both targets, so it is read through
-/// `fs` regardless of where the app's elf runs from.
-fn app_icon_exists(path: &str) -> bool { FileSystem::default().metadata(path, fs::Location::System).is_ok() }
-
+/// Read the app's bundled icon through `fs`, refusing anything larger than `max_size_bytes`
+/// before allocating, so a malformed bundle can't make us read an unbounded amount into memory.
 fn read_app_icon_bytes(path: &str, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
     let fs = FileSystem::default();
     let metadata = fs.metadata(path, fs::Location::System)?;
@@ -785,7 +752,7 @@ fn sideloaded_app_dir_name(app_dir: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    use std::collections::{BTreeMap, HashMap};
 
     use app_manager::decode_app_id_str;
 
@@ -797,27 +764,20 @@ mod tests {
 
     fn app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
         let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
-        app_info_with_source_and_icon(app_id, name, elf_path, source, None)
+        app_info_with_source(app_id, name, elf_path, source)
     }
 
     fn built_in_app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
-        app_info_with_source_and_icon(app_id, name, elf_path, AppSource::BuiltIn, None)
+        app_info_with_source(app_id, name, elf_path, AppSource::BuiltIn)
     }
 
-    fn app_info_with_source_and_icon(
-        app_id: &str,
-        name: &str,
-        elf_path: Option<&str>,
-        source: AppSource,
-        icon: Option<&str>,
-    ) -> AppInfo {
+    fn app_info_with_source(app_id: &str, name: &str, elf_path: Option<&str>, source: AppSource) -> AppInfo {
         AppInfo {
             id: decode_app_id_str(app_id).unwrap(),
             app_dir: elf_path.map(|path| path.strip_suffix("/app.elf").unwrap_or(path).to_owned()),
             manifest: Manifest {
                 app_name: BTreeMap::from([(Locale("en".to_string()), name.to_string())]),
                 app_id: app_manifest::parse_app_id_bytes(app_id).unwrap(),
-                icon: icon.map(ToOwned::to_owned),
                 publisher: None,
                 description: None,
                 version: None,
@@ -859,12 +819,11 @@ mod tests {
     fn sideloaded_bundle_dir_rejects_non_sideloaded_apps() {
         let registry = registry_with(vec![
             built_in_app_info(THIRD_PARTY_APP_ID, "Built In App", Some("/keyos/apps/example/app.elf")),
-            app_info_with_source_and_icon(
+            app_info_with_source(
                 "0xffeeddccbbaa99887766554433221100",
                 "Hosted App",
                 Some("/tmp/hosted-app/app.elf"),
                 AppSource::ThirdParty,
-                None,
             ),
         ]);
 
@@ -877,12 +836,11 @@ mod tests {
 
     #[test]
     fn sideloaded_bundle_dir_rejects_path_that_does_not_match_app_id() {
-        let registry = registry_with(vec![app_info_with_source_and_icon(
+        let registry = registry_with(vec![app_info_with_source(
             THIRD_PARTY_APP_ID,
             "Example App",
             Some("/keyos/sideloaded-apps/ffeeddccbbaa99887766554433221100/app.elf"),
             AppSource::ThirdParty,
-            None,
         )]);
 
         assert_eq!(registry.sideloaded_bundle_dir(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()), None);

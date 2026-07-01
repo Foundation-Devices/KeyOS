@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    cell::RefCell,
     io::{Read, Seek},
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, SystemTime},
 };
@@ -56,6 +58,10 @@ security::use_api!();
 update::use_api!();
 
 const PERIODIC_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// Maximum number of decoded app icons kept resident at once. Icons are fetched
+/// one per app over IPC, so an unbounded set would grow with the install count.
+const APP_ICON_CACHE_CAP: usize = 32;
 
 app!("Settings", role = ClaimSettingsRole);
 
@@ -271,32 +277,20 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let globals = ui.global::<AppManagementGlobal>();
 
-    #[cfg(keyos)]
-    {
-        let bundled_app_icon_cache = slint_keyos_platform::raw_image::new_bundled_app_icon_cache();
-        globals.on_app_icon(move |app_id| {
-            // Icon bytes are fetched on demand by app id and memoized by the
-            // texture cache, so the installed-apps listing never has to carry them.
-            slint_keyos_platform::raw_image::load_raw_image_bytes(
-                &bundled_app_icon_cache,
-                app_id.clone(),
-                move || state.borrow().app_manager.get_app_icon(app_id.as_str()).unwrap_or_default(),
-            )
-        });
-    }
-    #[cfg(not(keyos))]
-    {
-        let app_icon_fs = state.borrow().fs.clone();
-        let bundled_app_icon_cache = Default::default();
-        globals.on_app_icon(move |icon_path| {
-            slint_keyos_platform::raw_image::load_raw_image_file(
-                &app_icon_fs,
-                &bundled_app_icon_cache,
-                fs::Location::System,
-                icon_path,
-            )
-        });
-    }
+    // Icon bytes are fetched on demand by app id and decoded here; the LRU caps
+    // how many decoded icons stay resident so the listing never carries them.
+    let icon_cache: Rc<RefCell<lru::LruCache<SharedString, Image>>> = Rc::new(RefCell::new(
+        lru::LruCache::new(NonZeroUsize::new(APP_ICON_CACHE_CAP).expect("cache cap is non-zero")),
+    ));
+    globals.on_app_icon(move |app_id| {
+        if let Some(image) = icon_cache.borrow_mut().get(&app_id).cloned() {
+            return image;
+        }
+        let bytes = state.borrow().app_manager.get_app_icon(app_id.as_str()).unwrap_or_default();
+        let image = slint_keyos_platform::raw_image::raw_image_from_bytes(&bytes);
+        icon_cache.borrow_mut().put(app_id, image.clone());
+        image
+    });
 
     refresh_installed_apps(state);
     globals.on_refresh_installed_apps(move || {
@@ -340,30 +334,15 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
 
     let installed_apps = apps
         .into_iter()
-        .map(|app| {
-            let app_id = app.app_id;
-            let icon_key = {
-                #[cfg(keyos)]
-                {
-                    app_id.clone()
-                }
-                #[cfg(not(keyos))]
-                {
-                    app.bundled_icon_path.unwrap_or_default()
-                }
-            };
-
-            InstalledApp {
-                app_id: app_id.into(),
-                name: app.name.into(),
-                icon_key: icon_key.into(),
-                publisher: app.publisher.into(),
-                can_launch: app.can_launch,
-                version: app.version.into(),
-                size: format_app_size(app.size_bytes, lang).into(),
-                description: app.description.into(),
-                permission_groups: app_permission_groups(app.permissions),
-            }
+        .map(|app| InstalledApp {
+            app_id: app.app_id.into(),
+            name: app.name.into(),
+            publisher: app.publisher.into(),
+            can_launch: app.can_launch,
+            version: app.version.into(),
+            size: format_app_size(app.size_bytes, lang).into(),
+            description: app.description.into(),
+            permission_groups: app_permission_groups(app.permissions),
         })
         .collect::<Vec<_>>();
 

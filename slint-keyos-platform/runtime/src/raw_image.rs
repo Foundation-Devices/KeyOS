@@ -131,103 +131,42 @@ where
     Image::from(ImageInner::StaticTextures(texture))
 }
 
-pub fn load_raw_image_file<P>(
-    fs: &fs::FileSystem<P>,
-    cache: &RefCell<HashMap<String, &'static StaticTextures>>,
-    location: fs::Location,
-    path: SharedString,
-) -> Image
-where
-    P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
-    P: server::MessageAllowed<fs::messages::CloseFile>,
-    P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: fs::MapFilePermissions,
-{
-    let path = path.to_string();
-    let key = format!("{location:?}:{path}");
-    match cache.borrow_mut().entry(key) {
-        std::collections::hash_map::Entry::Occupied(entry) => {
-            log::debug!("load_raw_image_file cache hit on {location:?}:{path}");
-            Image::from(ImageInner::StaticTextures(*entry.get()))
-        }
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            let Some(archived_image) = load_archive_from_location::<RawImage, _>(fs, location, &path) else {
-                log::warn!("Could not load image file {location:?}:{path}");
-                return Image::from(ImageInner::None);
-            };
-            let texture = archived_image.into();
-            entry.insert(texture);
-            Image::from(ImageInner::StaticTextures(texture))
-        }
-    }
-}
-
-/// Bounded cache of decoded bundled app icons.
-///
-/// Icons are fetched on demand over IPC (one per app id), so the number of
-/// distinct icons scales with the number of installed apps. Each decoded image
-/// owns its pixels (refcounted), and the LRU bound caps how many stay resident:
-/// evicting an entry drops the cache's reference, freeing the pixels once no
-/// on-screen delegate still holds the image.
-pub type BundledAppIconCache = RefCell<lru::LruCache<String, Image>>;
-
-/// Maximum number of decoded bundled app icons kept resident at once.
-pub const BUNDLED_APP_ICON_CACHE_CAP: usize = 32;
-
-pub fn new_bundled_app_icon_cache() -> BundledAppIconCache {
-    RefCell::new(lru::LruCache::new(
-        std::num::NonZeroUsize::new(BUNDLED_APP_ICON_CACHE_CAP).expect("cache cap is non-zero"),
-    ))
-}
-
-/// Load a bundled app icon, fetching its bytes via `fetch_bytes()` only on a
-/// cache miss. The decoded image owns its pixels so the LRU can free it on
-/// eviction; a miss after eviction simply re-fetches and re-decodes.
-pub fn load_raw_image_bytes<F>(cache: &BundledAppIconCache, cache_key: SharedString, fetch_bytes: F) -> Image
-where
-    F: FnOnce() -> Vec<u8>,
-{
-    let cached = cache.borrow_mut().get(cache_key.as_str()).cloned();
-    if let Some(image) = cached {
-        log::debug!("load_raw_image_bytes cache hit on {cache_key}");
-        return image;
-    }
-
-    let bytes = fetch_bytes();
+/// Decode rkyv-archived raw image bytes (an app's `icon.bin`) into an owned,
+/// refcounted `Image`, or an empty image when the bytes are empty or invalid.
+pub fn raw_image_from_bytes(bytes: &[u8]) -> Image {
     if bytes.is_empty() {
         return Image::from(ImageInner::None);
     }
 
     let mut aligned_bytes: rkyv::util::AlignedVec = rkyv::util::AlignedVec::with_capacity(bytes.len());
-    aligned_bytes.extend_from_slice(&bytes);
+    aligned_bytes.extend_from_slice(bytes);
     let Some(archived_image) = rkyv::access::<
         slint_keyos_platform_common::ArchivedRawImage,
         rkyv::rancor::Error,
     >(aligned_bytes.as_slice())
     .ok() else {
-        log::warn!("Could not load raw image bytes for {cache_key}");
+        log::warn!("Could not parse raw image bytes");
         return Image::from(ImageInner::None);
     };
 
-    let Some(image) = decode_raw_image_to_owned(archived_image) else {
-        log::warn!("Could not decode raw image bytes for {cache_key}");
-        return Image::from(ImageInner::None);
-    };
-
-    cache.borrow_mut().put(cache_key.to_string(), image.clone());
-    image
+    decode_raw_image_to_owned(archived_image).unwrap_or_else(|| {
+        log::warn!("Could not decode raw image bytes");
+        Image::from(ImageInner::None)
+    })
 }
+
+const MAX_IMAGE_CANVAS_DIM: usize = 2048;
 
 /// Decode an archived raw image into an owned, refcounted `Image`.
 ///
 /// Unlike the `StaticTextures` path (which borrows `&'static` data and therefore
 /// must leak), this copies the texture's pixels into a `SharedPixelBuffer` that
-/// frees with the last `Image` clone — required for an evicting cache.
+/// frees with the last `Image` clone.
 fn decode_raw_image_to_owned(archived: &slint_keyos_platform_common::ArchivedRawImage) -> Option<Image> {
     use slint_keyos_platform_common::ArchivedPixelFormat;
 
-    let total_width = archived.size.width.to_native() as usize;
+    let total_w = archived.size.width.to_native() as usize;
+    let total_h = archived.size.height.to_native() as usize;
     let rect_x = archived.texture_rect.x.to_native() as usize;
     let rect_y = archived.texture_rect.y.to_native() as usize;
     let rect_w = archived.texture_rect.width.to_native() as usize;
@@ -241,51 +180,81 @@ fn decode_raw_image_to_owned(archived: &slint_keyos_platform_common::ArchivedRaw
     let bpp = match &archived.pixel_format {
         ArchivedPixelFormat::Rgb => 3usize,
         ArchivedPixelFormat::Rgba | ArchivedPixelFormat::RgbaPremultiplied => 4,
-        ArchivedPixelFormat::AlphaMap => {
-            log::warn!("AlphaMap app icons are not supported by the owned-image path");
-            return None;
-        }
+        // One alpha byte per pixel; the single tint color lives in color_argb.
+        ArchivedPixelFormat::AlphaMap => 1,
     };
 
-    // The pixel data is laid out for `total_width`; the texture rect selects the
-    // sub-region for this image. Validate the rect fits before copying.
-    let stride = total_width.checked_mul(bpp)?;
-    let row_bytes = rect_w.checked_mul(bpp)?;
-    let last_row_start = (rect_y.checked_add(rect_h)?.checked_sub(1)?)
-        .checked_mul(stride)?
-        .checked_add(rect_x.checked_mul(bpp)?)?;
-    if last_row_start.checked_add(row_bytes)? > bytes.len() {
+    if total_w > MAX_IMAGE_CANVAS_DIM || total_h > MAX_IMAGE_CANVAS_DIM {
+        log::warn!("raw image canvas {total_w}x{total_h} exceeds the maximum");
+        return None;
+    }
+
+    // generate_texture stores only the cropped texture_rect, tightly packed; blit
+    // it back onto the full total_size canvas so aspect and padding survive scaling.
+    let needed = rect_w.checked_mul(rect_h)?.checked_mul(bpp)?;
+    if needed > bytes.len() || rect_x.checked_add(rect_w)? > total_w || rect_y.checked_add(rect_h)? > total_h
+    {
         log::warn!("raw image bytes too small for {rect_w}x{rect_h} texture rect");
         return None;
     }
 
-    let copy_rows = |dst: &mut [u8]| {
+    let width = total_w as u32;
+    let height = total_h as u32;
+    let blit = |dst: &mut [u8], px_bytes: usize| {
         for ry in 0..rect_h {
-            let src_off = (rect_y + ry) * stride + rect_x * bpp;
-            let dst_off = ry * row_bytes;
-            dst[dst_off..dst_off + row_bytes].copy_from_slice(&bytes[src_off..src_off + row_bytes]);
+            let dst_off = ((rect_y + ry) * total_w + rect_x) * px_bytes;
+            let src_off = ry * rect_w * px_bytes;
+            dst[dst_off..dst_off + rect_w * px_bytes]
+                .copy_from_slice(&bytes[src_off..src_off + rect_w * px_bytes]);
         }
     };
 
-    let width = rect_w as u32;
-    let height = rect_h as u32;
     match &archived.pixel_format {
+        // Slint encodes an RGBA image that's an opaque, multi-color rect surrounded
+        // by transparent pixels as a cropped RGB image. RGB can't carry that
+        // transparent margin, so widen it back to RGBA and leave the area outside
+        // the rect transparent.
+        ArchivedPixelFormat::Rgb if rect_w != total_w || rect_h != total_h => {
+            let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+            let dst = buffer.make_mut_slice();
+            for ry in 0..rect_h {
+                let row = &bytes[ry * rect_w * 3..(ry + 1) * rect_w * 3];
+                for rx in 0..rect_w {
+                    let px = &row[rx * 3..rx * 3 + 3];
+                    dst[(rect_y + ry) * total_w + rect_x + rx] =
+                        slint::Rgba8Pixel { r: px[0], g: px[1], b: px[2], a: 255 };
+                }
+            }
+            Some(Image::from_rgba8(buffer))
+        }
         ArchivedPixelFormat::Rgb => {
             let mut buffer = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
-            copy_rows(buffer.make_mut_bytes());
+            blit(buffer.make_mut_bytes(), 3);
             Some(Image::from_rgb8(buffer))
         }
         ArchivedPixelFormat::Rgba => {
             let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
-            copy_rows(buffer.make_mut_bytes());
+            blit(buffer.make_mut_bytes(), 4);
             Some(Image::from_rgba8(buffer))
         }
         ArchivedPixelFormat::RgbaPremultiplied => {
             let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
-            copy_rows(buffer.make_mut_bytes());
+            blit(buffer.make_mut_bytes(), 4);
             Some(Image::from_rgba8_premultiplied(buffer))
         }
-        ArchivedPixelFormat::AlphaMap => None,
+        ArchivedPixelFormat::AlphaMap => {
+            let tint = slint::Rgb8Pixel::from(&archived.color_argb);
+            let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+            let dst = buffer.make_mut_slice();
+            for ry in 0..rect_h {
+                let src = &bytes[ry * rect_w..(ry + 1) * rect_w];
+                for rx in 0..rect_w {
+                    dst[(rect_y + ry) * total_w + rect_x + rx] =
+                        slint::Rgba8Pixel { r: tint.r, g: tint.g, b: tint.b, a: src[rx] };
+                }
+            }
+            Some(Image::from_rgba8(buffer))
+        }
     }
 }
 

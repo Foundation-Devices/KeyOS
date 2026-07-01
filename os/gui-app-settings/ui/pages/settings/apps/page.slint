@@ -5,6 +5,7 @@ import {
     BasePage,
     HLine,
     IconButton,
+    Icon,
     MenuActionItem,
     MenuBooleanItem,
     ScrollFadeMask,
@@ -69,15 +70,25 @@ component AppListCard inherits Rectangle {
         spacing: Size.sz4;
 
         icon-column := Rectangle {
+            // Empty image (width 0) means the app ships no icon.bin; fall back to
+            // the shield placeholder.
+            property <image> app-icon: AppManagementGlobal.app-icon(root.app.app_id);
+
             width: Size.sz13;
             height: Size.sz13;
             background: Palette.transparent;
 
-            Image {
+            if icon-column.app-icon.width > 0: Image {
                 width: Size.sz13;
                 height: Size.sz13;
-                source: AppManagementGlobal.app-icon(root.app.icon_key);
+                source: icon-column.app-icon;
                 image-fit: contain;
+            }
+
+            if icon-column.app-icon.width <= 0: Icon {
+                name: "shield";
+                size: Size.sz13;
+                color: Palette.content-primary;
             }
         }
 
@@ -194,7 +205,6 @@ export component AppsPage inherits BasePage {
                         AppManagementGlobal.selected-app-permission-groups = row.app.permission_groups;
                         Navigate.app-details({
                             app-id: row.app.app_id,
-                            icon-key: row.app.icon_key,
                             name: row.app.name,
                             publisher: row.app.publisher,
                             version: row.app.version,

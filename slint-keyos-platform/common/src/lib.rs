@@ -156,3 +156,8 @@ impl From<&ArchivedPixelFormat> for slint::private_unstable_api::re_exports::Tex
 impl From<&ArchivedColor> for slint::private_unstable_api::re_exports::Color {
     fn from(value: &ArchivedColor) -> Self { Self::from_argb_u8(value.a, value.r, value.g, value.b) }
 }
+
+#[cfg(feature = "slint")]
+impl From<&ArchivedColor> for slint::Rgb8Pixel {
+    fn from(value: &ArchivedColor) -> Self { Self { r: value.r, g: value.g, b: value.b } }
+}

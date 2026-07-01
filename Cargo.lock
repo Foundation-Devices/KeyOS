@@ -4951,6 +4951,7 @@ dependencies = [
  "keycard",
  "keycard-scan",
  "log 0.4.27",
+ "lru 0.13.0",
  "ngwallet",
  "num-format",
  "oneshot",

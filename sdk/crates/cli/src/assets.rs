@@ -44,21 +44,21 @@ fn stage_hardware_assets_with_tool(
     fs::create_dir_all(&resources_dir)
         .with_context(|| format!("Failed to create app resources directory {}", resources_dir.display()))?;
 
-    stage_icon(config, project_root, output_dir, tool)?;
-    stage_bundled_icon(config, project_root, output_dir, tool)?;
+    stage_bundled_icon_with_tool(config, project_root, output_dir, tool)?;
     stage_images(project_root, &resources_dir, tool)?;
     stage_fonts(project_root, &resources_dir)?;
 
     Ok(resources_dir)
 }
 
-fn stage_icon(config: &AppConfig, project_root: &Path, output_dir: &Path, tool: &AssetTool) -> Result<()> {
-    let icon_source = project_root.join(&config.icon);
-    let icon_destination = output_dir.join(config.manifest_icon_file());
-    convert_image_file(&icon_source, &icon_destination, tool)
+/// Stage the single bundled icon next to app.elf. Resolves the asset tool on its
+/// own; callers staging a full asset set should go through stage_hardware_assets
+/// so the resolve happens once.
+pub fn stage_bundled_icon(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<()> {
+    stage_bundled_icon_with_tool(config, project_root, output_dir, &AssetTool::resolve()?)
 }
 
-fn stage_bundled_icon(
+fn stage_bundled_icon_with_tool(
     config: &AppConfig,
     project_root: &Path,
     output_dir: &Path,
@@ -377,7 +377,6 @@ esac
         let resources_dir =
             stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
 
-        assert!(resources_dir.join(".foundation").join("icon.raw").exists());
         assert!(output_dir.join("icon.bin").exists());
         assert!(resources_dir.join("images").join("nested").join("photo.raw").exists());
         assert_eq!(fs::read(resources_dir.join("fonts").join("Brand.ttf")).unwrap(), b"font");
@@ -398,7 +397,6 @@ esac
         let resources_dir =
             stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
 
-        assert!(resources_dir.join(".foundation").join("icon.raw").exists());
         assert!(output_dir.join("icon.bin").exists());
         assert!(!resources_dir.join("images").join("sample.raw").exists());
 

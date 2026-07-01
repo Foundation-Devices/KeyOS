@@ -207,11 +207,12 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
         .join(app_id_dir);
     assert!(host_staged.join("app.elf").exists());
     assert!(host_staged.join("manifest.json").exists());
+    assert!(host_staged.join("icon.bin").exists());
     // The device-format bundle (manifest + converted resources, no app.elf) that
     // gets injected into the simulator system image.
     let injected = env.app_root().join("target").join("foundation").join("sim-sideload").join(app_id_dir);
     assert!(injected.join("manifest.json").exists());
-    assert!(injected.join("resources").join(".foundation").join("icon.raw").exists());
+    assert!(injected.join("icon.bin").exists());
     assert!(env.read_log("simulator.log").contains(env.bundle_root().display().to_string().as_str()));
     assert!(env.read_log("simulator-stdin.log").contains("run 0x00112233445566778899aabbccddeeff"));
     let cargo_log = env.read_log("cargo.log");

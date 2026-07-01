@@ -9,6 +9,7 @@ import {
     ContentSection,
     ErrorModal,
     HLine,
+    Icon,
     MenuSection,
     MenuSectionLayout,
     ScrollFadeMask,
@@ -36,16 +37,26 @@ component AppSummaryCard inherits Rectangle {
         padding-bottom: Size.sz4;
         spacing: Size.sz4;
 
-        Rectangle {
+        icon-frame := Rectangle {
+            // Empty image (width 0) means the app ships no icon.bin; fall back to
+            // the shield placeholder.
+            property <image> app-icon: AppManagementGlobal.app-icon(root.app.app_id);
+
             width: Size.sz13;
             height: Size.sz13;
             background: Palette.transparent;
 
-            Image {
+            if icon-frame.app-icon.width > 0: Image {
                 width: Size.sz13;
                 height: Size.sz13;
-                source: AppManagementGlobal.app-icon(root.app.icon_key);
+                source: icon-frame.app-icon;
                 image-fit: contain;
+            }
+
+            if icon-frame.app-icon.width <= 0: Icon {
+                name: "shield";
+                size: Size.sz13;
+                color: Palette.content-primary;
             }
         }
 
