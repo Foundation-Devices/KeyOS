@@ -141,25 +141,30 @@ extern "C" {
 
 pub(crate) fn cleanup_and_jump_firmware() -> ! {
     unsafe {
-        // Replace EXTRA_ENTROPY before jumping to potentially 3rd party code, to make it
-        // harder to leak.
-        // This is undefined behaviour; we overwrite a non-mutable static, but it compiles to the
-        // right code.
-        (&EXTRA_ENTROPY as *const [u8; 32] as *mut [u8; 32]).write_volatile(DEFAULT_EXTRA_ENTROPY);
-
-        // Clean the rest of the SRAM to prevent leaking any other potentially unwanted data
-        // through the stack or .bss variables.
-        // This corrupts the stack of course, but we jump to the firmware right after this.
-        const SRAM_END: *const u32 = 0x00220000 as _;
-        let sram_slice = core::slice::from_raw_parts_mut(
-            &raw mut _etext,
-            SRAM_END.offset_from(&raw const _etext) as usize,
-        );
-        sram_slice.fill(0);
-
         core::arch::asm!(
-            "bx {}",
-            in(reg) FIRMWARE_JUMP_ADDR,
+            // Replace EXTRA_ENTROPY before jumping to potentially 3rd party code, to make it
+            // harder to leak.
+            "0:",
+            "ldr {scratch}, [{entropy_src}], #4",
+            "str {scratch}, [{entropy_dst}], #4",
+            "subs {entropy_words}, {entropy_words}, #1",
+            "bne 0b",
+            // Clean the rest of the SRAM to prevent leaking any other potentially unwanted data
+            // through the stack or .bss variables. This corrupts the stack of course, but we
+            // jump to the firmware right after this.
+            "mov {scratch}, #0",
+            "1:",
+            "str {scratch}, [{scrub_start}], #4",
+            "cmp {scrub_start}, {scrub_end}",
+            "bne 1b",
+            "bx {firmware}",
+            scratch = in(reg) 0usize,
+            entropy_words = in(reg) 8usize,
+            entropy_src = in(reg) &raw const DEFAULT_EXTRA_ENTROPY,
+            entropy_dst = in(reg) &raw const EXTRA_ENTROPY,
+            scrub_start = in(reg) &raw mut _etext,
+            scrub_end = in(reg) 0x0022_0000usize,
+            firmware = in(reg) FIRMWARE_JUMP_ADDR,
             options(noreturn),
         )
     }
