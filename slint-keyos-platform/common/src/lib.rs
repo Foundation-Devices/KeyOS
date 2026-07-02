@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 pub mod analyze_path;
 pub mod utils;
 
+pub const UI_ICON_SET: &str = "icon_set.bin";
+pub const UI2_ICON_SET: &str = "icon_set_ui2.bin";
+
 #[derive(rkyv::Serialize, rkyv::Archive)]
 pub struct ImageSize {
     pub width: u32,

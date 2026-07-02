@@ -27,7 +27,7 @@ This template creates a GUI app with:
   - `app.slint` - Main component gallery using shared `@ui` imports
 - `resources/icon.svg` - App icon image converted into the hardware app icon
 - `resources/theme.json` - App-local theme opened by `foundation theme`
-- `resources/images/sample.svg` - Sample app-owned image, referenced with `Images.common("images/sample")`
+- `resources/images/sample-scene.svg` - Sample app-owned image, loaded with `Images.image("sample-scene")`
 
 At build, preview, and sim time the SDK also materializes a generated private SDK UI/resource search tree so the public `@ui` surface and shared component assets resolve consistently after app-local `resources/`.
 
@@ -49,7 +49,7 @@ After creating a project from this template, you can:
 1. Run `foundation theme` to edit `resources/theme.json`
 2. Run `foundation sim` to inspect the theme in the simulator
 3. Replace `resources/icon.svg` with your own icon
-4. Add app images under `resources/images/` and load them from Slint with `Images.common("images/<name>")`
+4. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
 5. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
 
 ## Building

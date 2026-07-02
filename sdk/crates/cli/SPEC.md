@@ -200,7 +200,7 @@ Observed behavior:
 
 App-owned images and fonts should live under the app's `resources` directory:
 
-- `resources/images/` contains app images referenced from Slint with `Images.common("images/<relative-name>")`
+- `resources/images/` contains app images referenced from Slint with `Images.image("<relative-name>")`
 - `resources/fonts/` contains app fonts registered before the Slint app starts
 - `resources/icon.svg` remains the default app icon source referenced by `app-config.toml`
 - `resources/theme.json` is the default app-local theme source referenced by `app-config.toml`

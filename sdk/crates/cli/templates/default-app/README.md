@@ -29,7 +29,7 @@ This template creates a basic GUI app with:
 - `i18n/` - Internationalization files (English and Spanish)
 - `resources/icon.svg` - App icon image converted into the hardware app icon
 - `resources/theme.json` - App-local theme opened by `foundation theme`
-- `resources/images/sample.svg` - Sample app-owned image, referenced with `Images.common("images/sample")`
+- `resources/images/checkmark.svg` - Sample app-owned image, loaded with `Images.image("checkmark")`
 
 At build, preview, and sim time the SDK also materializes a generated private SDK UI/resource search tree so the public `@ui` surface and shared component assets resolve consistently after app-local `resources/`.
 
@@ -52,7 +52,7 @@ After creating a project from this template, you can:
 2. Edit `i18n/en.json` and `i18n/es.json` to update text
 3. Replace `resources/icon.svg` with your own icon
 4. Run `foundation theme` to edit `resources/theme.json`
-5. Add app images under `resources/images/` and load them from Slint with `Images.common("images/<name>")`
+5. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
 6. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
 7. Add more callbacks in `ui/callbacks.slint` and wire them up in `src/main.rs`
 8. Add additional UI components or create a multi-page app by enabling the router

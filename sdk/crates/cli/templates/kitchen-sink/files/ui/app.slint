@@ -1043,12 +1043,12 @@ export component AppWindow inherits Window {
                                         y: 12px;
                                         width: parent.width - 24px;
                                         height: parent.height - 24px;
-                                        options: ["General", "Security", "Keys"];
-                                        panels: ["General settings", "Security controls", "Key material"];
+                                        options: ["General", "Security", "Profile"];
+                                        panels: ["General settings", "Security controls", "Profile details"];
                                         icons: [
                                             Images.icon("settings", 24px),
                                             Images.icon("lock", 24px),
-                                            Images.icon("key", 24px)
+                                            Images.icon("user", 24px)
                                         ];
                                         orientation: TabsOrientation.vertical;
                                         variant: TabsVariant.bordered;
@@ -1478,9 +1478,9 @@ export component AppWindow inherits Window {
                                 MediaImage {
                                     width: parent.width;
                                     frame-width: parent.width;
-                                    source: Images.common("images/sample");
+                                    source: Images.image("sample-scene");
                                     alt: "Sample";
-                                    caption: "App-owned image loaded from resources/images/sample.svg";
+                                    caption: "App-owned image loaded from resources/images/sample-scene.svg";
                                 }
                             }
 
@@ -1490,7 +1490,7 @@ export component AppWindow inherits Window {
                                     width: parent.width;
                                     frame-width: parent.width;
                                     frame-height: 130px;
-                                    source: Images.common("images/sample");
+                                    source: Images.image("sample-scene");
                                     rounded: false;
                                     show-border: false;
                                     fit: ImageFit.contain;

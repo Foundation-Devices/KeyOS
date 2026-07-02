@@ -14,6 +14,7 @@ pub(crate) mod source;
 
 use anyhow::Result;
 pub use raw_image::{convert_icons, convert_image_to_raw};
+pub use slint_keyos_platform_common::{UI2_ICON_SET, UI_ICON_SET};
 use source::{uwrite, uwriteln, Source};
 
 pub fn compile(module_path: &str) {

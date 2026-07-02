@@ -89,18 +89,23 @@ pub struct IconCache {
     cache: HashMap<(usize, String), &'static StaticTextures>,
 }
 
+/// Load icon `name` at the smallest rendered size >= `requested_size` from
+/// `icon_set_file`, caching decoded textures in `cache`. The cache binds to the
+/// first `icon_set_file` it loads and ignores the argument on later calls, so
+/// pass a separate cache per icon set.
 pub fn load_icon<P>(
     fs: &fs::FileSystem<P>,
     cache: &RefCell<IconCache>,
     name: SharedString,
     requested_size: f32,
+    icon_set_file: &str,
 ) -> Image
 where
     P: server::CheckedPermissions,
     P: fs::MapFilePermissions,
 {
     if cache.borrow().icon_set.is_none() {
-        let Some(icon_set) = map_archive::<IconSet, _>(fs, "icon_set.bin") else {
+        let Some(icon_set) = map_archive::<IconSet, _>(fs, icon_set_file) else {
             return Image::from(ImageInner::None);
         };
         cache.borrow_mut().icon_set = Some(icon_set);

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use fatfs::{FileSystem, ReadWriteSeek};
+use slint_keyos_platform_build::{UI2_ICON_SET, UI_ICON_SET};
 
 use crate::builder::project_root;
 
@@ -53,6 +54,9 @@ pub const ADDITIONAL_ICON_SIZES: &[(&str, &[usize])] = &[
     ("chain", &[56]),
 ];
 
+/// ui2's icon render sizes, matching its theme's sm/md/lg.
+const UI2_ICON_SIZES: [usize; 3] = [20, 24, 28];
+
 /// What to stage onto a system volume. Only the derived trees are touched, so a
 /// persistent volume keeps its settings and user data across builds.
 pub struct SystemVolume<'a> {
@@ -70,7 +74,12 @@ pub struct SystemVolume<'a> {
 /// Refresh `keyos/apps` and `keyos/common` on `fs` from the host sources in `vol`.
 pub fn stage_system_volume<T: ReadWriteSeek>(fs: &FileSystem<T>, vol: &SystemVolume) -> Result<()> {
     let ui_dir = project_root().join("ui").join("ui");
-    render_common_assets(vol.common_out, read_dir(ui_dir.join("images")), ui_icons(&ui_dir.join("icons")))?;
+    let ui2_icons_dir = project_root().join("ui2").join("resources").join("icons");
+    render_common_assets(
+        vol.common_out,
+        read_dir(ui_dir.join("images")),
+        vec![(UI_ICON_SET, ui_icons(&ui_dir.join("icons"))), (UI2_ICON_SET, ui2_icons(&ui2_icons_dir))],
+    )?;
 
     println!("Bundling FS apps");
     fatfs_image::remove_tree(fs, "keyos/apps").context("clear keyos/apps")?;
@@ -88,17 +97,18 @@ pub fn stage_system_volume<T: ReadWriteSeek>(fs: &FileSystem<T>, vol: &SystemVol
     Ok(())
 }
 
-/// Render `images` and `icons` into `out_dir` as the on-disk `common` layout
-/// (`images/**.raw`, `icon_set.bin`, `fonts/*`). Fonts are always the full
-/// `ui/ui/fonts` set, so they are not a parameter. `out_dir` is wiped first, so
-/// it always reflects exactly the given selection.
-///
-/// An image entry that is a directory is rendered recursively, preserving its
-/// name; the icon sizes follow `convert_icons`.
-pub fn render_common_assets<Images, Icons>(out_dir: &Path, images: Images, icons: Icons) -> Result<()>
+/// Render `images` and `icon_sets` into `out_dir` as the on-disk `common` layout:
+/// `images/**.raw`, one file per icon set (named by the set's file name), and the
+/// full `ui/ui/fonts` set. `out_dir` is wiped first, so it reflects exactly the
+/// given selection. A directory image entry is rendered recursively, preserving
+/// its name.
+pub fn render_common_assets<Images>(
+    out_dir: &Path,
+    images: Images,
+    icon_sets: Vec<(&str, Vec<(PathBuf, Vec<usize>)>)>,
+) -> Result<()>
 where
     Images: IntoIterator<Item = PathBuf>,
-    Icons: IntoIterator<Item = (PathBuf, Vec<usize>)>,
 {
     fs::remove_dir_all(out_dir).ok();
     fs::create_dir_all(out_dir).context("create common asset dir")?;
@@ -115,8 +125,10 @@ where
     println!("- Bundled {count} images in {:.2}s", timer.elapsed().as_secs_f32());
 
     println!("Bundling icons");
-    fs::write(out_dir.join("icon_set.bin"), slint_keyos_platform_build::convert_icons(icons))
-        .context("write icon_set.bin")?;
+    for (file, icons) in icon_sets {
+        let icon_set = slint_keyos_platform_build::convert_icons(icons);
+        fs::write(out_dir.join(file), icon_set).with_context(|| format!("write {file}"))?;
+    }
 
     println!("Bundling fonts");
     let fonts_out = out_dir.join("fonts");
@@ -178,6 +190,14 @@ pub fn ui_icons(icons_dir: &Path) -> Vec<(PathBuf, Vec<usize>)> {
             }
             (path, sizes)
         })
+        .collect()
+}
+
+/// The `ui2/resources/icons` SVGs paired with ui2's render sizes.
+fn ui2_icons(icons_dir: &Path) -> Vec<(PathBuf, Vec<usize>)> {
+    read_dir(icons_dir)
+        .filter(|p| p.extension().map_or(false, |e| e == "svg"))
+        .map(|path| (path, UI2_ICON_SIZES.to_vec()))
         .collect()
 }
 

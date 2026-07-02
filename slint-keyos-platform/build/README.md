@@ -70,7 +70,7 @@ export * from "gen/exports.slint";
 
 #### /src/main.rs
 
-The router is set up automatically by the `app_minimal` macro, no need to do
+The router is set up automatically by the `app!` macro, no need to do
 anything else.
 
 ## Overview 

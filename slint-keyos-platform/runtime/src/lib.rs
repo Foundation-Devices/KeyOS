@@ -3,6 +3,7 @@
 #![cfg_attr(keyos, feature(stdarch_arm_neon_intrinsics))]
 #![feature(must_not_suspend)]
 
+pub use slint_keyos_platform_common::{UI2_ICON_SET, UI_ICON_SET};
 pub use {
     fiat_symbols, file_backed, fs, futures_lite, gui_server_api, i18n, log, log_server, phf,
     server::{self, FromScalar},
@@ -90,7 +91,7 @@ macro_rules! app {
             let ui = AppWindow::new().expect("create app window");
 
             $crate::_internal_init_ui_utils!(Utils, ui);
-            $crate::_internal_init_images!(Images, ui, app_context);
+            $crate::_internal_init_images!(ui, app_context);
             $crate::_internal_not_recovery!(
                 $crate::_internal_init_theme!(
                     CurrentTheme,
@@ -114,13 +115,11 @@ macro_rules! app {
     };
 }
 
-/// Minimal app bootstrap for SDK/template apps.
-///
-/// Unlike `app!`, this does not include generated translations or initialize the
-/// standard in-tree globals (`Utils`, `Images`, `Theme`, `TR`). Those apps own
-/// their generated UI surface and initialize any globals they export explicitly.
+/// App bootstrap for SDK apps built on the shared `ui2` surface. Binds the
+/// `Images` global to the `ui2` icon set. The app provides its own theme,
+/// globals, and translations.
 #[macro_export]
-macro_rules! app_minimal {
+macro_rules! app_ui2 {
     ($name:expr,height = $height:expr) => {
         use $crate::slint;
         slint::include_modules!();
@@ -154,6 +153,19 @@ macro_rules! app_minimal {
             $crate::slint::platform::set_platform(Box::new(platform)).expect("set platform");
 
             let ui = AppWindow::new().expect("create app window");
+
+            let fs = app_context.fs.clone();
+            let image_cache = Default::default();
+            ui.global::<Images>().on_image(move |name| {
+                $crate::raw_image::load_raw_image(&fs, &image_cache, format!("images/{name}").into(), false, false)
+            });
+
+            let fs = app_context.fs.clone();
+            let icon_cache = Default::default();
+            ui.global::<Images>().on_icon(move |path, size| {
+                $crate::raw_image::load_icon(&fs, &icon_cache, path, size, $crate::UI2_ICON_SET)
+            });
+
             create_router!(ui, app_context);
 
             app_main(app_context, ui);
@@ -161,7 +173,7 @@ macro_rules! app_minimal {
     };
 
     ($name:expr) => {
-        $crate::app_minimal!($name, height = $crate::gui_server_api::consts::SCREEN_HEIGHT);
+        $crate::app_ui2!($name, height = $crate::gui_server_api::consts::SCREEN_HEIGHT);
     };
 }
 
@@ -314,8 +326,8 @@ macro_rules! _internal_init_ui_utils {
 }
 
 #[macro_export]
-macro_rules! _internal_init_images_with_theme {
-    ($images:ty, $theme:ty, $app:ident, $cx:ident) => {{
+macro_rules! _internal_init_images {
+    ($app:ident, $cx:ident) => {{
         // #IF PREVIEW
 
         // #ELSE
@@ -323,38 +335,35 @@ macro_rules! _internal_init_images_with_theme {
 
         let fs = $cx.fs.clone();
         let common_image_cache = Default::default();
-        $app.global::<$images>().on_common({
+        $app.global::<Images>().on_common({
             let ui = $app.as_weak();
             move |path| {
-                let is_dark = ui.upgrade().map(|ui| ui.global::<$theme>().get_is_dark()).unwrap_or(false);
+                let is_dark =
+                    ui.upgrade().map(|ui| ui.global::<CurrentTheme>().get_is_dark()).unwrap_or(false);
                 $crate::raw_image::load_raw_image(&fs, &common_image_cache, path, false, is_dark)
             }
         });
 
         let fs = $cx.fs.clone();
         let common_image_cache = Default::default();
-        $app.global::<$images>().on_nine_slice({
+        $app.global::<Images>().on_nine_slice({
             let ui_nine_slice = $app.as_weak();
             move |path| {
-                let is_dark =
-                    ui_nine_slice.upgrade().map(|ui| ui.global::<$theme>().get_is_dark()).unwrap_or(false);
+                let is_dark = ui_nine_slice
+                    .upgrade()
+                    .map(|ui| ui.global::<CurrentTheme>().get_is_dark())
+                    .unwrap_or(false);
                 $crate::raw_image::load_raw_image(&fs, &common_image_cache, path, true, is_dark)
             }
         });
 
         let fs = $cx.fs.clone();
         let icon_cache = Default::default();
-        $app.global::<$images>()
-            .on_icon(move |path, size| $crate::raw_image::load_icon(&fs, &icon_cache, path, size));
+        $app.global::<Images>().on_icon(move |path, size| {
+            $crate::raw_image::load_icon(&fs, &icon_cache, path, size, $crate::UI_ICON_SET)
+        });
 
         // #ENDIF
-    }};
-}
-
-#[macro_export]
-macro_rules! _internal_init_images {
-    ($images:ty, $app:ident, $cx:ident) => {{
-        $crate::_internal_init_images_with_theme!($images, CurrentTheme, $app, $cx);
     }};
 }
 

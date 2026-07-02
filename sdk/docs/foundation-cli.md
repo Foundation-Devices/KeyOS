@@ -61,9 +61,8 @@ Use app-owned asset folders under `resources/` when adding new user assets:
 - `resources/images/`: `.svg`, `.png`, `.jpg`, `.jpeg`, `.webp`, and `.bmp`
 - `resources/fonts/`: `.ttf`, `.otf`, and `.ttc`
 
-Reference app images from Slint with `Images.common("images/<relative-path-without-extension>")`. For example,
-`resources/images/logo.svg` becomes `Images.common("images/logo")`. Dark variants keep the existing `-dark` naming
-convention, and nine-slice filenames keep their parsed image name.
+Reference app images from Slint with `Images.image("<relative-path-without-extension>")`. For example,
+`resources/images/logo.svg` becomes `Images.image("logo")`.
 
 Fonts in `resources/fonts/` are registered before the Slint app starts. Use the font family's real name in Slint
 `font-family` properties; the file name only controls how the file is copied.

@@ -4,7 +4,4 @@
 target/
 .foundation-sdk/
 ui/ui
-resources/fonts
-resources/icons
-resources/images
 manifest.toml

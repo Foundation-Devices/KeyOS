@@ -14,6 +14,7 @@ use fscommon::StreamSlice;
 use hex::ToHex;
 use keyos::TOTAL_FLASH_BLOCKS;
 use sha2::Digest;
+use slint_keyos_platform_build::UI_ICON_SET;
 
 use crate::bootloader::{build_at91bootstrap, encrypt_bootloader, BootloaderBuildArgs, SambaCryptArgs};
 use crate::builder::{project_root, Builder, KEYOS_APPS_DIR};
@@ -165,9 +166,10 @@ fn create_boot_partition(file: &mut File, samba_crypt_args: SambaCryptArgs) -> a
     let images = RECOVERY_IMAGES.iter().map(|img| ui_dir_local.join(img));
     let icons = RECOVERY_ICONS
         .iter()
-        .map(|(icon, sizes)| (ui_dir_local.join("icons").join(format!("{icon}.svg")), sizes.to_vec()));
+        .map(|(icon, sizes)| (ui_dir_local.join("icons").join(format!("{icon}.svg")), sizes.to_vec()))
+        .collect();
 
-    render_common_assets(&output_dir, images, icons)?;
+    render_common_assets(&output_dir, images, vec![(UI_ICON_SET, icons)])?;
     fatfs_image::copy_tree_into(&fs, &output_dir, "common").context("bundle common boot assets")?;
 
     Ok(())

@@ -26,7 +26,7 @@ template-name/
     └── resources/         # App icon, app theme, and app-owned resources
 ```
 
-Scaffolded GUI apps also receive a generated private SDK UI/resource search tree at build/preview time. That tree supplies the SDK-owned public `@ui` surface and shared component assets, while app-owned files in `resources/` take precedence. Put user images in `resources/images/` and user fonts in `resources/fonts/`.
+Scaffolded GUI apps also receive a generated private SDK UI/resource search tree at build/preview time. That tree supplies the SDK-owned public `@ui` surface and shared component assets, while app-owned files in `resources/` take precedence. Put app images in `resources/images/` (load them with `Images.image("<name>")`) and app fonts in `resources/fonts/`.
 
 ## Template Variables
 
@@ -77,7 +77,7 @@ The default KeyOS GUI application with:
 - English and Spanish localizations
 - SVG placeholder icon
 - App theme JSON under `resources/theme.json`
-- Sample app-owned image under `resources/images/`
+- Sample app-owned image under `resources/images/`, loaded with `Images.image`
 - Single-page layout (no router)
 
 Perfect for simple apps that don't need navigation.
@@ -91,7 +91,7 @@ A multi-page KeyOS GUI application with:
 - English and Spanish localizations
 - SVG placeholder icon
 - App theme JSON under `resources/theme.json`
-- Sample app-owned image under `resources/images/`
+- Sample app-owned image under `resources/images/`, loaded with `Images.image`
 - Example of page-based architecture
 
 Use this when you need multiple screens or sections in your app.
@@ -103,7 +103,7 @@ A ui2 component gallery with:
 - One page per shared component
 - Size, style, tone, and state variants
 - App-local `resources/theme.json` for `foundation theme`
-- Sample app-owned image under `resources/images/`
+- Sample app-owned image under `resources/images/`, loaded with `Images.image`
 
 Use this when designers need to edit a theme and inspect the result through `foundation sim` or `foundation sideload`.
 
