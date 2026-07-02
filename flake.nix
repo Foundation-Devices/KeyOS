@@ -127,8 +127,12 @@
             buildInputs = with pkgs;
               [
                 fontconfig
+                libGL
                 pcsclite
                 libusb1
+                qt6.qtbase
+                qt6.qtsvg
+                stdenv.cc.cc.lib
                 zlib
               ]
               ++ darwinPkgs
@@ -138,8 +142,12 @@
               lib.makeLibraryPath (
                 [
                   fontconfig
+                  libGL
                   pcsclite
                   libusb1
+                  qt6.qtbase
+                  qt6.qtsvg
+                  stdenv.cc.cc.lib
                   zlib
                   # slint sim
                   libxkbcommon
