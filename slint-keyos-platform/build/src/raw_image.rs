@@ -9,12 +9,11 @@ use i_slint_compiler::{
 use resvg::{tiny_skia, usvg};
 use slint_keyos_platform_common::{utils::parse_nine_slice_filename, IconSet, RawImage};
 
-pub fn convert_image_to_raw(path: &Path) -> (String, Vec<u8>) {
+pub fn convert_image_to_raw(path: &Path) -> image::ImageResult<(String, Vec<u8>)> {
     let (image, source_format, original_size) = load_image(
         i_slint_compiler::fileaccess::VirtualFile { canon_path: path.to_owned(), builtin_contents: None },
         1.0,
-    )
-    .unwrap_or_else(|_| panic!("Could not load image file {}", path.display()));
+    )?;
 
     let texture = generate_texture(image, source_format, original_size);
     let mut image = RawImage::from(texture);
@@ -24,7 +23,7 @@ pub fn convert_image_to_raw(path: &Path) -> (String, Vec<u8>) {
         image.nine_slice = Some(nine_slice);
         image_name = ns_image_name;
     }
-    (image_name, serialize(image))
+    Ok((image_name, serialize(image)))
 }
 
 pub fn convert_icons<Icons, IconSizes>(icons: Icons) -> Vec<u8>

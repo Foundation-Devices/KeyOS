@@ -552,7 +552,7 @@ impl Builder {
         // other `build --hosted` consumer) can stage it for the simulator kernel.
         if result.target.is_none() {
             result.write_hosted_services_manifest();
-            crate::hosted_image::build_hosted_disk_images();
+            crate::bootimage::build_hosted_disk_images();
         }
         result
     }

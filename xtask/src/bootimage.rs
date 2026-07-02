@@ -3,20 +3,21 @@
 
 //! Firmware (boot) image building routines.
 
+use std::env;
 use std::fs::{self, File};
-use std::io::{Seek, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use fatfs::{Dir, FatType, FileSystem};
+use fatfs::FileSystem;
 use fscommon::StreamSlice;
 use hex::ToHex;
 use keyos::TOTAL_FLASH_BLOCKS;
-use mbrs::{AddrScheme, Mbr, PartInfo, PartType};
 use sha2::Digest;
 
 use crate::bootloader::{build_at91bootstrap, encrypt_bootloader, BootloaderBuildArgs, SambaCryptArgs};
-use crate::builder::{project_root, Builder, FLUX_APPS_DIR, FLUX_PARENT_APP_DIR, KEYOS_APPS_DIR};
+use crate::builder::{project_root, Builder, KEYOS_APPS_DIR};
+use crate::system_disk::{render_common_assets, stage_system_volume, SystemVolume};
 use crate::{
     APP_IMAGE, BOOTLOADER_IMAGE, BOOTLOADER_IMAGE_CIPHER, BOOT_ASSETS_DIR, RECOVERY_IMAGE,
     TARGET_TRIPLE_KEYOS,
@@ -28,8 +29,11 @@ const GIB: u64 = 1024 * MIB;
 
 pub const BOOT_IMAGE: &str = "boot.img";
 
-const BOOT_VOLUME_NAME: &[u8] = b"KEYOSBOOT  ";
-const SYSTEM_VOLUME_NAME: &[u8] = b"PRIME      ";
+const BOOT_VOLUME_NAME: &str = "KEYOSBOOT";
+const SYSTEM_VOLUME_NAME: &str = "PRIME";
+
+const HOSTED_SYSTEM_VOLUME_SIZE: u64 = 128 * MIB;
+const HOSTED_USER_VOLUME_SIZE: u64 = 8 * GIB;
 
 pub const SECTOR_SIZE: u64 = 512;
 // Leave space for the MBR
@@ -52,41 +56,6 @@ pub const USER_PARTITION_SIZE_SECTORS: u32 = (USER_PARTITION_SIZE_BYTES / SECTOR
 pub const USER_PARTITION_START_SECTOR: u32 = SYSTEM_PARTITION_START_SECTOR + SYSTEM_PARTITION_SIZE_SECTORS;
 
 const _: () = assert!(USER_PARTITION_START_SECTOR + USER_PARTITION_SIZE_SECTORS <= TOTAL_FLASH_BLOCKS as u32);
-
-pub const DEFAULT_ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
-pub const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
-    ("alert", &[64]),
-    ("decline-circle", &[64]),
-    ("bitcoin", &[64]),
-    ("plus", &[96]),
-    ("acorn", &[96]),
-    ("key", &[96]),
-    ("lock", &[64, 96]),
-    ("unlock", &[64, 96]),
-    ("check", &[96]),
-    ("close", &[96]),
-    ("arrow-down", &[96]),
-    ("arrow-up", &[96]),
-    ("nfc-card", &[96]),
-    ("device", &[128]),
-    ("nfc-1-card-horiz", &[104]),
-    ("nfc-1-card-vert", &[96]),
-    ("info", &[64]),
-    ("info2", &[96]),
-    ("question-circle", &[64]),
-    ("master-key", &[96]),
-    ("device-nfc", &[96]),
-    ("smartphone-2", &[128]),
-    ("device-detailed", &[96]),
-    ("laptop", &[192]),
-    ("usb-cable", &[172]),
-    // Legacy mode icons
-    ("legacy", &[96]),
-    ("monero", &[56]),
-    ("ethereum", &[56]),
-    ("solana", &[56]),
-    ("chain", &[56]),
-];
 
 const RECOVERY_IMAGES: [&str; 8] = [
     "images/background.png",
@@ -126,77 +95,19 @@ const RECOVERY_ICONS: [(&str, &[usize]); 25] = [
     ("usb", &[24]),
 ];
 
-fn init_mbr(file: &mut File) -> anyhow::Result<()> {
-    file.seek(std::io::SeekFrom::Start(0))?;
-
-    let buf = <[u8; 512]>::try_from(&Mbr::default())?;
-    file.write_all(&buf)?;
-    file.seek(std::io::SeekFrom::Start(0))?;
-
-    Ok(())
-}
-
-fn update_mbr(
-    file: &mut File,
-    is_bootable: bool,
-    partition_idx: usize,
-    start_sector: u32,
-    last_sector: u32,
-) -> anyhow::Result<Mbr> {
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let mut mbr = Mbr::try_from_reader(&*file).context("MBR must be already initialized")?;
-    file.seek(std::io::SeekFrom::Start(0))?;
-
-    // Update the MBR
-    mbr.partition_table.entries[partition_idx] = Some(PartInfo::try_from_lba_bounds(
-        is_bootable,
-        start_sector,
-        last_sector,
-        PartType::Fat32 { visible: true, scheme: AddrScheme::Lba },
-    )?);
-
-    Ok(mbr)
-}
-
-fn format_partition<'a>(
+/// Point MBR entry `index` at a freshly FAT32-formatted partition and open it.
+fn format_and_open<'a>(
     file: &'a mut File,
-    is_bootable: bool,
-    partition_idx: usize,
-    volume_label: &[u8],
+    index: u8,
     start_sector: u32,
     sectors: u32,
+    label: &str,
+    bootable: bool,
 ) -> anyhow::Result<FileSystem<StreamSlice<&'a mut File>>> {
-    let last_sector = start_sector + sectors - 1;
-    let mbr = update_mbr(file, is_bootable, partition_idx, start_sector, last_sector)?;
-
-    let start_offset = start_sector as u64 * SECTOR_SIZE;
-    let end_offset = ((start_sector + sectors) as u64 * SECTOR_SIZE) + 1;
-    let partition_slice = StreamSlice::new(&*file, start_offset, end_offset)?;
-
-    println!(
-        "Formatting partition #{}, bootable: {is_bootable}, start_sector: {start_sector}, last_sector: {last_sector}",
-        partition_idx
-    );
-    fatfs::format_volume(
-        partition_slice,
-        fatfs::FormatVolumeOptions::new()
-            .fat_type(FatType::Fat32)
-            .total_sectors(sectors)
-            .bytes_per_cluster(64 * SECTOR_SIZE as u32)
-            .volume_label(volume_label.try_into()?),
-    )
-    .context("format volume")?;
-
-    // Overwrite the modified MBR
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let buf = <[u8; 512]>::try_from(&mbr)?;
-    file.write_all(&buf)?;
-
-    // Open the newly formatted partition
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let mut boot_partition = StreamSlice::new(file, start_offset, end_offset)?;
-    boot_partition.seek(std::io::SeekFrom::Start(0))?;
-    FileSystem::new(boot_partition, fatfs::FsOptions::new()).context("open filesystem")
+    println!("Formatting partition #{index}, bootable: {bootable}, start_sector: {start_sector}");
+    fatfs_image::set_partition_entry(file, index as usize, start_sector, sectors, bootable)?;
+    fatfs_image::format_partition(file, start_sector, sectors, label)?;
+    fatfs_image::open_partition(file, index).context("open formatted partition")
 }
 
 fn create_boot_partition(file: &mut File, samba_crypt_args: SambaCryptArgs) -> anyhow::Result<()> {
@@ -206,13 +117,13 @@ fn create_boot_partition(file: &mut File, samba_crypt_args: SambaCryptArgs) -> a
         encrypt_bootloader(&images_path, samba_crypt_args);
     }
 
-    let fs = format_partition(
+    let fs = format_and_open(
         file,
-        true,
         0,
-        BOOT_VOLUME_NAME,
         BOOT_PARTITION_START_SECTOR,
         BOOT_PARTITION_SIZE_SECTORS,
+        BOOT_VOLUME_NAME,
+        true,
     )
     .context("formatting partition")?;
 
@@ -254,261 +165,47 @@ fn create_boot_partition(file: &mut File, samba_crypt_args: SambaCryptArgs) -> a
     let images = RECOVERY_IMAGES.iter().map(|img| ui_dir_local.join(img));
     let icons = RECOVERY_ICONS
         .iter()
-        .map(|(icon, sizes)| (ui_dir_local.join("icons").join(format!("{icon}.svg")), sizes.iter().copied()));
-    let fonts = read_dir(ui_dir_local.join("fonts"));
+        .map(|(icon, sizes)| (ui_dir_local.join("icons").join(format!("{icon}.svg")), sizes.to_vec()));
 
-    bundle_common_files(fs.root_dir(), output_dir, images, icons, fonts)?;
+    render_common_assets(&output_dir, images, icons)?;
+    fatfs_image::copy_tree_into(&fs, &output_dir, "common").context("bundle common boot assets")?;
 
-    Ok(())
-}
-
-fn bundle_apps(
-    apps_dir_disk: &Dir<'_, StreamSlice<&mut File>>,
-    apps_dir_local: &Path,
-    apps_dir_disk_path: &str,
-    app_files: &[&str],
-) -> anyhow::Result<()> {
-    if apps_dir_local.exists() {
-        for app_dir in fs::read_dir(apps_dir_local)? {
-            let app_dir_local = app_dir?;
-            let app_name = app_dir_local.file_name().into_string().unwrap();
-            if !app_files.iter().all(|app_file| app_dir_local.path().join(app_file).is_file()) {
-                println!("- Skipping `{}` directory without app bundle files", app_name);
-                continue;
-            }
-
-            println!("- Bundling `{}` app", app_name);
-            let app_dir_disk = apps_dir_disk.create_dir(&app_name)?;
-
-            for app_file in app_files {
-                let app_file_local = app_dir_local.path().join(app_file);
-                let mut app_file_disk = app_dir_disk.create_file(app_file)?;
-                println!(
-                    "  - Copying: {} -> /{}/{}/{}",
-                    app_file_local.file_name().unwrap().to_str().unwrap(),
-                    apps_dir_disk_path,
-                    app_name,
-                    app_file
-                );
-                app_file_disk.write_all(&fs::read(app_file_local)?)?;
-            }
-
-            let app_resources_local = app_dir_local.path().join("resources");
-            if app_resources_local.is_dir() {
-                println!("  - Copying app resources");
-                let resources_dir_disk = app_dir_disk.create_dir("resources")?;
-                copy_dir_to_fat(&app_resources_local, &resources_dir_disk)?;
-            }
-        }
-    } else {
-        println!("* no apps directory found");
-    }
     Ok(())
 }
 
 fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
     let images_path = Builder::images_path();
 
-    let fs = format_partition(
+    let fs = format_and_open(
         file,
-        false,
         1,
-        SYSTEM_VOLUME_NAME,
         SYSTEM_PARTITION_START_SECTOR,
         SYSTEM_PARTITION_SIZE_SECTORS,
+        SYSTEM_VOLUME_NAME,
+        false,
     )?;
 
     let keyos_dir = fs.root_dir().create_dir("keyos").context("system: creating `keyos` directory")?;
     keyos_dir.create_file(APP_IMAGE)?.write_all(&fs::read(images_path.join(APP_IMAGE))?)?;
 
     let target_root = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release");
-    let keyos_apps_dir = keyos_dir.create_dir("apps")?;
-    println!("Bundling FS apps");
-    bundle_apps(
-        &keyos_apps_dir,
-        &target_root.join(KEYOS_APPS_DIR),
-        KEYOS_APPS_DIR,
-        &["app.elf", "manifest.json"],
+    stage_system_volume(
+        &fs,
+        &SystemVolume {
+            apps_src: &target_root.join(KEYOS_APPS_DIR),
+            exclude_app_elf: false,
+            common_out: &target_root.join("common"),
+        },
     )?;
-
-    let flux_parent_dir = match keyos_apps_dir.open_dir(FLUX_PARENT_APP_DIR) {
-        Ok(dir) => dir,
-        Err(_) => keyos_apps_dir.create_dir(FLUX_PARENT_APP_DIR)?,
-    };
-    let flux_apps_dir = flux_parent_dir.create_dir("apps")?;
-    println!("Bundling FS flux apps");
-    bundle_apps(
-        &flux_apps_dir,
-        &target_root.join(FLUX_APPS_DIR),
-        FLUX_APPS_DIR,
-        &["app.elf", "manifest.json"],
-    )?;
-
-    let ui_dir_local = project_root().join("ui").join("ui");
-
-    let output_dir = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join("common");
-    let images = read_dir(ui_dir_local.join("images"));
-    let icons = read_dir(ui_dir_local.join("icons"))
-        .filter(|e| e.extension().map_or(false, |f| f == "svg"))
-        .map(|path| {
-            let icon_name = path.file_stem().unwrap().to_string_lossy().to_string();
-            let mut sizes = Vec::from(DEFAULT_ICON_SIZES);
-            for (additional_name, additional_sizes) in ADDITIONAL_ICON_SIZES {
-                if *additional_name == icon_name {
-                    sizes.extend_from_slice(additional_sizes);
-                }
-            }
-            (path, sizes)
-        });
-    let fonts = read_dir(ui_dir_local.join("fonts"));
-
-    bundle_common_files(keyos_dir, output_dir, images, icons, fonts)?;
-
-    Ok(())
-}
-
-fn process_image_file(
-    target_dir: &Dir<'_, StreamSlice<&mut File>>,
-    image_path: &Path,
-    out_dir: &Path,
-) -> anyhow::Result<()> {
-    let (image_name, image_data) = slint_keyos_platform_build::convert_image_to_raw(image_path);
-    let image_name_disk = PathBuf::from(image_name).with_extension("raw");
-    let mut image_file_disk = target_dir.create_file(image_name_disk.to_str().unwrap())?;
-    image_file_disk.write_all(&image_data)?;
-
-    fs::write(out_dir.join(image_name_disk), image_data)?;
-
-    Ok(())
-}
-
-fn process_directory(
-    dir_path: &Path,
-    target_dir: &Dir<'_, StreamSlice<&mut File>>,
-    out_dir: &Path,
-    image_count: &mut usize,
-) -> anyhow::Result<()> {
-    for entry in read_dir(dir_path) {
-        if entry.is_dir() {
-            let dir_name = entry.file_name().unwrap().to_str().unwrap();
-            let sub_dir = target_dir.create_dir(dir_name)?;
-            process_directory(&entry, &sub_dir, &out_dir.join(dir_name), image_count)?;
-        } else if entry.is_file() {
-            process_image_file(target_dir, &entry, out_dir)?;
-            *image_count += 1;
-        }
-    }
-    Ok(())
-}
-
-fn copy_dir_to_fat(dir_path: &Path, target_dir: &Dir<'_, StreamSlice<&mut File>>) -> anyhow::Result<()> {
-    let mut entries = fs::read_dir(dir_path)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let entry_name = entry.file_name();
-        if entry_name.to_string_lossy() == ".DS_Store" {
-            continue;
-        }
-        let entry = entry.path();
-        if entry.is_dir() {
-            let dir_name = entry.file_name().unwrap().to_str().unwrap();
-            let sub_dir = target_dir.create_dir(dir_name)?;
-            copy_dir_to_fat(&entry, &sub_dir)?;
-        } else if entry.is_file() {
-            let file_name = entry.file_name().unwrap();
-            let mut file_disk = target_dir.create_file(file_name.to_str().unwrap())?;
-            file_disk.write_all(&fs::read(&entry)?)?;
-        }
-    }
-    Ok(())
-}
-
-fn bundle_common_files<Images, Icons, Fonts, IconSizes>(
-    root_dir: Dir<'_, StreamSlice<&mut File>>,
-    output_dir: PathBuf,
-    images: Images,
-    icons: Icons,
-    fonts: Fonts,
-) -> anyhow::Result<()>
-where
-    Images: IntoIterator<Item = PathBuf>,
-    Icons: IntoIterator<Item = (PathBuf, IconSizes)>,
-    Fonts: IntoIterator<Item = PathBuf>,
-    IconSizes: IntoIterator<Item = usize>,
-{
-    fs::remove_dir_all(&output_dir).ok();
-    fs::create_dir(&output_dir).context("create output dir")?;
-
-    let common_dir_disk = root_dir.create_dir("common")?;
-    let image_dir_disk = common_dir_disk.create_dir("images")?;
-    let image_out_dir = output_dir.join("images");
-    fs::create_dir(&image_out_dir).context("create output dir")?;
-
-    println!("Bundling common images");
-    let timer = std::time::Instant::now();
-    let mut last_print = timer;
-    let mut image_count = 0;
-
-    for image_path in images {
-        if image_path.is_dir() {
-            // Get the directory name and create it
-            let dir_name = image_path.file_name().unwrap().to_str().unwrap();
-            let sub_dir = image_dir_disk.create_dir(dir_name)?;
-            let sub_out_dir = image_out_dir.join(dir_name);
-            fs::create_dir(&sub_out_dir).context("create output sub directory")?;
-            process_directory(&image_path, &sub_dir, &sub_out_dir, &mut image_count)?;
-        } else {
-            process_image_file(&image_dir_disk, &image_path, &image_out_dir)?;
-            image_count += 1;
-        }
-
-        if last_print.elapsed() > std::time::Duration::from_millis(500) {
-            println!("  - Converted {image_count} files");
-            last_print = std::time::Instant::now();
-        }
-    }
-    println!("- Bundled {image_count} images in {:.2}s", timer.elapsed().as_secs_f32());
-    println!("Bundling icons");
-    let icon_data = slint_keyos_platform_build::convert_icons(icons);
-    let mut image_file_disk = common_dir_disk.create_file("icon_set.bin")?;
-    image_file_disk.write_all(&icon_data)?;
-    fs::write(output_dir.join("icon_set.bin"), icon_data)?;
-
-    println!("Bundling fonts");
-    let out_dir_fonts = output_dir.join("fonts");
-    fs::create_dir(&out_dir_fonts)?;
-
-    let font_dir_disk = common_dir_disk.create_dir("fonts")?;
-    for font_path in fonts {
-        let font_name = font_path.file_name().unwrap().to_str().unwrap();
-        let mut font_file_disk = font_dir_disk.create_file(&font_name)?;
-        let font_data = fs::read(&font_path)?;
-        font_file_disk.write_all(&font_data)?;
-        fs::write(&out_dir_fonts.join(font_name), font_data)?;
-    }
 
     Ok(())
 }
 
 fn create_user_partition(file: &mut File) -> anyhow::Result<()> {
-    let first_sector = USER_PARTITION_START_SECTOR;
-    let last_sector = first_sector + USER_PARTITION_SIZE_SECTORS - 1;
-    let mbr = update_mbr(file, false, 2, first_sector, last_sector)?;
-
-    // Overwrite the modified MBR
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let buf = <[u8; 512]>::try_from(&mbr)?;
-    file.write_all(&buf)?;
-
-    Ok(())
-}
-
-fn read_dir(path: impl AsRef<Path>) -> impl Iterator<Item = PathBuf> {
-    fs::read_dir(&path).unwrap_or_else(|e| panic!("Could not read directory {:?}: {e:?}", AsRef::as_ref(&path)))
-            .map(|e| e.unwrap().path())
-            // Skip hidden files such as ".DS_Store" on macOS
-            .filter(|e| e.file_name().map_or(false, |f| !f.to_string_lossy().starts_with('.')))
+    // The user volume is formatted on the device at first boot, so only mark it
+    // in the MBR.
+    fatfs_image::set_partition_entry(file, 2, USER_PARTITION_START_SECTOR, USER_PARTITION_SIZE_SECTORS, false)
+        .context("mark user partition")
 }
 
 fn check_images_exist() {
@@ -529,7 +226,7 @@ pub(crate) fn create_boot_image(samba_crypt_args: SambaCryptArgs) {
     let mut boot_image =
         fs::OpenOptions::new().write(true).read(true).truncate(true).create(true).open(BOOT_IMAGE).unwrap();
 
-    init_mbr(&mut boot_image).expect("init MBR");
+    fatfs_image::init_mbr(&mut boot_image).expect("init MBR");
     create_boot_partition(&mut boot_image, samba_crypt_args).expect("create boot partition");
     create_system_partition(&mut boot_image).expect("create system partition");
     create_user_partition(&mut boot_image).expect("create user partition");
@@ -542,14 +239,64 @@ pub fn build_charge_boot() {
     let mut boot_image =
         fs::OpenOptions::new().write(true).read(true).truncate(true).create(true).open(BOOT_IMAGE).unwrap();
 
-    init_mbr(&mut boot_image).expect("init MBR");
-    let fs =
-        format_partition(&mut boot_image, true, 0, BOOT_VOLUME_NAME, BOOT_PARTITION_START_SECTOR, 0x1000)
-            .expect("error formatting partition");
+    fatfs_image::init_mbr(&mut boot_image).expect("init MBR");
+    let fs = format_and_open(&mut boot_image, 0, BOOT_PARTITION_START_SECTOR, 0x1000, BOOT_VOLUME_NAME, true)
+        .expect("error formatting partition");
 
     let bootloader_bytes =
         build_at91bootstrap(BootloaderBuildArgs::default(), crate::bootloader::BootloaderType::Charge);
     fs.root_dir().create_file("boot.bin").unwrap().write_all(&bootloader_bytes).unwrap();
+}
+
+/// Build the hosted simulator's FAT disk images that `os/fs` mounts. They are
+/// created once and never reformatted, so user data survives across builds; only
+/// the derived asset trees are refreshed.
+pub fn build_hosted_disk_images() {
+    println!("Building hosted disk images");
+    let kernel_dir = project_root().join("xous").join("kernel");
+    let user_image = kernel_dir.join("disk.dat");
+    let system_image = kernel_dir.join("disk_system.dat");
+
+    if !user_image.exists() {
+        println!("- Creating user volume {}", user_image.display());
+        fatfs_image::create_single_partition(
+            &user_image,
+            HOSTED_USER_VOLUME_SIZE,
+            fatfs_image::DEFAULT_START_SECTOR,
+            "USER",
+        )
+        .expect("create disk.dat");
+    }
+    if !system_image.exists() {
+        println!("- Creating system volume {}", system_image.display());
+        fatfs_image::create_single_partition(
+            &system_image,
+            HOSTED_SYSTEM_VOLUME_SIZE,
+            fatfs_image::DEFAULT_START_SECTOR,
+            "PRIME",
+        )
+        .expect("create disk_system.dat");
+    }
+
+    let hosted = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_root().join("target"))
+        .join("hosted");
+
+    println!("- Staging keyos/common and keyos/apps into {}", system_image.display());
+    let mut image =
+        fs::OpenOptions::new().read(true).write(true).open(&system_image).expect("open disk_system.dat");
+    let system_fs = fatfs_image::open_partition(&mut image, 0).expect("open system partition");
+
+    stage_system_volume(
+        &system_fs,
+        &SystemVolume {
+            apps_src: &hosted.join("keyos").join("apps"),
+            exclude_app_elf: true,
+            common_out: &hosted.join("sim-seed").join("keyos").join("common"),
+        },
+    )
+    .expect("stage system volume");
 }
 
 fn print_digest_of_cosigned_file(name: &str, path: &Path) {

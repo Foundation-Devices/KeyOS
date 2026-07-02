@@ -52,7 +52,7 @@ pub fn create_single_partition(path: &Path, size: u64, start_sector: u32, label:
     let partition_sectors = total_sectors - start_sector;
 
     init_mbr(&mut file)?;
-    set_partition_entry(&mut file, 0, start_sector, partition_sectors)?;
+    set_partition_entry(&mut file, 0, start_sector, partition_sectors, false)?;
     format_partition(&mut file, start_sector, partition_sectors, label)?;
     Ok(())
 }
@@ -179,20 +179,30 @@ fn open_or_create_dir<'a, T: ReadWriteSeek>(parent: &Dir<'a, T>, name: &str) -> 
     }
 }
 
-fn init_mbr(file: &mut File) -> Result<()> {
+/// Write a fresh protective MBR (no partition entries) at sector 0.
+pub fn init_mbr(file: &mut File) -> Result<()> {
     file.seek(SeekFrom::Start(0)).context("seek to MBR")?;
     let buf = <[u8; 512]>::try_from(&Mbr::default()).context("encode MBR")?;
     file.write_all(&buf).context("write MBR")?;
     Ok(())
 }
 
-fn set_partition_entry(file: &mut File, index: usize, start_sector: u32, sectors: u32) -> Result<()> {
+/// Point MBR entry `index` at a FAT32 partition spanning `sectors` from
+/// `start_sector`. `bootable` sets the active flag (only the boot partition
+/// needs it). The MBR must already be initialized.
+pub fn set_partition_entry(
+    file: &mut File,
+    index: usize,
+    start_sector: u32,
+    sectors: u32,
+    bootable: bool,
+) -> Result<()> {
     file.seek(SeekFrom::Start(0)).context("seek to MBR")?;
     let mut mbr = Mbr::try_from_reader(&*file).context("MBR must be initialized first")?;
     let last_sector = start_sector + sectors - 1;
     mbr.partition_table.entries[index] = Some(
         PartInfo::try_from_lba_bounds(
-            false,
+            bootable,
             start_sector,
             last_sector,
             PartType::Fat32 { visible: true, scheme: AddrScheme::Lba },
@@ -206,7 +216,9 @@ fn set_partition_entry(file: &mut File, index: usize, start_sector: u32, sectors
     Ok(())
 }
 
-fn format_partition(file: &mut File, start_sector: u32, sectors: u32, label: &str) -> Result<()> {
+/// Format the `sectors`-long region starting at `start_sector` as FAT32. Does
+/// not touch the MBR; set the partition entry separately.
+pub fn format_partition(file: &mut File, start_sector: u32, sectors: u32, label: &str) -> Result<()> {
     let start = start_sector as u64 * SECTOR_SIZE;
     let end = start + sectors as u64 * SECTOR_SIZE;
     let slice = StreamSlice::new(file, start, end).context("slice partition")?;

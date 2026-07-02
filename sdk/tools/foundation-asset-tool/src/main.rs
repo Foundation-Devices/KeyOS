@@ -68,13 +68,13 @@ fn ensure_no_extra_args(mut args: impl Iterator<Item = OsString>) -> Result<()> 
 }
 
 fn write_raw_image_file(source: &Path, destination: &Path) -> Result<String> {
-    let (image_name, image_data) = slint_keyos_platform_build::convert_image_to_raw(source);
+    let (image_name, image_data) = slint_keyos_platform_build::convert_image_to_raw(source)?;
     write_file(destination, &image_data)?;
     Ok(image_name)
 }
 
 fn write_raw_image_dir(source: &Path, destination_dir: &Path) -> Result<String> {
-    let (image_name, image_data) = slint_keyos_platform_build::convert_image_to_raw(source);
+    let (image_name, image_data) = slint_keyos_platform_build::convert_image_to_raw(source)?;
     write_file(&destination_dir.join(format!("{image_name}.raw")), &image_data)?;
     Ok(image_name)
 }
