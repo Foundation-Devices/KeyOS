@@ -94,63 +94,19 @@ pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
     verify_cosign2_mem_with_backends(data, &KNOWN_SIGNERS, &Sha256 { crypto }, &EccVerifier, check_trust)
 }
 
-fn verify_cosign2_mem_with_third_party_keys_inner(
-    official_result: Result<cosign2::Header, HashError>,
-    data: &[u8],
-    trusted_third_party_pubkeys: &[[u8; 33]],
-    check_trust: bool,
-    sha: &impl cosign2::Sha256,
-    secp: &impl cosign2::Secp256k1Verify,
-) -> Result<cosign2::Header, HashError> {
-    if official_result.is_ok() || !check_trust || trusted_third_party_pubkeys.is_empty() {
-        return official_result;
-    }
-
-    let Some(header) = cosign2::Header::parse(data, &[], sha, secp, cosign2::Header::DEFAULT_SIZE)? else {
-        return Err(HashError::MissingCosign2Header);
-    };
-
-    if header.pubkey1() == [0; 33]
-        && header.signature1() == [0; 64]
-        && header.signature2() != [0; 64]
-        && trusted_third_party_pubkeys.contains(&header.pubkey2())
-    {
-        Ok(header)
-    } else {
-        official_result
-    }
-}
-
-/// Verify a cosign2-signed binary, accepting either an official Foundation
-/// signature (slot 1) or a developer signature (slot 2) made with one of
-/// `trusted_third_party_pubkeys`.
-///
-/// Short-circuit rules — return early with `official_result` when:
-/// * the official chain already verified, **or**
-/// * `check_trust` is false (caller has opted out of trust enforcement), **or**
-/// * `trusted_third_party_pubkeys` is empty (no third-party keys configured → third-party fallback is
-///   effectively disabled and the official error is the most informative one to surface).
-///
-/// Otherwise we re-parse the header and accept it only when *all* of: slot 1
-/// pubkey and signature are zero (the binary was never officially signed),
-/// slot 2 has a real signature, and slot 2's pubkey is in the trusted list.
-/// On miss we return the original official_result error, since that's what the
-/// caller's user is trying to debug.
-pub fn verify_cosign2_mem_with_third_party_keys<P: crypto::ShaPermissions>(
+/// Verify a developer-signed (third-party) cosign2 binary: the slot-2 signature must be
+/// cryptographically valid, but the signing key is not checked against any trusted list here.
+/// Trust is decided by the caller, matching the header's `pubkey2()` against the cert store.
+pub fn verify_cosign2_mem_third_party<P: crypto::ShaPermissions>(
     crypto: &CryptoApi<P>,
     data: &[u8],
-    trusted_third_party_pubkeys: &[[u8; 33]],
-    check_trust: bool,
 ) -> Result<cosign2::Header, HashError> {
-    let official_result = verify_cosign2_mem(crypto, data, check_trust);
-    verify_cosign2_mem_with_third_party_keys_inner(
-        official_result,
-        data,
-        trusted_third_party_pubkeys,
-        check_trust,
-        &Sha256 { crypto },
-        &EccVerifier,
-    )
+    let header = verify_cosign2_mem_with_backends(data, &[], &Sha256 { crypto }, &EccVerifier, false)?;
+    // A third-party manifest carries only the developer signature in slot 2; reject anything else.
+    if header.pubkey1() != [0; 33] || header.pubkey2() == [0; 33] {
+        return Err(HashError::NotTrusted);
+    }
+    Ok(header)
 }
 
 /// Verifies the `cosign2` header of a file
@@ -235,6 +191,21 @@ impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
             }
         }
     }
+}
+
+/// Stream `total_len` bytes from `reader` through the SHA-256 engine, hashing in fixed-size
+/// chunks so the whole input never has to be buffered at once. `progress_fn` is called with the
+/// running fraction hashed.
+pub fn sha256_streaming<P: crypto::ShaPermissions, R: std::io::Read, F: Fn(f32)>(
+    crypto: &CryptoApi<P>,
+    total_len: usize,
+    reader: R,
+    progress_fn: F,
+) -> Result<[u8; 32], HashError> {
+    use cosign2::Sha256Streaming as _;
+
+    Sha256Streaming { crypto, progress_fn: &progress_fn, binary_size: total_len.max(1) }
+        .hash_streaming(total_len, reader)
 }
 
 /// Streaming SHA-256 implementation to allow hashing of large files

@@ -3,6 +3,7 @@
 
 //! Build KeyOS application for hardware
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -41,8 +42,13 @@ pub fn execute(release: bool) -> Result<()> {
     let project_root = project.root.as_path();
     let config = &project.config;
 
-    // Create output directory
+    // Build the bundle from a clean dir, or else a stray root file (a stale
+    // artifact, a .DS_Store) gets hashed into the signed manifest.
     let output_dir = project_root.join("target").join("keyos").join(&config.app_name);
+    if output_dir.exists() {
+        fs::remove_dir_all(&output_dir)
+            .with_context(|| format!("Failed to clean bundle directory {}", output_dir.display()))?;
+    }
     fs::create_dir_all(&output_dir)?;
 
     // Ensure shared @ui sources and generated router/translation files exist before cargo runs.
@@ -70,26 +76,28 @@ pub fn execute(release: bool) -> Result<()> {
     let stripped_path = output_dir.join("app.elf");
     strip_binary(&binary_path, &stripped_path)?;
 
-    // Generate manifest.json
-    println!("Generating manifest.json...");
-    let manifest_path = output_dir.join("manifest.json");
-    generate_manifest(config, project_root, &manifest_path)?;
-
     println!("Preparing app assets...");
     stage_hardware_assets(config, project_root, &output_dir)?;
 
-    // Sign the application
-    println!("Signing application...");
+    println!("Generating manifest.json...");
+    let file_hashes = bundle_file_hashes(&output_dir)?;
+    let manifest_path = output_dir.join("manifest.json");
+    generate_manifest(config, project_root, &manifest_path, file_hashes)?;
+
+    // Sign app.elf and the manifest. fileHashes was taken from the unsigned elf, so signing the
+    // elf doesn't invalidate it and the two signatures are independent.
+    println!("Signing app.elf and manifest...");
     let cosign2_config_path = get_cosign2_config(config, project_root)?;
-    sign_application(&stripped_path, &cosign2_config_path, &config.version.to_string())?;
+    sign_with_cosign2(&stripped_path, &cosign2_config_path, &config.version.to_string())?;
     ensure_cosign2_header(&stripped_path)?;
+    sign_with_cosign2(&manifest_path, &cosign2_config_path, &config.version.to_string())?;
 
     // Success message
     println!();
     println!("Build complete!");
     println!("Output: {}", output_dir.display());
     println!("  app.elf (signed)");
-    println!("  manifest.json");
+    println!("  manifest.json (signed)");
     println!("  icon.bin");
     println!("  resources/");
     println!("Version: {}", config.version);
@@ -276,17 +284,47 @@ fn strip_binary(input: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate manifest.json from app-config.toml
-fn generate_manifest(config: &AppConfig, project_root: &Path, output: &Path) -> Result<()> {
-    let manifest = AppManifest::from_config(config, config.resolved_permissions(project_root)?);
+/// Generate manifest.json from app-config.toml, carrying the staged bundle's file hashes.
+fn generate_manifest(
+    config: &AppConfig,
+    project_root: &Path,
+    output: &Path,
+    file_hashes: BTreeMap<String, String>,
+) -> Result<()> {
+    let mut manifest = AppManifest::from_config(config, config.resolved_permissions(project_root)?);
+    manifest.file_hashes = file_hashes;
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(output, json)?;
 
     Ok(())
 }
 
-/// Sign the application using cosign2
-fn sign_application(elf_path: &Path, cosign2_config: &Path, version: &str) -> Result<()> {
+/// Hex sha256 of every staged bundle file except `manifest.json`, keyed by bundle-relative path
+/// with forward slashes. The manifest is the signed container, so it never lists its own hash.
+fn bundle_file_hashes(bundle_dir: &Path) -> Result<BTreeMap<String, String>> {
+    use sha2::{Digest, Sha256};
+
+    let mut hashes = BTreeMap::new();
+    let mut stack = vec![bundle_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let rel = path.strip_prefix(bundle_dir)?.to_string_lossy().replace('\\', "/");
+            if rel == "manifest.json" {
+                continue;
+            }
+            hashes.insert(rel, hex::encode(Sha256::digest(fs::read(&path)?)));
+        }
+    }
+    Ok(hashes)
+}
+
+/// Sign a bundle file in place using cosign2 with the developer (slot 2) scheme.
+fn sign_with_cosign2(input_path: &Path, cosign2_config: &Path, version: &str) -> Result<()> {
     let sdk = SdkRoot::discover().ok();
 
     let status = if let Some(cosign2) =
@@ -297,13 +335,13 @@ fn sign_application(elf_path: &Path, cosign2_config: &Path, version: &str) -> Re
             .arg("--developer")
             .arg("--in-place")
             .arg("-i")
-            .arg(elf_path)
+            .arg(input_path)
             .arg("--binary-version")
             .arg(version)
             .arg("-c")
             .arg(cosign2_config)
             .status()
-            .context("Failed to sign application")?
+            .context("Failed to sign bundle file")?
     } else if let Some(manifest) = sdk
         .as_ref()
         .map(|sdk| sdk.keyos_root().join("imports").join("cosign2").join("cosign2-bin").join("Cargo.toml"))
@@ -320,24 +358,26 @@ fn sign_application(elf_path: &Path, cosign2_config: &Path, version: &str) -> Re
             .arg("--developer")
             .arg("--in-place")
             .arg("-i")
-            .arg(elf_path)
+            .arg(input_path)
             .arg("--binary-version")
             .arg(version)
             .arg("-c")
             .arg(cosign2_config)
             .status()
-            .context("Failed to sign application")?
+            .context("Failed to sign bundle file")?
     } else {
         anyhow::bail!("cosign2 not found. Is the nix environment active?");
     };
 
     if !status.success() {
-        anyhow::bail!("Failed to sign application");
+        anyhow::bail!("Failed to sign {}", input_path.display());
     }
 
     Ok(())
 }
 
+/// Confirm app.elf carries a cosign2 header after signing, so an unsigned binary never ships as if
+/// it were signed.
 fn ensure_cosign2_header(elf_path: &Path) -> Result<()> {
     let mut file = fs::File::open(elf_path)
         .with_context(|| format!("Failed to inspect signed application {}", elf_path.display()))?;

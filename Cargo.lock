@@ -8893,6 +8893,7 @@ dependencies = [
  "app-manifest",
  "base64 0.22.1",
  "clap 4.5.41",
+ "cosign2",
  "hex",
  "hidapi",
  "png",

@@ -13,7 +13,6 @@ pub const BUNDLED_ICON_FILE: &str = "icon.bin";
 const ASSET_TOOL_BINARY: &str = "foundation-asset-tool";
 const ASSET_TOOL_ENV: &str = "FOUNDATION_ASSET_TOOL";
 const RESOURCES_DIR: &str = "resources";
-const LEGACY_BUILD_ASSETS_DIR: &str = "assets";
 const IMAGES_DIR: &str = "images";
 const FONTS_DIR: &str = "fonts";
 
@@ -28,19 +27,6 @@ fn stage_hardware_assets_with_tool(
     tool: &AssetTool,
 ) -> Result<PathBuf> {
     let resources_dir = output_dir.join(RESOURCES_DIR);
-    let legacy_assets_dir = output_dir.join(LEGACY_BUILD_ASSETS_DIR);
-
-    if resources_dir.exists() {
-        fs::remove_dir_all(&resources_dir).with_context(|| {
-            format!("Failed to clean app resources directory {}", resources_dir.display())
-        })?;
-    }
-    if legacy_assets_dir.exists() {
-        fs::remove_dir_all(&legacy_assets_dir).with_context(|| {
-            format!("Failed to clean legacy generated asset directory {}", legacy_assets_dir.display())
-        })?;
-    }
-
     fs::create_dir_all(&resources_dir)
         .with_context(|| format!("Failed to create app resources directory {}", resources_dir.display()))?;
 

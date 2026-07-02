@@ -156,6 +156,7 @@ mod tests {
             memory: Default::default(),
             syscall: Default::default(),
             qr_match_rules: Default::default(),
+            file_hashes: Default::default(),
         }
     }
 

@@ -330,7 +330,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     // size formatting below) are honored instead of always asking for English.
     let locale = state.borrow().settings.get_locale();
     let lang = locale.lang();
-    let apps = state.borrow().app_manager.get_installed_apps(lang);
+    let apps = state.borrow().app_manager.list_apps(lang, app_manager::AppFilter::third_party_only());
 
     let installed_apps = apps
         .into_iter()

@@ -11,6 +11,7 @@ anyhow = "1"
 app-manifest = { path = "../../os/app-manifest" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+cosign2 = { path = "../../imports/cosign2/cosign2" }
 hex = "0.4"
 hidapi = "2"
 png = "0.17"

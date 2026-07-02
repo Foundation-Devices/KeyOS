@@ -8,7 +8,7 @@ en = "Settings"
 template = ["gui-app", "fs-generic"]
 "os/app-manager" = [
     "LaunchAppBlocking",
-    "GetInstalledApps",
+    "ListApps",
     "GetAppIcon",
     "GetThirdPartyCertificates",
     "ImportThirdPartyCertificate",

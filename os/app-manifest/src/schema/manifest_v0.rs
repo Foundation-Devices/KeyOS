@@ -38,6 +38,11 @@ pub struct ManifestV0 {
     pub syscall: Vec<String>,
     #[serde(default)]
     pub qr_match_rules: Vec<QrMatchRuleV0>,
+    /// Hex sha256 of each signed bundle file (`app.elf`, `icon.bin`, `resources/...`),
+    /// keyed by bundle-relative path. Written by the build and covered by the manifest
+    /// signature; must be absent from the hand-edited `manifest.toml`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub file_hashes: BTreeMap<String, String>,
 }
 
 /// Frozen v0 API manifest schema. Same versioning rules as ManifestV0.

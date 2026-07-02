@@ -34,6 +34,8 @@ pub enum VerificationError {
 pub enum LaunchError {
     UnknownAppId,
     Verification(VerificationError),
+    NameRegistration,
+    UntrustedPublisher,
     OutOfMemory,
     InternalError,
 }
@@ -55,7 +57,9 @@ impl From<LaunchError> for AppManagerError {
     fn from(value: LaunchError) -> Self {
         match value {
             LaunchError::UnknownAppId => AppManagerError::UnknownAppId,
-            LaunchError::Verification(_) => AppManagerError::VerificationFailed,
+            LaunchError::Verification(_) | LaunchError::UntrustedPublisher => {
+                AppManagerError::VerificationFailed
+            }
             _ => AppManagerError::InternalError,
         }
     }

@@ -171,9 +171,11 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(build.status.success(), "build failed: {}", stderr(&build));
     let built_manifest = env.app_root().join("target").join("keyos").join("smoke-app").join("manifest.json");
     assert!(built_manifest.exists());
-    let built_manifest_contents = fs::read_to_string(&built_manifest).unwrap();
-    assert!(built_manifest_contents.contains("os/gui-server"));
-    assert!(built_manifest_contents.contains("os/settings"));
+    // The build signs the manifest, prepending a 2048-byte cosign2 header; the JSON follows it.
+    let built_manifest_bytes = fs::read(&built_manifest).unwrap();
+    let built_manifest_json = std::str::from_utf8(&built_manifest_bytes[2048..]).unwrap();
+    assert!(built_manifest_json.contains("os/gui-server"));
+    assert!(built_manifest_json.contains("os/settings"));
 
     let sideload = env
         .command_in(env.app_root())

@@ -105,7 +105,8 @@ fn send_ack(transport: &UsbDebugClient, cmd: Command, context: &str, timeout: Du
 }
 
 fn validate_manifest_json(manifest: &[u8]) -> Result<String> {
-    let json: Value = serde_json::from_slice(manifest).context("manifest.json is not valid JSON")?;
+    let json: Value =
+        serde_json::from_slice(manifest_json(manifest)?).context("manifest.json is not valid JSON")?;
     let app_id =
         json.get("appId").and_then(Value::as_str).context("manifest.json is missing string field appId")?;
     ensure!(
@@ -113,6 +114,15 @@ fn validate_manifest_json(manifest: &[u8]) -> Result<String> {
         "manifest.json is missing object field appName"
     );
     normalize_app_id(app_id)
+}
+
+/// The JSON inside the signed manifest. manifest.json is cosign2-signed, a header followed by the
+/// JSON; the signed bytes are uploaded to the device verbatim and only this metadata read needs the
+/// JSON. The device verifies the signature, so here we just drop the header.
+fn manifest_json(manifest: &[u8]) -> Result<&[u8]> {
+    manifest
+        .get(cosign2::Header::DEFAULT_SIZE..)
+        .context("manifest.json is too short to hold a cosign2 header")
 }
 
 fn normalize_app_id(app_id: &str) -> Result<String> {
@@ -193,8 +203,12 @@ mod tests {
     const VALID_APP_ID: &str = "0x00112233445566778899aabbccddeeff";
     const VALID_APP_ID_HEX: &str = "00112233445566778899aabbccddeeff";
 
+    /// A manifest as built: an opaque cosign2 header followed by the JSON.
     fn manifest_with_app_id(app_id: &str) -> Vec<u8> {
-        format!(r#"{{"appName":{{"en":"Test"}},"appId":"{app_id}"}}"#).into_bytes()
+        let json = format!(r#"{{"appName":{{"en":"Test"}},"appId":"{app_id}"}}"#);
+        let mut bundle = vec![0u8; cosign2::Header::DEFAULT_SIZE];
+        bundle.extend_from_slice(json.as_bytes());
+        bundle
     }
 
     #[test]
@@ -202,6 +216,13 @@ mod tests {
         let app_id = validate_manifest_json(&manifest_with_app_id(VALID_APP_ID)).unwrap();
 
         assert_eq!(app_id, VALID_APP_ID_HEX);
+    }
+
+    #[test]
+    fn manifest_without_cosign2_header_is_rejected() {
+        let error = validate_manifest_json(br#"{"appName":{"en":"Test"},"appId":"0x00"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("too short to hold a cosign2 header"));
     }
 
     #[test]

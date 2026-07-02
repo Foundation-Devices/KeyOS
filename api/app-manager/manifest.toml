@@ -8,11 +8,10 @@ SubscribeAppEvents = { id = 1, type = "archiveEvent" }
 LaunchApp = { id = 2, type = "scalar" }
 GetAppName = { id = 3, type = "blockingArchive" }
 GetQrMatchRules = { id = 4, type = "blockingArchive" }
-GetInstalledApps = { id = 5, type = "blockingArchive" }
+ListApps = { id = 5, type = "blockingArchive" }
 GetThirdPartyCertificates = { id = 6, type = "blockingArchive" }
 ImportThirdPartyCertificate = { id = 7, type = "blockingArchive" }
 RemoveThirdPartyCertificate = { id = 8, type = "blockingArchive" }
 GetAppIcon = { id = 9, type = "blockingArchive" }
-ListApps = { id = 10, type = "blockingArchive" }
 RefreshInstalledApps = { id = 11, type = "blockingScalar" }
 RemoveInstalledApp = { id = 12, type = "blockingArchive" }

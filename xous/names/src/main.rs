@@ -567,6 +567,7 @@ mod tests {
             memory: Vec::new(),
             syscall: Vec::new(),
             qr_match_rules: Vec::new(),
+            file_hashes: BTreeMap::new(),
         };
 
         for (index, server_name) in servers.iter().enumerate() {

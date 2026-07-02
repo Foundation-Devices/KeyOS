@@ -21,6 +21,10 @@ pub struct AppManifest {
     pub version: String,
     #[serde(default)]
     pub permissions: PermissionEntries,
+    /// Hex sha256 of each signed bundle file, keyed by bundle-relative path. Filled in by
+    /// the build after assets are staged; covered by the manifest signature.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub file_hashes: BTreeMap<String, String>,
 }
 
 impl AppManifest {
@@ -32,6 +36,7 @@ impl AppManifest {
             description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
             version: config.version.to_string(),
             permissions,
+            file_hashes: BTreeMap::new(),
         }
     }
 }

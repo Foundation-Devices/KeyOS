@@ -19,8 +19,8 @@ use app_manager::{
     RemoveThirdPartyCertificateResult, ThirdPartyCertificateInfo,
 };
 use app_manager::{
-    GetAppIcon, GetAppName, GetInstalledApps, GetQrMatchRules, InstalledAppInfo, LaunchApp,
-    LaunchAppBlocking, ListApps, RefreshInstalledApps, SubscribeAppEvents,
+    GetAppIcon, GetAppName, GetQrMatchRules, InstalledAppInfo, LaunchApp, LaunchAppBlocking, ListApps,
+    RefreshInstalledApps, SubscribeAppEvents,
 };
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
@@ -44,6 +44,7 @@ pub struct AppManagerServer {
     app_event_subscribers: Vec<ArchiveEventSubscriber<AppEvent>>,
     app_registry: AppRegistry,
     third_party_cert_store: ThirdPartyCertificateStore,
+    names: server::xous_names::XousNames,
     panic_message_buf: xous::MemoryRange,
 }
 
@@ -57,6 +58,7 @@ impl Default for AppManagerServer {
             app_event_subscribers: Vec::default(),
             app_registry: AppRegistry::default(),
             third_party_cert_store: ThirdPartyCertificateStore::default(),
+            names: server::xous_names::XousNames::new().expect("xous-names should be available at startup"),
             panic_message_buf,
         }
     }
@@ -69,18 +71,22 @@ impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<app_manager::AppQrMatchRules> {
-        self.app_registry.qr_match_rules()
+        self.app_registry.qr_match_rules(&self.third_party_cert_store.trusted_publishers())
     }
 }
 
-impl BlockingArchiveHandler<GetInstalledApps> for AppManagerServer {
+impl BlockingArchiveHandler<ListApps> for AppManagerServer {
     fn handle(
         &mut self,
-        msg: GetInstalledApps,
+        msg: ListApps,
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<InstalledAppInfo> {
-        self.app_registry.installed_apps(&msg.locale, &self.third_party_cert_store.trusted_publishers())
+        self.app_registry.list_apps(
+            &msg.locale,
+            &self.third_party_cert_store.trusted_publishers(),
+            &msg.filter,
+        )
     }
 }
 
@@ -288,17 +294,6 @@ impl BlockingArchiveHandler<GetAppName> for AppManagerServer {
     }
 }
 
-impl BlockingArchiveHandler<ListApps> for AppManagerServer {
-    fn handle(
-        &mut self,
-        msg: ListApps,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) -> Vec<app_manager::AppEntry> {
-        self.app_registry.list_apps(&msg.locale, &msg.filter)
-    }
-}
-
 impl ScalarHandler<ChildCrashed> for AppManagerServer {
     fn handle(
         &mut self,
@@ -350,30 +345,36 @@ impl AppManagerServer {
         // The registry tracks the bundle's fs `app.elf` path; the device launches
         // it from the image, the simulator from the staged host binary.
         let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
-        let check_trust =
-            cfg!(feature = "production") || self.app_registry.requires_debug_signature_trust(app_id);
-        // Imported developer certificates must never authorize a built-in AppId.
-        // Production firmware still enforces Foundation signer trust via check_trust.
-        let trusted_pubkeys = if self.app_registry.is_built_in_app(app_id) {
-            Vec::new()
-        } else {
-            self.third_party_cert_store.trusted_pubkeys()
-        };
 
-        #[cfg(keyos)]
-        let verified = crate::launch::verify_app(&app_id, &elf_path, &trusted_pubkeys, check_trust)?;
-        #[cfg(not(keyos))]
-        let host_elf = crate::launch::host_elf_path(&elf_path).ok_or(LaunchError::UnknownAppId)?;
+        // Trust is dynamic: a sideloaded app launches only while its signer matches a
+        // currently-valid publisher cert, so importing or removing a cert takes effect
+        // without a rescan. Built-in and hosted apps are always launchable.
+        if !self.app_registry.is_launchable(app_id, &self.third_party_cert_store.trusted_publishers()) {
+            return Err(LaunchError::UntrustedPublisher);
+        }
 
-        // Register only after verification, so a failed trust check can't expose
-        // the app's resources or claim its names.
+        // Register names and resources only after the trust check, so an untrusted app never
+        // claims server names or resource access.
+        let manifest_bytes = self.app_registry.manifest_bytes(app_id).ok_or(LaunchError::UnknownAppId)?;
+        self.names.add_manifest(manifest_bytes).map_err(|e| {
+            error!("could not register manifest names for app 0x{app_id}: {e:?}");
+            LaunchError::NameRegistration
+        })?;
         self.register_app_resources(app_id)?;
-        self.app_registry.register_app_names(app_id);
 
+        // The manifest's signed file hashes guard app.elf and the resources at launch; on the
+        // simulator nothing is signed, so the staged host binary just runs.
         #[cfg(keyos)]
-        let pid = verified.launch()?;
+        let pid = {
+            let file_hashes = self.app_registry.file_hashes(app_id).ok_or(LaunchError::UnknownAppId)?;
+            let signer = self.app_registry.elf_signer(app_id);
+            crate::launch::verify_and_launch(&app_id, &elf_path, &file_hashes, signer)?
+        };
         #[cfg(not(keyos))]
-        let pid = launch_app(&app_id, &host_elf, &trusted_pubkeys, check_trust)?;
+        let pid = {
+            let host_elf = crate::launch::host_elf_path(&elf_path).ok_or(LaunchError::UnknownAppId)?;
+            launch_app(&app_id, &host_elf)?
+        };
 
         self.app_registry.register_running_app(pid, app_id, sender);
 

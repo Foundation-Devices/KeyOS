@@ -11,7 +11,7 @@
     installPhase = ''
       cp -r . $out
     '';
-    outputHash = "sha256-H0Eb1fsPgd4Yu9qGiKW3SHRr/K1VOoNxGBWqKNm9I5I=";
+    outputHash = "sha256-h9QFHyHO0bvQEPZ5sIbrTj0HOg5YKoqse0O2FR87yRI=";
     outputHashMode = "recursive";
   };
 in {

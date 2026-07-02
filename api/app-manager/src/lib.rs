@@ -71,30 +71,13 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.send_blocking_archive(GetQrMatchRules)
     }
 
-    /// List installed apps, optionally filtered. Pass `AppFilter::default()`
-    /// (or `AppFilter { is_flux: None }`) for "everything", `AppFilter::flux_only()`
-    /// for Flux child apps, etc.
-    pub fn list_apps(&self, locale: &str, filter: AppFilter) -> Vec<AppEntry>
+    /// List installed apps, optionally narrowed by `filter`. Pass `AppFilter::default()`
+    /// for everything, `AppFilter::third_party_only()` for sideloaded apps, etc.
+    pub fn list_apps(&self, locale: &str, filter: AppFilter) -> Vec<InstalledAppInfo>
     where
         P: MessageAllowed<ListApps>,
     {
         self.0.send_blocking_archive(ListApps { locale: locale.to_string(), filter })
-    }
-
-    /// Convenience wrapper around [`Self::list_apps`] for callers that only
-    /// want Flux-child apps (the original `list_flux_apps` use case).
-    pub fn list_flux_apps(&self, locale: &str) -> Vec<AppEntry>
-    where
-        P: MessageAllowed<ListApps>,
-    {
-        self.list_apps(locale, AppFilter::flux_only())
-    }
-
-    pub fn get_installed_apps(&self, locale: &str) -> Vec<InstalledAppInfo>
-    where
-        P: MessageAllowed<GetInstalledApps>,
-    {
-        self.0.send_blocking_archive(GetInstalledApps { locale: locale.to_string() })
     }
 
     pub fn get_app_icon(&self, app_id: &str) -> Option<Vec<u8>>
