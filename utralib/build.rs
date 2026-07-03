@@ -94,7 +94,7 @@ fn main() {
     #[cfg(not(feature = "hosted"))]
     {
         let svd_file_path = std::path::Path::new(&svd_filename);
-        println!("cargo:rerun-if-changed={}", svd_file_path.canonicalize().unwrap().display());
+        println!("cargo:rerun-if-changed={}", svd_filename);
 
         // Regenerate the utra file in RAM.
         let mut dest_vec = vec![];
