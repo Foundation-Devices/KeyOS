@@ -161,6 +161,11 @@ source = "../xous/xous-rs"
 dest = "lib/keyos/xous/xous-rs"
 
 [[copy]]
+source = "../imports/getrandom"
+dest = "lib/keyos/imports/getrandom"
+filter = "cargo_package"
+
+[[copy]]
 source = "crates/cli/templates"
 dest = "lib/templates"
 

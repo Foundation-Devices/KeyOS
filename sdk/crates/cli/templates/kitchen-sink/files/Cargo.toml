@@ -18,3 +18,8 @@ foundation-themes = { path = "{{sdk_keyos_root}}/sdk/crates/foundation-themes" }
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "{{sdk_keyos_root}}/slint-keyos-platform/build" }
+
+# Randomness is pre-wired: add `getrandom = "0.2"` (or `rand = "0.8"`) and calls
+# route to the TRNG on device. Stay on the getrandom 0.2 line; 0.3+ is uncovered.
+[patch.crates-io]
+getrandom = { path = "{{sdk_keyos_root}}/imports/getrandom" }
