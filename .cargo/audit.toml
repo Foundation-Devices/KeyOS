@@ -1,6 +1,12 @@
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071", # rsa Marvin Attack - no fix available yet
+    # quick-xml <0.41 DoS pair (0194 quadratic attr-check, 0195 NsReader alloc). quick-xml
+    # enters only via wayland-scanner: 0.31.10 (winit backend of the simulator/slintbook) and
+    # 0.30.1 (softbuffer fork feeding gui-server). Build-time/host, never in device firmware,
+    # unfixable while wayland-scanner pins <0.41. Remove under SFT-7201.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 # Ignore informational warnings (unmaintained, unsound notices)
 informational_warnings = []

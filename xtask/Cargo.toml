@@ -33,7 +33,7 @@ serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.41"
 sha2 = "0.10.8"
 slint-keyos-platform-build = { path = "../slint-keyos-platform/build" }
-svd2utra = "0.1.11"
+svd2utra = { version = "0.1.15", path = "../svd2utra" }
 tar = { workspace = true }
 usb-debug-protocol = { workspace = true, features = ["client"] }
 utralib = { workspace = true }

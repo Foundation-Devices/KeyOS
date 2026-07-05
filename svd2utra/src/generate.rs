@@ -1,6 +1,7 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+use quick_xml::escape::unescape;
 use quick_xml::events::{attributes::Attribute, Event};
 use quick_xml::name::QName;
 use quick_xml::reader::Reader;
@@ -109,7 +110,10 @@ fn extract_contents<T: BufRead>(reader: &mut Reader<T>) -> Result<String, ParseE
     let mut buf = Vec::new();
     let contents = reader.read_event_into(&mut buf).map_err(|_| ParseError::UnexpectedTag)?;
     match contents {
-        Event::Text(t) => t.unescape().map(|s| s.to_string()).map_err(|_| ParseError::NonUTF8),
+        Event::Text(t) => {
+            let text = t.decode().map_err(|_| ParseError::NonUTF8)?;
+            unescape(&text).map(|s| s.into_owned()).map_err(|_| ParseError::NonUTF8)
+        }
         _ => Err(ParseError::UnexpectedTag),
     }
 }
