@@ -28,6 +28,7 @@ mod blue_wallet;
 mod btcpay;
 mod bull;
 // mod casa;
+mod coconut_wallet;
 mod coinbits;
 mod electrum;
 // mod envoy;
@@ -47,6 +48,7 @@ use {
     btcpay::CONNECTOR as BtcPay,
     bull::CONNECTOR as Bull,
     // casa::CONNECTOR as Casa,
+    coconut_wallet::CONNECTOR as CoconutWallet,
     coinbits::CONNECTOR as Coinbits,
     electrum::CONNECTOR as Electrum,
     // envoy::CONNECTOR as Envoy,
@@ -540,6 +542,7 @@ register_wallets! {
     BtcPay,
     Bull,
     // Casa,
+    CoconutWallet,
     Coinbits,
     Electrum,
     FullyNoded,
@@ -759,6 +762,10 @@ pub struct GenericFormat {
     account: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     fw_version: Option<String>,
+    /// Identifies the exporting device (e.g. "passport-prime", "passport-core").
+    /// Only emitted by connectors that opt in; importers may use it to label the wallet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     #[serde(flatten)]
     paths: BTreeMap<String, GenericPathFormat>,
 }
@@ -768,6 +775,16 @@ pub fn generic_format(
     id: &AccountId,
     cfg: &NgAccountConfig,
     export_fw_version: bool,
+) -> Result<String, anyhow::Error> {
+    generic_format_with_model(state, id, cfg, export_fw_version, None)
+}
+
+pub fn generic_format_with_model(
+    state: &AppState,
+    id: &AccountId,
+    cfg: &NgAccountConfig,
+    export_fw_version: bool,
+    model: Option<&str>,
 ) -> Result<String, anyhow::Error> {
     let network_int = network_to_u32(cfg.network);
 
@@ -817,6 +834,7 @@ pub fn generic_format(
         xfp,
         account: cfg.index,
         fw_version: if export_fw_version { Some(get_version_info(state)) } else { None },
+        model: model.map(String::from),
         paths,
     };
 
