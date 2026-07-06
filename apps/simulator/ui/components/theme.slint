@@ -11,4 +11,70 @@ export global Theme {
     // teal gradient runs blue-500 (0%) -> teal-400 (100%).
     in-out property <color> blue-500: #009db9;
     in-out property <color> teal-400: #33b7c1;
+
+    // Window chrome. The dark artwork image is only shown in dark mode; light
+    // mode uses this flat gradient instead.
+    pure public function window-background(dark: bool) -> brush {
+        return dark ? @linear-gradient(180deg, #000000 0%, #000000 100%) : @linear-gradient(180deg, #eceae7 0%, #ddd8d4 100%);
+    }
+
+    // Panel (section container).
+    pure public function panel-surface(dark: bool) -> brush {
+        return dark ? @linear-gradient(180deg, #0a0a0b 0%, #0d0d0e 100%) : @linear-gradient(180deg, #f7f5f3 0%, #eceae7 100%);
+    }
+
+    // Gradient outline: a light rim at the top settling into a constant tone
+    // from 55% down (Figma: #BFAFA9 0% -> #3D322E 55% -> #3D322E 100%).
+    pure public function panel-border(dark: bool) -> brush {
+        return dark ? @linear-gradient(180deg, #bfafa9 0%, #3d322e 55%, #3d322e 100%) : @linear-gradient(180deg, #ffffff 0%, #b5aaa4 55%, #b5aaa4 100%);
+    }
+
+    pure public function panel-shadow(dark: bool) -> color {
+        return dark ? #0000003d : #00000024;
+    }
+
+    pure public function heading(dark: bool) -> color {
+        return dark ? #e3e2e2 : #393534;
+    }
+
+    // Engraved hairline: a dark line over a light one.
+    pure public function divider-dark-line(dark: bool) -> color {
+        return dark ? #231f20 : #c4bcb7;
+    }
+
+    pure public function divider-light-line(dark: bool) -> color {
+        return dark ? #747374 : #ffffff;
+    }
+
+    // Segmented switch.
+    pure public function track-border(dark: bool) -> color {
+        return dark ? #1c1c1c : #c6c0bc;
+    }
+
+    pure public function track-background(dark: bool) -> brush {
+        return dark ? @linear-gradient(0deg, #383838 0%, #2e2e2e 68%) : @linear-gradient(0deg, #fbfaf9 0%, #e3dfdc 68%);
+    }
+
+    pure public function chip-border(dark: bool) -> color {
+        return dark ? #262626 : #0000001a;
+    }
+
+    pure public function option-foreground(dark: bool) -> color {
+        return dark ? #959394 : #8a8480;
+    }
+
+    // Faked inner-shadow tint for the inset track and selected chip.
+    pure public function inner-shadow(dark: bool) -> color {
+        return dark ? #00000040 : #00000026;
+    }
+
+    // Action tiles (metallic gradient stays the same in both modes; only the
+    // rim border changes so the tile keeps definition on a light panel).
+    pure public function tile-border(dark: bool) -> color {
+        return dark ? #eae9e0cc : #a39d96cc;
+    }
+
+    pure public function tile-border-pressed(dark: bool) -> color {
+        return dark ? #cfcec5cc : #968f88cc;
+    }
 }

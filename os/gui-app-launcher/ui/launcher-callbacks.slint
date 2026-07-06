@@ -3,27 +3,67 @@
 
 import { DropdownModel } from "@ui/widgets.slint";
 
-export struct HiddenApp {
+export struct LauncherItemData {
+    id: string,
     label: string,
-    app-id: string,
+    icon-name: string,
+    // Key for fetching a bundled app icon via LauncherCallbacks.app-icon;
+    // empty for items that render a themed icon by name instead.
+    icon-key: string,
+    enabled: bool,
+    slot-index: int,
+    can-remove: bool,
+}
+
+export struct LauncherPageData {
+    id: string,
+    items: [LauncherItemData],
 }
 
 export global LauncherCallbacks {
-    callback app-clicked(length, length, string);
+    callback item-clicked(length, length, string);
+    callback move-item(string, int, string, int);
+    callback remove-item-requested(string);
     callback scan-clicked(bool);
     callback bitcoin-scrub-update(length, length);
     callback bitcoin-scrub-end();
     callback universal-qr-continue(string);
     pure callback app-id-to-title(string) -> string;
+    pure callback app-icon(string) -> image;
 }
 
 export global State {
-    in property <string> loading-app-id: "";
+    in-out property <string> loading-item-id: "";
     in property <bool> update-resume-active: false;
-    in property <bool> developers-welcome-popup-open: false;
+    in-out property <bool> rearrange-mode: false;
+    in-out property <int> jiggle-step: 0;
+    in-out property <int> current-page: 0;
+    in-out property <string> drag-source-collection-id: "";
+    in-out property <bool> drag-overlay-visible: false;
+    in-out property <length> drag-overlay-abs-x: 0px;
+    in-out property <length> drag-overlay-abs-y: 0px;
+    in-out property <bool> drag-overlay-show-label: true;
+    in-out property <LauncherItemData> drag-overlay-item: {
+        id: "",
+        label: "",
+        icon-name: "",
+        icon-key: "",
+        enabled: true,
+        slot-index: 0,
+        can-remove: false,
+    };
+    in-out property <string> drag-hover-collection-id: "";
+    in-out property <int> drag-hover-index: -1;
+    // Finger position in window coordinates while a drag is active.
+    in-out property <length> drag-pointer-abs-x: 0px;
+    in-out property <length> drag-pointer-abs-y: 0px;
+
+    in property <[LauncherPageData]> pages: [];
+    in property <[LauncherItemData]> dock-items: [];
 
     in property <bool> is-price-stale: true;
     in property <bool> is-price-expired: true;
+    in property <bool> is-price-positive: true;
     in property <string> last-update-time: "";
     in property <bool> is-envoy-connected: false;
     in property <image> bitcoin-graph-image;
@@ -38,7 +78,6 @@ export global State {
     in property <string> bitcoin-point-date: "";
     in property <string> bitcoin-point-time: "";
 
-    in property <[HiddenApp]> hidden-apps: [];
     in-out property <[DropdownModel]> dropdown-model;
 }
 

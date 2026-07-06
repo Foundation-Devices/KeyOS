@@ -27,7 +27,7 @@ This template creates a basic GUI app with:
   - `app.slint` - Main app window using `@ui/card.slint` and `@ui/button.slint`
   - `callbacks.slint` - Callback definitions
 - `i18n/` - Internationalization files (English and Spanish)
-- `resources/icon.svg` - App icon image converted into the hardware app icon
+- `resources/icon.svg` - 96x96px app icon image converted into the hardware app icon
 - `resources/theme.json` - App-local theme opened by `foundation theme`
 - `resources/images/checkmark.svg` - Sample app-owned image, loaded with `Images.image("checkmark")`
 
@@ -50,7 +50,7 @@ After creating a project from this template, you can:
 
 1. Modify `ui/app.slint` to change the layout or add more UI elements
 2. Edit `i18n/en.json` and `i18n/es.json` to update text
-3. Replace `resources/icon.svg` with your own icon
+3. Replace `resources/icon.svg` with your own 96x96px icon
 4. Run `foundation theme` to edit `resources/theme.json`
 5. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
 6. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties

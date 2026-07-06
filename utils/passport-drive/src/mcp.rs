@@ -21,7 +21,10 @@ use usb_debug_protocol::{
     Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient, INSTALL_CERTIFICATE_BYTES_MAX,
 };
 
-use crate::{LOG_TERMINATOR, SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::{
+    launch_app_failure_message, launch_app_transport_error_message, LOG_TERMINATOR, SCREEN_HEIGHT,
+    SCREEN_WIDTH,
+};
 
 const MAX_LOG_LINES: usize = 2000;
 const TAP_HOLD_MS: u16 = 50;
@@ -382,6 +385,11 @@ fn tool_definitions() -> Value {
             "description": "Probe the Developer Mode gated usb-debug interface. Returns 'enabled' if reachable; otherwise the request fails.",
             "inputSchema": { "type": "object", "properties": {}, "required": [] }
         },
+        {
+            "name": "get_trusted_publisher_count",
+            "description": "Return the number of currently trusted publisher certificates installed on the device.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        },
         // Kernel debug
         {
             "name": "send_kernel_command",
@@ -461,6 +469,7 @@ fn handle_tool(state: &mut McpState, name: &str, args: &Value) -> Value {
         "get_process_list" => handle_get_process_list(state),
         "get_version" => handle_get_version(state),
         "get_developer_mode" => handle_get_developer_mode(state),
+        "get_trusted_publisher_count" => handle_get_trusted_publisher_count(state),
         _ => error_result(&format!("Unknown tool: {name}")),
     }
 }
@@ -750,6 +759,48 @@ fn handle_get_developer_mode(state: &McpState) -> Value {
     }
 }
 
+fn handle_get_trusted_publisher_count(state: &McpState) -> Value {
+    let dev = match state.require_device() {
+        Ok(d) => d,
+        Err(e) => return error_result(&e),
+    };
+
+    match dev.send(Command::GetTrustedPublisherCount, Duration::from_secs(5)) {
+        Ok(payload) => match trusted_publisher_count_from_payload(&payload) {
+            Ok(count) => text_result(&count.to_string()),
+            Err(e) => error_result(&e),
+        },
+        Err(e) => error_result(&format!("get_trusted_publisher_count request failed: {e}")),
+    }
+}
+
+fn trusted_publisher_count_from_payload(payload: &[u8]) -> Result<u16, String> {
+    let bytes: [u8; 2] = payload.try_into().map_err(|_| {
+        format!("get_trusted_publisher_count: expected 2 payload bytes, got {}", payload.len())
+    })?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trusted_publisher_count_from_payload;
+
+    #[test]
+    fn trusted_publisher_count_decodes_little_endian_payload() {
+        assert_eq!(trusted_publisher_count_from_payload(&[0x34, 0x12]).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn trusted_publisher_count_rejects_short_payload() {
+        assert!(trusted_publisher_count_from_payload(&[0x34]).is_err());
+    }
+
+    #[test]
+    fn trusted_publisher_count_rejects_long_payload() {
+        assert!(trusted_publisher_count_from_payload(&[0x34, 0x12, 0x00]).is_err());
+    }
+}
+
 fn handle_get_process_list(state: &McpState) -> Value {
     let dev = match state.require_device() {
         Ok(d) => d,
@@ -807,10 +858,17 @@ fn handle_launch_app(state: &McpState, args: &Value) -> Value {
                     "App is already running with PID {}. Newly uploaded code will not run until the app is closed and launched again.",
                     result.pid
                 )),
+                status => {
+                    let reason = launch_app_failure_message(status).unwrap_or("unknown launch failure");
+                    error_result(&format!("Launch failed: {reason}"))
+                }
             },
             Err(e) => error_result(&format!("Invalid launch_app response: {e}")),
         },
-        Err(e) => error_result(&format!("Failed to launch app: {e}")),
+        Err(e) => error_result(&format!(
+            "Failed to launch app: {}",
+            launch_app_transport_error_message(&e.to_string())
+        )),
     }
 }
 

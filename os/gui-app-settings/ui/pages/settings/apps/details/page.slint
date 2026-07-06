@@ -248,6 +248,7 @@ export component AppDetailsPage inherits BasePage {
             Button {
                 label: TR2.lookup(TrId.AppsRemoveApp);
                 importance: Importance.negative;
+                visible: props.can_remove;
                 clicked => {
                     root.remove-confirm-visible = true;
                 }

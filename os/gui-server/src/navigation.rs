@@ -90,6 +90,9 @@ impl Gui {
                 app_manager::AppManagerError::VerificationFailed => {
                     RunAppResponse::LaunchFailed { reason: LaunchFailureReason::SignatureRejected }
                 }
+                app_manager::AppManagerError::NoTrustedPublisherCertificate => RunAppResponse::LaunchFailed {
+                    reason: LaunchFailureReason::NoTrustedPublisherCertificate,
+                },
                 _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
             }
         })?;

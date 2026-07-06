@@ -83,6 +83,22 @@ impl PassportDriveMcpClient {
         Ok(tool_text(&result).unwrap_or_else(|| result.to_string()))
     }
 
+    pub fn trusted_publisher_count(&mut self) -> Result<u16> {
+        let result = self.call_tool("get_trusted_publisher_count", json!({}))?;
+        let text = tool_text(&result).context("get_trusted_publisher_count returned an empty reply")?;
+        text.trim()
+            .parse::<u16>()
+            .with_context(|| format!("unexpected get_trusted_publisher_count reply: {text:?}"))
+    }
+
+    pub fn ensure_trusted_publisher_installed(&mut self) -> Result<()> {
+        let count = self.trusted_publisher_count()?;
+        if count == 0 {
+            bail!("no trusted publisher certificate is installed on the device");
+        }
+        Ok(())
+    }
+
     fn spawn_candidate(command: &OsStr) -> Result<Self> {
         let mut child = Command::new(command)
             .arg("mcp")

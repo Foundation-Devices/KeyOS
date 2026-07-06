@@ -12,12 +12,13 @@ pub mod signing;
 
 // Re-export main types
 pub use config::{
-    AppConfig, AppId, AppIdError, ConfigError, PermissionEntries, PermissionsConfig, PublisherConfig,
-    APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
+    validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError, ConfigError, IconDimensions,
+    PermissionEntries, PermissionsConfig, PublisherConfig, APP_CONFIG_FILE, APP_ICON_SIZE_PX,
+    DISPLAY_APP_NAME_ALLOWED_CHARS, PERMISSION_TEMPLATES_FILE,
 };
 pub use context::{ContextError, ProjectContext};
 pub use errors::{FoundationCoreError, FoundationCoreResult};
-pub use manifest::AppManifest;
+pub use manifest::{app_manifest_from_config, AppManifest};
 pub use sdk::{SdkError, SdkLayout, SdkRoot};
 pub use signing::{
     configured_signing_identities, foundation_dir, list_signing_identities, resolve_identity_cosign2_config,

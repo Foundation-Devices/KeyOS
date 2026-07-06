@@ -1,52 +1,49 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT
 
-//! manifest.json types
+//! Manifest conversion from SDK app config to the shared KeyOS manifest schema.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
+use app_manifest::{Locale, Manifest};
 
 use crate::config::{AppConfig, PermissionEntries};
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AppManifest {
-    pub app_name: BTreeMap<String, String>,
-    pub app_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publisher: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub version: String,
-    #[serde(default)]
-    pub permissions: PermissionEntries,
-    /// Hex sha256 of each signed bundle file, keyed by bundle-relative path. Filled in by
-    /// the build after assets are staged; covered by the manifest signature.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub file_hashes: BTreeMap<String, String>,
+pub type AppManifest = Manifest;
+
+pub fn app_manifest_from_config(config: &AppConfig, permissions: PermissionEntries) -> AppManifest {
+    AppManifest {
+        app_name: config
+            .manifest_app_names()
+            .into_iter()
+            .map(|(locale, name)| (Locale(locale), name))
+            .collect(),
+        app_id: config.app_id.as_bytes().try_into().expect("AppConfig validation enforces 16-byte app IDs"),
+        publisher: config.publisher.name_value().map(ToOwned::to_owned),
+        description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
+        version: Some(config.version.to_string()),
+        servers: BTreeMap::new(),
+        fixed_sids: BTreeMap::new(),
+        permissions: permissions_to_sets(permissions),
+        memory: Vec::new(),
+        syscall: Vec::new(),
+        qr_match_rules: Vec::new(),
+        file_hashes: BTreeMap::new(),
+    }
 }
 
-impl AppManifest {
-    pub fn from_config(config: &AppConfig, permissions: PermissionEntries) -> Self {
-        Self {
-            app_name: config.manifest_app_names(),
-            app_id: config.app_id.as_hex().to_lowercase(),
-            publisher: config.publisher.name_value().map(ToOwned::to_owned),
-            description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
-            version: config.version.to_string(),
-            permissions,
-            file_hashes: BTreeMap::new(),
-        }
-    }
+fn permissions_to_sets(permissions: PermissionEntries) -> BTreeMap<String, BTreeSet<String>> {
+    permissions.into_iter().map(|(server, messages)| (server, messages.into_iter().collect())).collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
-    use super::AppManifest;
+    use app_manifest::Locale;
+
+    use super::app_manifest_from_config;
     use crate::config::{AppConfig, AppId, PermissionEntries, PermissionsConfig, PublisherConfig};
 
     #[test]
@@ -69,13 +66,22 @@ mod tests {
         let permissions: PermissionEntries =
             BTreeMap::from([("os/settings".to_string(), vec!["GetDeviceName".to_string()])]);
 
-        let manifest = AppManifest::from_config(&config, permissions.clone());
+        let manifest = app_manifest_from_config(&config, permissions);
 
-        assert_eq!(manifest.app_name, BTreeMap::from([("en".to_string(), "Demo Friendly".to_string())]));
-        assert_eq!(manifest.app_id, "0xaabbccddeeff00112233445566778899");
+        assert_eq!(
+            manifest.app_name,
+            BTreeMap::from([(Locale("en".to_string()), "Demo Friendly".to_string())])
+        );
+        assert_eq!(
+            manifest.app_id,
+            [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99]
+        );
         assert_eq!(manifest.publisher.as_deref(), Some("Demo Corp"));
         assert_eq!(manifest.description.as_deref(), Some("Demo"));
-        assert_eq!(manifest.version, "0.1.0");
-        assert_eq!(manifest.permissions, permissions);
+        assert_eq!(manifest.version.as_deref(), Some("0.1.0"));
+        assert_eq!(
+            manifest.permissions,
+            BTreeMap::from([("os/settings".to_string(), BTreeSet::from(["GetDeviceName".to_string()]))])
+        );
     }
 }

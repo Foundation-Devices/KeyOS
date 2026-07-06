@@ -11,8 +11,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use foundation_core::{
-    configured_signing_identities, resolve_identity_cosign2_config, AppConfig, AppManifest, ProjectContext,
-    SdkRoot,
+    app_manifest_from_config, configured_signing_identities, resolve_identity_cosign2_config, AppConfig,
+    ProjectContext, SdkRoot,
 };
 use foundation_ui::Prompts;
 
@@ -37,8 +37,7 @@ pub fn execute(release: bool) -> Result<()> {
 
     // Find and read app-config.toml
     println!("Reading app-config.toml...");
-    let project = ProjectContext::discover()
-        .context("app-config.toml not found. Are you in a Foundation app directory?")?;
+    let project = ProjectContext::discover()?;
     let project_root = project.root.as_path();
     let config = &project.config;
 
@@ -291,7 +290,7 @@ fn generate_manifest(
     output: &Path,
     file_hashes: BTreeMap<String, String>,
 ) -> Result<()> {
-    let mut manifest = AppManifest::from_config(config, config.resolved_permissions(project_root)?);
+    let mut manifest = app_manifest_from_config(config, config.resolved_permissions(project_root)?);
     manifest.file_hashes = file_hashes;
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(output, json)?;

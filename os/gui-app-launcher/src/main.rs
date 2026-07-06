@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,16 +20,22 @@ use gui_server_api::{
 };
 use haptics::HapticPattern;
 use jiff::fmt::strtime;
+use layout::{
+    page_collection_id, LauncherAction, LauncherConfig, LauncherItem, LauncherPage, LauncherPageItem,
+    LauncherTarget, BITCOIN_APP_ID, SCAN_QR_ACTION_ID, SETTINGS_APP_ID_STR,
+};
 use slint_keyos_platform::{
     app,
     file_backed::JsonBacked,
-    navigation::open_qr_scanner,
+    navigation::async_open_qr_scanner,
+    raw_image::raw_image_from_bytes,
     settings::{
         global::{OnboardingStatus, SystemTheme, TimeZone, UseStandardTimeFormat},
         messages::SubscribeSystemTheme,
     },
-    skia::{GraphPoint, PricePoint},
-    slint::{ComponentHandle, Timer, VecModel},
+    skia::{scale_image, GraphPoint, PricePoint},
+    sleep,
+    slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel},
     spawn_local, subscribe_archive, subscribe_scalar, StoredValue,
 };
 use update::messages::ProgressUpdate;
@@ -35,30 +43,52 @@ use xous::{app_id_to_pid, current_pid, AppId, PID};
 
 use crate::{fs_permissions::FileSystemPermissions, gui_permissions::GuiPermissions};
 
+mod layout;
+
 const LAUNCH_ANIMATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STALE_TIME: Duration = Duration::from_secs(60 * 2); // 2 minutes
 const EXPIRE_TIME_MINUTES: u64 = 60;
 const EXPIRE_TIME: Duration = Duration::from_secs(EXPIRE_TIME_MINUTES * 60); // 1 hour
 const GRAPH_WINDOW_MINUTES: u64 = 100;
 const REDRAW_TIME_SECS: u64 = 60; // 1 minute
-const GRAPH_WIDTH: u32 = 402;
-const GRAPH_HEIGHT: u32 = 76;
+const GRAPH_WIDTH: u32 = 432;
+const GRAPH_HEIGHT: u32 = 88;
 const GRAPH_MAX_HEIGHT: u32 = GRAPH_HEIGHT - 10;
+const APP_ICON_SIZE: u32 = 64;
 const GRAPH_WINDOW_SECS: u64 = 60 * GRAPH_WINDOW_MINUTES;
 const PERSISTENT_STATE_PATH: &str = "persistent-state.json";
+const FILES_APP_ID: &str = "0x46696c652042726f7773657200000000";
+const AUTHENTICATOR_APP_ID: &str = "0x41757468656e74696361746f72203246";
+const KEYS_APP_ID: &str = "0x5365637572697479204b657973000000";
+const VAULT_APP_ID: &str = "0x53656564205661756c74000000000000";
+/// Themed icon for apps that ship without a bundled icon.
+const FALLBACK_APP_ICON: &str = "grid-view";
 
-/// Maps app ID hex strings (as they appear in manifest.toml) to icon names used in the dropdown.
-const APP_ID_ICONS: &[(&str, &str)] = &[
-    ("0x426974636f696e2057616c6c65740000", "bitcoin"), // Bitcoin Wallet
-    ("0x41757468656e74696361746f72203246", "shield"),  // 2FA Authenticator
-    ("0x53656564205661756c74000000000000", "acorn"),   // Seed Vault
+/// Built-in user-facing apps that should appear in the launcher. They ship
+/// without bundled icons, so map them to themed icon names. Sideloaded apps are
+/// returned by the app manager with their bundled metadata.
+const KNOWN_APP_ICONS: &[(&str, &str)] = &[
+    (FILES_APP_ID, "folder"),
+    (VAULT_APP_ID, "acorn"),
+    (KEYS_APP_ID, "key"),
+    (AUTHENTICATOR_APP_ID, "shield"),
+    (BITCOIN_APP_ID, "bitcoin"),
+    (SETTINGS_APP_ID_STR, "cog"),
 ];
 
-// Graph offset within the card for stripe alignment:
-// X: 2px (card border) + 8px (padding) = 10px
-// Y: 2px (card border) + 8px (padding) + 61px (header) = 71px
-const GRAPH_OFFSET_X: f32 = 10.0;
-const GRAPH_OFFSET_Y: f32 = 71.0;
+fn known_app_label(app_id: &str) -> Option<String> {
+    let tr_id = match app_id {
+        FILES_APP_ID => TrId::MainFileBrowser,
+        VAULT_APP_ID => TrId::MainSeedVault,
+        KEYS_APP_ID => TrId::MainSecurityKeys,
+        AUTHENTICATOR_APP_ID => TrId::Main2FaCodes,
+        BITCOIN_APP_ID => TrId::MainBitcoin,
+        SETTINGS_APP_ID_STR => TrId::MainSettings,
+        _ => return None,
+    };
+    Some(tr::lookup_id(tr_id).to_string())
+}
+
 const FLATLINE_POINTS: [PricePoint; 2] = [
     PricePoint { price: 500, timestamp: 0, is_pad: true },
     PricePoint { price: 500, timestamp: 1, is_pad: true },
@@ -91,6 +121,7 @@ fn sort_universal_qr_matches(matched: &mut Vec<(DropdownModel, UniversalQrMatch)
 
 pub struct AppState {
     pub gui: Arc<GuiApi>,
+    pub app_manager: AppManagerApi,
     pub ui: slint::Weak<AppWindow>,
     pub ql_status: QlStatus,
     pub haptics_api: HapticsApi,
@@ -98,6 +129,7 @@ pub struct AppState {
     pub is_fs_unavailable: bool,
     pub is_visible: bool,
     pub persistent: JsonBacked<PersistentState, FileSystemPermissions>,
+    pub(crate) launcher: LauncherConfig,
     pub rendered_prices: Vec<PricePoint>,
     pub last_scrubbed_point: Option<(u64, u32)>,
     pub last_scrub_update_time: Option<Instant>,
@@ -118,6 +150,16 @@ pub struct PersistentState {
     /// Empty on first launch / for legacy persisted state.
     #[serde(default)]
     pub currency_code: String,
+    /// Saved item ordering by page index.
+    #[serde(default)]
+    pub page_orders: Vec<Vec<String>>,
+    /// Saved dock item ordering.
+    #[serde(default)]
+    pub dock_order: Vec<String>,
+    /// Version of the layout scheme `page_orders`/`dock_order` was written with;
+    /// orders from older schemes are ignored (see [`layout::LAYOUT_VERSION`]).
+    #[serde(default)]
+    pub layout_version: u32,
 }
 
 impl AppState {
@@ -130,9 +172,12 @@ impl AppState {
         if persistent.currency_code.is_empty() && !persistent.prices.is_empty() {
             persistent.guard().prices.clear();
         }
+        let app_manager = AppManagerApi::default();
+        let launcher = LauncherConfig::from_persistent(&persistent, discover_launcher_items(&app_manager));
         let settings = SettingsApi::default();
         Self {
             gui,
+            app_manager,
             ui,
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             haptics_api: HapticsApi::default(),
@@ -140,6 +185,7 @@ impl AppState {
             is_fs_unavailable: false,
             is_visible: false,
             persistent,
+            launcher,
             rendered_prices: Vec::new(),
             last_scrubbed_point: None,
             last_scrub_update_time: None,
@@ -155,35 +201,166 @@ impl AppState {
     }
 
     pub fn ui(&self) -> AppWindow { self.ui.unwrap() }
+
+    fn launcher_item_by_id(&self, item_id: &str) -> Option<&LauncherItem> {
+        self.launcher.item_by_id(item_id)
+    }
+
+    fn move_item(
+        &mut self,
+        source_collection_id: &str,
+        from_index: usize,
+        target_collection_id: &str,
+        to_index: usize,
+    ) {
+        if self.launcher.move_item(source_collection_id, from_index, target_collection_id, to_index) {
+            self.sync_layout_orders();
+        }
+    }
+
+    fn sync_layout_orders(&mut self) {
+        let mut persistent = self.persistent.guard();
+        self.launcher.sync_persistent(&mut persistent);
+    }
 }
 
 app!("Launcher", role = ClaimLauncherRole);
+
+/// Items the launcher can display: the fixed built-in app allowlist, sideloaded
+/// apps reported by the app manager, plus the launcher's own Scan QR action.
+fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
+    let locale = SettingsApi::default().get_locale();
+    let lang = locale.lang();
+
+    let mut items: Vec<LauncherItem> = Vec::new();
+    for entry in app_manager.list_apps(lang, app_manager::AppFilter::standard_only()) {
+        let known_icon = KNOWN_APP_ICONS.iter().find(|(id, _)| *id == entry.app_id).map(|(_, icon)| *icon);
+        let is_sideloaded = entry.can_remove;
+        // Registry entries that are neither known user apps nor sideloaded are
+        // hidden support/dev apps, even in simulator builds.
+        if known_icon.is_none() && !is_sideloaded {
+            continue;
+        }
+        let icon_key = if is_sideloaded { entry.app_id.clone() } else { String::new() };
+        let icon_name = if icon_key.is_empty() {
+            known_icon.unwrap_or(FALLBACK_APP_ICON).to_string()
+        } else {
+            String::new()
+        };
+        items.push(LauncherItem {
+            id: entry.app_id.clone(),
+            label: known_app_label(&entry.app_id).unwrap_or(entry.name),
+            icon_name,
+            icon_key,
+            target: LauncherTarget::App { app_id: entry.app_id },
+            enabled: entry.can_launch,
+            can_remove: entry.can_remove,
+        });
+    }
+
+    items.push(LauncherItem {
+        id: SCAN_QR_ACTION_ID.to_string(),
+        label: tr::lookup_id(TrId::MainScanQr).to_string(),
+        icon_name: "scan-qr".to_string(),
+        icon_key: String::new(),
+        target: LauncherTarget::Action { action: LauncherAction::ScanQr },
+        enabled: true,
+        can_remove: false,
+    });
+    items.sort_by(|a, b| {
+        default_rank(&a.id)
+            .cmp(&default_rank(&b.id))
+            .then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
+    });
+    items
+}
+
+/// Canonical placement order for fresh layouts; apps not listed here sort
+/// after the built-ins, alphabetically by label.
+fn default_rank(item_id: &str) -> usize {
+    if let Some(index) = KNOWN_APP_ICONS.iter().position(|(id, _)| *id == item_id) {
+        index
+    } else if item_id == SCAN_QR_ACTION_ID {
+        KNOWN_APP_ICONS.len()
+    } else {
+        usize::MAX
+    }
+}
+
+/// Re-list installed apps and rebuild the launcher layout. Saved ordering is
+/// preserved; newly installed apps appear in the first open slot and removed
+/// apps drop out.
+fn refresh_launcher_apps(state: StoredValue<AppState>) {
+    let app_manager = state.borrow().app_manager.clone();
+    let discovered = discover_launcher_items(&app_manager);
+    let mut state = state.borrow_mut();
+    state.launcher = LauncherConfig::from_persistent(&state.persistent, discovered);
+    let ui = state.ui();
+    sync_launcher_ui(&ui, &state.launcher);
+}
+
+fn build_item_model(items: &[LauncherItem]) -> ModelRc<LauncherItemData> {
+    ModelRc::new(VecModel::from(
+        items
+            .iter()
+            .enumerate()
+            .map(|(slot, item)| LauncherItemData {
+                id: SharedString::from(item.id.as_str()),
+                label: SharedString::from(item.label.as_str()),
+                icon_name: SharedString::from(item.icon_name.as_str()),
+                icon_key: SharedString::from(item.icon_key.as_str()),
+                enabled: item.enabled,
+                slot_index: slot as i32,
+                can_remove: item.can_remove,
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn build_page_item_model(items: &[LauncherPageItem]) -> ModelRc<LauncherItemData> {
+    ModelRc::new(VecModel::from(
+        items
+            .iter()
+            .map(|page_item| LauncherItemData {
+                id: SharedString::from(page_item.item.id.as_str()),
+                label: SharedString::from(page_item.item.label.as_str()),
+                icon_name: SharedString::from(page_item.item.icon_name.as_str()),
+                icon_key: SharedString::from(page_item.item.icon_key.as_str()),
+                enabled: page_item.item.enabled,
+                slot_index: page_item.slot as i32,
+                can_remove: page_item.item.can_remove,
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn build_page_model(pages: &[LauncherPage]) -> ModelRc<LauncherPageData> {
+    ModelRc::new(VecModel::from(
+        pages
+            .iter()
+            .enumerate()
+            .map(|(page_index, page)| LauncherPageData {
+                id: SharedString::from(page_collection_id(page_index)),
+                items: build_page_item_model(&page.items),
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn sync_launcher_ui(ui: &AppWindow, launcher: &LauncherConfig) {
+    let state = ui.global::<State>();
+    state.set_pages(build_page_model(&launcher.pages));
+    state.set_dock_items(build_item_model(&launcher.dock));
+    if state.get_current_page() >= launcher.pages.len() as i32 {
+        state.set_current_page(0);
+    }
+}
 
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
     let state = StoredValue::new(AppState::new(cx.gui.clone(), ui.as_weak()));
-
-    #[cfg(not(feature = "production"))]
-    {
-        let hidden_apps = vec![
-            HiddenApp { label: "System Actions".into(), app_id: "0x6775692d6170702d73797374656d2d61".into() },
-            HiddenApp { label: "Recovery".into(), app_id: "0x6775692d6170702d7265636f76657279".into() },
-            HiddenApp { label: "Onboarding".into(), app_id: "0xdac5321775d449c11bc9c90f38067f8f".into() },
-            HiddenApp {
-                label: "File Picker Demo".into(),
-                app_id: "0xd7578c121c1d86fd541a086662de6dd6".into(),
-            },
-            HiddenApp { label: "Image Viewer".into(), app_id: "0x0944ad38232eab9a060661c2e8dc7eb5".into() },
-            HiddenApp { label: "Reg. Testing".into(), app_id: "0xc677731d8ee7380a38faa7cd97cbd3a5".into() },
-            HiddenApp { label: "Playground".into(), app_id: "0x7c9f81f9bcee31425062fb0d8fbf3001".into() },
-            HiddenApp { label: "Crypto Perf".into(), app_id: "0xc781da2a8f5f4a68b2ee0e6ad83d41b7".into() },
-            HiddenApp { label: "Update".into(), app_id: "0x6b713041faef901f23743263a45dcb83".into() },
-        ];
-
-        ui.global::<State>().set_hidden_apps(slint::ModelRc::new(VecModel::from(hidden_apps)));
-    }
 
     cx.set_input_handler({
         move |app_input| match app_input.msg {
@@ -199,14 +376,21 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 // Clear loading state when the launcher is hidden
                 let ui = state.ui();
                 clear_launching_state(&ui);
+                clear_rearrange_state(&ui);
                 clear_bitcoin_scrub(&ui);
                 state.loading_state_timer.stop();
             }
             InputMessage::Visible => {
                 state.borrow_mut().is_visible = true;
+                // Pick up apps installed or removed while the launcher was hidden.
+                refresh_launcher_apps(state);
                 if state.borrow().is_fs_unavailable {
                     invoke_fs_format_alert(state);
                 }
+            }
+            InputMessage::Custom1 => {
+                let ui = state.borrow().ui();
+                clear_rearrange_state(&ui);
             }
             _ => {}
         }
@@ -238,8 +422,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
                 state_mut.universal_qr_matches.clear();
                 let ui = state_mut.ui();
-                ui.global::<State>()
-                    .set_dropdown_model(slint::ModelRc::new(VecModel::from(Vec::<DropdownModel>::new())));
+                clear_dropdown_model(&ui);
                 (state_mut.gui.clone(), ui, scan_result, matched_rules)
             };
             ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
@@ -288,7 +471,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
         log::info!("Requesting app name for app_id={app_id_str}");
         let locale = "en"; // TODO: i18n, get the locale from the settings
-        if let Some(name) = AppManagerApi::default().app_name_by_app_id(&app_id, locale) {
+        if let Some(name) = state.borrow().app_manager.app_name_by_app_id(&app_id, locale) {
             return name.into();
         }
 
@@ -298,102 +481,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<LauncherCallbacks>().on_scan_clicked({
         move |_pressed| {
             state.borrow().haptics_api.click();
-            {
-                let mut state_mut = state.borrow_mut();
-                state_mut.pending_universal_scan = None;
-                state_mut.universal_qr_matches.clear();
-                let ui = state_mut.ui();
-                ui.global::<State>()
-                    .set_dropdown_model(slint::ModelRc::new(VecModel::from(Vec::<DropdownModel>::new())));
-            }
-            log::info!("Opening universal QR scanner");
-            let scan_result = match open_qr_scanner::<GuiPermissions>(ScanQrOptions {
-                request_matching_apps: true,
-                header_left_icon: String::new(),
-                header_right_icon: String::from("close"),
-                message: tr::lookup_id(TrId::ScanContent).to_string(),
-                ..ScanQrOptions::default()
-            }) {
-                Ok(Some(result)) => result,
-                Ok(None) => {
-                    log::info!("No result returned from QR scanner");
-                    return;
-                }
-                Err(e) => {
-                    log::error!("Failed to open QR scanner: {e:?}");
-                    return;
-                }
-            };
-
-            let matching_apps = match &scan_result {
-                ScanQrResult::Qr { matching_apps, .. } | ScanQrResult::Ur2 { matching_apps, .. } => {
-                    matching_apps.clone()
-                }
-                ScanQrResult::LeftClicked | ScanQrResult::RightClicked | ScanQrResult::ButtonClicked => {
-                    log::info!("QR scanner dismissed");
-                    return;
-                }
-            };
-
-            let matching_apps = matching_apps.unwrap_or_default();
-
-            if matching_apps.is_empty() {
-                log::info!("No installed apps accept the scanned QR payload");
-                return;
-            }
-
-            // Auto-forward when only one app matches — skip the selection UI entirely
-            if matching_apps.len() == 1 {
-                let single_match = &matching_apps[0];
-                let app_id = single_match.id;
-                let gui = state.borrow().gui.clone();
-                log::info!("Single app match — auto-forwarding universal QR");
-                let options =
-                    MatchedQrResult { scan_result, matched_rules: single_match.matched_rules.clone() };
-                if let Err(e) = gui.navigate_to(app_id, &options.serialize()) {
-                    log::error!("Failed to navigate to universal QR target app: {e:?}");
-                }
-                return;
-            }
-
-            let locale = "en"; // TODO: i18n, get the locale from the settings
-            let mut matched: Vec<_> = matching_apps
-                .iter()
-                .filter_map(|app| {
-                    let app_id = app.id;
-                    let Some(app_name) = AppManagerApi::default().app_name_by_app_id(&app_id, locale) else {
-                        log::warn!("Could not fetch app name for app_id=0x{app_id}");
-                        return None;
-                    };
-                    let app_id_hex = format!("0x{app_id}");
-                    let icon = APP_ID_ICONS
-                        .iter()
-                        .find(|(id, _)| *id == app_id_hex)
-                        .map(|(_, icon)| *icon)
-                        .unwrap_or("");
-                    Some((
-                        DropdownModel {
-                            label: app_name.clone().into(),
-                            value: app_id_hex.into(),
-                            icon: icon.into(),
-                        },
-                        UniversalQrMatch { app_id, matched_rules: app.matched_rules.clone() },
-                    ))
-                })
-                .collect();
-
-            sort_universal_qr_matches(&mut matched);
-
-            let (dropdown_model, universal_qr_matches): (Vec<_>, Vec<_>) = matched.into_iter().unzip();
-
-            let mut state_mut = state.borrow_mut();
-            state_mut.pending_universal_scan = Some(scan_result);
-            state_mut.universal_qr_matches = universal_qr_matches;
-
-            let ui = state_mut.ui();
-            ui.global::<State>().set_dropdown_model(slint::ModelRc::new(VecModel::from(dropdown_model)));
-            ui.global::<Navigate>()
-                .invoke_universal_qr(NavigateOptions { replace: false, animate: Animate::Forward });
+            spawn_local(open_universal_qr_scan(state)).detach();
         }
     });
 
@@ -464,57 +552,119 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
-    ui.global::<LauncherCallbacks>().on_app_clicked({
-        move |x: f32, y: f32, id| {
+    ui.global::<LauncherCallbacks>().on_item_clicked({
+        move |x: f32, y: f32, item_id| {
             let x = x as usize;
             let y = y as usize;
-            let (gui, ui) = {
+            let (gui, ui, item) = {
                 let state = state.borrow();
-                (state.gui.clone(), state.ui())
+                let Some(item) = state.launcher_item_by_id(item_id.as_str()).cloned() else {
+                    log::warn!("Unknown launcher item clicked: {item_id}");
+                    return;
+                };
+                (state.gui.clone(), state.ui(), item)
             };
 
-            // Ignore app icon clicks when an app is already being launched (SFT-6854)
+            // Ignore item clicks when an app is already being launched (SFT-6854)
             if is_launching(&ui) {
+                return;
+            }
+
+            if !item.enabled {
+                log::info!("Ignoring disabled launcher item click: {}", item.id);
                 return;
             }
 
             state.borrow().haptics_api.click();
 
-            let Ok(app_id) = app_manager::decode_app_id_str(id.as_str()) else {
-                log::error!("Invalid AppId hex: {id:}");
-                error_message(
-                    &ui,
-                    tr::lookup_id(TrId::LauncherCrashHeader),
-                    tr::lookup_id(TrId::LauncherCrashContent),
-                    Some(format!("Invalid AppId hex: {id:}")),
-                    None,
-                    None,
-                );
-                return;
-            };
-            log::info!("App clicked with id={id:} at ({x}, {y})");
+            match item.target {
+                LauncherTarget::Action { action: LauncherAction::ScanQr } => {
+                    ui.global::<State>().set_loading_item_id(item.id.clone().into());
+                    spawn_local(open_universal_qr_scan(state)).detach();
+                }
+                LauncherTarget::App { app_id } => {
+                    let Ok(app_id) = app_manager::decode_app_id_str(app_id.as_str()) else {
+                        log::error!("Invalid AppId hex configured for item {}: {}", item.id, app_id);
+                        launcher_crash_error(
+                            &ui,
+                            format!("Invalid AppId hex configured for item {}: {}", item.id, app_id),
+                        );
+                        return;
+                    };
 
-            // The app is already running, just switch to it
-            if let Ok(Some(pid)) = app_id_to_pid(&app_id) {
-                clear_launching_state(&ui);
-                gui.switch_to(pid, x, y).expect("switch_to failed");
-                return;
-            }
+                    log::info!("Launcher item clicked with id={} at ({x}, {y})", item.id);
 
-            // Otherwise request the app-manager to launch the app
-            ui.global::<State>().set_loading_app_id(id.clone());
-            if let Err(e) = AppManagerApi::default().launch_app(&app_id) {
-                error_message(
-                    &ui,
-                    tr::lookup_id(TrId::LauncherCrashHeader),
-                    tr::lookup_id(TrId::LauncherCrashContent),
-                    Some(format!("{e:?}")),
-                    None,
-                    None,
-                );
+                    // The app is already running, just switch to it
+                    if let Ok(Some(pid)) = app_id_to_pid(&app_id) {
+                        clear_launching_state(&ui);
+                        if let Err(e) = gui.switch_to(pid, x, y) {
+                            log::error!("Failed to switch to running app: {e:?}");
+                            launcher_crash_error(&ui, format!("{e:?}"));
+                        }
+                        return;
+                    }
+
+                    // Otherwise request the app-manager to launch the app
+                    ui.global::<State>().set_loading_item_id(item.id.clone().into());
+                    if let Err(e) = state.borrow().app_manager.launch_app(&app_id) {
+                        launcher_crash_error(&ui, format!("{e:?}"));
+                    }
+                }
             }
         }
     });
+
+    {
+        let app_manager = state.borrow().app_manager.clone();
+        let app_icon_cache = RefCell::new(lru::LruCache::<String, Image>::new(
+            NonZeroUsize::new(32).expect("cache cap is non-zero"),
+        ));
+        ui.global::<LauncherCallbacks>().on_app_icon(move |icon_key| {
+            let cache_key = format!("{}@{}x{}:smooth", icon_key.as_str(), APP_ICON_SIZE, APP_ICON_SIZE);
+            if let Some(image) = app_icon_cache.borrow_mut().get(cache_key.as_str()).cloned() {
+                log::debug!("app icon cache hit on {cache_key}");
+                return image;
+            }
+
+            let icon_bytes = app_manager.get_app_icon(icon_key.as_str()).unwrap_or_default();
+            let image = scale_image(
+                raw_image_from_bytes(&icon_bytes),
+                APP_ICON_SIZE as f32,
+                APP_ICON_SIZE as f32,
+                true,
+            );
+            if !icon_bytes.is_empty() {
+                app_icon_cache.borrow_mut().put(cache_key, image.clone());
+            }
+            image
+        });
+    }
+
+    ui.global::<LauncherCallbacks>().on_move_item({
+        move |source_collection_id, from_index, target_collection_id, to_index| {
+            let mut state = state.borrow_mut();
+            state.move_item(
+                source_collection_id.as_str(),
+                from_index.max(0) as usize,
+                target_collection_id.as_str(),
+                to_index.max(0) as usize,
+            );
+            let ui = state.ui();
+            sync_launcher_ui(&ui, &state.launcher);
+            state.persistent.save();
+        }
+    });
+
+    ui.global::<LauncherCallbacks>().on_remove_item_requested({
+        move |item_id| {
+            confirm_and_remove_launcher_item(state, item_id.as_str());
+        }
+    });
+
+    {
+        let state = state.borrow();
+        sync_launcher_ui(&state.ui(), &state.launcher);
+    }
 
     spawn_local({
         async move {
@@ -561,6 +711,108 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.run().expect("Platform error");
+}
+
+/// Open the universal QR scanner and route the result: auto-forward when a single
+/// app matches, otherwise populate the dropdown and navigate to the selection page.
+async fn open_universal_qr_scan(state: StoredValue<AppState>) {
+    {
+        let mut state_mut = state.borrow_mut();
+        state_mut.pending_universal_scan = None;
+        state_mut.universal_qr_matches.clear();
+        let ui = state_mut.ui();
+        clear_dropdown_model(&ui);
+    }
+
+    // This sleep yields to allow the user to see a spinner early
+    sleep(Duration::from_millis(1)).await;
+
+    log::info!("Opening universal QR scanner");
+    let open_result = async_open_qr_scanner::<GuiPermissions>(ScanQrOptions {
+        request_matching_apps: true,
+        header_left_icon: String::new(),
+        header_right_icon: String::from("close"),
+        message: tr::lookup_id(TrId::ScanContent).to_string(),
+        ..ScanQrOptions::default()
+    })
+    .await;
+
+    // Clear the loading spinner now that the scanner has closed (or failed to open)
+    clear_launching_state(&state.borrow().ui());
+    let scan_result = match open_result {
+        Ok(Some(result)) => result,
+        Ok(None) => {
+            log::info!("No result returned from QR scanner");
+            return;
+        }
+        Err(e) => {
+            log::error!("Failed to open QR scanner: {e:?}");
+            return;
+        }
+    };
+
+    let matching_apps = match &scan_result {
+        ScanQrResult::Qr { matching_apps, .. } | ScanQrResult::Ur2 { matching_apps, .. } => {
+            matching_apps.clone()
+        }
+        ScanQrResult::LeftClicked | ScanQrResult::RightClicked | ScanQrResult::ButtonClicked => {
+            log::info!("QR scanner dismissed");
+            return;
+        }
+    };
+
+    let matching_apps = matching_apps.unwrap_or_default();
+
+    if matching_apps.is_empty() {
+        log::info!("No installed apps accept the scanned QR payload");
+        return;
+    }
+
+    // Auto-forward when only one app matches — skip the selection UI entirely
+    if matching_apps.len() == 1 {
+        let single_match = &matching_apps[0];
+        let app_id = AppId::from(single_match.id);
+        let gui = state.borrow().gui.clone();
+        log::info!("Single app match — auto-forwarding universal QR");
+        let options = MatchedQrResult { scan_result, matched_rules: single_match.matched_rules.clone() };
+        if let Err(e) = gui.navigate_to(app_id, &options.serialize()) {
+            log::error!("Failed to navigate to universal QR target app: {e:?}");
+        }
+        return;
+    }
+
+    let locale = "en"; // TODO: i18n, get the locale from the settings
+    let app_manager = state.borrow().app_manager.clone();
+    let mut matched: Vec<_> = matching_apps
+        .iter()
+        .filter_map(|app| {
+            let app_id = AppId::from(app.id);
+            let Some(app_name) = app_manager.app_name_by_app_id(&app_id, locale) else {
+                log::warn!("Could not fetch app name for app_id=0x{app_id}");
+                return None;
+            };
+            let app_id_hex = format!("0x{app_id}");
+            let icon =
+                KNOWN_APP_ICONS.iter().find(|(id, _)| *id == app_id_hex).map(|(_, icon)| *icon).unwrap_or("");
+            Some((
+                DropdownModel { label: app_name.clone().into(), value: app_id_hex.into(), icon: icon.into() },
+                UniversalQrMatch { app_id, matched_rules: app.matched_rules.clone() },
+            ))
+        })
+        .collect();
+
+    sort_universal_qr_matches(&mut matched);
+
+    let (dropdown_model, universal_qr_matches): (Vec<_>, Vec<_>) = matched.into_iter().unzip();
+
+    let mut state_mut = state.borrow_mut();
+    state_mut.pending_universal_scan = Some(scan_result);
+    state_mut.universal_qr_matches = universal_qr_matches;
+
+    let ui = state_mut.ui();
+    ui.global::<State>().set_dropdown_model(slint::ModelRc::new(VecModel::from(dropdown_model)));
+    ui.global::<Navigate>()
+        .invoke_universal_qr(NavigateOptions { replace: false, animate: Animate::Forward });
 }
 
 fn setup_ql_status(state: StoredValue<AppState>) {
@@ -723,6 +975,7 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
             let sign = if change_percentage.is_sign_positive() { '+' } else { '-' };
             let change_percentage_formatted = format!("{sign}{:.2}%", change_percentage.abs());
 
+            ui_state.set_is_price_positive(change_percentage >= 0.0);
             ui_state.set_bitcoin_price_change_percent(change_percentage_formatted.into());
 
             let data_vec: Vec<PricePoint> = if is_expired {
@@ -753,8 +1006,6 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
                 GRAPH_HEIGHT,
                 GRAPH_MAX_HEIGHT,
                 is_dark_mode,
-                GRAPH_OFFSET_X,
-                GRAPH_OFFSET_Y,
             );
             ui_state.set_bitcoin_graph_image(graph_image);
 
@@ -781,6 +1032,7 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
         None => {
             ui_state.set_is_price_stale(true);
             ui_state.set_is_price_expired(true);
+            ui_state.set_is_price_positive(true);
 
             let data_vec = FLATLINE_POINTS.to_vec();
             let graph_image = slint_keyos_platform::skia::draw_graph(
@@ -789,8 +1041,6 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
                 GRAPH_HEIGHT,
                 GRAPH_MAX_HEIGHT,
                 is_dark_mode,
-                GRAPH_OFFSET_X,
-                GRAPH_OFFSET_Y,
             );
             ui_state.set_bitcoin_graph_image(graph_image);
 
@@ -864,7 +1114,115 @@ fn invoke_fs_format_alert(state: StoredValue<AppState>) {
     }
 }
 
-fn clear_launching_state(ui: &AppWindow) { ui.global::<State>().set_loading_app_id("".into()); }
+fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str) {
+    let Some(item) = state.borrow().launcher_item_by_id(item_id).cloned() else {
+        log::warn!("Unknown launcher item remove requested: {item_id}");
+        return;
+    };
+
+    if !item.can_remove {
+        log::warn!("Ignoring remove request for non-removable launcher item: {}", item.id);
+        return;
+    }
+
+    let LauncherTarget::App { app_id } = item.target.clone() else {
+        log::warn!("Ignoring remove request for non-app launcher item: {}", item.id);
+        return;
+    };
+
+    {
+        let ui = state.borrow().ui();
+        clear_rearrange_state(&ui);
+    }
+
+    let result = {
+        let gui = state.borrow().gui.clone();
+        gui.invoke_alert(InvokeAlert {
+            app_title: None,
+            title: tr::lookup_id(TrId::RemoveAppHeader).to_string(),
+            icon: "alert".to_string(),
+            line1: i18n::replace_placeholders(tr::lookup_id(TrId::RemoveAppContent), &[item.label.as_str()]),
+            line2: None,
+            button1_title: tr::lookup_id(TrId::CommonButtonDelete).to_string(),
+            button2_title: Some(tr::lookup_id(TrId::CommonButtonCancel).to_string()),
+            button3_title: None,
+        })
+        .unwrap_or(AlertResult::Canceled)
+    };
+
+    if !matches!(result, AlertResult::Button1Pressed) {
+        return;
+    }
+
+    let app_id = match app_manager::decode_app_id_str(app_id.as_str()) {
+        Ok(app_id) => app_id,
+        Err(e) => {
+            log::error!("Invalid removable launcher AppId {}: {e:?}", item.id);
+            show_remove_app_error(state, &item.label);
+            return;
+        }
+    };
+
+    log::info!("Requesting removal of launcher item {} (app_id={app_id})", item.id);
+    let remove_result = state.borrow().app_manager.remove_installed_app(&app_id);
+
+    match remove_result {
+        Ok(app_manager::RemoveInstalledAppResult::Removed)
+        | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {
+            let ui = state.borrow().ui();
+            clear_rearrange_state(&ui);
+            refresh_launcher_apps(state);
+            let mut state = state.borrow_mut();
+            state.sync_layout_orders();
+            state.persistent.save();
+        }
+        Ok(app_manager::RemoveInstalledAppResult::Running) => {
+            log::warn!("failed to remove launcher item {}: app is still running", item.id);
+            show_remove_app_error(state, &item.label);
+        }
+        Ok(app_manager::RemoveInstalledAppResult::NotSideloaded) => {
+            log::warn!("failed to remove launcher item {}: app is not sideloaded", item.id);
+            show_remove_app_error(state, &item.label);
+        }
+        Ok(app_manager::RemoveInstalledAppResult::InternalError) => {
+            log::error!("failed to remove launcher item {}: app-manager internal error", item.id);
+            show_remove_app_error(state, &item.label);
+        }
+        Err(e) => {
+            log::error!("failed to request launcher item removal {}: {e:?}", item.id);
+            show_remove_app_error(state, &item.label);
+        }
+    }
+}
+
+fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {
+    let gui = state.borrow().gui.clone();
+    let _ = gui.invoke_alert(InvokeAlert {
+        app_title: None,
+        title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
+        icon: "alert".to_string(),
+        line1: i18n::replace_placeholders(tr::lookup_id(TrId::RemoveAppFailedContent), &[app_label]),
+        line2: None,
+        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
+        button2_title: None,
+        button3_title: None,
+    });
+}
+
+fn clear_launching_state(ui: &AppWindow) { ui.global::<State>().set_loading_item_id("".into()); }
+
+fn clear_dropdown_model(ui: &AppWindow) {
+    ui.global::<State>().set_dropdown_model(ModelRc::new(VecModel::from(Vec::<DropdownModel>::new())));
+}
+
+fn clear_rearrange_state(ui: &AppWindow) {
+    let state = ui.global::<State>();
+    state.set_rearrange_mode(false);
+    state.set_drag_source_collection_id("".into());
+    state.set_drag_overlay_visible(false);
+    state.set_drag_hover_collection_id("".into());
+    state.set_drag_hover_index(-1);
+}
 
 fn clear_bitcoin_scrub(ui: &AppWindow) {
     let ui_state = ui.global::<State>();
@@ -917,7 +1275,18 @@ fn set_bitcoin_point_datetime_from_latest(
     set_bitcoin_point_datetime(ui, point.timestamp, timezone, use_standard_time_format);
 }
 
-fn is_launching(ui: &AppWindow) -> bool { !ui.global::<State>().get_loading_app_id().is_empty() }
+fn is_launching(ui: &AppWindow) -> bool { !ui.global::<State>().get_loading_item_id().is_empty() }
+
+fn launcher_crash_error(ui: &AppWindow, long_message: String) {
+    error_message(
+        ui,
+        tr::lookup_id(TrId::LauncherCrashHeader),
+        tr::lookup_id(TrId::LauncherCrashContent),
+        Some(long_message),
+        None,
+        None,
+    );
+}
 
 fn error_message(
     ui: &AppWindow,
@@ -942,9 +1311,9 @@ fn error_message(
 }
 
 fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) {
-    let (ui, gui_api) = {
+    let (ui, gui_api, app_manager) = {
         let state_borrow = state.borrow();
-        (state_borrow.ui(), state_borrow.gui.clone())
+        (state_borrow.ui(), state_borrow.gui.clone(), state_borrow.app_manager.clone())
     };
     match event {
         app_manager::AppEvent::AppLaunched { app_id, pid, launched_by } => {
@@ -970,29 +1339,25 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             );
 
             // Switch to an app when it's ready
-            gui_api.switch_to(pid, 0, 0).expect("switch_to failed");
+            if let Err(e) = gui_api.switch_to(pid, 0, 0) {
+                log::error!("Failed to switch to launched app: {e:?}");
+                launcher_crash_error(&ui, format!("{e:?}"));
+            }
         }
 
         app_manager::AppEvent::LaunchError { app_id, error: e } => {
             log::error!("App launch error: {e:?}");
             clear_update_settings_crash(state, app_id);
-            error_message(
-                &ui,
-                tr::lookup_id(TrId::LauncherCrashHeader),
-                tr::lookup_id(TrId::LauncherCrashContent),
-                Some(format!("{e:?}")),
-                None,
-                None,
-            );
+            launcher_crash_error(&ui, format!("{e:?}"));
         }
 
         // TODO (SFT-5433): push the crash message into a log
         app_manager::AppEvent::AppCrashed { app_id, pid, exit_code, panic_message, .. } => {
             clear_update_settings_crash(state, app_id);
 
-            let app_name = AppManagerApi::default()
-                    .app_name_by_app_id(&app_id, "en") // TODO: i18n, get the locale from the settings
-                    .unwrap_or_else(|| "Unknown App".to_string());
+            let app_name = app_manager
+                .app_name_by_app_id(&app_id, "en") // TODO: i18n, get the locale from the settings
+                .unwrap_or_else(|| "Unknown App".to_string());
 
             if exit_code == 0 {
                 log::info!("App `{app_name}` (PID={pid}) exited normally");
@@ -1079,14 +1444,7 @@ fn maybe_resume_update(state: StoredValue<AppState>) {
     if let Err(e) = try_resume_update(state) {
         log::error!("failed to resume interrupted update: {e:?}");
         clear_update_resume_state(state);
-        error_message(
-            &ui,
-            tr::lookup_id(TrId::LauncherCrashHeader),
-            tr::lookup_id(TrId::LauncherCrashContent),
-            Some(format!("{e:?}")),
-            None,
-            None,
-        );
+        launcher_crash_error(&ui, format!("{e:?}"));
     }
 }
 
@@ -1111,7 +1469,7 @@ fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
 
     log::info!("interrupted update detected; launching settings to resume");
     ui.global::<State>().set_update_resume_active(true);
-    ui.global::<State>().set_loading_app_id(format!("0x{SETTINGS_APP_ID}").into());
+    ui.global::<State>().set_loading_item_id(SETTINGS_APP_ID_STR.into());
 
     state.gui.update_kiosk_policy(UpdateKioskPolicy::all(false)).context("set kiosk policy")?;
 
@@ -1120,7 +1478,8 @@ fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
 
     match settings_pid {
         Some(pid) => state.gui.switch_to(pid, 0, 0).context("switch to settings")?,
-        None => AppManagerApi::default()
+        None => state
+            .app_manager
             .launch_app(&SETTINGS_APP_ID)
             .map_err(|e| anyhow!("failed to launch settings: {e:?}"))?,
     }

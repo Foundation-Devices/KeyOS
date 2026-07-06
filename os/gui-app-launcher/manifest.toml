@@ -6,7 +6,14 @@ en = "App Launcher"
 
 [permissions]
 template = ["gui-app", "fs-generic"]
-"os/app-manager" = ["SubscribeAppEvents", "GetAppName", "LaunchApp"]
+"os/app-manager" = [
+    "SubscribeAppEvents",
+    "GetAppName",
+    "LaunchApp",
+    "ListApps",
+    "GetAppIcon",
+    "RemoveInstalledApp",
+]
 "os/fs" = [
     "FormatEncryptedVolume",
     "SubscribeFilesystemEvent",
@@ -16,5 +23,5 @@ template = ["gui-app", "fs-generic"]
 "os/gui-server" = ["SwitchTo", "Shutdown", "NavigateTo", "UpdateKioskPolicy", "ClaimLauncherRole"]
 "os/haptics" = ["Vibrate"]
 "os/quantum-link" = ["SubscribeExchangeRate", "SubscribeExchangeRateHistory", "SubscribeConnectionStatus"]
-"os/settings" = ["SetOnboardingStatus", "GetUseStandardTimeFormat", "GetTimeZone"]
+"os/settings" = ["SetOnboardingStatus", "GetUseStandardTimeFormat", "GetTimeZone", "GetLocale"]
 "os/update" = ["ClearUpdateApplied", "GetUpdateApplied", "GetUpdateStatus", "SubscribeUpdateProgress"]

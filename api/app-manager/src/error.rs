@@ -17,25 +17,28 @@ pub enum AppManagerError {
     UnknownAppId = 0,
 
     #[error("Verification Failed")]
-    VerificationFailed,
+    VerificationFailed = 1,
 
     #[error("Internal Error")]
-    InternalError,
+    InternalError = 2,
+
+    #[error("No Matching Trusted Publisher Certificate")]
+    NoTrustedPublisherCertificate = 3,
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum VerificationError {
     Unverified,
     MissingCosign2Header,
     InternalError,
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum LaunchError {
     UnknownAppId,
     Verification(VerificationError),
     NameRegistration,
-    UntrustedPublisher,
+    NoTrustedPublisherCertificate,
     OutOfMemory,
     InternalError,
 }
@@ -57,9 +60,8 @@ impl From<LaunchError> for AppManagerError {
     fn from(value: LaunchError) -> Self {
         match value {
             LaunchError::UnknownAppId => AppManagerError::UnknownAppId,
-            LaunchError::Verification(_) | LaunchError::UntrustedPublisher => {
-                AppManagerError::VerificationFailed
-            }
+            LaunchError::Verification(_) => AppManagerError::VerificationFailed,
+            LaunchError::NoTrustedPublisherCertificate => AppManagerError::NoTrustedPublisherCertificate,
             _ => AppManagerError::InternalError,
         }
     }

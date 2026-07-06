@@ -40,5 +40,6 @@ template = ["fs-generic"]
 ]
 "os/app-manager" = [
     "ImportThirdPartyCertificate",
+    "GetThirdPartyCertificates",
     "RefreshInstalledApps",
 ]

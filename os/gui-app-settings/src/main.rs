@@ -339,6 +339,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
             name: app.name.into(),
             publisher: app.publisher.into(),
             can_launch: app.can_launch,
+            can_remove: app.can_remove,
             version: app.version.into(),
             size: format_app_size(app.size_bytes, lang).into(),
             description: app.description.into(),
@@ -557,7 +558,15 @@ fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> S
 }
 
 fn remove_installed_app(state: StoredValue<AppState>, app_id: &str) -> SharedString {
-    let result = { state.borrow().app_manager.remove_installed_app(app_id) };
+    let app_id = match app_manager::decode_app_id_str(app_id) {
+        Ok(app_id) => app_id,
+        Err(e) => {
+            log::error!("invalid installed app id for removal: {app_id}: {e:?}");
+            return tr::lookup_id(TrId::AppsRemoveAppFailed).into();
+        }
+    };
+
+    let result = { state.borrow().app_manager.remove_installed_app(&app_id) };
     match result {
         Ok(app_manager::RemoveInstalledAppResult::Removed)
         | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {

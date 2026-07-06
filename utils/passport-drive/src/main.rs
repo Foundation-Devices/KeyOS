@@ -28,7 +28,67 @@ pub(crate) const FB_SIZE: usize = (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize;
 
 // Log protocol constant
 const LOG_TERMINATOR: u8 = 0x1E;
+
+pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'static str> {
+    match status {
+        LaunchAppStatus::Launched | LaunchAppStatus::AlreadyRunning => None,
+        LaunchAppStatus::AppIdNotFound => Some(
+            "app ID was not found after scanning installed apps; the uploaded bundle may have been skipped",
+        ),
+        LaunchAppStatus::SignatureRejected => Some(
+            "app signature or bundle hashes were rejected; rebuild and reload the app, and if the signing identity changed, import the matching trusted publisher certificate first",
+        ),
+        LaunchAppStatus::NoTrustedPublisherCertificate => Some(
+            "no matching trusted publisher certificate is installed; import the matching certificate in Settings > Apps > Trusted Publishers",
+        ),
+        LaunchAppStatus::MissingPermission => Some("launch was rejected because the caller is missing permission"),
+        LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
+        LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
+    }
+}
+
+pub(crate) fn launch_app_transport_error_message(error: &str) -> String {
+    if error.contains("device returned status 0x01") {
+        format!(
+            "{error}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching trusted publisher certificate is installed in Settings > Apps > Trusted Publishers."
+        )
+    } else {
+        error.to_string()
+    }
+}
+
 const TAP_HOLD_MS: u16 = 50;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launch_app_failure_message_reports_missing_matching_certificate() {
+        assert_eq!(
+            launch_app_failure_message(LaunchAppStatus::NoTrustedPublisherCertificate),
+            Some(
+                "no matching trusted publisher certificate is installed; import the matching certificate in Settings > Apps > Trusted Publishers"
+            )
+        );
+    }
+
+    #[test]
+    fn launch_app_failure_message_reports_signature_reload_guidance() {
+        let message = launch_app_failure_message(LaunchAppStatus::SignatureRejected).unwrap();
+
+        assert!(message.contains("rebuild and reload"));
+        assert!(message.contains("signing identity changed"));
+    }
+
+    #[test]
+    fn launch_app_transport_error_explains_legacy_generic_status() {
+        let message = launch_app_transport_error_message("device returned status 0x01");
+
+        assert!(message.contains("generic launch rejection"));
+        assert!(message.contains("matching trusted publisher certificate"));
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "passport-drive", about = "Drive Passport Prime over USB")]
@@ -611,7 +671,9 @@ fn main() -> Result<()> {
             anyhow::ensure!(bytes.len() == 16, "App ID must be exactly 16 bytes (32 hex chars)");
             let app_id: [u8; 16] = bytes.try_into().unwrap();
             eprintln!("Launching app...");
-            let payload = client.send(Command::LaunchApp { app_id }, Duration::from_secs(10))?;
+            let payload = client
+                .send(Command::LaunchApp { app_id }, Duration::from_secs(10))
+                .map_err(|e| anyhow::anyhow!("{}", launch_app_transport_error_message(&e.to_string())))?;
             let result = LaunchAppResult::decode(&payload)?;
             match result.status {
                 LaunchAppStatus::Launched => {
@@ -622,6 +684,10 @@ fn main() -> Result<()> {
                         "App is already running with PID {}. Newly uploaded code will not run until the app is closed and launched again.",
                         result.pid
                     );
+                }
+                status => {
+                    let reason = launch_app_failure_message(status).unwrap_or("unknown launch failure");
+                    bail!("App launch failed: {reason}");
                 }
             }
         }

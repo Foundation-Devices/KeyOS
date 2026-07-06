@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{collections::HashMap, io::Read};
+use std::collections::HashMap;
 
 use app_manager::{
     AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, ThirdPartyCertificateInfo,
@@ -18,6 +18,8 @@ use crate::FileSystem;
 const BUNDLED_ICON_FILE: &str = "icon.bin";
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
 pub const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
+// SDK-generated 256x256 RGBA icons are archived RawImage values: 256 KiB of
+// pixels plus rkyv header/alignment overhead. Leave margin for format drift.
 const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
 const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
 
@@ -222,13 +224,13 @@ impl AppRegistry {
             .map(|app_info| {
                 let name = app_info.localized_name(locale);
                 let size_bytes = app_info.binary_size();
-                let version = app_info.manifest.version.clone().unwrap_or_default();
                 let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
                 InstalledAppInfo {
                     app_id: format!("0x{}", app_info.id),
                     publisher,
                     can_launch,
-                    version,
+                    can_remove: app_info.is_third_party(),
+                    version: app_info.manifest.version.clone().unwrap_or_default(),
                     size_bytes,
                     description: app_info.description(),
                     permissions: app_info.permission_groups(),
@@ -257,12 +259,17 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).and_then(AppInfo::elf_path)
     }
 
-    /// Blind-read the app's bundled `icon.bin`, returning `None` when the app ships
+    /// Blind-read the app's bundled icon, returning `None` when the app ships
     /// no icon (the common case) or it can't be read.
     pub(crate) fn app_icon_bytes(&self, app_id: AppId) -> Option<Vec<u8>> {
-        let app_dir = self.installed_apps.get(&app_id)?.app_dir.as_deref()?;
-        let path = format!("{app_dir}/{BUNDLED_ICON_FILE}");
-        read_capped_file(&path, MAX_APP_ICON_SIZE_BYTES).ok()
+        let path = self.installed_apps.get(&app_id)?.bundled_icon_path()?;
+        match read_capped_file(&path, MAX_APP_ICON_SIZE_BYTES) {
+            Ok(data) => Some(data),
+            Err(e) => {
+                log::warn!("failed to read bundled app icon for app_id=0x{app_id}: {e:?}");
+                None
+            }
+        }
     }
 
     pub(crate) fn app_resources_location(&self, app_id: AppId) -> Option<AppResourcesLocation> {
@@ -301,16 +308,11 @@ impl AppRegistry {
 
     pub(crate) fn sideloaded_bundle_dir(&self, app_id: AppId) -> Option<String> {
         let app_info = self.installed_apps.get(&app_id)?;
-        if app_info.source != AppSource::ThirdParty {
+        if !app_info.is_third_party() {
             return None;
         }
 
-        let app_dir = app_info.app_dir.as_deref()?;
-        if app_dir.rsplit('/').next()? != hex::encode(app_id.0) {
-            return None;
-        }
-
-        Some(app_dir.to_string())
+        app_info.app_dir.clone()
     }
 
     pub(crate) fn clear_registered_manifest(&self, app_id: AppId) {
@@ -405,6 +407,11 @@ impl AppInfo {
 
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
 
+    fn bundled_icon_path(&self) -> Option<String> {
+        let app_dir = self.app_dir.as_deref()?;
+        Some(format!("{app_dir}/{BUNDLED_ICON_FILE}"))
+    }
+
     fn app_resources_location(&self) -> Option<AppResourcesLocation> {
         let app_dir = self.app_dir.as_deref()?;
         let app_dir = app_dir.rsplit('/').next()?;
@@ -446,6 +453,8 @@ impl AppInfo {
 /// Read a bundle file through `fs`, refusing anything larger than `max_size_bytes` before
 /// allocating, so a malformed bundle can't make us read an unbounded amount into memory.
 fn read_capped_file(path: &str, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+
     let fs = FileSystem::default();
     let metadata = fs.metadata(path, fs::Location::System)?;
     if metadata.size > max_size_bytes {
@@ -536,8 +545,12 @@ fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, sour
 }
 
 fn sideloaded_app_dir_name(app_dir: &str) -> Option<&str> {
-    let name = app_dir.strip_prefix(SIDELOADED_APPS_DIR)?.strip_prefix('/')?;
+    let name = sideloaded_path_suffix(app_dir)?;
     (!name.is_empty() && !name.contains('/')).then_some(name)
+}
+
+fn sideloaded_path_suffix(path: &str) -> Option<&str> {
+    path.strip_prefix(SIDELOADED_APPS_DIR).and_then(|path| path.strip_prefix('/'))
 }
 
 #[cfg(test)]
@@ -681,6 +694,22 @@ mod tests {
 
         assert_eq!(built_in_location.root, AppResourcesRoot::BuiltIn);
         assert_eq!(built_in_location.app_dir, "bitcoin");
+    }
+
+    #[test]
+    fn installed_apps_include_manifest_description_and_version_without_trusting_publisher() {
+        let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        app.manifest.publisher = Some("Example Publisher".to_string());
+        app.manifest.description = Some("Example description".to_string());
+        app.manifest.version = Some("1.2.3".to_string());
+        let mut registry = registry_with(vec![app]);
+
+        let apps = registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only());
+
+        assert!(apps[0].publisher.is_empty());
+        assert!(!apps[0].can_launch);
+        assert_eq!(apps[0].description, "Example description");
+        assert_eq!(apps[0].version, "1.2.3");
     }
 
     #[test]

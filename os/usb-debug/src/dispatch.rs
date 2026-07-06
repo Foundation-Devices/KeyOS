@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use fs::{Error as FsError, Location, OpenFlags};
-use gui_server_api::msg::RunAppResponse;
+use gui_server_api::msg::{LaunchFailureReason, RunAppResponse};
 use gui_server_api::touch::{Touch, TouchKind as GuiTouchKind};
 use gui_server_api::Key;
 use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, Payload, ProtocolError, Response};
@@ -151,13 +151,29 @@ impl DebugProtocol {
                     log::warn!("debug: launch_app rejected: device is locked");
                     Response::Locked
                 }
-                Ok(resp) => {
-                    log::warn!("debug: launch_app rejected: {resp:?}");
-                    Response::Err
+                Ok(RunAppResponse::AppIdNotFound) => {
+                    log::warn!("debug: launch_app rejected: app id not found");
+                    Response::LaunchAck(LaunchAppResult::new(0, LaunchAppStatus::AppIdNotFound).encode())
+                }
+                Ok(RunAppResponse::LaunchFailed { reason }) => {
+                    log::warn!("debug: launch_app rejected: {reason:?}");
+                    let status = match reason {
+                        LaunchFailureReason::SignatureRejected => LaunchAppStatus::SignatureRejected,
+                        LaunchFailureReason::NoTrustedPublisherCertificate => {
+                            LaunchAppStatus::NoTrustedPublisherCertificate
+                        }
+                        LaunchFailureReason::MissingPermission => LaunchAppStatus::MissingPermission,
+                        LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
+                    };
+                    Response::LaunchAck(LaunchAppResult::new(0, status).encode())
+                }
+                Ok(RunAppResponse::NotReady) => {
+                    log::warn!("debug: launch_app rejected: gui not ready");
+                    Response::LaunchAck(LaunchAppResult::new(0, LaunchAppStatus::NotReady).encode())
                 }
                 Err(e) => {
                     log::error!("debug: launch_app failed: {e:?}");
-                    Response::Err
+                    Response::LaunchAck(LaunchAppResult::new(0, LaunchAppStatus::InternalError).encode())
                 }
             },
             Command::GetVersion => match self.security.os_version_info() {
@@ -182,6 +198,7 @@ impl DebugProtocol {
             Command::LoadAppEnd => self.load_app_end(),
             Command::GetProcessList => self.get_process_list(),
             Command::InstallCertificate { certificate_pem } => self.install_certificate(certificate_pem),
+            Command::GetTrustedPublisherCount => self.get_trusted_publisher_count(),
             Command::KernelCmd { cmd_byte } => {
                 let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
                     Ok(buf) => xous::DropDeallocate::new(buf),
@@ -292,6 +309,19 @@ impl DebugProtocol {
                 Response::Err
             }
         }
+    }
+
+    fn get_trusted_publisher_count(&mut self) -> Response {
+        let count = self
+            .app_manager
+            .get_third_party_certificates()
+            .iter()
+            .filter(|cert| cert.is_currently_valid())
+            .count();
+        let count = u16::try_from(count).unwrap_or(u16::MAX);
+
+        log::debug!("debug: trusted publisher count -> {count}");
+        Response::TrustedPublisherCount(count.to_le_bytes().to_vec())
     }
 
     fn close_app(&mut self, pid: u16) -> Response {
@@ -657,6 +687,7 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::LoadAppEnd
             | Command::GetProcessList
             | Command::InstallCertificate { .. }
+            | Command::GetTrustedPublisherCount
     )
 }
 

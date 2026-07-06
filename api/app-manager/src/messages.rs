@@ -75,6 +75,7 @@ pub struct InstalledAppInfo {
     pub name: String,
     pub publisher: String,
     pub can_launch: bool,
+    pub can_remove: bool,
     pub version: String,
     pub size_bytes: u64,
     pub description: String,
@@ -176,6 +177,9 @@ pub struct AppFilter {
 }
 
 impl AppFilter {
+    /// Filter to non-Flux apps.
+    pub fn standard_only() -> Self { Self { is_flux: Some(false), ..Default::default() } }
+
     /// Filter to Flux child apps only.
     pub fn flux_only() -> Self { Self { is_flux: Some(true), ..Default::default() } }
 
@@ -219,5 +223,6 @@ pub struct RemoveThirdPartyCertificate {
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(RemoveInstalledAppResult)]
 pub struct RemoveInstalledApp {
-    pub app_id: String,
+    #[rkyv(with = WithAppId)]
+    pub app_id: AppId,
 }

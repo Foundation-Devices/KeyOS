@@ -18,7 +18,7 @@ pub fn execute(release: bool, no_run: bool) -> Result<()> {
     println!("Building and sideloading the application...");
     build::execute(release)?;
 
-    let project = ProjectContext::discover().context("app-config.toml not found")?;
+    let project = ProjectContext::discover()?;
     let config = &project.config;
     let artifact_dir = project.root.join("target").join("keyos").join(&config.app_name);
     let app_elf = artifact_dir.join("app.elf");
@@ -62,13 +62,23 @@ pub fn execute(release: bool, no_run: bool) -> Result<()> {
         return Ok(());
     }
 
+    let preflight_spinner = ui.spinner("Checking trusted publisher certificate...");
+    if let Err(error) = mcp.ensure_trusted_publisher_installed() {
+        preflight_spinner.finish_clear();
+        return Err(anyhow::anyhow!(
+            "Sideload preflight failed before launch. On Passport Prime, import the matching certificate in Settings > Apps > Trusted Publishers, then reconnect USB and try again. Reason: {error}"
+        ));
+    }
+    preflight_spinner.finish_success("Trusted publisher certificate found");
+
     println!("Launching {} via passport-drive MCP...", config.app_name);
     let app_id_slice = config.app_id.as_bytes();
     let app_id_bytes: &[u8; 16] = app_id_slice.try_into().context("App ID must be exactly 16 bytes")?;
     let launch_response = mcp.launch_app(app_id_bytes).map_err(|error| {
+        let message = launch_error_message(&error.to_string());
         anyhow::anyhow!(
-            "The app was uploaded, but launching it through passport-drive MCP failed. Make sure Developer Mode is enabled. Reason: {}",
-            error
+            "The app was uploaded, but launching it through passport-drive MCP failed. {}",
+            message
         )
     })?;
     println!("Launch request accepted: {}", launch_response);
@@ -116,5 +126,29 @@ fn format_bytes(bytes: u64) -> String {
         format!("{bytes} {unit}")
     } else {
         format!("{value:.1} {unit}")
+    }
+}
+
+fn launch_error_message(error: &str) -> String {
+    let message = error.strip_prefix("Error: ").unwrap_or(error);
+    if message.contains("device returned status 0x01") {
+        format!(
+            "{message}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware or helper tooling that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching trusted publisher certificate is installed in Settings > Apps > Trusted Publishers."
+        )
+    } else {
+        message.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_error_message;
+
+    #[test]
+    fn launch_error_message_does_not_blame_developer_mode_for_legacy_generic_status() {
+        let message = launch_error_message("Error: Failed to launch app: device returned status 0x01");
+
+        assert!(message.contains("Developer Mode is reachable"));
+        assert!(message.contains("matching trusted publisher certificate"));
     }
 }

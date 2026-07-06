@@ -7,9 +7,9 @@ import { Theme } from "theme.slint";
 // border + drop shadow). The inner layout is supplied by the caller via
 // `@children`, so panels can be a single inline row or a header + body.
 export component Panel inherits Rectangle {
-    in property <brush> surface-brush: @linear-gradient(180deg, #0a0a0b 0%, #0d0d0e 100%);
-    // Light warm-grey at the top fading to near-black at the bottom.
-    in property <brush> border-brush: @linear-gradient(180deg, #bfafa9 0%, #6e6460 18%, #34302d 55%, #141312 100%);
+    in property <bool> is-dark: true;
+    in property <brush> surface-brush: Theme.panel-surface(root.is-dark);
+    in property <brush> border-brush: Theme.panel-border(root.is-dark);
     in property <length> stroke-width: 1px;
     in property <length> corner-radius: 11.2px;
 
@@ -19,7 +19,7 @@ export component Panel inherits Rectangle {
     background: root.surface-brush;
     drop-shadow-blur: 8px;
     drop-shadow-offset-y: 12px;
-    drop-shadow-color: #0000003d; // rgba(0,0,0,0.24)
+    drop-shadow-color: Theme.panel-shadow(root.is-dark);
     clip: true;
 
     @children
@@ -27,7 +27,9 @@ export component Panel inherits Rectangle {
 
 // PanelHeading — the section title text style (e.g. "Theme", "Scale").
 export component PanelHeading inherits Text {
-    color: #e3e2e2; // Content/Secondary
+    in property <bool> is-dark: true;
+
+    color: Theme.heading(root.is-dark);
     font-family: Theme.font-primary;
     font-size: 20px;
     font-weight: 500;
@@ -37,18 +39,20 @@ export component PanelHeading inherits Text {
 
 // PanelDivider — engraved hairline: a dark line over a light one.
 export component PanelDivider inherits Rectangle {
+    in property <bool> is-dark: true;
+
     height: 1.4px;
 
     VerticalLayout {
         spacing: 0px;
         Rectangle {
             height: 0.7px;
-            background: #231f20;
+            background: Theme.divider-dark-line(root.is-dark);
         }
 
         Rectangle {
             height: 0.7px;
-            background: #747374;
+            background: Theme.divider-light-line(root.is-dark);
         }
     }
 }

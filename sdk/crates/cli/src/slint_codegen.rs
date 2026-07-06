@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use foundation_core::{AppConfig, AppManifest, SdkRoot, APP_CONFIG_FILE};
+use foundation_core::{app_manifest_from_config, AppConfig, SdkRoot, APP_CONFIG_FILE};
 
 use crate::sdk_mapping::ensure_project_sdk_mapping;
 
@@ -61,7 +61,7 @@ fn ensure_compile_manifest(project_root: &Path) -> Result<()> {
     let permissions = config
         .resolved_permissions(project_root)
         .with_context(|| format!("Failed to resolve permissions for {}", project_root.display()))?;
-    let manifest = AppManifest::from_config(&config, permissions);
+    let manifest = app_manifest_from_config(&config, permissions);
     let rendered =
         toml::to_string_pretty(&manifest).context("Failed to serialize compatibility manifest.toml")?;
     let manifest_path = project_root.join(COMPILE_MANIFEST_FILE);
@@ -732,7 +732,7 @@ mod tests {
         )
         .unwrap();
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), "<svg />\n").unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
 
         fs::write(root.join("src").join("lib.rs"), "pub fn sample() {}\n").unwrap();
         fs::write(root.join("stamp.txt"), "v1\n").unwrap();

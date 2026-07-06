@@ -183,13 +183,7 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> RemoveInstalledAppResult {
-        let app_id = match app_manager::decode_app_id_str(&msg.app_id) {
-            Ok(app_id) => app_id,
-            Err(e) => {
-                log::warn!("RemoveInstalledApp: invalid app id {:?}: {e:?}", msg.app_id);
-                return RemoveInstalledAppResult::NotFound;
-            }
-        };
+        let app_id = msg.app_id;
 
         if self.app_registry.is_running(&app_id) {
             return RemoveInstalledAppResult::Running;
@@ -203,7 +197,11 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             };
         };
 
-        match FileSystem::default().remove(&app_dir, fs::Location::System) {
+        info!("removing sideloaded app 0x{} from {app_dir}", hex::encode(app_id.0));
+
+        let remove_result = FileSystem::default().remove(&app_dir, fs::Location::System);
+
+        match remove_result {
             Ok(()) | Err(fs::Error::FileNotFound) => {}
             Err(e) => {
                 error!("failed to remove sideloaded app bundle {app_dir}: {e:?}");
@@ -214,7 +212,10 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
         self.app_registry.clear_registered_manifest(app_id);
 
         match self.app_registry.scan_installed_apps() {
-            Ok(()) => RemoveInstalledAppResult::Removed,
+            Ok(()) => {
+                info!("removed sideloaded app 0x{}", hex::encode(app_id.0));
+                RemoveInstalledAppResult::Removed
+            }
             Err(e) => {
                 error!("failed to refresh installed apps after removing {app_dir}: {e:?}");
                 RemoveInstalledAppResult::InternalError
@@ -350,7 +351,7 @@ impl AppManagerServer {
         // currently-valid publisher cert, so importing or removing a cert takes effect
         // without a rescan. Built-in and hosted apps are always launchable.
         if !self.app_registry.is_launchable(app_id, &self.third_party_cert_store.trusted_publishers()) {
-            return Err(LaunchError::UntrustedPublisher);
+            return Err(LaunchError::NoTrustedPublisherCertificate);
         }
 
         // Register names and resources only after the trust check, so an untrusted app never

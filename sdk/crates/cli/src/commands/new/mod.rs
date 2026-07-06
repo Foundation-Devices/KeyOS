@@ -14,7 +14,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use dialoguer::{Input, Select};
-use foundation_core::SdkRoot;
+use foundation_core::{validate_display_app_name, SdkRoot};
 use template::TemplateProcessor;
 
 use crate::sdk_mapping::{
@@ -50,6 +50,8 @@ struct ThemeEntry {
     display_name: String,
     sort_order: i64,
 }
+
+const DEFAULT_GIT_BRANCH: &str = "main";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GitInitStatus {
@@ -145,13 +147,15 @@ pub fn execute(name: Option<&str>, template: Option<&str>, no_git: bool) -> Resu
             .unwrap_or_else(|| fallback.to_string())
     };
 
-    let friendly_default = template_default("friendly_app_name", &project_name);
+    let friendly_fallback = project_name.replace('_', " ");
+    let friendly_default = template_default("friendly_app_name", &friendly_fallback);
     let friendly_app_name = Input::<String>::new()
         .with_prompt("Enter the app's friendly name")
         .with_initial_text(&friendly_default)
         .interact_text()?
         .trim()
         .to_string();
+    validate_display_app_name("friendly-app-name", &friendly_app_name)?;
 
     let launcher_default = template_default("launcher_app_name", &friendly_app_name);
     let launcher_app_name = Input::<String>::new()
@@ -160,6 +164,7 @@ pub fn execute(name: Option<&str>, template: Option<&str>, no_git: bool) -> Resu
         .interact_text()?
         .trim()
         .to_string();
+    validate_display_app_name("launcher-app-name", &launcher_app_name)?;
 
     let description_default = template_default("description", "A new KeyOS application");
     let description = Input::<String>::new()
@@ -418,7 +423,10 @@ fn initialize_git_repo(project_path: &PathBuf) -> GitInitStatus {
         return GitInitStatus::Unavailable;
     }
 
-    let status = Command::new("git").arg("init").current_dir(project_path).status();
+    let status = Command::new("git")
+        .args(["init", "--initial-branch", DEFAULT_GIT_BRANCH])
+        .current_dir(project_path)
+        .status();
 
     match status {
         Ok(status) if status.success() => GitInitStatus::Initialized,
@@ -439,7 +447,10 @@ mod tests {
 
     use foundation_core::SdkRoot;
 
-    use super::{apply_template, initialize_git_repo, is_git_available, GitInitStatus, PromptConfig};
+    use super::{
+        apply_template, initialize_git_repo, is_git_available, GitInitStatus, PromptConfig,
+        DEFAULT_GIT_BRANCH,
+    };
     use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
@@ -721,8 +732,19 @@ mod tests {
 
         assert_eq!(status, GitInitStatus::Initialized);
         assert!(project_root.join(".git").is_dir());
+        assert_eq!(git_branch(&project_root), DEFAULT_GIT_BRANCH);
 
         cleanup(&temp_root);
+    }
+
+    fn git_branch(project_root: &Path) -> String {
+        let output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(project_root)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
     fn make_sdk_root(label: &str) -> PathBuf {

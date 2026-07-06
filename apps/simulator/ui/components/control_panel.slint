@@ -4,6 +4,7 @@
 import { Panel, PanelHeading, PanelDivider } from "panel.slint";
 import { LabeledSwitch, SwitchOption } from "labeled_switch.slint";
 import { ActionTile } from "action_tile.slint";
+import { Theme } from "theme.slint";
 
 // ControlPanel — the assembled control-panel screen. Compact layout: Theme and
 // Scale are single rows (title + control); Capture has its toggle in the header
@@ -13,6 +14,7 @@ export component ControlPanel inherits Rectangle {
     in-out property <int> scale-index: 1;      // 0.5x / 1x / 1.5x / 2x
     in-out property <int> capture-index: 0;    // Screen only / With Device Frame
     in-out property <bool> recording: false;   // toggles the record tile to a stop icon
+    property <bool> is-dark: root.theme-index == 1;
 
     callback theme-changed(int);
     callback scale-changed(int);
@@ -20,7 +22,7 @@ export component ControlPanel inherits Rectangle {
     callback screenshot();
     callback record();
 
-    background: #000000;
+    background: Theme.window-background(root.is-dark);
     // Size to content so the 24px padding is symmetric on all four sides
     // regardless of the window height.
     preferred-width: body.preferred-width;
@@ -28,8 +30,9 @@ export component ControlPanel inherits Rectangle {
     min-width: body.min-width;
     min-height: body.min-height;
 
-    // Full-bleed background artwork.
-    Image {
+    // Full-bleed background artwork (dark mode only; light mode uses the flat
+    // window-background gradient).
+    if root.is-dark: Image {
         x: 0;
         y: 0;
         width: parent.width;
@@ -45,6 +48,8 @@ export component ControlPanel inherits Rectangle {
 
         // --- Theme: title + toggle on one row ---
         Panel {
+            is-dark: root.is-dark;
+
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
@@ -53,12 +58,14 @@ export component ControlPanel inherits Rectangle {
                 spacing: 8px;
 
                 PanelHeading {
+                    is-dark: root.is-dark;
                     // Fixed title column so all three selectors get the same width.
                     text: "Theme";
                     width: 82px;
                 }
 
                 LabeledSwitch {
+                    is-dark: root.is-dark;
                     horizontal-stretch: 1;
                     min-width: 0px;
                     selected-index <=> root.theme-index;
@@ -75,6 +82,8 @@ export component ControlPanel inherits Rectangle {
 
         // --- Scale: same teal selector as Theme/Capture, 4 options ---
         Panel {
+            is-dark: root.is-dark;
+
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
@@ -83,11 +92,13 @@ export component ControlPanel inherits Rectangle {
                 spacing: 8px;
 
                 PanelHeading {
+                    is-dark: root.is-dark;
                     text: "Scale";
                     width: 82px;
                 }
 
                 LabeledSwitch {
+                    is-dark: root.is-dark;
                     horizontal-stretch: 1;
                     min-width: 0px;
                     selected-index <=> root.scale-index;
@@ -106,6 +117,8 @@ export component ControlPanel inherits Rectangle {
 
         // --- Capture: header (title + toggle), divider, then tiles ---
         Panel {
+            is-dark: root.is-dark;
+
             VerticalLayout {
                 spacing: 0px;
 
@@ -117,11 +130,13 @@ export component ControlPanel inherits Rectangle {
                     spacing: 8px;
 
                     PanelHeading {
+                        is-dark: root.is-dark;
                         text: "Capture";
                         width: 82px;
                     }
 
                     LabeledSwitch {
+                        is-dark: root.is-dark;
                         horizontal-stretch: 1;
                         min-width: 0px;
                         selected-index <=> root.capture-index;
@@ -135,13 +150,16 @@ export component ControlPanel inherits Rectangle {
                     }
                 }
 
-                PanelDivider { }
+                PanelDivider {
+                    is-dark: root.is-dark;
+                }
 
                 HorizontalLayout {
                     padding: 16px;
                     spacing: 24px;
 
                     ActionTile {
+                        is-dark: root.is-dark;
                         tile-height: 102px;
                         icon: @image-url("icons/camera.svg");
                         text: "Screenshot";
@@ -151,6 +169,7 @@ export component ControlPanel inherits Rectangle {
                     }
 
                     ActionTile {
+                        is-dark: root.is-dark;
                         tile-height: 102px;
                         icon: root.recording ? @image-url("icons/stop.svg") : @image-url("icons/record.svg");
                         text: root.recording ? "Stop Recording" : "Screen Recording";

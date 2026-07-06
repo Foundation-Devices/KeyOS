@@ -17,10 +17,12 @@ app-manifest = { path = "../app-manifest" }
 fs = { workspace = true }
 gui-server-api = { workspace = true }
 haptics = { workspace = true }
+hex = { workspace = true }
 i18n = { path = "../../i18n" }
 jiff = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
+lru = "0.13"
 quantum-link = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

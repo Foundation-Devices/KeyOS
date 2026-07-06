@@ -3,10 +3,13 @@
 
 //! Doctor command - checks development environment setup
 
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::Result;
-use foundation_core::SdkRoot;
+use foundation_core::{
+    AppConfig, SdkRoot, APP_CONFIG_FILE, APP_ICON_SIZE_PX, DISPLAY_APP_NAME_ALLOWED_CHARS,
+};
 
 /// Check result with status and optional fix message
 struct CheckResult {
@@ -52,6 +55,12 @@ pub fn execute() -> Result<()> {
 
     // Check git
     checks.push(check_git());
+
+    // Check app-config names when doctor is run from inside an app project
+    checks.push(check_app_config_names());
+
+    // Check app icon size when doctor is run from inside an app project
+    checks.push(check_app_icon_size());
 
     // Print results
     let mut all_passed = true;
@@ -286,6 +295,104 @@ fn check_git() -> CheckResult {
     }
 }
 
+fn check_app_config_names() -> CheckResult {
+    match std::env::current_dir() {
+        Ok(cwd) => check_app_config_names_from(&cwd),
+        Err(error) => CheckResult {
+            name: "Checking app config names".to_string(),
+            passed: false,
+            status: format!("FAILED: {error}"),
+            fix: None,
+        },
+    }
+}
+
+fn check_app_config_names_from(start: &Path) -> CheckResult {
+    let Some(config_path) = find_app_config(start) else {
+        return CheckResult {
+            name: "Checking app config names".to_string(),
+            passed: true,
+            status: "not in app project".to_string(),
+            fix: None,
+        };
+    };
+
+    match AppConfig::load(&config_path).and_then(|config| {
+        config.validate_app_names()?;
+        Ok(config)
+    }) {
+        Ok(config) => CheckResult {
+            name: "Checking app config names".to_string(),
+            passed: true,
+            status: format!("OK ({})", config.launcher_name()),
+            fix: None,
+        },
+        Err(error) => CheckResult {
+            name: "Checking app config names".to_string(),
+            passed: false,
+            status: format!("INVALID: {error}"),
+            fix: Some(format!(
+                "Update {}. app-name must be Cargo-safe; friendly-app-name and launcher-app-name may contain only {}.",
+                config_path.display(),
+                DISPLAY_APP_NAME_ALLOWED_CHARS
+            )),
+        },
+    }
+}
+
+fn check_app_icon_size() -> CheckResult {
+    match std::env::current_dir() {
+        Ok(cwd) => check_app_icon_size_from(&cwd),
+        Err(error) => CheckResult {
+            name: "Checking app icon size".to_string(),
+            passed: false,
+            status: format!("FAILED: {error}"),
+            fix: None,
+        },
+    }
+}
+
+fn check_app_icon_size_from(start: &Path) -> CheckResult {
+    let Some(config_path) = find_app_config(start) else {
+        return CheckResult {
+            name: "Checking app icon size".to_string(),
+            passed: true,
+            status: "not in app project".to_string(),
+            fix: None,
+        };
+    };
+
+    let project_root = config_path.parent().unwrap_or(start);
+    match AppConfig::load(&config_path).and_then(|config| config.validate_icon(project_root)) {
+        Ok(dimensions) => CheckResult {
+            name: "Checking app icon size".to_string(),
+            passed: true,
+            status: format!("OK ({}x{}px)", dimensions.width, dimensions.height),
+            fix: None,
+        },
+        Err(error) => CheckResult {
+            name: "Checking app icon size".to_string(),
+            passed: false,
+            status: format!("INVALID: {error}"),
+            fix: Some(format!(
+                "Update the icon referenced by {}. App icons must be {APP_ICON_SIZE_PX}x{APP_ICON_SIZE_PX}px.",
+                config_path.display()
+            )),
+        },
+    }
+}
+
+fn find_app_config(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        let config_path = current.join(APP_CONFIG_FILE);
+        if config_path.exists() {
+            return Some(config_path);
+        }
+        current = current.parent()?.to_path_buf();
+    }
+}
+
 fn resolve_tool(names: &[&str]) -> Option<std::path::PathBuf> {
     SdkRoot::discover()
         .ok()
@@ -309,4 +416,111 @@ fn command_available(command: &str, args: &[&str]) -> bool {
         .status()
         .map(|o| o.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{check_app_config_names_from, check_app_icon_size_from};
+
+    #[test]
+    fn app_config_name_check_reports_invalid_display_name() {
+        let root = make_temp_dir("doctor-invalid-name");
+        write_config(&root, "Demo_App");
+
+        let result = check_app_config_names_from(&root);
+
+        assert!(!result.passed);
+        assert!(result.status.contains("friendly-app-name"));
+        assert!(result.status.contains("only A-Z, a-z, 0-9, spaces, and hyphens"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn app_config_name_check_skips_outside_app_project() {
+        let root = make_temp_dir("doctor-no-app");
+
+        let result = check_app_config_names_from(&root);
+
+        assert!(result.passed);
+        assert_eq!(result.status, "not in app project");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn app_icon_size_check_reports_invalid_icon_size() {
+        let root = make_temp_dir("doctor-invalid-icon");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_config(&root, "Demo App");
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
+
+        let result = check_app_icon_size_from(&root);
+
+        assert!(!result.passed);
+        assert!(result.status.contains("Icon must be 96x96px"));
+        assert!(result.status.contains("128x96px"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn app_icon_size_check_accepts_96px_icon() {
+        let root = make_temp_dir("doctor-valid-icon");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_config(&root, "Demo App");
+        fs::write(root.join("resources").join("icon.svg"), valid_icon_svg()).unwrap();
+
+        let result = check_app_icon_size_from(&root);
+
+        assert!(result.passed);
+        assert_eq!(result.status, "OK (96x96px)");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn app_icon_size_check_skips_outside_app_project() {
+        let root = make_temp_dir("doctor-no-icon-project");
+
+        let result = check_app_icon_size_from(&root);
+
+        assert!(result.passed);
+        assert_eq!(result.status, "not in app project");
+
+        cleanup(&root);
+    }
+
+    fn write_config(root: &Path, friendly_name: &str) {
+        fs::write(
+            root.join("app-config.toml"),
+            format!(
+                r#"
+                app-name = "demo-app"
+                friendly-app-name = "{friendly_name}"
+                description = "Demo"
+                icon = "resources/icon.svg"
+                app-id = "0x00112233445566778899aabbccddeeff"
+                version = "0.1.0"
+                min-keyos-version = "1.0.0"
+                "#
+            ),
+        )
+        .unwrap();
+    }
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("foundation-doctor-{label}-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
+
+    fn valid_icon_svg() -> &'static str { r#"<svg width="96" height="96"></svg>"# }
 }

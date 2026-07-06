@@ -150,8 +150,9 @@ Observed behavior:
 
 - `app-name` is the Cargo package name and build output directory name
 - `launcher-app-name` falls back to `friendly-app-name`
+- `friendly-app-name` and `launcher-app-name` may contain only ASCII letters, numbers, spaces, and hyphens
 - `app-id` must be a `0x`-prefixed even-length hex string
-- `icon` is validated relative to the project root
+- `icon` is validated relative to the project root and must be exactly `96x96px`
 - `theme`, when present, names either an app-local editable JSON file or a base theme id
 - `permissions.template` expands through `permission_templates.toml`
 - explicit permission entries merge with expanded templates
@@ -173,7 +174,8 @@ Example:
 
 ### Emitted `manifest.json`
 
-`build` and `sim` emit the same manifest shape.
+`build` and `sim` emit the same manifest shape, serialized through the shared
+`app-manifest` crate used by KeyOS runtime manifest readers.
 
 Example:
 
@@ -272,7 +274,8 @@ Behavior:
 - If the app ID prompt is left blank, generates a random 16-byte hex ID with `0x` prefix
 - Creates the project directory from the selected template
 - Writes `app-config.toml`, `permission_templates.toml`, template source files, and resources
-- Initializes a Git repository by default with `git init`
+- Rejects friendly and launcher app names containing characters outside ASCII letters, numbers, spaces, and hyphens
+- Initializes a Git repository by default with initial branch `main`
 - Does not create an initial commit
 - `--no-git` skips repository initialization
 - If Git is unavailable, scaffolding still succeeds and the command prints a warning instead of failing
@@ -369,6 +372,8 @@ target/keyos/<app-name>/manifest.json
 ```text
 target/keyos/<app-name>/icon.bin
 ```
+
+- Refuses to build when the source icon is not exactly `96x96px`
 
 - Converts and stages app assets into:
 
@@ -549,6 +554,7 @@ Behavior:
   - `cosign2`
   - `foundation-slint-viewer` or `slint-viewer`
   - `git`
+  - app-config names and app icon size when run inside an app project
 - Prints pass/fail plus suggested fixes
 - Is advisory: failed checks do not currently force a non-zero exit status
 

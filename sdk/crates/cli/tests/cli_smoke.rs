@@ -230,6 +230,43 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 }
 
 #[test]
+fn build_refuses_invalid_app_names_before_cargo() {
+    let env = TestEnv::new();
+    env.install_fake_cargo();
+    env.write_smoke_app();
+
+    let config_path = env.app_root().join("app-config.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        config.replace("friendly-app-name = \"Smoke App\"", "friendly-app-name = \"Smoke_App\""),
+    )
+    .unwrap();
+
+    let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
+
+    assert!(!build.status.success());
+    assert!(stderr(&build).contains("friendly-app-name"), "stderr was: {}", stderr(&build));
+    assert!(env.read_log("cargo.log").is_empty());
+}
+
+#[test]
+fn build_refuses_invalid_icon_size_before_cargo() {
+    let env = TestEnv::new();
+    env.install_fake_cargo();
+    env.write_smoke_app();
+
+    fs::write(env.app_root().join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#)
+        .unwrap();
+
+    let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
+
+    assert!(!build.status.success());
+    assert!(stderr(&build).contains("Icon must be 96x96px"), "stderr was: {}", stderr(&build));
+    assert!(env.read_log("cargo.log").is_empty());
+}
+
+#[test]
 fn logs_command_launches_bundled_log_viewer() {
     let env = TestEnv::new();
     env.install_bundle_log_viewer();
@@ -769,7 +806,8 @@ printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
             "#,
         )
         .unwrap();
-        fs::write(self.app.join("resources").join("icon.svg"), "<svg />\n").unwrap();
+        fs::write(self.app.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#)
+            .unwrap();
         fs::write(
             self.app.join("ui").join("app.slint"),
             "export component AppWindow inherits Window { Text { text: \"smoke\"; } }\n",

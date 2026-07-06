@@ -14,6 +14,7 @@ import { Theme } from "theme.slint";
 export component ActionTile {
     in property <image> icon;
     in property <string> text;
+    in property <bool> is-dark: true;
     in property <length> tile-height: 164px;
     // Teal "active" treatment (e.g. recording in progress) instead of metallic.
     in property <bool> active: false;
@@ -32,7 +33,7 @@ export component ActionTile {
         min-height: root.tile-height;
         border-radius: 16px;
         border-width: 1px;
-        border-color: root.active ? #7ad2dacc : (tile.pressed ? #cfcec5cc : #eae9e0cc); // rgba(234,233,224,0.8)
+        border-color: root.active ? #7ad2dacc : (tile.pressed ? Theme.tile-border-pressed(root.is-dark) : Theme.tile-border(root.is-dark));
         // Active = Foundation teal gradient (blue-500 0% -> teal-400 100%); the
         // pressed darkening comes from the inner-shadow overlay below.
         background: root.active ? @linear-gradient(138.75deg, Theme.blue-500 0%, Theme.teal-400 100%) : (tile.pressed ? @linear-gradient(138.75deg, #bcbbbc 0%, #8e8c8e 100%) : @linear-gradient(138.75deg, #d5d4d5 0%, #a2a0a2 100%));

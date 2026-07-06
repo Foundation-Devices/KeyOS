@@ -9,6 +9,9 @@ import { TR2, TrId } from "./gen/tr.slint";
 import { BaseWindow, PopupMenu, TimerLoader, HeadingMd, TextSm } from "@ui/widgets.slint";
 
 export component AppWindow inherits BaseWindow {
+    background-image-light: @image-url("assets/launcher-bg-light.png");
+    background-image-dark: @image-url("assets/launcher-bg-dark.png");
+
     Router { }
 
     if State.update-resume-active: Rectangle {

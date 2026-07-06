@@ -33,7 +33,7 @@ The command:
   - minimum KeyOS version
 - generates a random 16-byte `0x`-prefixed app ID when the prompt is left blank
 - writes the scaffolded project files
-- runs `git init` by default
+- runs `git init` by default with initial branch `main`
 - skips repository initialization when `--no-git` is passed
 - does not create an initial commit
 

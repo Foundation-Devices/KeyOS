@@ -38,7 +38,9 @@ test_only_excludes := '--exclude gui-app-emu-flux ' + \
 # Format the codebase.
 fmt:
     just slint-fmt
-    cargo fmt
+    cargo fmt --all
+    cargo fmt --manifest-path sdk/Cargo.toml --all
+    cargo fmt --manifest-path sdk/crates/cli/Cargo.toml --all
     just toml-fmt
     just nix-fmt
 

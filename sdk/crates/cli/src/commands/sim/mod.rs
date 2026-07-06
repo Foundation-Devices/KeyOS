@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use foundation_core::{AppConfig, AppManifest, ProjectContext, SdkLayout, SdkRoot};
+use foundation_core::{app_manifest_from_config, AppConfig, ProjectContext, SdkLayout, SdkRoot};
 
 use crate::assets::{stage_bundled_icon, stage_hardware_assets};
 use crate::cargo_support::{configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present};
@@ -36,7 +36,7 @@ pub fn execute() -> Result<()> {
     let sdk = SdkRoot::discover().map_err(|_| anyhow::anyhow!("Could not locate the Foundation SDK root. Run this command from the SDK checkout or unpacked SDK bundle."))?;
 
     // Find and read app-config.toml
-    let project = ProjectContext::discover().context("app-config.toml not found")?;
+    let project = ProjectContext::discover()?;
     let project_root = project.root.as_path();
     let config = &project.config;
 
@@ -797,6 +797,6 @@ mod tests {
 
 /// Generate manifest.json content
 fn generate_manifest_json(config: &AppConfig, project_root: &Path) -> Result<String> {
-    let manifest = AppManifest::from_config(config, config.resolved_permissions(project_root)?);
+    let manifest = app_manifest_from_config(config, config.resolved_permissions(project_root)?);
     Ok(serde_json::to_string_pretty(&manifest)?)
 }

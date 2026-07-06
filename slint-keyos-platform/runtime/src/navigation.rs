@@ -37,6 +37,27 @@ where
     }
 }
 
+pub async fn async_open_qr_scanner<P>(options: ScanQrOptions) -> Result<Option<ScanQrResult>, GuiServerError>
+where
+    P: CheckedPermissions + MessageAllowed<ShowModal>,
+{
+    let msg = ShowModal {
+        app_id: QR_SCANNER_APP_ID,
+        modal_style: ModalStyle::SlideUpFullscreen,
+        args: options.serialize(),
+    };
+
+    let res = crate::async_archive::<P, _>(msg).await;
+
+    match res {
+        Ok(response) => Ok(ScanQrResult::from_slice(response.as_slice())),
+        Err(NavigationError::CanceledBySystem) | Err(NavigationError::CanceledByUser) => {
+            Ok(Some(ScanQrResult::new_cancelled()))
+        }
+        Err(e) => Err(GuiServerError::Navigation(e)),
+    }
+}
+
 pub fn select_file<P>(options: SelectFileOptions) -> Result<Option<SelectFileResult>, GuiServerError>
 where
     P: CheckedPermissions + MessageAllowed<ShowModal>,

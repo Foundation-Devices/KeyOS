@@ -1,42 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::sync::OnceLock;
-
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use tiny_skia::{
-    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pattern, Pixmap, Point, Rect,
-    SpreadMode, Stroke, StrokeDash, Transform,
+    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Point, Rect, SpreadMode, Stroke,
+    StrokeDash, Transform,
 };
 
-use super::card::LINE_PATTERN;
-
-// Cached stripe background
-static STRIPE_CACHE: OnceLock<Pixmap> = OnceLock::new();
 const BOTTOM_VERTICAL_MARGIN: u32 = 6;
-
-/// Get or create a cached stripe background pixmap
-fn get_stripe_background(w: u32, h: u32, offset_x: f32, offset_y: f32) -> &'static Pixmap {
-    STRIPE_CACHE.get_or_init(|| {
-        let mut stripe_pixmap = Pixmap::new(w, h).unwrap();
-        let mut line_paint = Paint::default();
-        let line_pattern = &*LINE_PATTERN;
-        line_paint.shader = Pattern::new(
-            line_pattern.as_ref(),
-            SpreadMode::Repeat,
-            tiny_skia::FilterQuality::Nearest,
-            1.0,
-            Transform::from_translate(-offset_x, -offset_y),
-        );
-        stripe_pixmap.fill_rect(
-            Rect::from_xywh(0.0, 0.0, w as f32, h as f32).unwrap(),
-            &line_paint,
-            Transform::identity(),
-            None,
-        );
-        stripe_pixmap
-    })
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PricePoint {
@@ -45,6 +16,9 @@ pub struct PricePoint {
     #[serde(default)]
     pub is_pad: bool,
 }
+
+const GRAPH_BORDER_RADIUS: f32 = 14.0;
+const GRAPH_BORDER_STROKE_WIDTH: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GraphPoint {
@@ -95,15 +69,7 @@ pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec
         .collect()
 }
 
-pub fn draw_graph(
-    data: &[PricePoint],
-    w: u32,
-    h: u32,
-    max_height: u32,
-    is_dark_mode: bool,
-    offset_x: f32,
-    offset_y: f32,
-) -> Image {
+pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, is_dark_mode: bool) -> Image {
     let mut pixel_buffer = SharedPixelBuffer::<Rgba8Pixel>::new(w, h);
     let mut pixmap = tiny_skia::PixmapMut::from_bytes(pixel_buffer.make_mut_bytes(), w, h).unwrap();
     pixmap.fill(Color::TRANSPARENT);
@@ -117,12 +83,7 @@ pub fn draw_graph(
     if is_flatline {
         draw_flatline_graph(&mut pixmap, data, w, h, max_height, is_dark_mode);
     } else {
-        // Round offsets and apply modulo for proper tiling alignment
-        let pattern_width = LINE_PATTERN.width() as f32;
-        let pattern_height = LINE_PATTERN.height() as f32;
-        let offset_x = offset_x.round() % pattern_width;
-        let offset_y = offset_y.round() % pattern_height;
-        draw_normal_graph(&mut pixmap, data, w, h, max_height, is_dark_mode, offset_x, offset_y);
+        draw_normal_graph(&mut pixmap, data, w, h, max_height, is_dark_mode);
     }
 
     Image::from_rgba8_premultiplied(pixel_buffer)
@@ -138,11 +99,6 @@ fn draw_flatline_graph(
 ) {
     const SHADOW_HEIGHT: usize = 6;
 
-    let bg_color = if is_dark_mode {
-        Color::from_rgba8(0x11, 0x11, 0x11, 0xff)
-    } else {
-        Color::from_rgba8(0xf6, 0xf6, 0xf6, 0xff)
-    };
     let stale_fg_color = if is_dark_mode {
         Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff)
     } else {
@@ -221,11 +177,6 @@ fn draw_flatline_graph(
     let mut mask = Mask::new(w, h).unwrap();
     mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
 
-    // Fill background
-    let mut paint_inside = Paint::default();
-    paint_inside.set_color(bg_color);
-    pixmap.fill_path(&border_path, &paint_inside, FillRule::EvenOdd, Transform::identity(), None);
-
     // Draw stale fill gradient
     pixmap.fill_path(
         &fill_path_stale,
@@ -250,6 +201,8 @@ fn draw_flatline_graph(
         Transform::identity(),
         Some(&mask),
     );
+
+    draw_graph_border(pixmap, w, h);
 }
 
 fn draw_normal_graph(
@@ -259,17 +212,11 @@ fn draw_normal_graph(
     h: u32,
     max_height: u32,
     is_dark_mode: bool,
-    offset_x: f32,
-    offset_y: f32,
 ) {
     const SHADOW_HEIGHT: usize = 6;
 
-    let bg_color = if is_dark_mode {
-        Color::from_rgba8(0x11, 0x11, 0x11, 0xff)
-    } else {
-        Color::from_rgba8(0xf6, 0xf6, 0xf6, 0xff)
-    };
-    let fg_color = Color::from_rgba8(0xbf, 0x75, 0x5f, 0xff);
+    // Matches Palette.content-positive (UIColors.green-500).
+    let fg_color = Color::from_rgba8(0x2e, 0x94, 0x83, 0xff);
     let stale_fg_color = match is_dark_mode {
         true => Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff), // #5A595A
         false => Color::from_rgba8(0x95, 0x93, 0x94, 0xff), // #959394
@@ -359,7 +306,7 @@ fn draw_normal_graph(
     };
 
     let fresh_stops =
-        [(0.0, Color::from_rgba8(0xD6, 0x8B, 0x6E, 0x3f)), (1.0, Color::from_rgba8(0xD6, 0x8B, 0x6E, 0xff))];
+        [(0.0, Color::from_rgba8(0x2e, 0x94, 0x83, 0x14)), (1.0, Color::from_rgba8(0x2e, 0x94, 0x83, 0xcc))];
     let fresh_stops: Vec<_> =
         fresh_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
     let paint_fill_fresh = Paint {
@@ -373,17 +320,6 @@ fn draw_normal_graph(
     let mut mask = Mask::new(w, h).unwrap();
     mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
 
-    // Fill background
-    let mut paint_inside = Paint::default();
-    paint_inside.set_color(bg_color);
-    pixmap.fill_path(&border_path, &paint_inside, FillRule::EvenOdd, Transform::identity(), None);
-
-    // Create a mask for all graph fill areas
-    let mut graph_fill_mask = Mask::new(w, h).unwrap();
-    for path in [&fill_path_fresh, &fill_path_stale].into_iter().flatten() {
-        graph_fill_mask.fill_path(path, FillRule::EvenOdd, false, Transform::identity());
-    }
-
     // Draw fill gradients
     if let Some(path) = &fill_path_stale {
         pixmap.fill_path(path, &paint_fill_stale, FillRule::EvenOdd, Transform::identity(), Some(&mask));
@@ -391,17 +327,6 @@ fn draw_normal_graph(
     if let Some(path) = &fill_path_fresh {
         pixmap.fill_path(path, &paint_fill_fresh, FillRule::EvenOdd, Transform::identity(), Some(&mask));
     }
-
-    // Draw stripes on top of gradients
-    let stripe_bg = get_stripe_background(w, h, offset_x, offset_y);
-    pixmap.draw_pixmap(
-        0,
-        0,
-        stripe_bg.as_ref(),
-        &tiny_skia::PixmapPaint::default(),
-        Transform::identity(),
-        Some(&graph_fill_mask),
-    );
 
     // Draw lines and shadows
     for (path, paint, stroke) in [
@@ -414,4 +339,53 @@ fn draw_normal_graph(
             pixmap.stroke_path(path, paint, stroke, Transform::identity(), Some(&mask));
         }
     }
+
+    draw_graph_border(pixmap, w, h);
+}
+
+fn draw_graph_border(pixmap: &mut tiny_skia::PixmapMut, w: u32, h: u32) {
+    if w < 2 || h < 2 {
+        return;
+    }
+
+    let stroke_width = GRAPH_BORDER_STROKE_WIDTH;
+    let inset = stroke_width / 2.0 + 0.5;
+    let left = inset;
+    let right = w as f32 - inset;
+    let top = 0.0;
+    let bottom = h as f32 - inset;
+    let radius = GRAPH_BORDER_RADIUS.min((right - left) / 2.0).min(bottom - top);
+    let control = radius * 0.552_284_8;
+
+    let mut pb = PathBuilder::new();
+    pb.move_to(left, top);
+    pb.line_to(left, bottom - radius);
+    pb.cubic_to(left, bottom - radius + control, left + radius - control, bottom, left + radius, bottom);
+    pb.line_to(right - radius, bottom);
+    pb.cubic_to(right - radius + control, bottom, right, bottom - radius + control, right, bottom - radius);
+    pb.line_to(right, top);
+
+    let Some(path) = pb.finish() else {
+        return;
+    };
+
+    let stops = vec![
+        GradientStop::new(0.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
+        GradientStop::new(0.25, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
+        GradientStop::new(1.0, Color::from_rgba8(0xbf, 0xaf, 0xa9, 0xff)),
+    ];
+    let paint = Paint {
+        shader: LinearGradient::new(
+            Point::from_xy(w as f32 / 2.0, 0.0),
+            Point::from_xy(w as f32 / 2.0, h as f32),
+            stops,
+            SpreadMode::Pad,
+            Transform::identity(),
+        )
+        .unwrap(),
+        ..Default::default()
+    };
+    let stroke = Stroke { width: stroke_width, ..Default::default() };
+
+    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
 }

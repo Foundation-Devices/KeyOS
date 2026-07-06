@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-@rust-attr(route(path = "/details?{app_id}&{name}&{publisher}&{version}&{size}&{description}"))
+@rust-attr(route(path = "/details?{app_id}&{name}&{publisher}&{can_remove}&{version}&{size}&{description}"))
 export struct AppDetailsProps {
     app_id: string,
     name: string,
     publisher: string,
+    can_remove: bool,
     version: string,
     size: string,
     description: string,

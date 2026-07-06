@@ -457,10 +457,21 @@ impl Gui {
 
     fn switch_to_launcher(&mut self) {
         if let Some(launcher_app_pid) = self.app_registry.pid(AppRole::Launcher) {
+            let launcher_already_active = self.active_app_pid() == Some(launcher_app_pid);
             match &mut self.state {
                 // Special case: we are already displaying the launcher, but it's in a modal state:
                 GuiState::Modal(modal_state) if modal_state.background_pid() == launcher_app_pid => {
                     modal_state.respond(Err(gui_server_api::error::NavigationError::CanceledBySystem));
+                }
+                _ if launcher_already_active => {
+                    if let Some(window) = self.windows.get(&launcher_app_pid) {
+                        if let Err(e) = xous::send_message(
+                            window.input_cid,
+                            xous::Message::new_scalar(InputMessage::Custom1 as usize, 0, 0, 0, 0),
+                        ) {
+                            error!("Failed to notify launcher about home button press: {e:?}");
+                        }
+                    }
                 }
                 _ => self.switch_to_window(launcher_app_pid),
             }

@@ -60,12 +60,19 @@ impl Status {
 ///
 /// The launch response payload starts with the PID as little-endian `u16`.
 /// Newer devices append this status byte so host tools can tell whether the
-/// app was freshly launched or an existing process was only foregrounded.
+/// app was freshly launched, an existing process was only foregrounded, or the
+/// launch request was rejected with a known reason.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
 pub enum LaunchAppStatus {
     Launched = 0,
     AlreadyRunning = 1,
+    AppIdNotFound = 2,
+    SignatureRejected = 3,
+    NoTrustedPublisherCertificate = 4,
+    MissingPermission = 5,
+    NotReady = 6,
+    InternalError = 7,
 }
 
 impl LaunchAppStatus {
@@ -129,6 +136,7 @@ const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
 const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
 const CMD_INSTALL_CERTIFICATE: u8 = 0x10;
+const CMD_GET_TRUSTED_PUBLISHER_COUNT: u8 = 0x11;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
@@ -185,6 +193,7 @@ pub enum Command {
     InstallCertificate {
         certificate_pem: Vec<u8>,
     },
+    GetTrustedPublisherCount,
 }
 
 impl Command {
@@ -207,6 +216,7 @@ impl Command {
             Command::LoadAppEnd => CMD_LOAD_APP_END,
             Command::GetProcessList => CMD_GET_PROCESS_LIST,
             Command::InstallCertificate { .. } => CMD_INSTALL_CERTIFICATE,
+            Command::GetTrustedPublisherCount => CMD_GET_TRUSTED_PUBLISHER_COUNT,
         }
     }
 
@@ -219,7 +229,8 @@ impl Command {
             | Command::GetVersion
             | Command::GetDeveloperMode
             | Command::LoadAppEnd
-            | Command::GetProcessList => {}
+            | Command::GetProcessList
+            | Command::GetTrustedPublisherCount => {}
             Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps } => {
                 out.extend_from_slice(&start_x.to_le_bytes());
                 out.extend_from_slice(&start_y.to_le_bytes());
@@ -337,6 +348,7 @@ impl Command {
                 }
                 Ok(Command::InstallCertificate { certificate_pem: payload.to_vec() })
             }
+            CMD_GET_TRUSTED_PUBLISHER_COUNT => Ok(Command::GetTrustedPublisherCount),
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
@@ -414,6 +426,8 @@ pub enum Response {
     /// Reply to `Command::GetDeveloperMode`. Single-byte payload: 0x00 = off, 0x01 = on.
     /// Device-side usb-debug returns `true` because the interface itself is Developer Mode gated.
     DeveloperMode(bool),
+    /// Reply to `Command::GetTrustedPublisherCount`. Payload is little-endian `u16`.
+    TrustedPublisherCount(Vec<u8>),
     /// Asynchronous log frame; not a reply to a `Command`.
     Log(Vec<u8>),
 }
@@ -431,6 +445,7 @@ impl Response {
             Response::Version(d) => (HDR_RESP_OK, d.as_slice()),
             Response::LaunchAck(d) => (HDR_RESP_OK, d.as_slice()),
             Response::DeveloperMode(enabled) => (HDR_RESP_OK, dev_mode_byte(*enabled)),
+            Response::TrustedPublisherCount(d) => (HDR_RESP_OK, d.as_slice()),
             Response::Log(d) => (HDR_LOG, d.as_slice()),
         }
     }
@@ -568,6 +583,7 @@ mod tests {
         roundtrip(Command::InstallCertificate {
             certificate_pem: b"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_vec(),
         });
+        roundtrip(Command::GetTrustedPublisherCount);
     }
 
     #[test]
@@ -661,6 +677,8 @@ mod tests {
         let result = LaunchAppResult::new(0x1234, LaunchAppStatus::AlreadyRunning);
         assert_eq!(result.encode(), vec![0x34, 0x12, 1]);
         assert_eq!(LaunchAppResult::decode(&result.encode()).unwrap(), result);
+        let failure = LaunchAppResult::new(0, LaunchAppStatus::NoTrustedPublisherCertificate);
+        assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
         assert_eq!(
             LaunchAppResult::decode(&[0x34, 0x12]).unwrap(),
             LaunchAppResult::new(0x1234, LaunchAppStatus::Launched)

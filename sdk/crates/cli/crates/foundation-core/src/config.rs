@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 pub const APP_CONFIG_FILE: &str = "app-config.toml";
 pub const PERMISSION_TEMPLATES_FILE: &str = "permission_templates.toml";
+pub const DISPLAY_APP_NAME_ALLOWED_CHARS: &str = "A-Z, a-z, 0-9, spaces, and hyphens";
+pub const APP_ICON_SIZE_PX: u32 = 96;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -200,13 +202,24 @@ impl AppConfig {
 
     /// Validate the config against the project root
     pub fn validate(&self, project_root: &Path) -> Result<(), ConfigError> {
-        self.validate_app_name()?;
+        self.validate_app_names()?;
+        self.validate_icon(project_root)?;
 
-        let icon_path = project_root.join(&self.icon);
-        if !icon_path.exists() {
-            return Err(ConfigError::MissingIcon { path: icon_path });
-        }
         let _ = self.resolved_permissions(project_root)?;
+        Ok(())
+    }
+
+    pub fn validate_icon(&self, project_root: &Path) -> Result<IconDimensions, ConfigError> {
+        let icon_path = project_root.join(&self.icon);
+        validate_icon_file(&icon_path)
+    }
+
+    pub fn validate_app_names(&self) -> Result<(), ConfigError> {
+        self.validate_app_name()?;
+        validate_display_app_name("friendly-app-name", &self.friendly_app_name)?;
+        if let Some(name) = &self.launcher_app_name {
+            validate_display_app_name("launcher-app-name", name)?;
+        }
         Ok(())
     }
 
@@ -214,6 +227,7 @@ impl AppConfig {
         let name = self.app_name.as_str();
         if name.is_empty() {
             return Err(ConfigError::InvalidAppName {
+                field: "app-name",
                 name: self.app_name.clone(),
                 reason: "must not be empty",
             });
@@ -221,6 +235,7 @@ impl AppConfig {
 
         if name == "." || name == ".." {
             return Err(ConfigError::InvalidAppName {
+                field: "app-name",
                 name: self.app_name.clone(),
                 reason: "must be a plain directory name",
             });
@@ -228,8 +243,17 @@ impl AppConfig {
 
         if Path::new(name).is_absolute() || name.contains('/') || name.contains('\\') {
             return Err(ConfigError::InvalidAppName {
+                field: "app-name",
                 name: self.app_name.clone(),
                 reason: "must not contain path components",
+            });
+        }
+
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(ConfigError::InvalidAppName {
+                field: "app-name",
+                name: self.app_name.clone(),
+                reason: "may contain only ASCII letters, numbers, hyphens, and underscores",
             });
         }
 
@@ -317,6 +341,112 @@ fn non_empty_value(value: &str) -> Option<&str> {
     }
 }
 
+pub fn validate_display_app_name(field: &'static str, name: &str) -> Result<(), ConfigError> {
+    if name.trim().is_empty() {
+        return Err(ConfigError::InvalidAppName {
+            field,
+            name: name.to_string(),
+            reason: "must not be empty",
+        });
+    }
+
+    if name.trim() != name {
+        return Err(ConfigError::InvalidAppName {
+            field,
+            name: name.to_string(),
+            reason: "must not start or end with whitespace",
+        });
+    }
+
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-') {
+        return Err(ConfigError::InvalidAppName {
+            field,
+            name: name.to_string(),
+            reason: "must contain only A-Z, a-z, 0-9, spaces, and hyphens",
+        });
+    }
+
+    Ok(())
+}
+
+pub fn validate_icon_file(path: &Path) -> Result<IconDimensions, ConfigError> {
+    if !path.exists() {
+        return Err(ConfigError::MissingIcon { path: path.to_path_buf() });
+    }
+
+    let dimensions = read_icon_dimensions(path)?;
+    if dimensions.width != APP_ICON_SIZE_PX || dimensions.height != APP_ICON_SIZE_PX {
+        return Err(ConfigError::InvalidIconSize {
+            path: path.to_path_buf(),
+            width: dimensions.width,
+            height: dimensions.height,
+            expected_width: APP_ICON_SIZE_PX,
+            expected_height: APP_ICON_SIZE_PX,
+        });
+    }
+
+    Ok(dimensions)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IconDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
+fn read_icon_dimensions(path: &Path) -> Result<IconDimensions, ConfigError> {
+    let bytes = std::fs::read(path)
+        .map_err(|source| ConfigError::IconReadError { path: path.to_path_buf(), source })?;
+
+    let Some(dimensions) = raster_icon_dimensions(&bytes).or_else(|| svg_icon_dimensions(&bytes)) else {
+        return Err(ConfigError::IconDimensionError {
+            path: path.to_path_buf(),
+            reason: "unsupported icon format or missing image dimensions",
+        });
+    };
+
+    Ok(dimensions)
+}
+
+fn raster_icon_dimensions(bytes: &[u8]) -> Option<IconDimensions> {
+    let image_type = imagesize::image_type(bytes).ok()?;
+    if !matches!(
+        image_type,
+        imagesize::ImageType::Png
+            | imagesize::ImageType::Jpeg
+            | imagesize::ImageType::Bmp
+            | imagesize::ImageType::Webp
+    ) {
+        return None;
+    }
+
+    let dimensions = imagesize::blob_size(bytes).ok()?;
+    Some(IconDimensions {
+        width: dimensions.width.try_into().ok()?,
+        height: dimensions.height.try_into().ok()?,
+    })
+}
+
+fn svg_icon_dimensions(bytes: &[u8]) -> Option<IconDimensions> {
+    let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).ok()?;
+    let size = tree.size();
+    Some(IconDimensions {
+        width: svg_dimension_to_u32(size.width())?,
+        height: svg_dimension_to_u32(size.height())?,
+    })
+}
+
+fn svg_dimension_to_u32(value: f32) -> Option<u32> {
+    if !value.is_finite() || value < 0.0 || value > u32::MAX as f32 {
+        return None;
+    }
+    let rounded = value.round();
+    if (value - rounded).abs() > f32::EPSILON {
+        return None;
+    }
+    Some(rounded as u32)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("Failed to read config file {path}: {source}")]
@@ -327,6 +457,15 @@ pub enum ConfigError {
 
     #[error("Icon file not found: {path}")]
     MissingIcon { path: PathBuf },
+
+    #[error("Failed to read icon file {path}: {source}")]
+    IconReadError { path: PathBuf, source: std::io::Error },
+
+    #[error("Icon must be {expected_width}x{expected_height}px, but {path} is {width}x{height}px")]
+    InvalidIconSize { path: PathBuf, width: u32, height: u32, expected_width: u32, expected_height: u32 },
+
+    #[error("Could not determine icon size for {path}: {reason}")]
+    IconDimensionError { path: PathBuf, reason: &'static str },
 
     #[error("Permission templates file not found: {path}")]
     MissingPermissionTemplates { path: PathBuf },
@@ -340,8 +479,8 @@ pub enum ConfigError {
     #[error("Permission template '{name}' not found in {path}")]
     UnknownPermissionTemplate { name: String, path: PathBuf },
 
-    #[error("Invalid app-name '{name}': {reason}")]
-    InvalidAppName { name: String, reason: &'static str },
+    #[error("Invalid {field} '{name}': {reason}")]
+    InvalidAppName { field: &'static str, name: String, reason: &'static str },
 
     #[error("'{field}' in {path} is generated by the build; remove it")]
     AutomatedField { field: &'static str, path: PathBuf },
@@ -354,8 +493,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        AppConfig, AppId, AppIdError, ConfigError, PermissionsConfig, PublisherConfig, APP_CONFIG_FILE,
-        PERMISSION_TEMPLATES_FILE,
+        validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError, ConfigError,
+        IconDimensions, PermissionsConfig, PublisherConfig, APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
     };
 
     #[test]
@@ -389,7 +528,7 @@ mod tests {
     fn loads_app_config_and_expands_permission_templates() {
         let root = make_temp_dir("app-config");
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), "<svg />\n").unwrap();
+        write_valid_icon(&root);
         fs::write(
             root.join(APP_CONFIG_FILE),
             r#"
@@ -444,7 +583,7 @@ mod tests {
     fn validate_rejects_app_names_with_path_components() {
         let root = make_temp_dir("invalid-app-name");
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), "<svg />\n").unwrap();
+        write_valid_icon(&root);
 
         for app_name in ["", ".", "..", "../common", "/tmp/demo", "nested/app", r"nested\app"] {
             let config = test_config(app_name);
@@ -458,10 +597,68 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_app_names_with_unsupported_package_characters() {
+        let root = make_temp_dir("invalid-package-name");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(&root);
+
+        for app_name in ["demo app", "demo.app", "demo@app"] {
+            let config = test_config(app_name);
+            assert!(
+                matches!(config.validate(&root), Err(ConfigError::InvalidAppName { field: "app-name", .. })),
+                "app-name {app_name:?} should be rejected"
+            );
+        }
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn display_app_name_allows_letters_numbers_spaces_and_hyphens() {
+        validate_display_app_name("friendly-app-name", "Demo App 42-Pro").unwrap();
+    }
+
+    #[test]
+    fn display_app_name_rejects_special_characters() {
+        for value in ["Demo_App", "Demo/App", "Demo.App", "Demo!", " Demo", "Demo "] {
+            assert!(
+                matches!(
+                    validate_display_app_name("friendly-app-name", value),
+                    Err(ConfigError::InvalidAppName { field: "friendly-app-name", .. })
+                ),
+                "display app name {value:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_friendly_and_launcher_names_with_special_characters() {
+        let root = make_temp_dir("invalid-display-name");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(&root);
+
+        let mut config = test_config("demo-app");
+        config.friendly_app_name = "Demo_App".to_string();
+        assert!(matches!(
+            config.validate(&root),
+            Err(ConfigError::InvalidAppName { field: "friendly-app-name", .. })
+        ));
+
+        let mut config = test_config("demo-app");
+        config.launcher_app_name = Some("Demo_App".to_string());
+        assert!(matches!(
+            config.validate(&root),
+            Err(ConfigError::InvalidAppName { field: "launcher-app-name", .. })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn validate_fails_when_permission_template_is_missing() {
         let root = make_temp_dir("missing-template");
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), "<svg />\n").unwrap();
+        write_valid_icon(&root);
         fs::write(
             root.join(APP_CONFIG_FILE),
             r#"
@@ -483,6 +680,49 @@ mod tests {
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         let error = config.validate(&root).unwrap_err();
         assert!(error.to_string().contains("Permission template 'missing' not found"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn validate_accepts_96px_svg_icon() {
+        let root = make_temp_dir("valid-icon");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(&root);
+
+        let config = test_config("demo-app");
+        let dimensions = config.validate_icon(&root).unwrap();
+
+        assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn validate_rejects_svg_icon_with_wrong_size() {
+        let root = make_temp_dir("invalid-icon-size");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
+
+        let config = test_config("demo-app");
+        assert!(matches!(
+            config.validate_icon(&root),
+            Err(ConfigError::InvalidIconSize { width: 128, height: 96, .. })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn validate_accepts_96px_png_icon_header() {
+        let root = make_temp_dir("valid-png-icon");
+        fs::create_dir_all(root.join("resources")).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), png_header(96, 96)).unwrap();
+
+        let config = test_config("demo-app");
+        let dimensions = validate_icon_file(&root.join(&config.icon)).unwrap();
+
+        assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
 
         cleanup(&root);
     }
@@ -513,4 +753,17 @@ mod tests {
     }
 
     fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
+
+    fn write_valid_icon(root: &Path) {
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
+    }
+
+    fn png_header(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::from(&b"\x89PNG\r\n\x1a\n"[..]);
+        bytes.extend_from_slice(&13u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes
+    }
 }

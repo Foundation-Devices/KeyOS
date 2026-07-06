@@ -1,441 +1,972 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { LauncherCallbacks as CB, State } from "../../launcher-callbacks.slint";
-import { VerticalBox, HorizontalBox, GridBox } from "std-widgets.slint";
-import { Font, Importance, CardColor, IconSize, Images, Size, Palette, CurrentTheme, Utils, UISize } from "@ui/theme.slint";
-import { Shield, PopupMenu, Shimmer, TimerLoader, TextSm, TextMd, Divider, HeadingMd, IconButton, HeadingLg, CircleIcon, TextLg, HeadingXl, LineCard, BasePage, Circle, Icon } from "@ui/widgets.slint";
-import { LightPalette } from "@ui/palettes/light-palette.slint";
-import { TR2, TrId } from "../../gen/tr.slint";
+import { LauncherCallbacks as CB, State, LauncherPageData, LauncherItemData } from "../../launcher-callbacks.slint";
 import { MainProps } from "./props.slint";
+import { BasePage, Circle, Divider, HeadingMd, Icon, IconButton, PopupMenu, TextMd, TextSm, TimerLoader } from "@ui/widgets.slint";
+import { CurrentTheme, Font, IconSize, Images, Palette, Size, Timings, UISize, Utils } from "@ui/theme.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
 
-export struct AppButton {
-    id: string,
-    title: string,
-    width: length,
-    height: length,
-}
+component PageDot inherits Rectangle {
+    in property <int> page-index;
+    in property <bool> selected;
 
-component AppTile inherits Rectangle {
-    in property <string> name;
-    in property <string> icon;
-    in property <CardColor> tile-color: CardColor.light-copper;
-    in property <string> app-id;
+    width: 12px;
+    height: 12px;
+    border-radius: self.height / 2;
+    background: selected ? Palette.content-brand : Palette.content-disabled;
 
-    width: 204px;
-    height: 100px;
+    animate background { duration: Timings.prop-change; }
 
-    property <bool> is-loading: State.loading-app-id == app-id;
+    callback selected-page(int);
 
-    HorizontalLayout {
-        padding-top: is-loading ? Size.sz1 : 0px;
-        padding-bottom: is-loading ? 0px : Size.sz1;
-
-        LineCard {
-            width: parent.width;
-            height: parent.height;
-            card-color: tile-color;
-
-            clicked => {
-                CB.app-clicked(240px, 400px, app-id);
-            }
-
-            Shimmer {
-                active: root.is-loading;
-
-                HorizontalLayout {
-                    padding-left: Size.sz4 + Size.sz0_5;
-                    padding-right: Size.sz4 + Size.sz0_5;
-                    spacing: Size.sz3;
-
-                    VerticalLayout {
-                        alignment: center;
-                        CircleIcon {
-                            icon: icon;
-                            line-color: tile-color;
-                            size: Size.sz16;
-                        }
-                    }
-
-                    TextMd {
-                        vertical-alignment: center;
-                        text: name;
-                        color: LightPalette.content-primary-inverse;
-                    }
-                }
-            }
+    TouchArea {
+        enabled: !State.rearrange-mode;
+        clicked => {
+            selected-page(page-index);
         }
     }
 }
 
-component BitcoinPriceDetails inherits VerticalLayout {
-    in property <string> line-one;
-    in property <string> line-two;
-
-    horizontal-stretch: 0;
-    alignment: start;
-    padding-top: Size.sz1;
-
-    TextSm {
-        text: line-one;
-        horizontal-alignment: right;
-        color: LightPalette.content-tertiary;
-        wrap: no-wrap;
-        overflow: clip;
-        vertical-alignment: center;
-    }
-
-    TextSm {
-        text: line-two;
-        horizontal-alignment: right;
-        color: LightPalette.content-tertiary;
-        wrap: no-wrap;
-        overflow: clip;
-        vertical-alignment: center;
-    }
+struct DropTarget {
+    id: string,
+    left: length,
+    top: length,
+    width: length,
+    height: length,
+    item-count: int,
+    slot-count: int,
+    columns: int,
+    shell-size: length,
+    slot-height: length,
+    row-gap: length,
+    column-gap: length,
 }
 
-component BitcoinTile inherits Rectangle {
-    property <bool> is-loading: State.loading-app-id == "0x426974636f696e2057616c6c65740000";
+component PriceGraph inherits Rectangle {
+    in property <length> content-width;
 
-    in property <string> name;
-    in property <string> price: "120,000";
-    in property <string> currency;
-    in property <string> last-change-percent: "+10.20%";
-    in property <string> last-price-update-time: "2 minutes ago";
-
-    height: 292px;
-    border-radius: Size.sz6;
-
-    callback clicked();
-    property <length> graph-width: 402px;
-    property <length> graph-height: 76px;
+    // Scrub marker coordinates arrive in the rendered bitmap's coordinate space.
+    property <length> graph-source-width: max(1px, State.bitcoin-graph-image.width * 1px);
+    property <length> graph-source-height: max(1px, State.bitcoin-graph-image.height * 1px);
     property <length> scrub-marker-size: 10px;
-    property <length> drag-threshold: 6px;
-    property <length> press-x: 0px;
-    property <length> press-y: 0px;
+    property <length> scrub-timestamp-width: 188px;
     property <bool> is-touch-active: false;
     property <bool> is-scrubbing-gesture: false;
-    property <bool> has-dragged-gesture: false;
 
-    HorizontalLayout {
-        padding-top: is-loading ? Size.sz1 : 0px;
-        padding-bottom: is-loading ? 0px : Size.sz1;
-        width: parent.width;
+    width: content-width;
+    height: 178px;
 
-        LineCard {
-            width: parent.width;
-            height: parent.height;
-            card-color: CardColor.dark-copper;
+    Rectangle {
+        x: 16px;
+        y: 12px;
+        width: parent.width - 32px;
+        height: 36px;
 
-            Shimmer {
-                active: root.is-loading;
+        Text {
+            x: 0px;
+            y: -4px;
+            width: parent.width - (State.bitcoin-scrub-active ? root.scrub-timestamp-width + 12px : 120px);
+            height: 44px;
+            text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : Utils.currency-symbol(State.bitcoin-currency-code) + (State.bitcoin-scrub-active ? State.bitcoin-scrub-price : State.bitcoin-price);
+            color: Palette.content-primary;
+            font-family: Font.heading-xl.family;
+            font-size: Font.heading-xl.size;
+            font-weight: Font.heading-xl.weight;
+            letter-spacing: Font.heading-xl.letter-spacing;
+            vertical-alignment: center;
+        }
 
-                VerticalLayout {
-                    alignment: stretch;
-                    padding: Size.sz2;
+        if !State.is-price-expired && !State.bitcoin-scrub-active: Rectangle {
+            width: 104px;
+            height: 32px;
+            x: parent.width - self.width;
+            y: 2px;
+            border-radius: self.height / 2;
+            background: State.is-price-positive ? Palette.content-positive : Palette.content-negative;
 
-                    Rectangle {
-                        border-radius: Size.sz4;
-                        border-color: Palette.border-tertiary.transparentize(0.5);
-                        border-width: Size.sz0_25;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+                padding-left: 10px;
+                padding-right: 12px;
 
-                        VerticalLayout {
-                            alignment: stretch;
-                            Rectangle {
-                                height: 136px - 75px;
-                                background: CurrentTheme.is-dark ? #111111 : Palette.background-hover;
-                                border-top-left-radius: Size.sz4;
-                                border-top-right-radius: Size.sz4;
-                                clip: true;
+                Rectangle {
+                    width: 16px;
+                    height: parent.height;
+                    background: transparent;
 
-                                HorizontalLayout {
-                                    padding-left: Size.sz4;
-                                    padding-right: Size.sz4;
-                                    padding-top: Size.sz2;
-                                    alignment: stretch;
-
-                                    HeadingXl {
-                                        horizontal-stretch: 0;
-                                        text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : Utils.currency-symbol(State.bitcoin-currency-code);
-                                        color: Palette.content-tertiary;
-                                    }
-
-                                    HeadingXl {
-                                        horizontal-stretch: 1;
-                                        text: State.bitcoin-scrub-active ? State.bitcoin-scrub-price : (State.is-price-expired ? "" : price);
-                                        color: Palette.content-secondary;
-                                    }
-
-                                    BitcoinPriceDetails {
-                                        line-one: State.bitcoin-scrub-active ? State.bitcoin-point-date : (State.is-price-stale ? (State.is-price-expired ? (State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected)) : TR2.lookup(TrId.MainLastUpdate)) : currency);
-                                        line-two: State.bitcoin-scrub-active ? State.bitcoin-point-time : (State.is-price-stale ? (State.is-price-expired ? "" : TR2.format(TrId.MainXAgo, [last-price-update-time])) : last-change-percent);
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                height: root.graph-height;
-                                border-bottom-left-radius: Size.sz4;
-                                border-bottom-right-radius: Size.sz4;
-                                clip: true;
-
-                                graph-area := Rectangle {
-                                    width: root.graph-width;
-                                    height: root.graph-height;
-                                    x: parent.width / 2 - self.width / 2;
-                                    clip: true;
-
-                                    Image {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: preserve;
-                                        source: State.bitcoin-graph-image;
-                                    }
-
-                                    if State.bitcoin-scrub-active: Circle {
-                                        size: root.scrub-marker-size;
-                                        x: State.bitcoin-scrub-marker-x;
-                                        y: State.bitcoin-scrub-marker-y;
-                                        background: Palette.content-secondary;
-                                    }
-                                }
-
-                                if (State.is-price-expired && !State.is-envoy-connected): Circle {
-                                    size: Size.sz8;
-                                    y: 2px;
-                                    border-color: Palette.content-tertiary;
-                                    border-width: Size.sz0_5;
-                                    background: CurrentTheme.is-dark ? #111111 : Palette.background-hover;
-
-                                    Icon {
-                                        size: Size.sz8;
-                                        name: "close";
-                                        color: Palette.content-tertiary;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        vertical-stretch: 1;
-                        padding-left: Size.sz4;
-                        padding-right: Size.sz4;
-                        VerticalLayout {
-                            alignment: center;
-                            TextLg {
-                                text: name;
-                                color: LightPalette.content-primary-inverse;
-                                bold: true;
-                            }
-                        }
-
-                        VerticalLayout {
-                            alignment: center;
-                            CircleIcon {
-                                icon: "bitcoin";
-                                line-color: CardColor.dark-copper;
-                                size: Size.sz12 * 2;
-                                icon-size: IconSize.px64;
-                            }
-                        }
+                    Icon {
+                        x: 0px;
+                        y: (parent.height - self.height) / 2;
+                        name: State.is-price-positive ? "arrow-up-right" : "arrow-down-right";
+                        size: 16px;
+                        color: Palette.white;
                     }
                 }
+
+                Text {
+                    text: State.bitcoin-price-change-percent;
+                    color: Palette.white;
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
             }
+        }
+
+        if State.bitcoin-scrub-active: Rectangle {
+            width: root.scrub-timestamp-width;
+            height: 44px;
+            x: parent.width - self.width;
+            y: -19px;
+
+            Text {
+                y: 16px;
+                width: parent.width;
+                height: 22px;
+                text: State.bitcoin-point-date;
+                color: Palette.content-tertiary;
+                font-size: 18px;
+                font-weight: 600;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+
+            Text {
+                y: 37px;
+                width: parent.width;
+                height: 22px;
+                text: State.bitcoin-point-time;
+                color: Palette.content-tertiary;
+                font-size: 18px;
+                font-weight: 600;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if State.is-price-stale && !State.bitcoin-scrub-active: Rectangle {
+        x: 16px;
+        y: 46px;
+        width: parent.width - 32px;
+        height: 26px;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: State.is-price-expired ? (State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected)) : TR2.lookup(TrId.MainLastUpdate) + " " + TR2.format(TrId.MainXAgo, [State.last-update-time]);
+            color: Palette.content-tertiary;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+
+    if !State.is-price-stale || State.bitcoin-scrub-active: Rectangle {
+        x: 16px;
+        y: 50px;
+        width: parent.width - 32px;
+        height: 22px;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: TR2.lookup(TrId.MainBitcoin) + " " + State.bitcoin-currency-code;
+            color: Palette.content-tertiary;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+
+    graph-strip := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height;
+        width: root.graph-source-width;
+        height: root.graph-source-height;
+        background: transparent;
+        border-top-left-radius: 0px;
+        border-top-right-radius: 0px;
+        border-bottom-left-radius: 16px;
+        border-bottom-right-radius: 16px;
+        clip: true;
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: State.bitcoin-graph-image;
+        }
+
+        if State.bitcoin-scrub-active: Circle {
+            size: root.scrub-marker-size;
+            x: State.bitcoin-scrub-marker-x;
+            y: State.bitcoin-scrub-marker-y;
+            background: Palette.content-secondary;
         }
     }
 
     touch-area := TouchArea {
+        enabled: !State.rearrange-mode;
+
         pointer-event(e) => {
             if self.enabled {
                 if (e.kind == PointerEventKind.down) {
-                    root.press-x = self.mouse-x;
-                    root.press-y = self.mouse-y;
                     root.is-touch-active = true;
-                    root.is-scrubbing-gesture = false;
-                    root.has-dragged-gesture = false;
-                } else if (e.kind == PointerEventKind.up) {
-                    if !root.is-touch-active {
-                        return;
+                    // Scrub starts on press: show the price at the touched point right away.
+                    if State.bitcoin-scrub-enabled {
+                        root.is-scrubbing-gesture = true;
+                        CB.bitcoin-scrub-update(self.mouse-x - graph-strip.x, graph-strip.width);
                     }
+                } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
                     root.is-touch-active = false;
                     if root.is-scrubbing-gesture {
                         root.is-scrubbing-gesture = false;
                         CB.bitcoin-scrub-end();
                     }
-                    if !root.has-dragged-gesture {
-                        root.clicked();
-                    }
-                    root.has-dragged-gesture = false;
-                } else if (e.kind == PointerEventKind.cancel) {
-                    if root.is-scrubbing-gesture {
-                        root.is-scrubbing-gesture = false;
-                        CB.bitcoin-scrub-end();
-                    }
-                    root.is-touch-active = false;
-                    root.has-dragged-gesture = true;
                 }
             }
         }
 
         moved => {
-            if self.enabled && root.is-touch-active {
-                if !root.is-scrubbing-gesture && (abs(self.mouse-x - root.press-x) >= root.drag-threshold || abs(self.mouse-y - root.press-y) >= root.drag-threshold) {
-                    root.has-dragged-gesture = true;
-                    if State.bitcoin-scrub-enabled {
-                        root.is-scrubbing-gesture = true;
-                    }
-                }
-                if root.is-scrubbing-gesture {
-                    CB.bitcoin-scrub-update(self.mouse-x - graph-area.x, root.graph-width);
-                }
+            if self.enabled && root.is-touch-active && root.is-scrubbing-gesture {
+                CB.bitcoin-scrub-update(self.mouse-x - graph-strip.x, graph-strip.width);
             }
         }
     }
 }
 
-component DevelopersTile inherits Rectangle {
+component RemoveBadge inherits Rectangle {
+    width: 36px;
+    height: 36px;
+    border-radius: self.height / 2;
+    background: CurrentTheme.is-dark ? #2b2b2b : #f3f3f3;
+    border-width: 1px;
+    border-color: Palette.white;
+    property <brush> mark-color: CurrentTheme.is-dark ? Palette.white : Palette.content-primary;
+
+    Icon {
+        width: parent.width;
+        height: parent.height;
+        name: "close";
+        size: 36px;
+        color: root.mark-color;
+    }
+
     callback clicked();
 
-    height: 92px;
-    background: Palette.content-secondary-inverse;
-    border-radius: Size.sz6;
-    border-color: Palette.border-tertiary;
-    border-width: Size.sz0_25;
-
-    layout := VerticalLayout {
-        alignment: center;
-        padding: Size.sz6;
-        TextMd {
-            text: TR2.lookup(TrId.MainDevelopersWelcome);
-            color: Palette.content-primary;
-            bold: true;
-        }
-
-        TextSm {
-            text: TR2.lookup(TrId.MainAppsAreComing);
-            color: Palette.content-tertiary;
-        }
-    }
-
-    touchArea := TouchArea {
-        clicked => {
-            clicked();
-        }
-    }
-
-    states [
-        pressed when touchArea.pressed: {
-            layout.padding-top: 4px;
-            layout.padding-bottom: 0px;
-        }
-    ]
-}
-
-component NavButton inherits IconButton {
-    icon-size: Size.sz12;
-    size: Size.sz12;
-}
-
-component DevelopersWelcomePopup inherits Rectangle {
-    background: Palette.black.transparentize(0.7);
-
-    PopupMenu {
-        background: Palette.content-secondary-inverse;
-        width: 424px;
-        x: root.width / 2 - self.width / 2;
-        y: root.height / 2 - self.height / 2;
-        z: 100;
-
-        VerticalLayout {
-            padding: Size.sz6;
-            padding-bottom: Size.sz10;
-            spacing: Size.sz2;
-            alignment: center;
-
-            HorizontalLayout {
-                alignment: end;
-                IconButton {
-                    icon: "close";
-                    size: Size.sz6;
-                    icon-size: Size.sz6;
-                    clicked => {
-                        State.developers-welcome-popup-open = false;
-                    }
-                }
-            }
-
-            VerticalLayout {
-                spacing: Size.sz6;
-
-                VerticalLayout {
-                    HeadingMd {
-                        text: TR2.lookup(TrId.MainDevsHeader);
-                        color: Palette.content-primary;
-                    }
-
-                    TextSm {
-                        text: TR2.lookup(TrId.MainDevsSubheader);
-                        color: Palette.content-tertiary;
-                    }
-                }
-
-                TextSm {
-                    padding: Size.sz6;
-                    text: TR2.lookup(TrId.MainDevsContent1);
-                    color: Palette.content-primary;
-                }
-
-                TextSm {
-                    padding: Size.sz6;
-                    text: TR2.lookup(TrId.MainDevsContent2);
-                    color: Palette.content-primary;
-                }
-
-                TextSm {
-                    padding: Size.sz6;
-                    text: TR2.lookup(TrId.MainDevsContent3);
-                    color: Palette.content-primary;
-                }
-
-                HorizontalLayout {
-                    alignment: center;
-
-                    Divider {
-                        background: Palette.border-primary;
-                        width: 50px;
-                    }
-                }
-
-                TextSm {
-                    horizontal-alignment: center;
-                    text: TR2.lookup(TrId.MainDevsVisitForInfo);
-                    color: Palette.content-primary;
-                }
-
-                TextMd {
-                    text: "https://foundation.xyz/dev";
-                    color: Palette.content-primary;
-                    horizontal-alignment: center;
-                }
-
-                HorizontalLayout {
-                    alignment: center;
-
-                    Image {
-                        source: CurrentTheme.is-dark ? Images.common("images/logo-dark") : Images.common("images/logo-light");
-                        width: 88px;
-                        height: 81px;
-                    }
-                }
-            }
-        }
-    }
-
     TouchArea {
+        width: parent.width;
+        height: parent.height;
+
         clicked => {
-            State.developers-welcome-popup-open = false;
+            root.clicked();
+        }
+    }
+}
+
+component LauncherCollectionItem inherits Rectangle {
+    in property <LauncherItemData> item;
+    in property <bool> show-label: true;
+    in property <bool> is-dragging: false;
+    in property <length> jiggle-x: 0px;
+    in property <length> jiggle-y: 0px;
+
+    width: 128px;
+    height: show-label ? 160px : 128px;
+    opacity: item.enabled ? 100% : 55%;
+    private property <bool> ignore-release-click: false;
+    private property <brush> icon-foreground-color: CurrentTheme.is-dark ? #e0e0e0 : #404040;
+    private property <length> visual-offset-x: State.rearrange-mode && !is-dragging ? jiggle-x : 0px;
+    private property <length> visual-offset-y: State.rearrange-mode && !is-dragging ? jiggle-y : 0px;
+    private property <length> press-offset-y: touch.pressed && !is-dragging ? 4px : 0px;
+
+    callback activate(length, length, string);
+    callback drag-started();
+    callback drag-moved(length, length);
+    callback drag-finished();
+
+    hold-timer := Timer {
+        interval: 450ms;
+        running: false;
+        triggered() => {
+            self.running = false;
+            root.ignore-release-click = true;
+            if (State.rearrange-mode) {
+                root.drag-finished();
+                State.rearrange-mode = false;
+            } else {
+                State.rearrange-mode = true;
+                State.drag-pointer-abs-x = touch.absolute-position.x + touch.mouse-x;
+                State.drag-pointer-abs-y = touch.absolute-position.y + touch.mouse-y;
+                root.drag-started();
+            }
+        }
+    }
+
+    shell := Rectangle {
+        width: 128px;
+        height: 128px;
+        x: root.visual-offset-x;
+        y: root.visual-offset-y + root.press-offset-y;
+        clip: false;
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: CurrentTheme.is-dark ? @image-url("../../assets/icon-bg-dark.png") : @image-url("../../assets/icon-bg-light.png");
+            image-fit: fill;
+        }
+
+        if !root.is-dragging && State.loading-item-id == root.item.id: TimerLoader {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 - 1px;
+            size: 28px;
+            loader-color: CurrentTheme.is-dark ? #54cad8aa : #0ea6b3aa;
+            active-color: Palette.content-brand;
+        }
+
+        if State.loading-item-id != root.item.id || root.is-dragging: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 - 1px;
+            width: 64px;
+            height: 64px;
+            background: transparent;
+
+            if root.item.icon-key == "": Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                name: root.item.icon-name;
+                size: 64px;
+                color: root.icon-foreground-color;
+            }
+
+            if root.item.icon-key != "": Rectangle {
+                property <image> app-icon: CB.app-icon(root.item.icon-key);
+
+                width: parent.width;
+                height: parent.height;
+
+                if self.app-icon.width > 0: Image {
+                    width: 64px;
+                    height: 64px;
+                    source: parent.app-icon;
+                }
+
+                if self.app-icon.width <= 0: Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    name: "shield";
+                    size: 64px;
+                    color: root.icon-foreground-color;
+                }
+            }
+        }
+    }
+
+    if show-label: Text {
+        x: -8px + root.visual-offset-x;
+        y: 132px + root.visual-offset-y + root.press-offset-y;
+        width: parent.width + 16px;
+        height: 28px;
+        text: item.label;
+        color: CurrentTheme.is-dark ? Palette.white : Palette.content-primary;
+        font-size: 20px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            hold-timer.running = false;
+            if (root.ignore-release-click) {
+                root.ignore-release-click = false;
+                return;
+            }
+            if (!State.rearrange-mode && root.item.enabled) {
+                root.activate(shell.absolute-position.x + shell.width / 2, shell.absolute-position.y + shell.height / 2, root.item.id);
+            }
+        }
+
+        moved => {
+            if (Math.abs(self.mouse-x - self.pressed-x) > 10px || Math.abs(self.mouse-y - self.pressed-y) > 10px) {
+                hold-timer.running = false;
+            }
+            if (State.rearrange-mode) {
+                State.drag-pointer-abs-x = self.absolute-position.x + self.mouse-x;
+                State.drag-pointer-abs-y = self.absolute-position.y + self.mouse-y;
+                root.drag-moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.ignore-release-click = false;
+                hold-timer.running = false;
+                if (State.rearrange-mode) {
+                    State.drag-pointer-abs-x = self.absolute-position.x + self.mouse-x;
+                    State.drag-pointer-abs-y = self.absolute-position.y + self.mouse-y;
+                    root.drag-started();
+                } else {
+                    hold-timer.running = true;
+                }
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                hold-timer.running = false;
+                if (State.rearrange-mode) {
+                    root.drag-finished();
+                }
+            }
+        }
+    }
+
+    if State.rearrange-mode && root.item.can-remove: RemoveBadge {
+        x: root.visual-offset-x - 4px;
+        y: root.visual-offset-y - 4px;
+        z: 100;
+        clicked => {
+            hold-timer.running = false;
+            root.ignore-release-click = true;
+            CB.remove-item-requested(root.item.id);
+        }
+    }
+}
+
+component LauncherCollection inherits Rectangle {
+    in property <[LauncherItemData]> items;
+    in property <string> collection-id;
+    in property <DropTarget> cross-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    in property <DropTarget> page-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    in property <bool> show-labels: true;
+    in property <int> columns: 3;
+    in property <int> slot-count: items.length;
+    in property <length> slot-height: show-labels ? 160px : 128px;
+    in property <length> shell-size: 128px;
+    in property <length> row-gap: 24px;
+    in property <length> column-gap: show-labels ? 24px : 8px;
+
+    private property <int> safe-columns: Math.max(1, columns);
+    private property <int> bounded-slot-count: Math.max(items.length, slot-count);
+    private property <bool> drag-active: false;
+    private property <int> dragged-index: -1;
+    private property <int> target-index: -1;
+    private property <length> drag-dx: 0px;
+    private property <length> drag-dy: 0px;
+    private property <[length]> jiggle-table: [-1.5px, 1.0px, 0.5px, -0.5px, 1.5px, -1.0px];
+    private property <bool> active-local-drag:
+        drag-active && State.drag-overlay-visible && State.drag-source-collection-id == root.collection-id;
+    private property <bool> external-hover-active:
+        State.drag-overlay-visible && State.drag-source-collection-id != "" && State.drag-source-collection-id != root.collection-id && State.drag-hover-collection-id == root.collection-id;
+
+    width: safe-columns * shell-size + Math.max(0, safe-columns - 1) * column-gap;
+    height: Math.ceil(bounded-slot-count / safe-columns) * slot-height + Math.max(0, Math.ceil(bounded-slot-count / safe-columns) - 1) * row-gap;
+    z: active-local-drag ? 900 : 0;
+
+    function slot-x(index: int) -> length {
+        Math.mod(index, safe-columns) * (shell-size + column-gap);
+    }
+    function slot-y(index: int) -> length {
+        Math.floor(index / safe-columns) * (slot-height + row-gap);
+    }
+    function jiggle-x-for(index: int) -> length {
+        root.jiggle-table[Math.mod(index * 3 + State.jiggle-step, 6)]
+    }
+    function jiggle-y-for(index: int) -> length {
+        root.jiggle-table[Math.mod(index * 5 + State.jiggle-step, 6)]
+    }
+    function clamped-display-slot(index: int) -> int {
+        Math.max(0, Math.min(root.bounded-slot-count - 1, index))
+    }
+    function local-drag-display-slot(index: int) -> int {
+        if (index == root.dragged-index) {
+            return root.dragged-index;
+        }
+        if (root.target-index > root.dragged-index && index > root.dragged-index && index <= root.target-index) {
+            return index - 1;
+        }
+        if (root.target-index < root.dragged-index && index >= root.target-index && index < root.dragged-index) {
+            return index + 1;
+        }
+        return index;
+    }
+    function external-hover-display-slot(index: int) -> int {
+        if (index >= State.drag-hover-index) {
+            return index + 1;
+        }
+        return index;
+    }
+    // Map the model slot to the animated visual slot while drag operations make room.
+    function display-slot(index: int) -> int {
+        if (root.active-local-drag) {
+            return root.clamped-display-slot(root.local-drag-display-slot(index));
+        }
+        if (root.external-hover-active) {
+            return root.clamped-display-slot(root.external-hover-display-slot(index));
+        }
+        return root.clamped-display-slot(index);
+    }
+    // Hit-test from the stored overlay position (window coords): unlike the
+    // element-relative drag deltas, it stays valid when an edge flip slides the
+    // source collection away between the last move event and the release.
+    function drag-center-x() -> length {
+        State.drag-overlay-abs-x + root.shell-size / 2
+    }
+    function drag-center-y() -> length {
+        State.drag-overlay-abs-y + root.slot-height / 2
+    }
+    function clamped-axis-index(position: length, origin: length, item-size: length, gap: length, count: int) -> int {
+        Math.max(0, Math.min(Math.max(0, count - 1), Math.round((position - origin - item-size / 2) / (item-size + gap))))
+    }
+    function grid-index(left: length, top: length, item-width: length, item-height: length, column-gap: length, row-gap: length, columns: int, rows: int, max-index: int, ) -> int {
+        Math.max(
+            0,
+            Math.min(
+                max-index,
+                root.clamped-axis-index(root.drag-center-x(), left, item-width, column-gap, columns) + root.clamped-axis-index(
+                    root.drag-center-y(),
+                    top,
+                    item-height,
+                    row-gap,
+                    rows,
+                ) * Math.max(1, columns)))
+    }
+    function target-slot-count(target: DropTarget) -> int {
+        Math.max(target.item-count, target.slot-count)
+    }
+    function is-over-target(target: DropTarget, x-slack: length) -> bool {
+        target.id != "" && root.drag-center-x() >= target.left - x-slack && root.drag-center-x() <= target.left + target.width + x-slack && root.drag-center-y() >= target.top && root.drag-center-y() <= target.top + target.height
+    }
+    function drop-target-index(target: DropTarget) -> int {
+        root.grid-index(
+            target.left,
+            target.top,
+            target.shell-size,
+            target.slot-height,
+            target.column-gap,
+            target.row-gap,
+            Math.max(1, target.columns),
+            Math.ceil((root.target-slot-count(target) + 1) / Math.max(1, target.columns)),
+            root.target-slot-count(target),
+        )
+    }
+    function is-over-cross-target() -> bool {
+        root.is-over-target(root.cross-target, 0px)
+    }
+    function cross-target-index() -> int {
+        root.drop-target-index(root.cross-target)
+    }
+    // Horizontal slack so releases inside the screen-edge flip zones still count
+    // as drops on the visible page.
+    property <length> page-target-x-slack: 48px;
+    function is-over-page-target() -> bool {
+        root.is-over-target(root.page-target, root.page-target-x-slack)
+    }
+    function page-target-index() -> int {
+        root.drop-target-index(root.page-target)
+    }
+
+    // Nearest same-collection slot for the dragged item. Rounding is relative to the
+    // slot origin so the flip boundary sits halfway between slots, and each axis is
+    // clamped to the grid so drift on one axis cannot push the index out of range.
+    function clamped-target() -> int {
+        root.grid-index(
+            root.absolute-position.x,
+            root.absolute-position.y,
+            root.shell-size,
+            root.slot-height,
+            root.column-gap,
+            root.row-gap,
+            root.safe-columns,
+            Math.ceil(root.bounded-slot-count / root.safe-columns),
+            root.bounded-slot-count - 1,
+        )
+    }
+    function overlay-abs-x() -> length {
+        root.absolute-position.x + root.slot-x(root.dragged-index) + root.drag-dx
+    }
+    function overlay-abs-y() -> length {
+        root.absolute-position.y + root.slot-y(root.dragged-index) + root.drag-dy
+    }
+
+    function clear-drag-state() {
+        State.drag-source-collection-id = "";
+        State.drag-overlay-visible = false;
+        State.drag-hover-collection-id = "";
+        State.drag-hover-index = -1;
+        root.drag-active = false;
+        root.dragged-index = -1;
+        root.target-index = -1;
+        root.drag-dx = 0px;
+        root.drag-dy = 0px;
+    }
+    TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: State.rearrange-mode && State.drag-source-collection-id == "";
+
+        clicked => {
+            State.rearrange-mode = false;
+            root.clear-drag-state();
+        }
+    }
+
+    for item[index] in items: icon := LauncherCollectionItem {
+        item: item;
+        show-label: root.show-labels;
+        is-dragging: root.active-local-drag && root.dragged-index == item.slot-index;
+        jiggle-x: root.jiggle-x-for(item.slot-index);
+        jiggle-y: root.jiggle-y-for(item.slot-index);
+        x: root.slot-x(root.display-slot(item.slot-index));
+        y: root.slot-y(root.display-slot(item.slot-index));
+        visible: !(root.active-local-drag && root.dragged-index == item.slot-index);
+
+        animate x {
+            duration: 180ms;
+            easing: ease-in-out;
+        }
+
+        animate y {
+            duration: 180ms;
+            easing: ease-in-out;
+        }
+
+        activate(abs-x, abs-y, item-id) => {
+            CB.item-clicked(abs-x, abs-y, item-id);
+        }
+
+        drag-started => {
+            root.drag-active = true;
+            root.dragged-index = item.slot-index;
+            root.target-index = item.slot-index;
+            root.drag-dx = 0px;
+            root.drag-dy = 0px;
+            State.drag-source-collection-id = root.collection-id;
+            State.drag-hover-collection-id = "";
+            State.drag-hover-index = -1;
+            State.drag-overlay-visible = true;
+            State.drag-overlay-show-label = root.show-labels;
+            State.drag-overlay-item = item;
+            State.drag-overlay-abs-x = root.overlay-abs-x();
+            State.drag-overlay-abs-y = root.overlay-abs-y();
+        }
+
+        drag-moved(dx, dy) => {
+            if (root.active-local-drag && root.dragged-index == item.slot-index) {
+                root.drag-dx = dx;
+                root.drag-dy = dy;
+                State.drag-overlay-abs-x = root.overlay-abs-x();
+                State.drag-overlay-abs-y = root.overlay-abs-y();
+                if (root.is-over-page-target()) {
+                    State.drag-hover-collection-id = root.page-target.id;
+                    State.drag-hover-index = root.page-target-index();
+                    root.target-index = root.dragged-index;
+                } else if (root.is-over-cross-target()) {
+                    State.drag-hover-collection-id = root.cross-target.id;
+                    State.drag-hover-index = root.cross-target-index();
+                    root.target-index = root.dragged-index;
+                } else {
+                    State.drag-hover-collection-id = "";
+                    State.drag-hover-index = -1;
+                    root.target-index = root.clamped-target();
+                }
+            }
+        }
+
+        drag-finished => {
+            if (root.active-local-drag && root.dragged-index == item.slot-index) {
+                if (root.is-over-page-target()) {
+                    CB.move-item(
+                        root.collection-id,
+                        root.dragged-index,
+                        root.page-target.id,
+                        root.page-target-index(),
+                    );
+                } else if (root.is-over-cross-target()) {
+                    CB.move-item(
+                        root.collection-id,
+                        root.dragged-index,
+                        root.cross-target.id,
+                        root.cross-target-index(),
+                    );
+                } else if (root.target-index != root.dragged-index) {
+                    CB.move-item(root.collection-id, root.dragged-index, root.collection-id, root.target-index);
+                }
+                root.clear-drag-state();
+            }
+        }
+    }
+}
+
+component Dock inherits Rectangle {
+    in property <length> content-width;
+    in property <DropTarget> active-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    private property <length> icon-inset-x: 24px;
+    private property <length> icon-inset-y: 10px;
+
+    width: content-width;
+    height: 160px;
+    background: transparent;
+    clip: false;
+    z: State.drag-source-collection-id == "dock" ? 950 : 0;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: CurrentTheme.is-dark ? @image-url("../../assets/dock-bg-dark.png") : @image-url("../../assets/dock-bg-light.png");
+        image-fit: fill;
+    }
+
+    LauncherCollection {
+        x: root.icon-inset-x;
+        y: root.icon-inset-y;
+        width: parent.width - root.icon-inset-x * 2;
+        height: 128px;
+        items: State.dock-items;
+        collection-id: "dock";
+        show-labels: false;
+        columns: 3;
+        slot-count: 3;
+        slot-height: 128px;
+        row-gap: 0px;
+        column-gap: 24px;
+        cross-target: root.active-target;
+    }
+}
+
+component LauncherPaginator inherits Rectangle {
+    in property <[LauncherPageData]> pages: [];
+    in-out property <int> current-page: 0;
+    in property <length> first-collection-height: 344px;
+    in property <length> standard-collection-height: 528px;
+    in property <length> content-width;
+    in property <length> collection-inset-x: 12px;
+    in property <length> collection-offset-y: -3px;
+    in property <DropTarget> dock-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 128px,
+        row-gap: 0px,
+        column-gap: 24px,
+    };
+    in property <DropTarget> active-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    in property <length> page-gap: 64px;
+
+    private property <DropTarget> empty-target: {
+        id: "",
+        left: 0px,
+        top: 0px,
+        width: 0px,
+        height: 0px,
+        item-count: 0,
+        slot-count: 0,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    private property <length> rearrange-top-bleed: State.rearrange-mode ? 16px : 0px;
+    private property <length> graph-region-height: 198px;
+    private property <length> first-page-content-height: first-collection-height + graph-region-height;
+    private property <length> page-viewport-height: first-page-content-height > standard-collection-height ? first-page-content-height : standard-collection-height;
+    private property <length> page-span: content-width + page-gap;
+    private property <length> graph-card-height: 178px;
+    // The price graph owns its scrub gesture; the page swipe hit area starts
+    // below it while page 0 is visible.
+    private property <length> swipe-hit-top: root.current-page == 0 ? root.graph-card-height : 0px;
+    // While dragging an icon, holding the finger inside an edge zone flips to the
+    // adjacent page after a short dwell so the icon can be dropped there.
+    private property <length> edge-zone-width: 18px;
+    private property <bool> drag-in-progress: State.drag-overlay-visible && State.drag-source-collection-id != "";
+    private property <int> drag-edge-direction: !drag-in-progress ? 0 : (State.drag-pointer-abs-x < root.absolute-position.x + edge-zone-width ? -1 : (State.drag-pointer-abs-x > root.absolute-position.x + root.width - edge-zone-width ? 1 : 0));
+
+    edge-flip-timer := Timer {
+        interval: 800ms;
+        running: root.drag-edge-direction != 0 && ((root.drag-edge-direction < 0 && root.current-page > 0) || (root.drag-edge-direction > 0 && root.current-page < root.pages.length - 1));
+        triggered() => {
+            root.current-page = Math.max(0, Math.min(root.pages.length - 1, root.current-page + root.drag-edge-direction));
+        }
+    }
+
+    width: content-width;
+    height: page-viewport-height + (pages.length > 1 ? 28px : 0px);
+    clip: false;
+    z: State.drag-source-collection-id != "" && State.drag-source-collection-id != "dock" ? 950 : 0;
+
+    function page-collection-y(page-index: int) -> length {
+        page-index == 0 ? root.graph-region-height + root.collection-offset-y : 0px
+    }
+    function page-collection-height(page-index: int) -> length {
+        page-index == 0 ? root.first-collection-height : root.standard-collection-height
+    }
+    function page-collection-slot-count(page-index: int) -> int {
+        (page-index == 0 ? 2 : 3) * 3
+    }
+
+    VerticalLayout {
+        width: root.width;
+        height: root.height;
+        alignment: start;
+        spacing: 0px;
+
+        Rectangle {
+            width: root.width;
+            height: root.page-viewport-height;
+            background: transparent;
+            clip: false;
+
+            Rectangle {
+                y: -root.rearrange-top-bleed;
+                width: parent.width;
+                height: root.page-viewport-height + root.rearrange-top-bleed;
+                background: transparent;
+                clip: true;
+
+                sgr := SwipeGestureHandler {
+                    y: root.rearrange-top-bleed + root.swipe-hit-top;
+                    width: parent.width;
+                    height: max(0px, root.page-viewport-height - root.swipe-hit-top);
+                    handle-swipe-right: State.drag-source-collection-id == "" && root.current-page > 0;
+                    handle-swipe-left: State.drag-source-collection-id == "" && root.current-page < root.pages.length - 1;
+
+                    swiped => {
+                        if (self.current-position.x > self.pressed-position.x + self.width / 4) {
+                            root.current-page = Math.max(0, root.current-page - 1);
+                        } else if (self.current-position.x < self.pressed-position.x - self.width / 4) {
+                            root.current-page = Math.min(root.pages.length - 1, root.current-page + 1);
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    property <length> position: -root.current-page * root.page-span;
+                    property <length> swipe-offset;
+                    x: position + swipe-offset;
+                    spacing: root.page-gap;
+
+                    animate position {
+                        duration: 200ms;
+                        easing: ease-in-out;
+                    }
+
+                    states [
+                        swiping when sgr.swiping: {
+                            swipe-offset: sgr.current-position.x - sgr.pressed-position.x;
+                            out {
+                                animate swipe-offset {
+                                    duration: 200ms;
+                                    easing: ease-in-out;
+                                }
+                            }
+                        }
+                    ]
+
+                    for page[page-index] in root.pages: Rectangle {
+                        width: root.content-width;
+                        height: root.page-viewport-height;
+
+                        if page-index == 0: PriceGraph {
+                            x: 0px;
+                            y: 0px;
+                            content-width: root.content-width;
+                        }
+
+                        LauncherCollection {
+                            x: root.collection-inset-x;
+                            y: root.page-collection-y(page-index);
+                            width: root.content-width - root.collection-inset-x * 2;
+                            height: root.page-collection-height(page-index);
+                            items: page.items;
+                            collection-id: page.id;
+                            show-labels: true;
+                            columns: 3;
+                            slot-height: 160px;
+                            row-gap: 24px;
+                            column-gap: 24px;
+                            slot-count: root.page-collection-slot-count(page-index);
+                            cross-target: root.dock-target;
+                            page-target: root.current-page != page-index ? root.active-target : root.empty-target;
+                        }
+                    }
+                }
+            }
+        }
+
+        if pages.length > 1: HorizontalLayout {
+            width: root.width;
+            height: 28px;
+            alignment: center;
+            spacing: 12px;
+            padding-top: 16px;
+
+            for page[page-index] in pages: PageDot {
+                page-index: page-index;
+                selected: page-index == root.current-page;
+                selected-page(idx) => {
+                    root.current-page = idx;
+                }
+            }
         }
     }
 }
@@ -443,168 +974,100 @@ component DevelopersWelcomePopup inherits Rectangle {
 export component MainPage inherits BasePage {
     in property <MainProps> props;
 
-    // background: Palette.white;
+    private property <length> grid-side-padding: 24px;
+    private property <length> frame-side-padding: 12px;
+    private property <length> page-collection-inset: grid-side-padding - frame-side-padding;
+    private property <length> page-collection-offset-y: -3px;
+    private property <length> paginator-top: 12px;
+    private property <length> content-width: root.width - frame-side-padding * 2;
+    private property <length> dock-left: 0px;
+    private property <length> dock-top: root.height - 160px;
+    private property <length> dock-width: root.width;
+    private property <length> icon-row-height: 160px;
+    private property <length> icon-row-gap: 24px;
+    private property <int> graph-page-grid-rows: 2;
+    private property <int> standard-page-grid-rows: 3;
+    private property <length> graph-height: 178px;
+    private property <length> graph-bottom-gap: 20px;
+    private property <length> graph-page-height: graph-page-grid-rows * icon-row-height + Math.max(0, graph-page-grid-rows - 1) * icon-row-gap;
+    private property <length> standard-page-height: standard-page-grid-rows * icon-row-height + Math.max(0, standard-page-grid-rows - 1) * icon-row-gap;
+    private property <length> active-page-left: frame-side-padding + page-collection-inset;
+    private property <length> active-page-top:
+        paginator-top + (State.current-page == 0 ? graph-height + graph-bottom-gap + page-collection-offset-y : 0px);
+    private property <length> active-page-width: content-width - page-collection-inset * 2;
+    private property <length> active-page-height: State.current-page == 0 ? graph-page-height : standard-page-height;
+    private property <length> dock-icon-inset-x: 24px;
+    private property <length> dock-icon-inset-y: 10px;
+    private property <length> dock-collection-left: dock-left + dock-icon-inset-x;
+    private property <length> dock-collection-top: dock-top + dock-icon-inset-y;
+    private property <length> dock-collection-width: dock-width - dock-icon-inset-x * 2;
+    private property <length> dock-collection-height: 128px;
+    private property <DropTarget> active-page-target: {
+        id: State.pages[State.current-page].id,
+        left: root.active-page-left,
+        top: root.active-page-top,
+        width: root.active-page-width,
+        height: root.active-page-height,
+        item-count: State.pages[State.current-page].items.length,
+        slot-count: (State.current-page == 0 ? graph-page-grid-rows : standard-page-grid-rows) * 3,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 160px,
+        row-gap: 24px,
+        column-gap: 24px,
+    };
+    private property <DropTarget> dock-target: {
+        id: "dock",
+        left: root.dock-collection-left,
+        top: root.dock-collection-top,
+        width: root.dock-collection-width,
+        height: root.dock-collection-height,
+        item-count: State.dock-items.length,
+        slot-count: 3,
+        columns: 3,
+        shell-size: 128px,
+        slot-height: 128px,
+        row-gap: 0px,
+        column-gap: 24px,
+    };
 
-    private property <bool> show-dev-info: true;
-    private property <bool> hidden-menu: false;
+    background: transparent;
 
-    // Image {
-    //     y: 0px;
-    //     width: parent.width;
-    //     height: parent.height;
-    //     source: Images.common(CurrentTheme.is-dark ? "images/background-dark" : "images/background");
-    //     image-fit: cover;
-    // }
-
-    VerticalLayout {
-        // padding-top: Size.sz10;
-        padding-left: 5px;
-        padding-right: 5px;
-
-        Shield {
-            if (!hidden-menu): VerticalLayout {
-                alignment: space-between;
-                padding-left: Size.sz6;
-                padding-right: Size.sz6;
-                padding-bottom: 42px; // TODO: Define a constant?
-                spacing: Size.sz4;
-
-                BitcoinTile {
-                    price: State.bitcoin-price;
-                    currency: "Bitcoin " + State.bitcoin-currency-code;
-                    last-change-percent: State.bitcoin-price-change-percent;
-                    last-price-update-time: State.last-update-time;
-                    name: TR2.lookup(TrId.MainWallet);
-                    clicked => {
-                        CB.app-clicked(240px, 400px, "0x426974636f696e2057616c6c65740000");
-                    }
-                }
-
-                if show-dev-info: DevelopersTile {
-                    vertical-stretch: 0;
-                    clicked => {
-                        State.developers-welcome-popup-open = true;
-                    }
-                }
-
-                HorizontalLayout {
-                    alignment: space-between;
-
-                    AppTile {
-                        name: TR2.lookup(TrId.MainFileBrowser);
-                        tile-color: CardColor.dark-grey;
-                        icon: "folder";
-                        app-id: "0x46696c652042726f7773657200000000";
-                    }
-
-                    AppTile {
-                        name: TR2.lookup(TrId.Main2FaCodes);
-                        tile-color: CardColor.blue;
-                        icon: "shield";
-                        app-id: "0x41757468656e74696361746f72203246";
-                    }
-                }
-
-                HorizontalLayout {
-                    alignment: space-between;
-                    AppTile {
-                        name: TR2.lookup(TrId.MainSecurityKeys);
-                        tile-color: CardColor.green;
-                        icon: "key";
-                        app-id: "0x5365637572697479204b657973000000";
-                    }
-
-                    AppTile {
-                        name: TR2.lookup(TrId.MainSeedVault);
-                        tile-color: CardColor.light-copper;
-                        icon: "acorn";
-                        app-id: "0x53656564205661756c74000000000000";
-                    }
-                }
-            }
-
-            if (State.hidden-apps.length > 0 && hidden-menu): VerticalLayout {
-                spacing: Size.sz4;
-                alignment: start;
-                padding-left: Size.sz6;
-                padding-right: Size.sz6;
-
-                HeadingLg {
-                    text: "Secret Menu";
-                    horizontal-alignment: center;
-                    color: Palette.content-primary;
-                }
-
-                Rectangle {
-                    height: 8px;
-                }
-
-                property <int> num-rows: ((State.hidden-apps.length + 1) / 2);
-
-                for row_index in num-rows: HorizontalLayout {
-                    alignment: space-between;
-
-                    property <int> base-index: row_index * 2;
-
-                    AppTile {
-                        name: State.hidden-apps[base-index].label;
-                        tile-color: Utils.index-to-card-color(base-index);
-                        icon: "shield";
-                        app-id: State.hidden-apps[base-index].app-id;
-                    }
-
-                    if (base-index + 1 < State.hidden-apps.length): AppTile {
-                        name: State.hidden-apps[base-index + 1].label;
-                        tile-color: Utils.index-to-card-color(base-index + 1);
-                        icon: "shield";
-                        app-id: State.hidden-apps[base-index + 1].app-id;
-                    }
-                }
-            }
-        }
-
-        // Bottom Navigation buttons
-        HorizontalLayout {
-            alignment: space-between;
-
-            padding-left: Size.sz5;
-            padding-right: Size.sz5;
-
-            padding-bottom: Size.sz4;
-
-            property <string> settings-app-id: "0xc192b79230473875f159d4423d74d00f";
-            property <bool> settings-app-loading: State.loading-app-id == settings-app-id;
-
-            if self.settings-app-loading: TimerLoader {
-                size: Size.sz12;
-            }
-            if !self.settings-app-loading: NavButton {
-                icon: "menu";
-                clicked => {
-                    CB.app-clicked(0, 0, settings-app-id)
-                }
-            }
-
-            if State.hidden-apps.length > 0: NavButton {
-                clicked => {
-                    hidden-menu = false;
-                }
-            }
-
-            if State.hidden-apps.length > 0: NavButton {
-                clicked => {
-                    hidden-menu = true;
-                }
-            }
-
-            NavButton {
-                icon: "scan-qr";
-                clicked => {
-                    CB.scan-clicked(false);
-                }
-            }
+    Timer {
+        interval: 130ms;
+        running: State.rearrange-mode;
+        triggered() => {
+            State.jiggle-step = Math.mod(State.jiggle-step + 1, 6);
         }
     }
 
-    if State.developers-welcome-popup-open: DevelopersWelcomePopup { }
+    LauncherPaginator {
+        x: frame-side-padding;
+        y: paginator-top;
+        content-width: root.content-width;
+        collection-inset-x: root.page-collection-inset;
+        collection-offset-y: root.page-collection-offset-y;
+        first-collection-height: root.graph-page-height;
+        standard-collection-height: root.standard-page-height;
+        pages: State.pages;
+        current-page <=> State.current-page;
+        dock-target: root.dock-target;
+        active-target: root.active-page-target;
+    }
+
+    Dock {
+        x: root.dock-left;
+        y: root.dock-top;
+        content-width: root.dock-width;
+        active-target: root.active-page-target;
+    }
+
+    if State.drag-overlay-visible: LauncherCollectionItem {
+        item: State.drag-overlay-item;
+        show-label: State.drag-overlay-show-label;
+        is-dragging: true;
+        x: State.drag-overlay-abs-x - root.absolute-position.x;
+        y: State.drag-overlay-abs-y - root.absolute-position.y;
+        z: 2000;
+    }
 }

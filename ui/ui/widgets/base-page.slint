@@ -14,8 +14,11 @@ export component BaseWindow inherits Window {
     width: UISize.screen-width;
     height: UISize.screen-height;
 
+    in property <image> background-image-light: Images.common("images/background");
+    in property <image> background-image-dark: Images.common("images/background-dark");
+
     Image {
-        source: Images.common(CurrentTheme.is-dark ? "images/background-dark" : "images/background");
+        source: CurrentTheme.is-dark ? root.background-image-dark : root.background-image-light;
     }
 
     // Allow defocusing the keyboard by clicking somewhere else
