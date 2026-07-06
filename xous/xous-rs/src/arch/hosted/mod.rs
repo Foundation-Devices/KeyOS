@@ -7,6 +7,9 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex};
 
 use crate::{Result, SysCall, SysCallResult, TID};
 
+const MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
+const MEMORY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 mod mem;
 pub use mem::*;
 
@@ -50,6 +53,8 @@ pub(crate) static PROCESS_KEY: LazyLock<crate::AppId> = LazyLock::new(|| {
 });
 
 static SERVER_CONNECTION: LazyLock<ServerConnection> = LazyLock::new(|| {
+    spawn_memory_monitor();
+
     // By the time we get our process' key, it should not be zero
     assert_ne!(&PROCESS_KEY.0, &[0u8; 16]);
 
@@ -99,6 +104,30 @@ static SERVER_CONNECTION: LazyLock<ServerConnection> = LazyLock::new(|| {
         // response_tracker,
     }
 });
+
+/// Spawn a thread that terminates this process once its resident set passes
+/// `MEMORY_LIMIT`, so a hosted leak takes down only the leaker instead of
+/// starving the host.
+pub fn spawn_memory_monitor() {
+    std::thread::Builder::new()
+        .name("memory monitor".to_owned())
+        .spawn(|| loop {
+            if let Some(usage) = memory_stats::memory_stats() {
+                if usage.physical_mem > MEMORY_LIMIT {
+                    eprintln!(
+                        "memory monitor: process {} RSS {} bytes exceeded {} -- exiting",
+                        std::process::id(),
+                        usage.physical_mem,
+                        MEMORY_LIMIT
+                    );
+                    // Exit, not abort, which dumps core on many systems.
+                    std::process::exit(101);
+                }
+            }
+            std::thread::sleep(MEMORY_POLL_INTERVAL);
+        })
+        .expect("couldn't spawn memory monitor");
+}
 
 /// The ID of the current process
 static PROCESS_ID: LazyLock<PID> = LazyLock::new(|| {
@@ -264,8 +293,11 @@ fn read_next_syscall_result(
             }
             // Otherwise the server died mid-call: our buffer never moved, so keep it for
             // the Buffer to drop. The kernel sends no bytes back, so read nothing.
-        } else if kind == CallMemoryKind::Borrow || kind == CallMemoryKind::MutableBorrow {
-            // Read the buffer back from the remote host.
+        } else if (kind == CallMemoryKind::Borrow || kind == CallMemoryKind::MutableBorrow)
+            && matches!(&response, Result::MemoryReturned(..))
+        {
+            // Read the buffer back from the remote host. On an error the kernel sends no
+            // bytes (the server is gone), so there is nothing to read.
             use core::slice;
             let mut data = unsafe { slice::from_raw_parts_mut(mem.as_mut_ptr(), mem.len()) };
 
@@ -296,6 +328,11 @@ fn read_next_syscall_result(
                 //     data,
                 //     previous_data
                 // );
+            }
+
+            // The returned range is not valid here, so hand back the lent buffer.
+            if let Result::MemoryReturned(ref mut range, _, _) = response {
+                *range = mem;
             }
         }
 

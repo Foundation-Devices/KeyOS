@@ -43,9 +43,13 @@ fn main() {
     loop {
         let mut input = String::new();
 
-        if stdin.read_line(&mut input).is_err() {
-            log::info!("read line error");
-            break;
+        match stdin.read_line(&mut input) {
+            Ok(0) => break, // EOF: stdin closed, nothing more to read.
+            Ok(_) => {}
+            Err(error) => {
+                log::info!("read line error: {error}");
+                break;
+            }
         }
 
         match input.trim() {

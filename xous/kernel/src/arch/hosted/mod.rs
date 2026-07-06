@@ -1,6 +1,26 @@
 // SPDX-FileCopyrightText: 2020 Sean Cross <sean@xobs.io>
 // SPDX-License-Identifier: Apache-2.0
 
+//! Message-buffer ownership in hosted mode.
+//!
+//! On hardware a memory message is shared pages and its `MemoryRange` address
+//! *is* the buffer; hosted mode has no shared pages, so each incoming memory
+//! message is read into a heap buffer that the address merely views. One rule
+//! frees them without leaks or double-frees:
+//!
+//!   Free a buffer once its bytes reach their destination -- copied to the
+//!   server at delivery, or back to the client on a successful return -- or when
+//!   the server is torn down before the message was delivered.
+//!
+//! Delivery frees the buffer for every message kind alike: the server takes its
+//! own copy off the wire, any reply (a returned borrow, or the buffer moved back
+//! for a `BlockingMove`) rides a fresh buffer rather than this one, and a failed
+//! message returns no bytes at all, so nothing reads this buffer after delivery.
+//! The `WaitingReturn*` tokens therefore keep no live buffer, and `Server::destroy`
+//! unblocks a waiter with an error without returning one. A returned buffer is
+//! freed once copied to the client, and a send that errors before queueing or
+//! delivery frees the buffer as it unwinds.
+
 pub mod irq;
 pub mod mem;
 pub mod process;
@@ -51,6 +71,14 @@ static LOCAL_RNG_STATE: AtomicU64 = AtomicU64::new(2);
 
 #[allow(dead_code)]
 pub fn current_pid() -> PID { crate::arch::process::current_pid() }
+
+/// Free the heap buffer a memory message's `MemoryRange` views (see the module
+/// ownership note). Callers must not free it twice or read it afterward.
+pub(crate) fn free_message_buffer(range: xous::MemoryRange) {
+    // SAFETY: `range` came from `Box::into_raw` of a `[u8]` of this length (see the
+    // module ownership note); the caller guarantees a single free and no later read.
+    unsafe { drop(Box::from_raw(core::slice::from_raw_parts_mut(range.as_mut_ptr(), range.len()))) };
+}
 
 /// Each client gets its own connection and its own thread, which is handled here.
 /// Blocks reading syscalls off the socket until it closes (the kernel shutting down
@@ -262,6 +290,8 @@ fn listen_thread(
 /// that kmain can activate. In a hosted environment,this is the primary
 /// thread that handles network communications, and this function never returns.
 pub fn idle() -> bool {
+    xous::arch::spawn_memory_monitor();
+
     // Start listening.
     let (sender, message_receiver) = unbounded();
     let (new_pid_sender, new_pid_receiver) = unbounded();

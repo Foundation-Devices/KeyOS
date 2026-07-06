@@ -537,16 +537,6 @@ impl Result {
             _ => Result::UnknownResult(src[0], src[1], src[2], src[3], src[4], src[5], src[6]),
         }
     }
-
-    /// If the Result has memory attached to it, return the memory
-    #[inline]
-    pub fn memory(&self) -> Option<&MemoryRange> {
-        match self {
-            Result::MessageEnvelope(msg) => msg.body.memory(),
-            Result::Message(msg) => msg.memory(),
-            _ => None,
-        }
-    }
 }
 
 impl From<Error> for Result {

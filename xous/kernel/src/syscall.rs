@@ -23,6 +23,18 @@ enum ExecutionType {
 
 pub(crate) fn send_message(sender_tid: TID, cid: CID, message: Message) -> SysCallResult {
     SystemServices::with_mut(|ss| {
+        // Frees the incoming buffer if we bail out below; cancelled once queued or
+        // delivered, and a no-op for a message without memory.
+        #[cfg(not(keyos))]
+        let buf_guard = {
+            let range = message.memory().copied();
+            defer::defer(move || {
+                if let Some(range) = range {
+                    crate::arch::free_message_buffer(range);
+                }
+            })
+        };
+
         let ConnectionSlot::Connected { sidx, permissions, .. } = ss.current_process().connection(cid)?
         else {
             return Err(Error::ServerNotFound);
@@ -42,6 +54,9 @@ pub(crate) fn send_message(sender_tid: TID, cid: CID, message: Message) -> SysCa
         let blocking = message.is_blocking();
 
         send_message_inner(ss, sender_tid, sidx, message)?;
+        // Queued or delivered now, so the buffer is owned elsewhere; don't free it.
+        #[cfg(not(keyos))]
+        buf_guard.cancel();
 
         if blocking {
             ss.current_process_mut().set_thread_state(sender_tid, ThreadState::WaitBlocking { sidx });
@@ -215,19 +230,23 @@ fn return_memory(
                 // Return the memory to the calling process
                 ss.return_memory(buf.as_ptr() as _, pid, tid, client_addr.get() as _, buf.len())?;
 
-                let client_range = unsafe { MemoryRange::new(client_addr.get(), buf.len()) }?;
-                let return_value = Result::MemoryReturned(client_range, offset, valid);
+                // On hardware the range is where the lent pages now live in the sender;
+                // hosted ships this range on the wire, so it must point at our buffer.
+                #[cfg(keyos)]
+                let return_range = unsafe { MemoryRange::new(client_addr.get(), buf.len()) }?;
+                #[cfg(not(keyos))]
+                let return_range = buf;
+                let return_value = Result::MemoryReturned(return_range, offset, valid);
                 ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
                 ss.set_thread_result(pid, tid, return_value)?;
             }
             WaitingMessage::MovedMemory { pid, tid, client_addr, buf_size } => {
                 // The server owns `buf`; move it into the client at a fresh address.
+                // (Hosted doesn't move pages -- `new_virt` is `buf`, shipped from the
+                // range in `set_thread_result`.)
                 let new_virt =
                     ss.send_memory(buf.as_mut_ptr() as *mut usize, pid, core::ptr::null_mut(), buf.len())?;
                 let new_range = unsafe { MemoryRange::new(new_virt as usize, buf.len()) }?;
-                // Hosted mode doesn't move pages, so ship the bytes to the client's return slot.
-                #[cfg(not(keyos))]
-                ss.return_memory(buf.as_mut_ptr() as _, pid, tid, new_virt, buf.len())?;
                 // The reply landed elsewhere, so free the range the sender reserved on send.
                 ss.clear_shared_range(pid, client_addr, buf_size, ClearShared::Free);
 
@@ -236,7 +255,15 @@ fn return_memory(
                 ss.set_thread_result(pid, tid, return_value)?;
             }
             WaitingMessage::ForgetMemory(range) => {
+                #[cfg(keyos)]
                 MemoryManager::with_mut(|mm| mm.unmap_range(range.as_ptr(), range.len()))?;
+                // The client is gone, so the returned bytes go nowhere; free the buffer.
+                // (`range` is either stale or `buf` itself, so don't free it separately.)
+                #[cfg(not(keyos))]
+                {
+                    let _ = range;
+                    crate::arch::free_message_buffer(buf);
+                }
             }
             WaitingMessage::ScalarMessage { .. } | WaitingMessage::ScalarMessageTerminated => {
                 klog!("WARNING: Tried to wait on a message that was a scalar");

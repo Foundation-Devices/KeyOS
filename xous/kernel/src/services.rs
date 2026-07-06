@@ -598,25 +598,12 @@ impl SystemServices {
     pub fn return_memory(
         &mut self,
         src_virt: *mut usize,
-        dest_pid: PID,
-        dest_tid: TID,
+        _dest_pid: PID,
+        _dest_tid: TID,
         _dest_virt: *mut usize,
-        len: usize,
-        // buf: MemoryRange,
+        _len: usize,
     ) -> Result<*mut usize, Error> {
-        let buf = unsafe { MemoryRange::new(src_virt as usize, len) }?;
-        let buf = buf.as_slice();
-        let current_pid = current_pid();
-        {
-            let target_process = self.process(dest_pid)?;
-            target_process.activate();
-            let mut arch_process = ArchProcess::current();
-            arch_process.return_memory(dest_tid, buf);
-        }
-        let target_process = self.process(current_pid)?;
-        target_process.activate();
-
-        Ok(src_virt as *mut usize)
+        Ok(src_virt)
     }
 
     /// Drop the lent (shared) reservation over `[addr, addr + len)` in `pid`'s space; see

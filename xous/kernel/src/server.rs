@@ -8,8 +8,10 @@ use xous::{
     MessageSender, ScalarMessage, ServerEvent, NUM_SERVER_EVENTS, PID, SID, TID,
 };
 
+#[cfg(keyos)]
+use crate::mem::MemoryManager;
 use crate::{
-    mem::{ClearShared, MemoryManager},
+    mem::ClearShared,
     process::{current_pid, ThreadState},
     services::SystemServices,
 };
@@ -390,11 +392,22 @@ impl Server {
                 // For lend and lendmut where the client disappeared, also just free the memory
                 QueuedMessage::MemoryMessageSend { server_addr, buf_size, .. }
                 | QueuedMessage::MemoryMessageBlockingSendTerminated { server_addr, buf_size, .. }
-                | QueuedMessage::WaitingForget { server_addr, buf_size, .. }
                 | QueuedMessage::MemoryMessageROLendTerminated { server_addr, buf_size, .. }
                 | QueuedMessage::MemoryMessageRWLendTerminated { server_addr, buf_size, .. } => {
+                    #[cfg(keyos)]
                     MemoryManager::with_mut(|mm| mm.unmap_range(server_addr.get() as _, buf_size.get()))
                         .unwrap();
+                    #[cfg(not(keyos))]
+                    crate::arch::free_message_buffer(MemoryRange::from_parts(server_addr, buf_size));
+                }
+
+                QueuedMessage::WaitingForget { server_addr, buf_size } => {
+                    #[cfg(keyos)]
+                    MemoryManager::with_mut(|mm| mm.unmap_range(server_addr.get() as _, buf_size.get()))
+                        .unwrap();
+                    // The buffer was already freed; `server_addr` is a stale token.
+                    #[cfg(not(keyos))]
+                    let _ = (server_addr, buf_size);
                 }
 
                 // For messages where the client is waiting for a response, unblock the
@@ -435,6 +448,15 @@ impl Server {
                     {
                         ss.clear_shared_range(client_pid, client_addr, buf_size, ClearShared::OnDemand);
                     }
+                    // An undelivered borrow's buffer is still ours to free; a delivered
+                    // one was already freed at delivery.
+                    #[cfg(not(keyos))]
+                    if matches!(
+                        *entry,
+                        QueuedMessage::MemoryMessageROLend { .. } | QueuedMessage::MemoryMessageRWLend { .. }
+                    ) {
+                        crate::arch::free_message_buffer(MemoryRange::from_parts(server_addr, buf_size));
+                    }
                     ss.process_mut(client_pid).unwrap().set_thread_state(client_tid, ThreadState::Ready);
                     ss.set_thread_result(client_pid, client_tid, xous::Result::Error(Error::ServerNotFound))
                         .unwrap();
@@ -450,8 +472,11 @@ impl Server {
                     ..
                 } => {
                     let tid = tid as _;
+                    #[cfg(keyos)]
                     MemoryManager::with_mut(|mm| mm.unmap_range(server_addr.get() as _, buf_size.get()))
                         .unwrap();
+                    #[cfg(not(keyos))]
+                    crate::arch::free_message_buffer(MemoryRange::from_parts(server_addr, buf_size));
                     ss.clear_shared_range(pid, client_addr, buf_size, ClearShared::OnDemand);
                     ss.set_thread_result(pid, tid, xous::Result::Error(Error::ServerNotFound)).unwrap();
                     ss.process_mut(pid).unwrap().set_thread_state(tid, ThreadState::Ready);
@@ -588,15 +613,18 @@ impl Server {
         let current_val = self.queue.get_mut(message_index).ok_or(Error::BadAddress)?;
         let result = match *current_val {
             QueuedMessage::WaitingReturnMemory { pid, tid, server_addr, client_addr, buf_size } => {
-                // Sanity check the specified address was correct
-                #[cfg(keyos)]
                 if let Some(buf) = buf {
-                    if server_addr.get() != buf.as_ptr() as usize || buf_size.get() != buf.len() {
+                    // The hosted address is a token into another process, so skip it there.
+                    #[cfg(keyos)]
+                    if server_addr.get() != buf.as_ptr() as usize {
+                        return Err(Error::BadAddress);
+                    }
+                    if buf_size.get() != buf.len() {
                         return Err(Error::BadAddress);
                     }
                 }
                 #[cfg(not(keyos))]
-                let _ = (server_addr, buf_size);
+                let _ = server_addr;
 
                 WaitingMessage::BorrowedMemory { pid, tid: tid as _, client_addr }
             }

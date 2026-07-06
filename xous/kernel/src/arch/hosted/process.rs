@@ -25,9 +25,6 @@ struct ProcessImpl {
     /// The network connection to the client process.
     conn: Option<TcpStream>,
 
-    /// Memory that may need to be returned to the caller for each thread
-    memory_to_return: [Option<Vec<u8>>; MAX_THREAD_COUNT],
-
     /// This enables the kernel to keep track of threads in the
     /// target process, and know which threads are ready to
     /// receive messages.
@@ -221,20 +218,17 @@ impl Process {
                 response.extend_from_slice(&word.to_le_bytes());
             }
 
-            if let Some(mem) = result.memory() {
-                let s = unsafe { core::slice::from_raw_parts(mem.as_ptr(), mem.len()) };
+            // On hosted these ranges name heap buffers we own (see the module note).
+            let buffer = match &result {
+                xous::Result::MessageEnvelope(env) => env.body.memory().copied(),
+                xous::Result::MemoryReturned(range, ..) => Some(*range),
+                _ => None,
+            };
+            if let Some(range) = buffer {
+                let s = unsafe { core::slice::from_raw_parts(range.as_ptr(), range.len()) };
                 klog!("adding {} additional bytes from result", s.len());
                 response.extend_from_slice(s);
-            }
-
-            // If there is memory to return for this thread, also return that.
-            if let Some(buf) = process.memory_to_return.get_mut(tid - 1).and_then(|v| v.take()) {
-                if result.memory().is_some() {
-                    panic!("Result has memory and we're also returning memory!");
-                }
-                klog!("adding {} additional bytes from memory being returned", buf.len());
-                klog!("data: {:?}", buf);
-                response.extend_from_slice(&buf);
+                super::free_message_buffer(range);
             }
 
             klog!("setting thread return value to {} bytes", response.len());
@@ -242,16 +236,6 @@ impl Process {
             if let Err(e) = conn.write_all(&response).and_then(|_| conn.flush()) {
                 eprintln!("KERNEL({}): could not send response to process: {}", process_table.current, e);
             }
-        });
-    }
-
-    pub fn return_memory(&mut self, tid: TID, buf: &[u8]) {
-        PROCESS_TABLE.with(|pt| {
-            let mut process_table = pt.borrow_mut();
-            let current_pid_idx = process_table.current.get() as usize - 1;
-            let process = &mut process_table.table[current_pid_idx].as_mut().unwrap();
-            assert!(process.memory_to_return[tid - 1].is_none());
-            process.memory_to_return[tid - 1] = Some(buf.to_vec());
         });
     }
 
@@ -264,11 +248,9 @@ impl Process {
         PROCESS_TABLE.with(|process_table| {
             let mut process_table = process_table.borrow_mut();
             let pid_idx = (pid.get() - 1) as usize;
-            use crate::filled_array;
             let mut process = ProcessImpl {
                 conn: None,
                 key: init_data.app_id,
-                memory_to_return: filled_array![None; 32 /* MAX_THREAD */],
                 current_thread: INITIAL_TID,
                 threads: [Thread { allocated: false }; MAX_THREAD_COUNT],
             };
