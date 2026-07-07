@@ -19,7 +19,7 @@ jobs:
 
   check-workspace:
     name: Check workspace compilation
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, Linux ]
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/setup-nix-rust
