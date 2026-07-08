@@ -14,8 +14,6 @@ Most people arrive here for one of two reasons:
 - They want to rebuild KeyOS and compare hashes against an official release.
 - They want to build a KeyOS app with the Foundation SDK.
 
-<img src="media/passport-prime-device.png" width="800" alt="Passport Prime running KeyOS"/>
-
 ## Reproduce A KeyOS Release
 
 See [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) for the full release verification
