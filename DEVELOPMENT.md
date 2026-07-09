@@ -126,6 +126,30 @@ Run the simulator:
 
     just sim
 
+### Hot Reload
+
+While the simulator is running, an app can be rebuilt and relaunched
+in place, without restarting the whole simulator:
+
+    just sim-reload <crate>
+
+For example:
+
+    just sim-reload gui-app-lock-screen
+
+To rebuild and reload automatically on every change to the crate's source directory
+(requires `cargo install cargo-watch`):
+
+    just sim-watch <crate>
+
+Note that watch mode watches the crate's own directory plus the shared UI library
+(`ui/ui`). Changes to other shared code won't trigger a reload — run
+`just sim-reload <crate>` manually in that case; the rebuild picks up shared changes.
+
+Hot reload works for apps only. System services whose exit takes
+the hosted system down with them (see `SYSTEM_SERVICES_HOSTED` in `xtask/src/main.rs`,
+e.g. `gui-server` or `fs-server`) require a full simulator restart.
+
 ## Installation
 
 ### Full System Reprogram with SAM-BA

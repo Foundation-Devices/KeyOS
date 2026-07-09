@@ -3,7 +3,7 @@
 
 use std::process::Command;
 
-use crate::builder::{get_package_metadata, Builder};
+use crate::builder::{get_package_metadata, workspace_root, Builder};
 
 pub fn reload_service(crate_name: String) {
     println!("Building {} for hosted mode...", crate_name);
@@ -40,12 +40,13 @@ pub fn reload_service(crate_name: String) {
 pub fn watch_service(crate_name: String) {
     let package = get_package_metadata(&crate_name);
     let crate_dir = package.manifest_path.parent().expect("manifest path has no parent");
+    let shared_ui_dir = workspace_root().join("ui/ui"); // Shared slint UI library
 
-    println!("Watching {} for changes (Ctrl-C to stop)...", crate_dir);
+    println!("Watching {} and {} for changes (Ctrl-C to stop)...", crate_dir, shared_ui_dir);
 
     let reload_cmd = format!("cargo xtask reload {}", crate_name);
     let status = Command::new("cargo")
-        .args(["watch", "-w", crate_dir.as_str(), "-s", &reload_cmd])
+        .args(["watch", "-w", crate_dir.as_str(), "-w", shared_ui_dir.as_str(), "-s", &reload_cmd])
         .status()
         .unwrap_or_else(|e| {
             eprintln!("Failed to run `cargo watch`: {e}");

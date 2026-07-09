@@ -1026,6 +1026,8 @@ pub fn get_crate_os_deps(crate_name: &str) -> Vec<String> {
     result
 }
 
+pub fn workspace_root() -> &'static cargo_metadata::camino::Utf8Path { &METADATA.workspace_root }
+
 pub fn get_package_metadata(crate_name: &str) -> &'static cargo_metadata::Package {
     METADATA
         .packages

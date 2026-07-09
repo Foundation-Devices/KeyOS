@@ -264,6 +264,7 @@ component VerifyPassword inherits Rectangle {
             animated: animated;
             password <=> State.input;
             is-check-ongoing: State.is-check-ongoing;
+            pin-incorrect: pin-incorrect;
             locked-len: State.show-security-words-enabled ? State.locked-prefix.character-count : 0;
             accept-button-text: TR2.lookup(TrId.CommonKeyboardUnlock);
             accept-button-enabled: self.password.character-count >= 6 && !State.is-check-ongoing;
@@ -314,7 +315,7 @@ component VerifyAuth inherits Rectangle {
 
     if State.is-pin-entry: VerifyPin {
         changed has-focus => {
-            if !self.has-focus {
+            if !self.has-focus && !State.is-check-ongoing {
                 root.lost-focus()
             }
         }
@@ -325,7 +326,7 @@ component VerifyAuth inherits Rectangle {
 
     if !State.is-pin-entry: VerifyPassword {
         changed has-focus => {
-            if !self.has-focus {
+            if !self.has-focus && !State.is-check-ongoing {
                 root.lost-focus()
             }
         }

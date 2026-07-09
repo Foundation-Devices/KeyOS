@@ -15,17 +15,53 @@ component PinDot inherits Rectangle {
     in property <bool> animated: true;
     in property <bool> placeholder;
     in property <bool> pulsating;
-    property <brush> fill-color: Palette.content-secondary;
 
-    clip: true;
+    // Dot's position along the row, 0.0 (leftmost) to 1.0 (rightmost)
+    in property <float> wave-position;
+
+    // The wave's position; alternates between 0..1..0 while pulsating is true,
+    // driven by the state's alternating animation below
+    property <float> wave-center: 0;
+    property <float> wave-envelope: pulsating ? 1.0 : 0.0;
+    animate wave-envelope {
+        duration: pulsating ? 0ms : 200ms;
+        easing: ease-in-out;
+    }
+    property <float> wave-bump: wave-envelope * Math.max(0, 1 - Math.abs(wave-position - wave-center) * 3);
+    property <length> wave-max-amplitude: 6px;
+    property <length> wave-offset: -wave-max-amplitude * wave-bump;
+    property <brush> wave-fill-color: Palette.content-secondary.mix(Palette.content-tertiary-inverse, 1 - wave-bump);
+
+    states [
+        _ when pulsating: {
+            wave-center: 1.0;
+            in {
+                animate wave-center {
+                    duration: 500ms; // one sweep across the row
+                    direction: alternate;
+                    iteration-count: -1;
+                    easing: ease-in-out;
+                }
+            }
+            out {
+                animate wave-center {
+                    duration: 200ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+    ]
+
     width: size;
     height: size;
     border-radius: self.width / 2;
     border-width: 1px;
-    border-color: placeholder ? transparent : Palette.border-primary;
+    border-color: placeholder || (filled && pulsating) ? transparent : Palette.border-primary;
     opacity: hidden ? 0 : 1;
 
     if !placeholder: fill := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + wave-offset;
         property <length> fill-size: filled ? parent.width : 0px;
         animate fill-size {
             duration: animated ? 150ms : 0;
@@ -35,7 +71,7 @@ component PinDot inherits Rectangle {
         width: fill-size;
         height: fill-size;
         border-width: 1px;
-        background: fill-size != 0 ? root.fill-color : transparent;
+        background: fill-size != 0 ? root.wave-fill-color : transparent;
         border-radius: fill-size / 2;
     }
 
@@ -44,23 +80,6 @@ component PinDot inherits Rectangle {
         size: Size.sz8;
         colorize: Palette.border-secondary;
     }
-
-    states [
-        default when !pulsating: {
-            fill-color: Palette.content-secondary;
-        }
-        pulsating when pulsating: {
-            fill-color: Palette.content-tertiary-inverse;
-            in {
-                animate fill-color {
-                    duration: 500ms;
-                    easing: ease-in-out;
-                    direction: alternate;
-                    iteration-count: -1;
-                }
-            }
-        }
-    ]
 }
 
 export component LoginLayout inherits VerticalLayout {
@@ -89,6 +108,15 @@ export component PinEntry inherits VerticalLayout {
     forward-focus: hidden-input;
 
     alignment: start;
+
+    // Hide the keyboard while checking the PIN by unfocusing the input field
+    changed is-check-ongoing => {
+        if self.is-check-ongoing {
+            hidden-input.clear-focus();
+        } else if self.pin-incorrect {
+            hidden-input.focus();
+        }
+    }
 
     Rectangle {
         Image {
@@ -146,14 +174,17 @@ export component PinEntry inherits VerticalLayout {
                     spacing: Size.sz4;
                     for i in [0, 1, 2, 3, 4, 5]: PinDot {
                         pulsating: root.is-check-ongoing;
+                        wave-position: i / 11.0;
                         filled: i < pin-length;
                     }
                     if single-row && pin-length >= 7: PinDot {
                         pulsating: root.is-check-ongoing;
+                        wave-position: 6 / 11.0;
                         filled: true;
                     }
                     if single-row && pin-length >= 8: PinDot {
                         pulsating: root.is-check-ongoing;
+                        wave-position: 7 / 11.0;
                         filled: true;
                     }
                     if single-row: PinDot {
@@ -165,6 +196,7 @@ export component PinEntry inherits VerticalLayout {
                     spacing: Size.sz4;
                     for i in [6, 7, 8, 9, 10, 11]: PinDot {
                         pulsating: root.is-check-ongoing;
+                        wave-position: i / 11.0;
                         placeholder: i == pin-length;
                         filled: i < pin-length;
                         hidden: i > pin-length;
@@ -179,6 +211,7 @@ export component PasswordEntry inherits VerticalLayout {
     in property <bool> animated;
     in-out property <string> password <=> password-input.text;
     in property <bool> is-check-ongoing;
+    in property <bool> pin-incorrect: false;
     in property <int> locked-len: 0;
     out property <bool> has-focus: password-input.has-focus;
     in property <string> accept-button-text;
@@ -191,6 +224,16 @@ export component PasswordEntry inherits VerticalLayout {
     padding-bottom: Size.sz6;
 
     forward-focus: password-input;
+
+    // Hide the on-screen keyboard while a login check is in flight; only pop it back
+    // out if the check failed (a successful check navigates away instead).
+    changed is-check-ongoing => {
+        if self.is-check-ongoing {
+            password-input.clear-focus();
+        } else if self.pin-incorrect {
+            password-input.focus();
+        }
+    }
 
     Rectangle {
         HorizontalLayout {

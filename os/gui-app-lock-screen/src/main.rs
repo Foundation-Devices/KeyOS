@@ -282,11 +282,11 @@ fn init_state(state: StoredValue<AppState>) {
 }
 
 fn reset_input_state(ui_state: &State, remaining_attempts: u32) {
+    ui_state.set_remaining_attempts(remaining_attempts as _);
     ui_state.set_is_check_ongoing(false);
     ui_state.set_input("".into());
     ui_state.set_locked_prefix("".into());
     ui_state.set_security_words(Default::default());
-    ui_state.set_remaining_attempts(remaining_attempts as _);
 }
 
 fn reset_request_state(ui_state: &State) { ui_state.set_nav_request(false); }
