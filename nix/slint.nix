@@ -1,10 +1,6 @@
 # SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
-{
-  self,
-  system,
-  pkgs,
-}: let
+{pkgs}: let
   version = "v1.12.1-foundation6";
   foundationSlint = pkgs.callPackage ./foundation-slint.nix {
     inherit version;

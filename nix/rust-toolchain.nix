@@ -18,7 +18,7 @@
     sha256 = toolchainSha256;
   };
 
-  channel = (builtins.fromTOML (builtins.readFile (self + "/rust-toolchain.toml"))).toolchain.channel;
+  channel = (fromTOML (builtins.readFile (self + "/rust-toolchain.toml"))).toolchain.channel;
   customTargetLib = pkgs.fetchzip {
     url = "https://github.com/Foundation-Devices/rust-keyos/releases/download/1.96.0-${channel}/armv7a-unknown-xous-elf_${channel}.zip";
     sha256 = "sha256-BvQyJ6BfMeaqGjSeE28iMKXpiQcuIMuW02XxMS9Pcrw=";

@@ -44,21 +44,17 @@
         };
       };
 
-      customPackages = let
-        ciPkgs = with pkgs; {
+      customPackages =
+        (with pkgs; {
           inherit just reuse taplo;
           # upstream slint-lsp for CI (faster)
           slint-lsp-upstream = slint-lsp;
-        };
-        rustToolchain = import ./nix/rust-toolchain.nix {
-          inherit self system fenix;
-          pkgs = pkgs;
-        };
-        slintPkgs = import ./nix/slint.nix {inherit self system pkgs;};
-        cosign2Pkgs = import ./nix/cosign2.nix {inherit self system pkgs;};
-        localazy = import ./nix/localazy.nix {inherit self system pkgs;};
-      in
-        ciPkgs // rustToolchain // slintPkgs // cosign2Pkgs // localazy;
+        })
+        // pkgs.callPackage ./nix/rust-toolchain.nix {inherit self fenix;}
+        // pkgs.callPackage ./nix/slint.nix {}
+        // pkgs.callPackage ./nix/cosign2.nix {inherit self;}
+        // pkgs.callPackage ./nix/localazy.nix {}
+        // pkgs.callPackage ./nix/sim-runner.nix {};
 
       buildPackages = with pkgs;
         [
@@ -94,6 +90,7 @@
         ++ (with customPackages; [
           localazy
           rust-analyzer
+          sim-runner
           slint-lsp
           slint-viewer
         ])
@@ -118,51 +115,24 @@
           libiconv
         ];
 
+      sharedLibs = with pkgs;
+        [
+          fontconfig
+          pcsclite
+          libusb1
+          zlib
+        ]
+        ++ darwinPkgs
+        ++ lib.optionals stdenv.isLinux [udev];
+
       mkShell = packages:
         pkgs.mkShellNoCC (
           {
             strictDeps = true;
             packages = packages;
             hardeningDisable = ["all"];
-            buildInputs = with pkgs;
-              [
-                fontconfig
-                libGL
-                pcsclite
-                libusb1
-                qt6.qtbase
-                qt6.qtsvg
-                stdenv.cc.cc.lib
-                zlib
-              ]
-              ++ darwinPkgs
-              ++ lib.optionals stdenv.isLinux [udev];
-
-            LD_LIBRARY_PATH = with pkgs;
-              lib.makeLibraryPath (
-                [
-                  fontconfig
-                  libGL
-                  pcsclite
-                  libusb1
-                  qt6.qtbase
-                  qt6.qtsvg
-                  stdenv.cc.cc.lib
-                  zlib
-                  # slint sim
-                  libxkbcommon
-                  llvmPackages.libclang.lib
-                ]
-                ++ darwinPkgs
-                ++ lib.optionals stdenv.isLinux [
-                  # slint sim
-                  xorg.libX11
-                  xorg.libXcursor
-                  xorg.libXi
-                  wayland
-                  udev
-                ]
-              );
+            buildInputs = sharedLibs;
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath sharedLibs;
 
             shellHook = ''
               # darwin xcode

@@ -120,7 +120,7 @@ gen-icu-data:
     fi
 
 sim: gen-themes
-    cargo xtask run --hosted
+    sim-runner
 
 sim-reload crate:
     cargo xtask reload {{crate}}

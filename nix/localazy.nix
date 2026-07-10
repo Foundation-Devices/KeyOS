@@ -1,10 +1,6 @@
 # SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
-{
-  self,
-  system,
-  pkgs,
-}: {
+{pkgs}: {
   localazy = pkgs.stdenv.mkDerivation rec {
     pname = "localazy-cli";
     version = "2.0.8";
