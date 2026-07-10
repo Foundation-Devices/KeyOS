@@ -132,8 +132,6 @@ pub enum SigningError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         configured_signing_identities_in_root, resolve_identity_cosign2_config_in_root,
@@ -142,7 +140,8 @@ mod tests {
 
     #[test]
     fn resolves_named_identity_config() {
-        let root = make_temp_dir("signing-preferred");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         let signing_root = root.join(SIGNING_DIR_NAME);
         fs::create_dir_all(signing_root.join("demo-app")).unwrap();
         fs::write(
@@ -153,13 +152,12 @@ mod tests {
 
         let resolved = resolve_identity_cosign2_config_in_root("demo-app", &signing_root).unwrap();
         assert_eq!(resolved, signing_root.join("demo-app").join(COSIGN2_CONFIG_FILE));
-
-        cleanup(&root);
     }
 
     #[test]
     fn lists_only_configured_identities() {
-        let root = make_temp_dir("signing-configured");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         let signing_root = root.join(SIGNING_DIR_NAME);
         fs::create_dir_all(signing_root.join("with-config")).unwrap();
         fs::create_dir_all(signing_root.join("without-config")).unwrap();
@@ -172,13 +170,12 @@ mod tests {
         let identities = configured_signing_identities_in_root(&signing_root).unwrap();
         assert_eq!(identities.len(), 1);
         assert_eq!(identities[0].identity_name, "with-config");
-
-        cleanup(&root);
     }
 
     #[test]
     fn creates_identity_paths_with_stable_filenames() {
-        let root = make_temp_dir("signing-paths");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         let signing_root = root.join(SIGNING_DIR_NAME);
         fs::create_dir_all(&signing_root).unwrap();
 
@@ -189,16 +186,5 @@ mod tests {
         assert_eq!(identity.public_key, identity.root.join("public.pub"));
         assert_eq!(identity.certificate, identity.root.join("sample.crt"));
         assert_eq!(identity.legacy_certificate(), identity.root.join("certificate.crt"));
-
-        cleanup(&root);
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-signing-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &PathBuf) { let _ = fs::remove_dir_all(path); }
 }

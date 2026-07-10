@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+printf '%s\n' "$PWD $*" >> "${FOUNDATION_FAKE_LOG_DIR:-.}/theme-editor.log"
+exit 0

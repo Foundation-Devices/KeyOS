@@ -1,0 +1,22 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+if [ "$1" = "--version" ]; then
+  echo 'foundation-asset-tool 1.0.0-fake'
+  exit 0
+fi
+cmd="$1"
+source="$2"
+destination="$3"
+case "$cmd" in
+  raw-image-file)
+    mkdir -p "$(dirname "$destination")"
+    cp "$source" "$destination"
+    ;;
+  raw-image-dir)
+    mkdir -p "$destination"
+    base=$(basename "$source")
+    stem=${base%.*}
+    cp "$source" "$destination/$stem.raw"
+    ;;
+esac

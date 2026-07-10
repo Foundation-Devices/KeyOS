@@ -421,78 +421,73 @@ fn command_available(command: &str, args: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::Path;
 
     use super::{check_app_config_names_from, check_app_icon_size_from};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn app_config_name_check_reports_invalid_display_name() {
-        let root = make_temp_dir("doctor-invalid-name");
-        write_config(&root, "Demo_App");
+        let root_dir = make_temp_dir("doctor-invalid-name");
+        let root = root_dir.path();
+        write_config(root, "Demo_App");
 
-        let result = check_app_config_names_from(&root);
+        let result = check_app_config_names_from(root);
 
         assert!(!result.passed);
         assert!(result.status.contains("friendly-app-name"));
         assert!(result.status.contains("only A-Z, a-z, 0-9, spaces, and hyphens"));
-
-        cleanup(&root);
     }
 
     #[test]
     fn app_config_name_check_skips_outside_app_project() {
-        let root = make_temp_dir("doctor-no-app");
+        let root_dir = make_temp_dir("doctor-no-app");
+        let root = root_dir.path();
 
-        let result = check_app_config_names_from(&root);
+        let result = check_app_config_names_from(root);
 
         assert!(result.passed);
         assert_eq!(result.status, "not in app project");
-
-        cleanup(&root);
     }
 
     #[test]
     fn app_icon_size_check_reports_invalid_icon_size() {
-        let root = make_temp_dir("doctor-invalid-icon");
+        let root_dir = make_temp_dir("doctor-invalid-icon");
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_config(&root, "Demo App");
+        write_config(root, "Demo App");
         fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
 
-        let result = check_app_icon_size_from(&root);
+        let result = check_app_icon_size_from(root);
 
         assert!(!result.passed);
         assert!(result.status.contains("Icon must be 96x96px"));
         assert!(result.status.contains("128x96px"));
-
-        cleanup(&root);
     }
 
     #[test]
     fn app_icon_size_check_accepts_96px_icon() {
-        let root = make_temp_dir("doctor-valid-icon");
+        let root_dir = make_temp_dir("doctor-valid-icon");
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_config(&root, "Demo App");
+        write_config(root, "Demo App");
         fs::write(root.join("resources").join("icon.svg"), valid_icon_svg()).unwrap();
 
-        let result = check_app_icon_size_from(&root);
+        let result = check_app_icon_size_from(root);
 
         assert!(result.passed);
         assert_eq!(result.status, "OK (96x96px)");
-
-        cleanup(&root);
     }
 
     #[test]
     fn app_icon_size_check_skips_outside_app_project() {
-        let root = make_temp_dir("doctor-no-icon-project");
+        let root_dir = make_temp_dir("doctor-no-icon-project");
+        let root = root_dir.path();
 
-        let result = check_app_icon_size_from(&root);
+        let result = check_app_icon_size_from(root);
 
         assert!(result.passed);
         assert_eq!(result.status, "not in app project");
-
-        cleanup(&root);
     }
 
     fn write_config(root: &Path, friendly_name: &str) {
@@ -512,15 +507,6 @@ mod tests {
         )
         .unwrap();
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-doctor-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 
     fn valid_icon_svg() -> &'static str { r#"<svg width="96" height="96"></svg>"# }
 }

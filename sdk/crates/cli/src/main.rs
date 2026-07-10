@@ -12,6 +12,8 @@ mod cli;
 mod commands;
 mod sdk_mapping;
 mod slint_codegen;
+#[cfg(test)]
+mod test_support;
 
 #[tokio::main]
 async fn main() {

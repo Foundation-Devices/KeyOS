@@ -5,7 +5,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use tempfile::TempDir;
 
 #[test]
 fn built_in_commands_expose_help() {
@@ -74,13 +75,6 @@ fn removed_legacy_command_names_fail() {
 #[test]
 fn environment_commands_work_in_smoke_env() {
     let env = TestEnv::new();
-    env.install_fake_nix();
-    env.install_fake_git();
-    env.install_fake_rustc();
-    env.install_fake_arm_strip();
-    env.install_bundle_asset_tool();
-    env.install_bundle_cosign2();
-    env.install_bundle_viewer();
 
     let doctor = env.command().arg("doctor").output().unwrap();
     assert!(doctor.status.success(), "doctor failed: {}", stderr(&doctor));
@@ -104,19 +98,6 @@ fn environment_commands_work_in_smoke_env() {
 #[test]
 fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     let env = TestEnv::new();
-    env.install_fake_nix();
-    env.install_fake_git();
-    env.install_fake_rustc();
-    env.install_fake_arm_strip();
-    env.install_fake_cargo();
-    env.install_fake_openssl();
-    env.install_bundle_asset_tool();
-    env.install_bundle_cosign2();
-    env.install_bundle_viewer();
-    env.install_bundle_theme_compiler();
-    env.install_bundle_simulator();
-    env.install_bundle_fatfs_image();
-    env.install_fake_passport_drive();
     env.write_smoke_app();
 
     let gen_cert = env
@@ -232,7 +213,6 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 #[test]
 fn build_refuses_invalid_app_names_before_cargo() {
     let env = TestEnv::new();
-    env.install_fake_cargo();
     env.write_smoke_app();
 
     let config_path = env.app_root().join("app-config.toml");
@@ -253,7 +233,6 @@ fn build_refuses_invalid_app_names_before_cargo() {
 #[test]
 fn build_refuses_invalid_icon_size_before_cargo() {
     let env = TestEnv::new();
-    env.install_fake_cargo();
     env.write_smoke_app();
 
     fs::write(env.app_root().join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#)
@@ -269,7 +248,6 @@ fn build_refuses_invalid_icon_size_before_cargo() {
 #[test]
 fn logs_command_launches_bundled_log_viewer() {
     let env = TestEnv::new();
-    env.install_bundle_log_viewer();
 
     let logs = env.command().arg("logs").arg("--timeout").arg("9").output().unwrap();
     assert!(logs.status.success(), "logs failed: {}", stderr(&logs));
@@ -281,7 +259,6 @@ fn logs_command_launches_bundled_log_viewer() {
 #[test]
 fn theme_command_creates_app_theme_and_launches_bundled_editor() {
     let env = TestEnv::new();
-    env.install_bundle_theme_editor();
     env.write_smoke_app();
 
     let theme = env.command_in(env.app_root()).arg("theme").output().unwrap();
@@ -307,13 +284,6 @@ fn theme_command_creates_app_theme_and_launches_bundled_editor() {
 #[test]
 fn plugin_and_completion_commands_work_in_smoke_env() {
     let env = TestEnv::new();
-    env.install_fake_git();
-    env.install_fake_nix();
-    env.install_fake_rustc();
-    env.install_fake_arm_strip();
-    env.install_bundle_cosign2();
-    env.install_bundle_viewer();
-    env.install_path_plugin("foundation-echo", "#!/bin/sh\nprintf 'plugin:%s\\n' \"$*\"\n");
     env.write_plugin_index();
 
     let search = env.command().arg("plugin").arg("search").arg("demo").output().unwrap();
@@ -386,9 +356,8 @@ fn english_commands_still_work_when_locale_is_non_english() {
 }
 
 struct TestEnv {
-    root: PathBuf,
+    root: TempDir,
     home: PathBuf,
-    fake_bin: PathBuf,
     bundle: PathBuf,
     app: PathBuf,
     path: OsString,
@@ -396,30 +365,29 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
-        let root = make_temp_dir("foundation-cli-smoke");
-        let home = root.join("home");
-        let fake_bin = root.join("fake-bin");
-        let bundle = root.join("sdk-bundle");
-        let app = root.join("smoke-app");
+        let root = tempfile::Builder::new().prefix("foundation-cli-smoke-").tempdir().unwrap();
+        let home = root.path().join("home");
+        let bundle = root.path().join("sdk-bundle");
+        let app = root.path().join("smoke-app");
+        let fake_bin = Path::new(env!("FOUNDATION_FAKE_BIN"));
 
         fs::create_dir_all(home.join(".foundation").join("plugins")).unwrap();
-        fs::create_dir_all(fake_bin.clone()).unwrap();
-        fs::create_dir_all(bundle.join("bin")).unwrap();
         fs::create_dir_all(bundle.join("lib").join("keyos")).unwrap();
         fs::create_dir_all(bundle.join("ui").join("ui")).unwrap();
         fs::create_dir_all(bundle.join("resources").join("icons")).unwrap();
         fs::create_dir_all(bundle.join("target").join("apps")).unwrap();
+        link(fake_bin, &bundle.join("bin"));
         fs::write(bundle.join("flake.nix"), "{}").unwrap();
         fs::write(bundle.join("lib").join("keyos").join("Cargo.toml"), "[workspace]\n").unwrap();
         fs::write(bundle.join("ui").join("ui").join("placeholder.slint"), "// ui\n").unwrap();
         fs::write(bundle.join("ui").join("ui").join("theme.slint"), "// theme\n").unwrap();
         fs::write(bundle.join("resources").join("icons").join("loader.svg"), "<svg></svg>\n").unwrap();
 
-        let mut path_entries = vec![fake_bin.clone()];
+        let mut path_entries = vec![fake_bin.to_path_buf()];
         path_entries.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
         let path = std::env::join_paths(path_entries).unwrap();
 
-        Self { root, home, fake_bin, bundle, app, path }
+        Self { root, home, bundle, app, path }
     }
 
     fn home(&self) -> &Path { &self.home }
@@ -443,291 +411,15 @@ impl TestEnv {
             .env("FOUNDATION_SDK_ROOT", &self.bundle)
             .env("HOME", &self.home)
             .env("SHELL", "/bin/bash")
-            .env("PATH", &self.path);
+            .env("PATH", &self.path)
+            // Fakes log into this dir; child tools inherit it so read_log finds them.
+            .env("FOUNDATION_FAKE_LOG_DIR", self.root.path());
         command
     }
 
-    fn install_fake_cargo(&self) {
-        self.write_script(
-            self.fake_bin.join("cargo"),
-            format!(
-                r#"#!/bin/sh
-printf 'cmd=%s RUSTFLAGS=%s\n' "$*" "${{RUSTFLAGS:-}}" >> "{}"
-if [ "$1" = "--version" ]; then
-  echo 'cargo 1.0.0-fake'
-  exit 0
-fi
-cmd="$1"
-shift || true
-pkg=""
-profile="debug"
-target=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --package)
-      pkg="$2"
-      shift 2
-      ;;
-    --target)
-      target="$2"
-      shift 2
-      ;;
-    --release)
-      profile="release"
-      shift
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-if [ -z "$pkg" ] && [ -f Cargo.toml ]; then
-  pkg=$(sed -n 's/^name = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
-fi
-case "$cmd" in
-  check)
-    mkdir -p ui/gen
-    if [ -f build.rs ] && grep -q 'include_router: true' build.rs; then
-      : > ui/gen/router.slint
-      : > ui/gen/navigate.slint
-      : > ui/gen/exports.slint
-    fi
-    if [ -f build.rs ] && grep -q 'include_translations: true' build.rs; then
-      : > ui/gen/tr.slint
-      : > ui/gen/exports.slint
-    fi
-    exit 0
-    ;;
-  build)
-    if [ -n "$target" ]; then
-      out="target/$target/$profile/$pkg"
-    else
-      out="target/$profile/$pkg"
-    fi
-    mkdir -p "$(dirname "$out")"
-    printf 'fake-binary' > "$out"
-    exit 0
-    ;;
-esac
-exit 0
-"#,
-                self.root.join("cargo.log").display()
-            ),
-        );
-    }
-
-    fn install_fake_nix(&self) {
-        self.write_script(
-            self.fake_bin.join("nix"),
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'nix 2.0.0-fake'; exit 0; fi\nif [ \"$1\" = \"config\" ] && [ \"$2\" = \"show\" ] && [ \"$3\" = \"accept-flake-config\" ]; then echo false; exit 0; fi\nif [ \"$1\" = \"develop\" ]; then printf '%s\\n' \"$*\" > \"{}\"; exit 0; fi\nexit 0\n",
-                self.root.join("nix-develop.log").display()
-            ),
-        );
-        self.write_script(self.fake_bin.join("nix-collect-garbage"), "#!/bin/sh\nexit 0\n");
-    }
-
-    fn install_fake_rustc(&self) {
-        self.write_script(
-            self.fake_bin.join("rustc"),
-            "#!/bin/sh\nif [ \"$1\" = \"--target\" ] && [ \"$2\" = \"armv7a-unknown-xous-elf\" ] && [ \"$3\" = \"--print\" ] && [ \"$4\" = \"cfg\" ]; then echo 'target_arch=\"arm\"'; exit 0; fi\nif [ \"$1\" = \"--version\" ]; then echo 'rustc 1.0.0-fake'; exit 0; fi\nexit 0\n",
-        );
-    }
-
-    fn install_fake_arm_strip(&self) {
-        self.write_script(
-            self.fake_bin.join("arm-none-eabi-strip"),
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'arm-none-eabi-strip 1.0.0-fake'; exit 0; fi\nout=''\ninput=''\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    -o)\n      out=\"$2\"\n      shift 2\n      ;;\n    --strip-unneeded)\n      shift\n      ;;\n    *)\n      input=\"$1\"\n      shift\n      ;;\n  esac\ndone\ncp \"$input\" \"$out\"\n",
-        );
-    }
-
-    fn install_fake_git(&self) {
-        self.write_script(
-            self.fake_bin.join("git"),
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'git version 2.0.0-fake'; exit 0; fi\nif [ \"$1\" = \"init\" ]; then exit 0; fi\nexit 0\n",
-        );
-    }
-
-    fn install_fake_openssl(&self) {
-        self.write_script(
-            self.fake_bin.join("openssl"),
-            "#!/bin/sh\nif [ \"$1\" = \"version\" ]; then echo 'OpenSSL fake'; exit 0; fi\nif [ \"$1\" = \"ecparam\" ]; then printf 'PRIVATE-KEY'; exit 0; fi\nif [ \"$1\" = \"ec\" ]; then printf 'FAKEDER'; printf '\\x02'; printf '12345678901234567890123456789012'; exit 0; fi\nif [ \"$1\" = \"req\" ]; then out=''; while [ $# -gt 0 ]; do if [ \"$1\" = \"-out\" ]; then out=\"$2\"; shift 2; else shift; fi; done; printf 'CERTIFICATE' > \"$out\"; exit 0; fi\nif [ \"$1\" = \"x509\" ]; then in=''; while [ $# -gt 0 ]; do if [ \"$1\" = \"-in\" ]; then in=\"$2\"; shift 2; else shift; fi; done; printf 'Certificate contents for %s\\n' \"$in\"; exit 0; fi\nexit 1\n",
-        );
-    }
-
-    fn install_bundle_cosign2(&self) {
-        // Emulate signing by prepending a minimal cosign2 header (magic + the
-        // binary version at the version offset, zero-padded to the default
-        // header size) so `build`'s ensure_cosign2_header guard accepts the elf.
-        self.write_script(
-            self.bundle.join("bin").join("cosign2"),
-            r#"#!/bin/sh
-elf=""
-version="0.0.0"
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -i) elf="$2"; shift 2 ;;
-    --binary-version) version="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-if [ -z "$elf" ]; then
-  exit 0
-fi
-header="$(mktemp)"
-dd if=/dev/zero of="$header" bs=2048 count=1 2>/dev/null
-printf 'PRM1' | dd of="$header" bs=1 seek=0 conv=notrunc 2>/dev/null
-printf '%s' "$version" | dd of="$header" bs=1 seek=22 conv=notrunc 2>/dev/null
-cat "$elf" >> "$header"
-mv "$header" "$elf"
-"#,
-        );
-    }
-
-    fn install_bundle_asset_tool(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-asset-tool"),
-            r#"#!/bin/sh
-if [ "$1" = "--version" ]; then
-  echo 'foundation-asset-tool 1.0.0-fake'
-  exit 0
-fi
-cmd="$1"
-source="$2"
-destination="$3"
-case "$cmd" in
-  raw-image-file)
-    mkdir -p "$(dirname "$destination")"
-    cp "$source" "$destination"
-    ;;
-  raw-image-dir)
-    mkdir -p "$destination"
-    base=$(basename "$source")
-    stem=${base%.*}
-    cp "$source" "$destination/$stem.raw"
-    ;;
-esac
-"#,
-        );
-    }
-
-    fn install_fake_passport_drive(&self) {
-        self.write_script(
-            self.fake_bin.join("foundation-passport-drive"),
-            r#"#!/bin/sh
-log="$(dirname "$0")/../passport-drive.log"
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$log"
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  if [ -z "$id" ]; then
-    continue
-  fi
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      case "$line" in
-        *'"name":"get_developer_mode"'*)
-          printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"enabled"}]}}\n' "$id"
-          ;;
-        *)
-          printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"ok"}]}}\n' "$id"
-          ;;
-      esac
-      ;;
-    *)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
-      ;;
-  esac
-done
-"#,
-        );
-    }
-
-    fn install_bundle_viewer(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-slint-viewer"),
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$0 $*\" >> \"{}\"\nexit 0\n",
-                self.root.join("viewer.log").display()
-            ),
-        );
-    }
-
-    fn install_bundle_theme_compiler(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-theme-compiler"),
-            r#"#!/bin/sh
-rust_dir=''
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --rust-dir)
-      rust_dir="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-if [ -z "$rust_dir" ]; then
-  exit 1
-fi
-mkdir -p "$rust_dir"
-printf 'pub mod default_theme;\n' > "$rust_dir/mod.rs"
-printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
-"#,
-        );
-    }
-
-    fn install_bundle_theme_editor(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-theme-editor"),
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$PWD $*\" >> \"{}\"\nexit 0\n",
-                self.root.join("theme-editor.log").display()
-            ),
-        );
-    }
-
-    fn install_bundle_log_viewer(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-keyos-log-viewer"),
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$0 $*\" >> \"{}\"\nexit 0\n",
-                self.root.join("log-viewer.log").display()
-            ),
-        );
-    }
-
-    fn install_bundle_simulator(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("foundation-simulator"),
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$PWD\" >> \"{}\"\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> \"{}\"\n  case \"$line\" in\n    ping)\n      printf 'ok ping proto=1 caps=run\\n'\n      ;;\n    run\\ *)\n      printf 'ok run launched pid=123\\n'\n      exit 0\n      ;;\n  esac\ndone\n",
-                self.root.join("simulator.log").display(),
-                self.root.join("simulator-stdin.log").display()
-            ),
-        );
-    }
-
-    fn install_bundle_fatfs_image(&self) {
-        self.write_script(
-            self.bundle.join("bin").join("fatfs-image"),
-            "#!/bin/sh\nif [ \"$1\" = \"create\" ]; then : > \"$2\"; fi\nexit 0\n",
-        );
-    }
-
-    fn install_path_plugin(&self, name: &str, script: &str) {
-        self.write_script(self.fake_bin.join(name), script);
-    }
-
     fn install_home_plugin(&self, name: &str) {
-        self.write_script(
-            self.home.join(".foundation").join("plugins").join(format!("foundation-{name}")),
-            "#!/bin/sh\nexit 0\n",
-        );
+        let plugin = self.home.join(".foundation").join("plugins").join(format!("foundation-{name}"));
+        link(&Path::new(env!("FOUNDATION_FAKE_BIN")).join("noop"), &plugin);
     }
 
     fn write_plugin_index(&self) {
@@ -815,32 +507,18 @@ printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
         .unwrap();
     }
 
-    fn write_script(&self, path: PathBuf, contents: impl AsRef<str>) {
-        fs::write(&path, contents.as_ref()).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&path, perms).unwrap();
-        }
+    fn read_log(&self, name: &str) -> String {
+        fs::read_to_string(self.root.path().join(name)).unwrap_or_default()
     }
-
-    fn read_log(&self, name: &str) -> String { fs::read_to_string(self.root.join(name)).unwrap_or_default() }
-}
-
-impl Drop for TestEnv {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.root); }
 }
 
 fn foundation_bin() -> PathBuf { PathBuf::from(env!("CARGO_BIN_EXE_foundation")) }
 
-fn make_temp_dir(label: &str) -> PathBuf {
-    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let root = std::env::temp_dir().join(format!("{label}-{unique}"));
-    fs::create_dir_all(&root).unwrap();
-    root
-}
+#[cfg(unix)]
+fn link(src: &Path, dst: &Path) { std::os::unix::fs::symlink(src, dst).unwrap(); }
+
+#[cfg(not(unix))]
+fn link(_src: &Path, _dst: &Path) {}
 
 fn stdout(output: &Output) -> String { String::from_utf8_lossy(&output.stdout).to_string() }
 

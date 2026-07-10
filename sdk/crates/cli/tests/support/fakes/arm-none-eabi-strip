@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+if [ "$1" = "--version" ]; then echo 'arm-none-eabi-strip 1.0.0-fake'; exit 0; fi
+out=''
+input=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    --strip-unneeded) shift ;;
+    *) input="$1"; shift ;;
+  esac
+done
+cp "$input" "$out"

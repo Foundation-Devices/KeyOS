@@ -1,0 +1,16 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+rust_dir=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --rust-dir) rust_dir="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$rust_dir" ]; then
+  mkdir -p "$rust_dir"
+  printf 'pub mod default_theme;\n' > "$rust_dir/mod.rs"
+  printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
+fi
+exit 0

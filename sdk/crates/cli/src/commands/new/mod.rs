@@ -443,7 +443,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::SdkRoot;
 
@@ -453,12 +452,14 @@ mod tests {
     };
     use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn apply_template_uses_project_sdk_keyos_root_variable() {
-        let sdk_root = make_sdk_root("template-sdk");
+        let (_sdk_dir, sdk_root) = make_sdk_root("template-sdk");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_temp_dir("scaffold-project");
+        let project_root_dir = make_temp_dir("scaffold-project");
+        let project_root = project_root_dir.path();
         let project_path = project_root.join("demo-app");
 
         fs::create_dir_all(&project_path).unwrap();
@@ -508,14 +509,11 @@ mod tests {
         assert!(project_path.join("app-config.toml").exists());
         assert!(project_path.join("permission_templates.toml").exists());
         assert!(project_path.join("resources").join("icon.svg").exists());
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
     #[test]
     fn apply_template_keeps_sdk_path_variables_for_external_templates() {
-        let sdk_root = make_sdk_root("compat-template-sdk");
+        let (_sdk_dir, sdk_root) = make_sdk_root("compat-template-sdk");
         let template_dir =
             sdk_root.join("crates").join("cli").join("templates").join("compat-vars").join("files");
         fs::create_dir_all(&template_dir).unwrap();
@@ -526,7 +524,8 @@ mod tests {
         .unwrap();
 
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_temp_dir("compat-scaffold-project");
+        let project_root_dir = make_temp_dir("compat-scaffold-project");
+        let project_root = project_root_dir.path();
         let project_path = project_root.join("demo-app");
 
         fs::create_dir_all(&project_path).unwrap();
@@ -559,9 +558,6 @@ mod tests {
             )
         );
         assert!(project_path.join(project_sdk_keyos_root_path()).exists());
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
     // Heavy integration test: scaffolds an app and `cargo check`s it against the
@@ -574,7 +570,8 @@ mod tests {
     #[ignore = "requires ~/.foundation/themes/rust populated and nightly cargo; run with --ignored"]
     fn scaffolded_default_app_compiles_with_generated_theme_module() {
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
-        let project_root = make_temp_dir("scaffold-compile");
+        let project_root_dir = make_temp_dir("scaffold-compile");
+        let project_root = project_root_dir.path();
         let project_path = project_root.join("demo-app");
         let home = project_root.join("home");
 
@@ -621,8 +618,6 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        cleanup(&project_root);
     }
 
     /// Generate the SDK's base theme JSON into `<home>/.foundation/themes/rust`,
@@ -666,7 +661,8 @@ mod tests {
     #[ignore = "requires ~/.foundation/themes/rust populated and nightly cargo; run with --ignored"]
     fn scaffolded_multi_page_app_compiles_with_light_template_theme() {
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
-        let project_root = make_temp_dir("scaffold-multi-page-compile");
+        let project_root_dir = make_temp_dir("scaffold-multi-page-compile");
+        let project_root = project_root_dir.path();
         let project_path = project_root.join("demo-app");
         let home = project_root.join("home");
 
@@ -714,8 +710,6 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        cleanup(&project_root);
     }
 
     #[test]
@@ -724,7 +718,8 @@ mod tests {
             return;
         }
 
-        let temp_root = make_temp_dir("git-init");
+        let temp_root_dir = make_temp_dir("git-init");
+        let temp_root = temp_root_dir.path();
         let project_root = temp_root.join("project");
         fs::create_dir_all(&project_root).unwrap();
 
@@ -733,8 +728,6 @@ mod tests {
         assert_eq!(status, GitInitStatus::Initialized);
         assert!(project_root.join(".git").is_dir());
         assert_eq!(git_branch(&project_root), DEFAULT_GIT_BRANCH);
-
-        cleanup(&temp_root);
     }
 
     fn git_branch(project_root: &Path) -> String {
@@ -747,8 +740,9 @@ mod tests {
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
-    fn make_sdk_root(label: &str) -> PathBuf {
-        let repo_root = make_temp_dir(label);
+    fn make_sdk_root(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let repo_root = dir.path();
         fs::write(repo_root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         let root = repo_root.join("sdk");
         fs::create_dir_all(&root).unwrap();
@@ -763,7 +757,7 @@ mod tests {
             );
         }
 
-        root
+        (dir, root)
     }
 
     fn copy_dir(source: &Path, destination: &Path) {
@@ -779,15 +773,6 @@ mod tests {
             }
         }
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-new-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }
 
 /// Generate a random 16-byte app ID in hex format

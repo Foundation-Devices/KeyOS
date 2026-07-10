@@ -298,60 +298,22 @@ fn is_supported_font(path: &Path) -> bool {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::{AppId, PermissionsConfig, PublisherConfig};
     use semver::Version;
 
     use super::{stage_hardware_assets_with_tool, AssetTool};
     use crate::assets::{is_supported_font, is_supported_image};
+    use crate::test_support::make_temp_dir;
 
-    const ASSET_TOOL_STUB: &str = r#"#!/bin/sh
-if [ "$1" = "--version" ]; then
-  echo 'foundation-asset-tool 1.0.0-fake'
-  exit 0
-fi
-cmd="$1"
-source="$2"
-destination="$3"
-case "$cmd" in
-  raw-image-file)
-    mkdir -p "$(dirname "$destination")"
-    cp "$source" "$destination"
-    ;;
-  raw-image-dir)
-    mkdir -p "$destination"
-    base=$(basename "$source")
-    stem=${base%.*}
-    cp "$source" "$destination/$stem.raw"
-    ;;
-esac
-"#;
-
-    // A stub script standing in for the conversion helper, so the test stays in
-    // process and never reaches for the unbuilt helper binary.
     fn asset_tool_stub() -> AssetTool {
-        static STUB: OnceLock<PathBuf> = OnceLock::new();
-        let script = STUB.get_or_init(|| {
-            let dir = make_temp_dir("asset-tool-stub");
-            let script = dir.join("foundation-asset-tool");
-            fs::write(&script, ASSET_TOOL_STUB).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&script).unwrap().permissions();
-                perms.set_mode(0o755);
-                fs::set_permissions(&script, perms).unwrap();
-            }
-            script
-        });
-        AssetTool::Binary(script.clone())
+        AssetTool::Binary(Path::new(env!("FOUNDATION_FAKE_BIN")).join("foundation-asset-tool"))
     }
 
     #[test]
     fn stages_icon_images_and_fonts_for_hardware() {
-        let root = make_temp_dir("hardware-assets");
+        let root_dir = make_temp_dir("hardware-assets");
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         fs::create_dir_all(root.join("images").join("nested")).unwrap();
         fs::create_dir_all(root.join("fonts")).unwrap();
@@ -361,19 +323,19 @@ esac
 
         let output_dir = root.join("target").join("keyos").join("demo-app");
         let resources_dir =
-            stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
+            stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
 
         assert!(output_dir.join("icon.bin").exists());
         assert!(resources_dir.join("images").join("nested").join("photo.raw").exists());
         assert_eq!(fs::read(resources_dir.join("fonts").join("Brand.ttf")).unwrap(), b"font");
-
-        cleanup(&root);
     }
 
     #[test]
     fn skips_sdk_shared_resource_symlink_dirs() {
-        let root = make_temp_dir("symlink-assets");
-        let sdk_shared = make_temp_dir("sdk-shared-assets");
+        let root_dir = make_temp_dir("symlink-assets");
+        let root = root_dir.path();
+        let sdk_shared_dir = make_temp_dir("sdk-shared-assets");
+        let sdk_shared = sdk_shared_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         fs::create_dir_all(sdk_shared.join("images")).unwrap();
         fs::write(root.join("resources").join("icon.svg"), svg()).unwrap();
@@ -381,13 +343,10 @@ esac
 
         let output_dir = root.join("target").join("keyos").join("demo-app");
         let resources_dir =
-            stage_hardware_assets_with_tool(&app_config(), &root, &output_dir, &asset_tool_stub()).unwrap();
+            stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
 
         assert!(output_dir.join("icon.bin").exists());
         assert!(!resources_dir.join("images").join("sample.raw").exists());
-
-        cleanup(&root);
-        cleanup(&sdk_shared);
     }
 
     #[test]
@@ -420,15 +379,6 @@ esac
     fn svg() -> &'static str {
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>"##
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-assets-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 
     #[cfg(unix)]
     fn create_dir_symlink(source: &Path, target: &Path) -> std::io::Result<()> {

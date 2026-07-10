@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+if [ "$1" = "--target" ] && [ "$2" = "armv7a-unknown-xous-elf" ] && [ "$3" = "--print" ] && [ "$4" = "cfg" ]; then echo 'target_arch="arm"'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'rustc 1.0.0-fake'; exit 0; fi
+exit 0

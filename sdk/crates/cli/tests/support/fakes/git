@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+if [ "$1" = "--version" ]; then echo 'git version 2.0.0-fake'; exit 0; fi
+if [ "$1" = "init" ]; then exit 0; fi
+exit 0

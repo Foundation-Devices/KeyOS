@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+dir="${FOUNDATION_FAKE_LOG_DIR:-.}"
+printf '%s\n' "$PWD" > "$dir/simulator.log"
+printf '%s\n' "${FOUNDATION_SIMULATOR_SCREENSHOTS_DIR:-}" > "$dir/simulator-screenshots-dir.log"
+printf '%s\n' "${FOUNDATION_SIMULATOR_APP_ELF_ROOT:-}" > "$dir/simulator-app-elf-root.log"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$dir/simulator-stdin.log"
+  case "$line" in
+    ping) printf 'ok ping proto=1 caps=run\n' ;;
+    run\ *) printf 'ok run launched pid=42\n'; exit 0 ;;
+  esac
+done

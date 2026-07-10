@@ -1046,8 +1046,7 @@ fi
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
 
     use super::{
         common_archive_name, detached_signature_command, deterministic_archive_command,
@@ -1266,7 +1265,7 @@ mod tests {
 
     #[test]
     fn discover_packaged_targets_uses_config_order() {
-        let temp_dir = temp_dir("discover-packaged-targets");
+        let (_temp_guard, temp_dir) = temp_dir();
         fs::write(temp_dir.join(common_archive_name("1.2.3")), "common").unwrap();
         fs::write(temp_dir.join(target_archive_name("1.2.3", "x86_64-unknown-linux-gnu")), "linux").unwrap();
         fs::write(temp_dir.join(target_archive_name("1.2.3", "aarch64-apple-darwin")), "mac").unwrap();
@@ -1287,13 +1286,11 @@ mod tests {
             discovered,
             vec!["aarch64-apple-darwin".to_string(), "x86_64-unknown-linux-gnu".to_string()]
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]
     fn finalize_requires_signing_key() {
-        let root = temp_dir("finalize-release-requires-signing-key");
+        let (_root_guard, root) = temp_dir();
         let output_dir = root.join("dist");
         fs::create_dir_all(&output_dir).unwrap();
         fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
@@ -1315,13 +1312,11 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("finalize requires --sign-key or FOUNDATION_SIGN_KEY"));
-
-        cleanup(&root);
     }
 
     #[test]
     fn finalize_release_regenerates_install_script_and_checksums_from_existing_archives() {
-        let root = temp_dir("finalize-release");
+        let (_root_guard, root) = temp_dir();
         let output_dir = root.join("dist");
         fs::create_dir_all(&output_dir).unwrap();
         fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
@@ -1373,13 +1368,11 @@ mod tests {
             )
         );
         assert!(upload_script.contains("gcloud storage cp \"$SCRIPT_DIR/install.sh\" \"$BUCKET\""));
-
-        cleanup(&root);
     }
 
     #[test]
     fn finalize_release_requires_all_configured_target_archives() {
-        let root = temp_dir("finalize-release-missing-target");
+        let (_root_guard, root) = temp_dir();
         let output_dir = root.join("dist");
         fs::create_dir_all(&output_dir).unwrap();
         fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
@@ -1401,16 +1394,11 @@ mod tests {
         let error = finalize_release(&output_dir, &config, "1.2.3", None, false).unwrap_err();
         assert!(error.to_string().contains("missing packaged target archives for version 1.2.3"));
         assert!(error.to_string().contains("x86_64-apple-darwin"));
-
-        cleanup(&root);
     }
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-package-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
+    fn temp_dir() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        (dir, path)
     }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

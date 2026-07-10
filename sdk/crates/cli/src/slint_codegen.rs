@@ -14,10 +14,18 @@ const COMPILE_MANIFEST_FILE: &str = "manifest.toml";
 pub const UI_LIBRARY_PATH_ENV: &str = "FOUNDATION_UI_LIBRARY_PATH";
 
 pub fn prepare_project_for_build(project_root: &Path, sdk: &SdkRoot) -> Result<()> {
+    prepare_project_for_build_with_theme_dir(project_root, sdk, None)
+}
+
+fn prepare_project_for_build_with_theme_dir(
+    project_root: &Path,
+    sdk: &SdkRoot,
+    themes_dir: Option<&Path>,
+) -> Result<()> {
     ensure_project_sdk_mapping(project_root, sdk)?;
     ensure_compile_manifest(project_root)?;
     ensure_project_ui_mapping(project_root, sdk)?;
-    maybe_generate_slint_artifacts(project_root, Some(sdk), CodegenMode::MissingOnly)
+    maybe_generate_slint_artifacts(project_root, Some(sdk), CodegenMode::MissingOnly, themes_dir)
 }
 
 pub fn prepare_slint_file_for_view(slint_file: &Path, sdk: Option<&SdkRoot>) -> Result<()> {
@@ -47,7 +55,7 @@ fn prepare_project_for_view(project_root: &Path, sdk: Option<&SdkRoot>) -> Resul
 
     // Viewer workflows do not have a later cargo build step to refresh routed or localized
     // `ui/gen/*` files, so always try the app's existing build.rs codegen first.
-    maybe_generate_slint_artifacts(&project_root, sdk, CodegenMode::AlwaysCheck)
+    maybe_generate_slint_artifacts(&project_root, sdk, CodegenMode::AlwaysCheck, None)
 }
 
 fn ensure_compile_manifest(project_root: &Path) -> Result<()> {
@@ -79,6 +87,7 @@ fn maybe_generate_slint_artifacts(
     project_root: &Path,
     sdk: Option<&SdkRoot>,
     mode: CodegenMode,
+    themes_dir: Option<&Path>,
 ) -> Result<()> {
     let build_rs = project_root.join("build.rs");
     if !build_rs.exists() {
@@ -101,7 +110,7 @@ fn maybe_generate_slint_artifacts(
     }
 
     let package_name = read_package_name(&project_root.join("Cargo.toml"))?;
-    let themes_rust_dir = theme_rust_dir_for_codegen(project_root, sdk)?;
+    let themes_rust_dir = theme_rust_dir_for_codegen(project_root, sdk, themes_dir)?;
 
     let local = run_codegen_check(project_root, &package_name, themes_rust_dir.as_deref())
         .with_context(|| format!("Failed to run cargo check for {}", project_root.display()))?;
@@ -236,7 +245,11 @@ fn read_package_name(cargo_toml: &Path) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Missing package.name in {}", cargo_toml.display()))
 }
 
-fn theme_rust_dir_for_codegen(project_root: &Path, sdk: Option<&SdkRoot>) -> Result<Option<PathBuf>> {
+fn theme_rust_dir_for_codegen(
+    project_root: &Path,
+    sdk: Option<&SdkRoot>,
+    themes_dir: Option<&Path>,
+) -> Result<Option<PathBuf>> {
     let Some(sdk) = sdk else {
         return Ok(None);
     };
@@ -246,7 +259,13 @@ fn theme_rust_dir_for_codegen(project_root: &Path, sdk: Option<&SdkRoot>) -> Res
     }
     let config =
         AppConfig::load(&config_path).with_context(|| format!("Failed to read {}", config_path.display()))?;
-    crate::commands::themes::ensure_project_theme(sdk, &config, project_root).map(Some)
+    let rust_dir = match themes_dir {
+        Some(themes_dir) => {
+            crate::commands::themes::ensure_project_theme_in(sdk, &config, project_root, themes_dir)?
+        }
+        None => crate::commands::themes::ensure_project_theme(sdk, &config, project_root)?,
+    };
+    Ok(Some(rust_dir))
 }
 
 fn run_codegen_check(
@@ -454,21 +473,22 @@ enum CodegenMode {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::SdkRoot;
     use toml::Value;
 
     use super::{
         ensure_project_ui_mapping, generated_slint_files_exist, parse_build_options,
-        prepare_project_for_build, prepare_slint_file_for_view, prepare_slint_file_for_view_from,
-        project_sdk_ui_root,
+        prepare_project_for_build_with_theme_dir, prepare_slint_file_for_view,
+        prepare_slint_file_for_view_from, project_sdk_ui_root,
     };
     use crate::sdk_mapping::project_sdk_keyos_root_path;
+    use crate::test_support::{link_fake_bin, make_temp_dir};
 
     #[test]
     fn parses_preview_build_options_from_build_rs() {
-        let root = make_temp_dir("build-rs-parse");
+        let root_dir = make_temp_dir("build-rs-parse");
+        let root = root_dir.path();
         let build_rs = root.join("build.rs");
         fs::write(
             &build_rs,
@@ -490,21 +510,20 @@ mod tests {
         assert_eq!(options.module_path, "ui/custom-app.slint");
         assert!(options.include_router);
         assert!(options.include_translations);
-
-        cleanup(&root);
     }
 
     #[test]
     fn creates_project_ui_mapping_from_sdk_ui_snapshot() {
-        let sdk_root = make_sdk_root("fresh-project");
+        let (_sdk_dir, sdk_root) = make_sdk_root("fresh-project");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_temp_dir("project");
+        let project_root_dir = make_temp_dir("project");
+        let project_root = project_root_dir.path();
 
-        ensure_project_ui_mapping(&project_root, &sdk).unwrap();
+        ensure_project_ui_mapping(project_root, &sdk).unwrap();
 
         let project_ui = project_root.join("ui").join("ui");
         assert!(project_ui.exists());
-        assert!(project_sdk_ui_root(&project_root).exists());
+        assert!(project_sdk_ui_root(project_root).exists());
         assert_eq!(fs::read_to_string(project_ui.join("theme.slint")).unwrap(), "theme\n");
         assert_eq!(fs::read_to_string(project_ui.join("button.slint")).unwrap(), "button\n");
         assert_eq!(
@@ -520,16 +539,14 @@ mod tests {
             "<svg>loader</svg>\n"
         );
         assert!(!project_root.join("resources").join("icons").exists());
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
     #[test]
     fn refreshes_existing_project_ui_directory() {
-        let sdk_root = make_sdk_root("existing-project");
+        let (_sdk_dir, sdk_root) = make_sdk_root("existing-project");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_temp_dir("project-existing");
+        let project_root_dir = make_temp_dir("project-existing");
+        let project_root = project_root_dir.path();
         let project_ui = project_root.join("ui").join("ui");
         let project_ui_resources = project_root.join("resources");
 
@@ -539,7 +556,7 @@ mod tests {
         fs::write(project_ui.join("button.slint"), "old-button\n").unwrap();
         fs::write(project_ui_resources.join("icons").join("loader.svg"), "app-loader\n").unwrap();
 
-        ensure_project_ui_mapping(&project_root, &sdk).unwrap();
+        ensure_project_ui_mapping(project_root, &sdk).unwrap();
 
         assert_eq!(fs::read_to_string(project_ui.join("theme.slint")).unwrap(), "theme\n");
         assert_eq!(fs::read_to_string(project_ui.join("button.slint")).unwrap(), "button\n");
@@ -559,20 +576,17 @@ mod tests {
             .unwrap(),
             "app-loader\n"
         );
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
-    fn make_sdk_root(label: &str) -> PathBuf {
-        let repo_root = make_temp_dir(label);
+    fn make_sdk_root(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let repo_root = dir.path();
         fs::write(repo_root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         let root = repo_root.join("sdk");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("flake.nix"), "{}").unwrap();
         fs::write(root.join("sdk-build.toml"), "").unwrap();
-        fs::create_dir_all(root.join("bin")).unwrap();
-        write_fake_theme_compiler(&root.join("bin").join("foundation-theme-compiler"));
+        link_fake_bin(&root.join("bin"));
         fs::create_dir_all(repo_root.join("ui2").join("components").join("ui")).unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("resources").join("icons")).unwrap();
         fs::write(repo_root.join("ui2").join("components").join("ui").join("theme.slint"), "theme\n")
@@ -584,32 +598,13 @@ mod tests {
             "<svg>loader</svg>\n",
         )
         .unwrap();
-        root
-    }
-
-    #[cfg(unix)]
-    fn write_fake_theme_compiler(path: &Path) {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::write(path, "#!/usr/bin/env sh\nexit 0\n").unwrap();
-        let mut permissions = fs::metadata(path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions).unwrap();
-    }
-
-    #[cfg(not(unix))]
-    fn write_fake_theme_compiler(path: &Path) { fs::write(path, "").unwrap(); }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-slint-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
+        (dir, root)
     }
 
     #[test]
     fn detects_when_generated_router_files_exist() {
-        let project_root = make_temp_dir("gen-detect");
+        let project_root_dir = make_temp_dir("gen-detect");
+        let project_root = project_root_dir.path();
         let gen_dir = project_root.join("ui").join("gen");
         fs::create_dir_all(&gen_dir).unwrap();
         fs::write(gen_dir.join("router.slint"), "").unwrap();
@@ -622,17 +617,17 @@ mod tests {
             include_translations: false,
         };
 
-        assert!(generated_slint_files_exist(&project_root, &options));
-        cleanup(&project_root);
+        assert!(generated_slint_files_exist(project_root, &options));
     }
 
     #[test]
     fn prepare_project_for_build_materializes_ui_mapping_and_generated_files() {
-        let sdk_root = make_sdk_root("build-project");
+        let (_sdk_dir, sdk_root) = make_sdk_root("build-project");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_codegen_project("build-project");
+        let (_proj_dir, project_root) = make_codegen_project("build-project");
 
-        prepare_project_for_build(&project_root, &sdk).unwrap();
+        let themes_dir = project_root.join("themes-cache");
+        prepare_project_for_build_with_theme_dir(&project_root, &sdk, Some(&themes_dir)).unwrap();
 
         let project_ui = project_root.join("ui").join("ui");
         assert!(project_ui.exists());
@@ -656,14 +651,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["RegisterAppMessage", "RequestRedraw"]
         );
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
     #[test]
     fn prepare_slint_file_for_view_refreshes_existing_generated_files() {
-        let project_root = make_codegen_project("view-project");
+        let (_proj_dir, project_root) = make_codegen_project("view-project");
         let slint_file = project_root.join("ui").join("app.slint");
         let gen_dir = project_root.join("ui").join("gen");
 
@@ -675,25 +667,22 @@ mod tests {
         prepare_slint_file_for_view(&slint_file, None).unwrap();
         assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v2\n");
         assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v2\n");
-
-        cleanup(&project_root);
     }
 
     #[test]
     fn prepare_slint_file_for_view_supports_relative_paths_from_project_root() {
-        let project_root = make_codegen_project("relative-view-project");
+        let (_proj_dir, project_root) = make_codegen_project("relative-view-project");
 
         prepare_slint_file_for_view_from(Path::new("ui/app.slint"), None, Some(&project_root)).unwrap();
 
         let gen_dir = project_root.join("ui").join("gen");
         assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v1\n");
         assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v1\n");
-
-        cleanup(&project_root);
     }
 
-    fn make_codegen_project(label: &str) -> PathBuf {
-        let root = make_temp_dir(label);
+    fn make_codegen_project(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let root = dir.path().to_path_buf();
         fs::create_dir_all(root.join("src")).unwrap();
         fs::create_dir_all(root.join("ui")).unwrap();
 
@@ -773,8 +762,6 @@ mod tests {
         )
         .unwrap();
 
-        root
+        (dir, root)
     }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

@@ -365,8 +365,6 @@ fn validate(config: &Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{load, selected_targets, workspace_root, CopyBundle, CopyFilter};
 
@@ -461,8 +459,8 @@ mod tests {
 
     #[test]
     fn load_parses_copy_bundle_and_filter() {
-        let temp_dir = make_temp_dir("config-copy-bundle-filter");
-        let config_path = temp_dir.join("sdk-build.toml");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("sdk-build.toml");
         fs::write(
             &config_path,
             r#"
@@ -500,14 +498,12 @@ mod tests {
         assert_eq!(config.copy.len(), 1);
         assert_eq!(config.copy[0].bundle, CopyBundle::Common);
         assert_eq!(config.copy[0].filter, CopyFilter::CargoPackage);
-
-        cleanup(&temp_dir);
     }
 
     #[test]
     fn load_rejects_missing_compile_binary() {
-        let temp_dir = make_temp_dir("config-missing-binary");
-        let config_path = temp_dir.join("sdk-build.toml");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("sdk-build.toml");
         fs::write(
             &config_path,
             r#"
@@ -543,14 +539,12 @@ mod tests {
             msg.contains("binary") || msg.contains("missing field"),
             "expected error about missing 'binary' field, got: {msg}"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]
     fn load_rejects_unknown_field() {
-        let temp_dir = make_temp_dir("config-unknown-field");
-        let config_path = temp_dir.join("sdk-build.toml");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("sdk-build.toml");
         fs::write(
             &config_path,
             r#"
@@ -582,16 +576,5 @@ mod tests {
             error.contains("unknown field") || error.contains("mystery_field"),
             "expected unknown-field error, got: {error}"
         );
-
-        cleanup(&temp_dir);
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-config-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

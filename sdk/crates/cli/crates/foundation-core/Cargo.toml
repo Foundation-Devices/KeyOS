@@ -18,3 +18,6 @@ semver = { workspace = true }
 dirs = { workspace = true }
 imagesize = "0.13"
 usvg = { version = "0.45.1", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

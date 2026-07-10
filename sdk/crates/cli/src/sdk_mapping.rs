@@ -154,47 +154,44 @@ fn create_dir_symlink(_source: &Path, _target: &Path) -> std::io::Result<()> {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::SdkRoot;
 
     use super::{ensure_project_sdk_mapping, project_sdk_keyos_root_path};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn bundle_mapping_targets_installed_current_link_when_available() {
-        let install_root = make_temp_dir("installed-sdk");
+        let install_root_dir = make_temp_dir("installed-sdk");
+        let install_root = install_root_dir.path();
         let bundle_root = install_root.join("foundation-sdk-1.0.0-x86_64-unknown-linux-gnu");
         make_bundle_root(&bundle_root);
         let current = install_root.join("current");
         create_dir_symlink(&bundle_root, &current).unwrap();
 
         let sdk = SdkRoot::from_root(current.clone()).unwrap();
-        let project_root = make_temp_dir("project");
+        let project_root_dir = make_temp_dir("project");
+        let project_root = project_root_dir.path();
 
-        ensure_project_sdk_mapping(&project_root, &sdk).unwrap();
+        ensure_project_sdk_mapping(project_root, &sdk).unwrap();
 
         let project_current = project_root.join(".foundation-sdk").join("current");
         assert_eq!(fs::read_link(&project_current).unwrap(), current);
         assert!(project_root.join(project_sdk_keyos_root_path()).exists());
-
-        cleanup(&project_root);
-        cleanup(&install_root);
     }
 
     #[test]
     fn repo_mapping_builds_bundle_shaped_facade() {
-        let sdk_root = make_repo_root("repo-sdk");
+        let (_repo_dir, sdk_root) = make_repo_root("repo-sdk");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root = make_temp_dir("project");
+        let project_root_dir = make_temp_dir("project");
+        let project_root = project_root_dir.path();
 
-        ensure_project_sdk_mapping(&project_root, &sdk).unwrap();
+        ensure_project_sdk_mapping(project_root, &sdk).unwrap();
 
         assert!(project_root.join(project_sdk_keyos_root_path()).exists());
         assert!(project_root.join(".foundation-sdk").join("current").join("ui").join("ui").exists());
         assert!(project_root.join(".foundation-sdk").join("current").join("resources").exists());
-
-        cleanup(&project_root);
-        cleanup(sdk_root.parent().unwrap());
     }
 
     fn make_bundle_root(root: &Path) {
@@ -206,8 +203,9 @@ mod tests {
         fs::create_dir_all(root.join("resources")).unwrap();
     }
 
-    fn make_repo_root(label: &str) -> PathBuf {
-        let repo_root = make_temp_dir(label);
+    fn make_repo_root(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let repo_root = dir.path();
         fs::write(repo_root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         let root = repo_root.join("sdk");
         fs::create_dir_all(&root).unwrap();
@@ -215,17 +213,8 @@ mod tests {
         fs::write(root.join("sdk-build.toml"), "").unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("components").join("ui")).unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("resources")).unwrap();
-        root
+        (dir, root)
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-sdk-map-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 
     #[cfg(unix)]
     fn create_dir_symlink(source: &Path, target: &Path) -> std::io::Result<()> {

@@ -409,6 +409,7 @@ mod tests {
     use serde_json::json;
 
     use crate::cargo_support::{filter_cargo_stderr, rendered_compiler_message};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn suppresses_sdk_dependency_warnings() {
@@ -484,15 +485,12 @@ warning: `i-slint-core` (lib) generated 1 warning
 
     #[test]
     fn cosign2_header_guard_rejects_unsigned_artifact() {
-        let artifact = std::env::temp_dir().join(format!(
-            "foundation-unsigned-app-{}.elf",
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
+        let artifact_dir = make_temp_dir("unsigned-app");
+        let artifact = artifact_dir.path().join("app.elf");
         std::fs::write(&artifact, b"unsigned app").unwrap();
 
         let error = super::ensure_cosign2_header(&artifact).unwrap_err().to_string();
 
         assert!(error.contains("too small to contain a cosign2 header"));
-        let _ = std::fs::remove_file(artifact);
     }
 }

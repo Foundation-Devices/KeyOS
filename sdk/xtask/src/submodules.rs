@@ -226,14 +226,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{check_all, resolve};
     use crate::config::{Config, SubmoduleConfig};
 
     #[test]
     fn check_all_accepts_override_without_gitmodules() {
-        let root = temp_dir("override-without-gitmodules");
+        let (_root_guard, root) = temp_dir();
         let override_dir = root.join("vendor").join("slint");
         fs::create_dir_all(&override_dir).unwrap();
 
@@ -252,12 +251,11 @@ mod tests {
         overrides.insert("slint".to_string(), override_dir.clone());
 
         assert!(check_all(&root, &config, &overrides).is_ok());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn check_all_reports_missing_source_when_unresolved() {
-        let root = temp_dir("missing-submodule-source");
+        let (_root_guard, root) = temp_dir();
 
         let mut config = Config::default();
         config.submodules.insert(
@@ -272,13 +270,12 @@ mod tests {
 
         let error = check_all(&root, &config, &BTreeMap::new()).unwrap_err();
         assert!(error.to_string().contains("set SLINT_DIR or run nix develop"));
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn keyos_override_resolves_parent_relative_sources() {
-        let root = temp_dir("keyos-override-sdk-root");
-        let keyos_root = temp_dir("keyos-override-source-root");
+        let (_root_guard, root) = temp_dir();
+        let (_keyos_guard, keyos_root) = temp_dir();
 
         let mut overrides = BTreeMap::new();
         overrides.insert("keyos".to_string(), keyos_root.clone());
@@ -288,15 +285,11 @@ mod tests {
         assert_eq!(resolver.keyos_root(), keyos_root.as_path());
         assert_eq!(resolver.resolve_source(&root, "../api/settings"), keyos_root.join("api/settings"));
         assert_eq!(resolver.resolve_source(&root, "crates/cli"), root.join("crates/cli"));
-
-        fs::remove_dir_all(root).unwrap();
-        fs::remove_dir_all(keyos_root).unwrap();
     }
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-submodule-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
+    fn temp_dir() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        (dir, path)
     }
 }

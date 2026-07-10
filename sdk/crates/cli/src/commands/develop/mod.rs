@@ -10,10 +10,10 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use foundation_core::SdkRoot;
+use tempfile::TempDir;
 
 /// SDK version embedded in the CLI
 const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -94,16 +94,20 @@ pub fn execute() -> Result<()> {
 }
 
 struct MinimalFlakeDir {
-    path: PathBuf,
+    dir: TempDir,
 }
 
 impl MinimalFlakeDir {
     fn create(sdk_root: &Path) -> Result<Self> {
+        // nix resolves the flake path through symlinks, so root the temp dir at a
+        // canonicalized base (e.g. macOS /tmp -> /private/tmp) or nix rejects it.
         let temp_root = env::temp_dir().canonicalize().unwrap_or_else(|_| env::temp_dir());
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let path = temp_root.join(format!("foundation-sdk-user-flake-{}-{nonce}", std::process::id()));
+        let dir = tempfile::Builder::new()
+            .prefix("foundation-sdk-user-flake-")
+            .tempdir_in(temp_root)
+            .context("Failed to create temporary Foundation SDK flake directory")?;
+        let path = dir.path();
 
-        fs::create_dir_all(&path)?;
         let flake_source = sdk_root.join(SDK_USER_FLAKE_SOURCE);
         let (flake_source, lock_path) = if flake_source.exists() {
             (flake_source, sdk_root.join(SDK_USER_FLAKE_LOCK_SOURCE))
@@ -120,14 +124,10 @@ impl MinimalFlakeDir {
                 .context("Failed to copy Foundation SDK flake.lock into temporary flake source")?;
         }
 
-        Ok(Self { path })
+        Ok(Self { dir })
     }
 
-    fn path(&self) -> &Path { &self.path }
-}
-
-impl Drop for MinimalFlakeDir {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.path); }
+    fn path(&self) -> &Path { self.dir.path() }
 }
 
 /// Check if Nix is installed
@@ -295,11 +295,11 @@ fn find_shell_in_path(shell_name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{shell_from_env_value, MinimalFlakeDir, SupportedShell};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn ignores_unsupported_shell_env_values() {
@@ -341,28 +341,18 @@ mod tests {
 
     #[test]
     fn minimal_flake_prefers_standalone_user_flake() {
-        let sdk_root = temp_dir("sdk-root");
+        let sdk_root_dir = make_temp_dir("sdk-root");
+        let sdk_root = sdk_root_dir.path();
         fs::create_dir_all(sdk_root.join("nix")).unwrap();
         fs::write(sdk_root.join("flake.nix"), "maintainer flake").unwrap();
         fs::write(sdk_root.join("flake.lock"), "maintainer lock").unwrap();
         fs::write(sdk_root.join("nix").join("sdk-user-flake.nix"), "user flake").unwrap();
         fs::write(sdk_root.join("nix").join("sdk-user-flake.lock"), "user lock").unwrap();
 
-        let temp_flake = MinimalFlakeDir::create(&sdk_root).unwrap();
+        let temp_flake = MinimalFlakeDir::create(sdk_root).unwrap();
 
         assert_eq!(fs::read_to_string(temp_flake.path().join("flake.nix")).unwrap(), "user flake");
         assert_eq!(fs::read_to_string(temp_flake.path().join("flake.lock")).unwrap(), "user lock");
         assert!(!temp_flake.path().join("nix").exists());
-
-        cleanup(&sdk_root);
     }
-
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-develop-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

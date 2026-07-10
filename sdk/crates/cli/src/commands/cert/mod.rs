@@ -5,9 +5,8 @@
 
 use std::fs;
 use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use foundation_core::{
@@ -483,14 +482,16 @@ fn generate_certificate(
     certificate_path: &Path,
     identity: &CertificateIdentity,
 ) -> Result<()> {
-    let config_path = make_temp_config_path();
     let config_contents = openssl_config(identity);
-    fs::write(&config_path, config_contents)
-        .with_context(|| format!("Failed to write key file: {}", config_path.display()))?;
-
-    // Guard ensures the temp config (which contains identity info) is removed
-    // even if openssl fails or this function returns early.
-    let _guard = TempFileGuard::new(&config_path);
+    // The config carries publisher identity info, so it must not outlive this
+    // call; NamedTempFile removes it on drop even if openssl fails or we return early.
+    let mut config_file = tempfile::Builder::new()
+        .suffix(".cnf")
+        .tempfile()
+        .context("Failed to create temporary openssl config")?;
+    config_file
+        .write_all(config_contents.as_bytes())
+        .with_context(|| format!("Failed to write openssl config: {}", config_file.path().display()))?;
 
     let output = Command::new("openssl")
         .args([
@@ -505,7 +506,7 @@ fn generate_certificate(
             CERT_VALIDITY_DAYS,
             "-sha256",
             "-config",
-            &config_path.display().to_string(),
+            &config_file.path().display().to_string(),
         ])
         .output()
         .context("Failed to generate X.509 certificate")?;
@@ -516,26 +517,6 @@ fn generate_certificate(
     }
 
     Ok(())
-}
-
-/// RAII helper: removes a file when dropped, warning if cleanup fails so the
-/// stale file doesn't disappear silently from the user's view.
-struct TempFileGuard {
-    path: PathBuf,
-}
-
-impl TempFileGuard {
-    fn new(path: &Path) -> Self { Self { path: path.to_path_buf() } }
-}
-
-impl Drop for TempFileGuard {
-    fn drop(&mut self) {
-        if self.path.exists() {
-            if let Err(e) = fs::remove_file(&self.path) {
-                eprintln!("warning: failed to remove temporary file {}: {e}", self.path.display());
-            }
-        }
-    }
 }
 
 fn openssl_config(identity: &CertificateIdentity) -> String {
@@ -568,11 +549,6 @@ URI.1 = {support_url}\n"
 
 fn escape_openssl_value(value: &str) -> String { value.replace('\\', "\\\\").replace('\n', " ") }
 
-fn make_temp_config_path() -> PathBuf {
-    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    std::env::temp_dir().join(format!("foundation-cert-gen-{unique}.cnf"))
-}
-
 #[derive(Serialize)]
 struct Cosign2Config {
     pubkey: String,
@@ -600,16 +576,16 @@ fn create_cosign2_config(config_path: &Path, private_key_path: &Path, public_key
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::make_temp_dir;
+
     #[cfg(unix)]
     #[test]
     fn overwriting_private_key_repairs_existing_permissions() {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-cert-perms-{unique}"));
-        fs::create_dir_all(&root).unwrap();
+        let root_dir = make_temp_dir("cert-perms");
+        let root = root_dir.path();
         let key_path = root.join("private.pem");
 
         fs::write(&key_path, b"old key").unwrap();
@@ -620,18 +596,14 @@ mod tests {
         let mode = fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         assert_eq!(fs::read(&key_path).unwrap(), b"new key");
-
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn cosign2_config_escapes_toml_string_values() {
         use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-cert-config-{unique}"));
-        fs::create_dir_all(&root).unwrap();
+        let root_dir = make_temp_dir("cert-config");
+        let root = root_dir.path();
 
         let config_path = root.join("cosign2.toml");
         let private_key_path = root.join(r#"identity "demo"\private.pem"#);
@@ -644,17 +616,14 @@ mod tests {
         assert_eq!(parsed["pubkey"].as_str(), Some(public_key_hex));
         assert_eq!(parsed["secret"].as_str(), Some(private_key_path.display().to_string().as_str()));
         assert_eq!(parsed["target"].as_str(), Some("atsama5d27-keyos"));
-
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn existing_certificate_identity_accepts_legacy_certificate_filename() {
         use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-cert-legacy-{unique}"));
+        let root_dir = make_temp_dir("cert-legacy");
+        let root = root_dir.path();
         let identity_root = root.join("demo");
         fs::create_dir_all(&identity_root).unwrap();
 
@@ -664,7 +633,5 @@ mod tests {
 
         let resolved = super::existing_certificate_identity(identity).unwrap();
         assert_eq!(resolved.certificate, legacy_certificate);
-
-        let _ = fs::remove_dir_all(root);
     }
 }

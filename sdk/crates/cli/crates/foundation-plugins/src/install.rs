@@ -445,9 +445,7 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::path::{Path, PathBuf};
     use std::thread;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{current_target, install_binary_atomically, plugin_name_from_repo, PluginInstaller};
 
@@ -459,26 +457,26 @@ mod tests {
 
     #[test]
     fn atomic_binary_install_replaces_existing_file() {
-        let temp_root = make_temp_dir("plugin-atomic-install");
+        let temp_root_dir = tempfile::tempdir().unwrap();
+        let temp_root = temp_root_dir.path();
         let install_path = temp_root.join("foundation-demo");
         fs::write(&install_path, b"old-plugin").unwrap();
 
         install_binary_atomically(&install_path, b"new-plugin").unwrap();
 
         assert_eq!(fs::read(&install_path).unwrap(), b"new-plugin");
-        let leftovers = fs::read_dir(&temp_root)
+        let leftovers = fs::read_dir(temp_root)
             .unwrap()
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
             .collect::<Vec<_>>();
         assert!(leftovers.is_empty());
-
-        cleanup(&temp_root);
     }
 
     #[tokio::test]
     async fn installs_plugin_from_mocked_release_server() {
-        let temp_root = make_temp_dir("plugin-install");
+        let temp_root_dir = tempfile::tempdir().unwrap();
+        let temp_root = temp_root_dir.path();
         let bin_dir = temp_root.join("plugins");
         let cache_path = temp_root.join("plugin-cache.json");
 
@@ -505,13 +503,12 @@ mod tests {
         assert_eq!(installed.name, "demo");
         assert_eq!(installed.path, bin_dir.join(format!("foundation-demo{}", std::env::consts::EXE_SUFFIX)));
         assert_eq!(fs::read(&installed.path).unwrap(), b"plugin-binary");
-
-        cleanup(&temp_root);
     }
 
     #[tokio::test]
     async fn rejects_failed_plugin_asset_download_before_installing() {
-        let temp_root = make_temp_dir("plugin-install-failed-download");
+        let temp_root_dir = tempfile::tempdir().unwrap();
+        let temp_root = temp_root_dir.path();
         let bin_dir = temp_root.join("plugins");
         let cache_path = temp_root.join("plugin-cache.json");
 
@@ -541,8 +538,6 @@ mod tests {
             .join(format!("foundation-demo{}", std::env::consts::EXE_SUFFIX))
             .exists());
         assert!(crate::cache::PluginCache::load_from(&cache_path).commands.get("demo").is_none());
-
-        cleanup(&temp_root);
     }
 
     struct MockReleaseServer {
@@ -613,13 +608,4 @@ mod tests {
             }
         }
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-plugin-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

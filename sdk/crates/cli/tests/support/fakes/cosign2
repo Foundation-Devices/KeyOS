@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+elf=""
+version="0.0.0"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -i) elf="$2"; shift 2 ;;
+    --binary-version) version="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -z "$elf" ]; then
+  exit 0
+fi
+header="$(mktemp)"
+dd if=/dev/zero of="$header" bs=2048 count=1 2>/dev/null
+printf 'PRM1' | dd of="$header" bs=1 seek=0 conv=notrunc 2>/dev/null
+printf '%s' "$version" | dd of="$header" bs=1 seek=22 conv=notrunc 2>/dev/null
+cat "$elf" >> "$header"
+mv "$header" "$elf"

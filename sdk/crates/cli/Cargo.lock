@@ -492,6 +492,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "toml 0.8.23",
 ]
@@ -505,6 +506,7 @@ dependencies = [
  "imagesize",
  "semver",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
  "usvg",
@@ -547,6 +549,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.23",

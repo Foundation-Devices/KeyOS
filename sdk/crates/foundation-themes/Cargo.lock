@@ -1323,6 +1323,7 @@ dependencies = [
  "components",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

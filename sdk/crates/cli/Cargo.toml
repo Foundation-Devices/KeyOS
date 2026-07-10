@@ -89,6 +89,7 @@ cosign2 = { path = "../../../imports/cosign2/cosign2" }
 hex = "0.4"
 sha2 = "0.10"
 include_dir = "0.7"
+tempfile = "3"
 
 [profile.release]
 strip = true

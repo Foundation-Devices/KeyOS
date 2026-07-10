@@ -594,43 +594,21 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use foundation_core::SdkRoot;
 
     use super::{
         drain_pending_control_events, launch_simulator, parse_control_line, simulator_screenshots_dir,
-        ControlEvent, APP_ELF_ROOT_ENV, SCREENSHOTS_DIR_ENV,
+        ControlEvent,
     };
+    use crate::test_support::{link_fake_bin, make_temp_dir};
 
     #[test]
     fn launches_bundled_simulator_from_bundle_layout() {
-        let sdk_root = make_bundle_sdk_root("bundle-launch");
+        let (_sdk_dir, sdk_root) = make_bundle_sdk_root("bundle-launch");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let staged_dir = sdk_root.join("target").join("apps").join("demo");
         fs::create_dir_all(&staged_dir).unwrap();
-
-        let simulator = sdk_root.join("bin").join("foundation-simulator");
-        fs::write(
-            &simulator,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$PWD\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nprintf '%s\\n' \"${{{}:-}}\" > \"{}\"\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> \"{}\"\n  case \"$line\" in\n    ping)\n      printf 'ok ping proto=1 caps=run\\n'\n      ;;\n    run\\ *)\n      printf 'ok run launched pid=42\\n'\n      exit 0\n      ;;\n  esac\ndone\n",
-                sdk_root.join("simulator.log").display(),
-                SCREENSHOTS_DIR_ENV,
-                sdk_root.join("simulator-screenshots-dir.log").display(),
-                APP_ELF_ROOT_ENV,
-                sdk_root.join("simulator-app-elf-root.log").display(),
-                sdk_root.join("simulator-stdin.log").display()
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&simulator).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&simulator, perms).unwrap();
-        }
 
         let app_elf_root = sdk_root.join("elf-root");
         launch_simulator(
@@ -656,43 +634,18 @@ mod tests {
             app_elf_root
         );
         assert!(fs::read_to_string(sdk_root.join("simulator-stdin.log")).unwrap().contains("run 0x00112233"));
-
-        cleanup(&sdk_root);
     }
 
     #[test]
     fn falls_back_to_just_sim_for_repo_layout() {
-        let sdk_root = make_repo_sdk_root("repo-launch");
+        let (_repo_dir, sdk_root) = make_repo_sdk_root("repo-launch");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let staged_dir = sdk_root.join("staged-app");
-        let fake_bin = sdk_root.join("fake-bin");
         fs::create_dir_all(&staged_dir).unwrap();
-        fs::create_dir_all(&fake_bin).unwrap();
-
-        let just = fake_bin.join("just");
-        fs::write(
-            &just,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"sim\" ]; then printf '%s\\n' \"$PWD\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; printf '%s\\n' \"${{{}:-}}\" > \"{}\"; while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"{}\"; case \"$line\" in ping) printf 'ok ping proto=1 caps=run\\n' ;; run\\ *) printf 'ok run launched pid=7\\n'; exit 0 ;; esac; done; fi\nexit 1\n",
-                sdk_root.join("just-sim.log").display(),
-                SCREENSHOTS_DIR_ENV,
-                sdk_root.join("just-sim-screenshots-dir.log").display(),
-                APP_ELF_ROOT_ENV,
-                sdk_root.join("just-sim-app-elf-root.log").display(),
-                sdk_root.join("just-sim-stdin.log").display()
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&just).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&just, perms).unwrap();
-        }
 
         let app_elf_root = sdk_root.join("elf-root");
-        let find_tool = |command: &str| (command == "just").then(|| just.clone());
+        let find_tool =
+            |command: &str| (command == "just").then(|| Path::new(env!("FOUNDATION_FAKE_BIN")).join("just"));
         launch_simulator(
             &sdk,
             &staged_dir,
@@ -704,17 +657,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            fs::canonicalize(fs::read_to_string(sdk_root.join("just-sim.log")).unwrap().trim()).unwrap(),
+            fs::canonicalize(fs::read_to_string(sdk.keyos_root().join("just-sim.log")).unwrap().trim())
+                .unwrap(),
             fs::canonicalize(sdk.keyos_root()).unwrap()
         );
-        assert!(fs::read_to_string(sdk_root.join("just-sim-screenshots-dir.log")).unwrap().trim().is_empty());
+        assert!(fs::read_to_string(sdk.keyos_root().join("just-sim-screenshots-dir.log"))
+            .unwrap()
+            .trim()
+            .is_empty());
         assert_eq!(
-            PathBuf::from(fs::read_to_string(sdk_root.join("just-sim-app-elf-root.log")).unwrap().trim()),
+            PathBuf::from(
+                fs::read_to_string(sdk.keyos_root().join("just-sim-app-elf-root.log")).unwrap().trim()
+            ),
             app_elf_root
         );
-        assert!(fs::read_to_string(sdk_root.join("just-sim-stdin.log")).unwrap().contains("run 0xaabbccdd"));
-
-        cleanup(sdk_root.parent().unwrap());
+        assert!(fs::read_to_string(sdk.keyos_root().join("just-sim-stdin.log"))
+            .unwrap()
+            .contains("run 0xaabbccdd"));
     }
 
     #[test]
@@ -747,52 +706,41 @@ mod tests {
 
     #[test]
     fn uses_app_local_screenshots_for_bundle_layout() {
-        let sdk_root = make_bundle_sdk_root("bundle-screenshots");
+        let (_sdk_dir, sdk_root) = make_bundle_sdk_root("bundle-screenshots");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let project_root = sdk_root.join("demo-app");
 
         assert_eq!(simulator_screenshots_dir(&sdk, &project_root), Some(project_root.join("screenshots")));
-
-        cleanup(&sdk_root);
     }
 
     #[test]
     fn keeps_existing_screenshots_location_for_repo_layout() {
-        let sdk_root = make_repo_sdk_root("repo-screenshots");
+        let (_repo_dir, sdk_root) = make_repo_sdk_root("repo-screenshots");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
 
         assert_eq!(simulator_screenshots_dir(&sdk, &sdk_root.join("demo-app")), None);
-
-        cleanup(sdk_root.parent().unwrap());
     }
 
-    fn make_bundle_sdk_root(label: &str) -> PathBuf {
-        let root = make_temp_dir(label);
+    fn make_bundle_sdk_root(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let root = dir.path().to_path_buf();
         fs::write(root.join("flake.nix"), "{}").unwrap();
-        fs::create_dir_all(root.join("bin")).unwrap();
+        link_fake_bin(&root.join("bin"));
         fs::create_dir_all(root.join("lib").join("keyos")).unwrap();
-        root
+        (dir, root)
     }
 
-    fn make_repo_sdk_root(label: &str) -> PathBuf {
-        let repo_root = make_temp_dir(label);
+    fn make_repo_sdk_root(label: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = make_temp_dir(label);
+        let repo_root = dir.path();
         fs::write(repo_root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         let root = repo_root.join("sdk");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("flake.nix"), "{}").unwrap();
         fs::write(root.join("sdk-build.toml"), "").unwrap();
         fs::create_dir_all(root.join("ui").join("ui")).unwrap();
-        root
+        (dir, root)
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-sim-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }
 
 /// Generate manifest.json content

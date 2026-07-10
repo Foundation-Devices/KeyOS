@@ -1008,8 +1008,6 @@ fn looks_like_token_ref(text: &str) -> bool { text.contains('.') && !text.starts
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::{compile_app_theme_json, list_themes_in_dir};
 
     #[test]
@@ -1023,11 +1021,8 @@ mod tests {
 
     #[test]
     fn compile_app_theme_json_resolves_builtin_parent() {
-        let temp_root = std::env::temp_dir().join(format!(
-            "foundation-themes-test-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&temp_root).unwrap();
+        let temp_root_dir = tempfile::tempdir().unwrap();
+        let temp_root = temp_root_dir.path();
 
         let theme_json = temp_root.join("theme.json");
         let output_rs = temp_root.join("app_theme.rs");
@@ -1052,7 +1047,5 @@ mod tests {
         assert!(generated.contains("pub fn app_theme() -> foundation_themes::ExportTheme"));
         assert!(generated.contains("\"font.primary\" = \"Avenir\";"));
         assert!(generated.contains("\"color.primary\" = color("));
-
-        std::fs::remove_dir_all(&temp_root).unwrap();
     }
 }

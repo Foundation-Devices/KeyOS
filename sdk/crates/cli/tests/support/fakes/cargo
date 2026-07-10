@@ -1,0 +1,50 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: MIT
+printf 'cmd=%s RUSTFLAGS=%s\n' "$*" "${RUSTFLAGS:-}" >> "${FOUNDATION_FAKE_LOG_DIR:-.}/cargo.log"
+if [ "$1" = "--version" ]; then
+  echo 'cargo 1.0.0-fake'
+  exit 0
+fi
+cmd="$1"
+shift || true
+pkg=""
+profile="debug"
+target=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --package) pkg="$2"; shift 2 ;;
+    --target) target="$2"; shift 2 ;;
+    --release) profile="release"; shift ;;
+    *) shift ;;
+  esac
+done
+if [ -z "$pkg" ] && [ -f Cargo.toml ]; then
+  pkg=$(sed -n 's/^name = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+fi
+case "$cmd" in
+  check)
+    mkdir -p ui/gen
+    if [ -f build.rs ] && grep -q 'include_router: true' build.rs; then
+      : > ui/gen/router.slint
+      : > ui/gen/navigate.slint
+      : > ui/gen/exports.slint
+    fi
+    if [ -f build.rs ] && grep -q 'include_translations: true' build.rs; then
+      : > ui/gen/tr.slint
+      : > ui/gen/exports.slint
+    fi
+    exit 0
+    ;;
+  build)
+    if [ -n "$target" ]; then
+      out="target/$target/$profile/$pkg"
+    else
+      out="target/$profile/$pkg"
+    fi
+    mkdir -p "$(dirname "$out")"
+    printf 'fake-binary' > "$out"
+    exit 0
+    ;;
+esac
+exit 0

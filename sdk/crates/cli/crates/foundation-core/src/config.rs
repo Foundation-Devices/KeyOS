@@ -490,7 +490,6 @@ pub enum ConfigError {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError, ConfigError,
@@ -526,9 +525,10 @@ mod tests {
 
     #[test]
     fn loads_app_config_and_expands_permission_templates() {
-        let root = make_temp_dir("app-config");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
         fs::write(
             root.join(APP_CONFIG_FILE),
             r#"
@@ -564,9 +564,9 @@ mod tests {
         .unwrap();
 
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
-        config.validate(&root).unwrap();
+        config.validate(root).unwrap();
 
-        let permissions = config.resolved_permissions(&root).unwrap();
+        let permissions = config.resolved_permissions(root).unwrap();
         assert_eq!(permissions["os/gui-server"], vec!["RegisterAppMessage", "RequestRedraw"]);
         assert_eq!(permissions["os/settings"], vec!["GetDeviceName", "GetLocale"]);
         assert_eq!(config.launcher_name(), "Demo");
@@ -575,15 +575,14 @@ mod tests {
         assert_eq!(config.publisher.name_value(), Some("Demo Corp"));
         assert_eq!(config.publisher.contact_email_value(), Some("support@example.com"));
         assert_eq!(config.publisher.support_url_value(), Some("https://example.com/support"));
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_rejects_app_names_with_path_components() {
-        let root = make_temp_dir("invalid-app-name");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
 
         for app_name in ["", ".", "..", "../common", "/tmp/demo", "nested/app", r"nested\app"] {
             let config = test_config(app_name);
@@ -592,15 +591,14 @@ mod tests {
                 "app-name {app_name:?} should be rejected"
             );
         }
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_rejects_app_names_with_unsupported_package_characters() {
-        let root = make_temp_dir("invalid-package-name");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
 
         for app_name in ["demo app", "demo.app", "demo@app"] {
             let config = test_config(app_name);
@@ -609,8 +607,6 @@ mod tests {
                 "app-name {app_name:?} should be rejected"
             );
         }
-
-        cleanup(&root);
     }
 
     #[test]
@@ -633,32 +629,32 @@ mod tests {
 
     #[test]
     fn validate_rejects_friendly_and_launcher_names_with_special_characters() {
-        let root = make_temp_dir("invalid-display-name");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
 
         let mut config = test_config("demo-app");
         config.friendly_app_name = "Demo_App".to_string();
         assert!(matches!(
-            config.validate(&root),
+            config.validate(root),
             Err(ConfigError::InvalidAppName { field: "friendly-app-name", .. })
         ));
 
         let mut config = test_config("demo-app");
         config.launcher_app_name = Some("Demo_App".to_string());
         assert!(matches!(
-            config.validate(&root),
+            config.validate(root),
             Err(ConfigError::InvalidAppName { field: "launcher-app-name", .. })
         ));
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_fails_when_permission_template_is_missing() {
-        let root = make_temp_dir("missing-template");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
         fs::write(
             root.join(APP_CONFIG_FILE),
             r#"
@@ -680,42 +676,39 @@ mod tests {
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         let error = config.validate(&root).unwrap_err();
         assert!(error.to_string().contains("Permission template 'missing' not found"));
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_accepts_96px_svg_icon() {
-        let root = make_temp_dir("valid-icon");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(&root);
+        write_valid_icon(root);
 
         let config = test_config("demo-app");
         let dimensions = config.validate_icon(&root).unwrap();
 
         assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_rejects_svg_icon_with_wrong_size() {
-        let root = make_temp_dir("invalid-icon-size");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
 
         let config = test_config("demo-app");
         assert!(matches!(
-            config.validate_icon(&root),
+            config.validate_icon(root),
             Err(ConfigError::InvalidIconSize { width: 128, height: 96, .. })
         ));
-
-        cleanup(&root);
     }
 
     #[test]
     fn validate_accepts_96px_png_icon_header() {
-        let root = make_temp_dir("valid-png-icon");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         fs::write(root.join("resources").join("icon.svg"), png_header(96, 96)).unwrap();
 
@@ -723,8 +716,6 @@ mod tests {
         let dimensions = validate_icon_file(&root.join(&config.icon)).unwrap();
 
         assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
-
-        cleanup(&root);
     }
 
     fn test_config(app_name: &str) -> AppConfig {
@@ -744,15 +735,6 @@ mod tests {
             cosign2_config: None,
         }
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-app-config-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 
     fn write_valid_icon(root: &Path) {
         fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();

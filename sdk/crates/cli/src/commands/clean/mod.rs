@@ -109,32 +109,31 @@ fn remove_path(path: &Path, label: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{clean_project, find_project_root};
+    use crate::test_support::make_temp_dir;
 
     #[test]
     fn finds_project_root_from_nested_dir_without_parsing_config() {
-        let project_root = make_temp_dir("clean-find-root");
+        let project_root_dir = make_temp_dir("clean-find-root");
+        let project_root = project_root_dir.path();
         // A deliberately incomplete (unparseable as a full AppConfig) file: clean
         // only needs the marker file to exist, not a valid config.
         fs::write(project_root.join("app-config.toml"), "app-name = \"demo\"\n").unwrap();
         let nested = project_root.join("ui").join("pages");
         fs::create_dir_all(&nested).unwrap();
 
-        assert_eq!(find_project_root(&nested).as_deref(), Some(project_root.as_path()));
+        assert_eq!(find_project_root(&nested).as_deref(), Some(project_root));
 
-        let no_root = make_temp_dir("clean-no-root");
-        assert!(find_project_root(&no_root).is_none());
-
-        cleanup(&no_root);
-        cleanup(&project_root);
+        let no_root_dir = make_temp_dir("clean-no-root");
+        let no_root = no_root_dir.path();
+        assert!(find_project_root(no_root).is_none());
     }
 
     #[test]
     fn removes_generated_build_and_theme_artifacts() {
-        let project_root = make_temp_dir("clean-generated");
+        let project_root_dir = make_temp_dir("clean-generated");
+        let project_root = project_root_dir.path();
 
         // Generated build + theme tree under target/.
         let themes = project_root.join("target").join("foundation").join("themes").join("rust");
@@ -158,7 +157,7 @@ mod tests {
         fs::create_dir_all(project_root.join("resources").join("images")).unwrap();
         fs::write(project_root.join("resources").join("images").join("logo.svg"), "<svg/>\n").unwrap();
 
-        clean_project(&project_root).unwrap();
+        clean_project(project_root).unwrap();
 
         // Generated artifacts are gone.
         assert!(!project_root.join("target").exists());
@@ -170,13 +169,12 @@ mod tests {
         assert!(project_root.join("app-config.toml").exists());
         assert!(project_root.join("ui").join("app.slint").exists());
         assert!(project_root.join("resources").join("images").join("logo.svg").exists());
-
-        cleanup(&project_root);
     }
 
     #[test]
     fn never_touches_authored_resources() {
-        let project_root = make_temp_dir("clean-resources");
+        let project_root_dir = make_temp_dir("clean-resources");
+        let project_root = project_root_dir.path();
         let resources = project_root.join("resources");
 
         // Authored resource content: icon, theme JSON, and asset directories.
@@ -187,30 +185,19 @@ mod tests {
         fs::write(resources.join("fonts").join("Brand.ttf"), b"font").unwrap();
         fs::write(resources.join("images").join("logo.svg"), "<svg/>\n").unwrap();
 
-        clean_project(&project_root).unwrap();
+        clean_project(project_root).unwrap();
 
         assert!(resources.join("icon.svg").exists());
         assert!(resources.join("theme.json").exists());
         assert!(resources.join("fonts").join("Brand.ttf").exists());
         assert!(resources.join("images").join("logo.svg").exists());
-
-        cleanup(&project_root);
     }
 
     #[test]
     fn clean_is_idempotent_when_nothing_generated() {
-        let project_root = make_temp_dir("clean-empty");
+        let project_root_dir = make_temp_dir("clean-empty");
+        let project_root = project_root_dir.path();
         // No target/, manifest.toml, or ui/ui present.
-        clean_project(&project_root).unwrap();
-        cleanup(&project_root);
+        clean_project(project_root).unwrap();
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-clean-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

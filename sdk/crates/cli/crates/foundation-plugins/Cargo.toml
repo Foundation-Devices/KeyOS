@@ -23,3 +23,6 @@ thiserror = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 once_cell = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

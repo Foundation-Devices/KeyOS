@@ -216,14 +216,13 @@ pub enum SdkError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{SdkLayout, SdkRoot};
 
     #[test]
     fn discovers_repo_layout() {
-        let repo_root = make_temp_dir("repo");
+        let repo_root_dir = tempfile::tempdir().unwrap();
+        let repo_root = repo_root_dir.path();
         fs::write(repo_root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         let root = repo_root.join("sdk");
         fs::create_dir_all(&root).unwrap();
@@ -240,13 +239,12 @@ mod tests {
         assert_eq!(sdk.keyos_root(), repo_root);
         assert_eq!(sdk.ui_library_path(), sdk.keyos_root().join("ui2").join("components").join("ui"));
         assert_eq!(sdk.ui_shared_resources_path(), sdk.keyos_root().join("ui2").join("resources"));
-
-        cleanup(&repo_root);
     }
 
     #[test]
     fn discovers_bundle_layout() {
-        let root = make_temp_dir("bundle");
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
         fs::write(root.join("flake.nix"), "{}").unwrap();
         fs::create_dir_all(root.join("bin")).unwrap();
         fs::create_dir_all(root.join("lib").join("keyos")).unwrap();
@@ -256,20 +254,9 @@ mod tests {
 
         let sdk = SdkRoot::discover_from(&nested).unwrap();
         assert_eq!(sdk.layout(), SdkLayout::Bundle);
-        assert_eq!(sdk.root(), root.as_path());
+        assert_eq!(sdk.root(), root);
         assert_eq!(sdk.keyos_root(), root.join("lib").join("keyos"));
         assert_eq!(sdk.ui_library_path(), root.join("ui").join("ui"));
         assert_eq!(sdk.ui_shared_resources_path(), root.join("resources"));
-
-        cleanup(&root);
     }
-
-    fn make_temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("foundation-sdk-{label}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    fn cleanup(path: &Path) { let _ = fs::remove_dir_all(path); }
 }

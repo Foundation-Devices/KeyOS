@@ -2043,24 +2043,21 @@ mod tests {
 
     #[test]
     fn stage_dir_lock_blocks_concurrent_holders() {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let output_dir = env::temp_dir().join(format!("foundation-stage-lock-{unique}"));
+        let temp = tempfile::tempdir().unwrap();
+        let output_dir = temp.path();
         let stage_root = output_dir.join(".stage");
-        fs::create_dir_all(&output_dir).unwrap();
 
-        let first = StageDirLock::acquire(&output_dir, &stage_root).expect("first lock should succeed");
-        let second = StageDirLock::acquire(&output_dir, &stage_root);
+        let first = StageDirLock::acquire(output_dir, &stage_root).expect("first lock should succeed");
+        let second = StageDirLock::acquire(output_dir, &stage_root);
         assert!(second.is_err(), "second lock acquisition should fail while first is held");
         let err = second.unwrap_err().to_string();
         assert!(err.contains("another xtask invocation"), "expected lock-contention message, got: {err}");
 
         // Releasing the first lock should let a new caller succeed.
         drop(first);
-        let third = StageDirLock::acquire(&output_dir, &stage_root)
+        let third = StageDirLock::acquire(output_dir, &stage_root)
             .expect("lock should be reacquirable after release");
         drop(third);
-
-        let _ = fs::remove_dir_all(&output_dir);
     }
 
     #[test]
@@ -2157,7 +2154,7 @@ mod tests {
 
     #[test]
     fn verify_target_stage_requires_simulator_for_full_bundle() {
-        let stage_dir = temp_stage_dir("verify-stage");
+        let (_stage_guard, stage_dir) = temp_stage_dir();
         fs::create_dir_all(stage_dir.join("bin")).unwrap();
 
         for path in [
@@ -2176,12 +2173,11 @@ mod tests {
 
         let error = verify_target_stage(&stage_dir, false).unwrap_err();
         assert!(error.to_string().contains("foundation-simulator"));
-        fs::remove_dir_all(stage_dir).unwrap();
     }
 
     #[test]
     fn verify_common_stage_requires_shared_layout() {
-        let stage_dir = temp_stage_dir("verify-common-stage");
+        let (_stage_guard, stage_dir) = temp_stage_dir();
         fs::create_dir_all(stage_dir.join("docs").join("guide").join("src")).unwrap();
         fs::create_dir_all(stage_dir.join("docs").join("api")).unwrap();
         for tool_dir in [".agents", ".claude"] {
@@ -2258,14 +2254,13 @@ mod tests {
         }
 
         assert!(verify_common_stage(&stage_dir, false).is_ok());
-        fs::remove_dir_all(stage_dir).unwrap();
     }
 
     #[test]
     fn shared_ui_is_generated_into_artifact_stage() {
         let root = workspace_root();
         let keyos_root = root.parent().expect("sdk workspace has KeyOS parent");
-        let stage_dir = temp_stage_dir("shared-ui-artifact");
+        let (_stage_guard, stage_dir) = temp_stage_dir();
 
         stage_shared_ui_artifact(keyos_root, &stage_dir, false).unwrap();
 
@@ -2276,30 +2271,26 @@ mod tests {
         // cargo_package snapshot, covered by
         // stage_cargo_package_snapshot_omits_target_directory), not by the
         // shared-UI staging here.
-
-        fs::remove_dir_all(stage_dir).unwrap();
     }
 
     #[test]
     fn parse_toolchain_channel_reads_rust_toolchain_toml() {
-        let stage_dir = temp_stage_dir("toolchain-channel");
+        let (_stage_guard, stage_dir) = temp_stage_dir();
         let toolchain = stage_dir.join("rust-toolchain.toml");
         fs::write(&toolchain, "[toolchain]\nchannel = \"nightly-2026-04-11\"\n").unwrap();
 
         assert_eq!(parse_toolchain_channel(&toolchain).as_deref(), Some("nightly-2026-04-11"));
-        fs::remove_dir_all(stage_dir).unwrap();
     }
 
     #[test]
     fn rust_toolchain_channel_walks_parent_directories() {
-        let root = temp_stage_dir("toolchain-search");
+        let (_root_guard, root) = temp_stage_dir();
         let nested = root.join("a").join("b");
         fs::create_dir_all(&nested).unwrap();
         fs::write(root.join("rust-toolchain.toml"), "[toolchain]\nchannel = \"nightly-2026-04-11\"\n")
             .unwrap();
 
         assert_eq!(rust_toolchain_channel(&nested).as_deref(), Some("nightly-2026-04-11"));
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2406,7 +2397,7 @@ source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-founda
 
     #[test]
     fn staged_workspace_uses_local_slint_paths_when_packaged() {
-        let root = temp_stage_dir("slint-override");
+        let (_root_guard, root) = temp_stage_dir();
         let staged_keyos_root = root.join("lib").join("keyos");
         fs::create_dir_all(root.join("lib").join("slint").join("internal").join("common")).unwrap();
         fs::create_dir_all(root.join("lib").join("slint").join("internal").join("compiler")).unwrap();
@@ -2425,13 +2416,11 @@ source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-founda
             .and_then(|value| value.as_table().cloned())
             .unwrap();
         assert_eq!(common.get("path").and_then(toml::Value::as_str), Some("../slint/internal/common"));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn staged_slint_workspace_manifest_filters_missing_members_and_paths() {
-        let root = temp_stage_dir("slint-manifest");
+        let (_root_guard, root) = temp_stage_dir();
         fs::create_dir_all(root.join("api").join("rs").join("build")).unwrap();
         fs::create_dir_all(root.join("api").join("rs").join("slint")).unwrap();
         fs::create_dir_all(root.join("internal").join("core")).unwrap();
@@ -2493,14 +2482,12 @@ lto = true
         assert!(dependencies.contains_key("serde"));
         assert!(!dependencies.contains_key("slint-cpp"));
         assert!(!dependencies.contains_key("i-slint-backend-android-activity"));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn slint_snapshot_excludes_local_build_artifacts() {
-        let source_root = temp_stage_dir("slint-source");
-        let destination_root = temp_stage_dir("slint-destination");
+        let (_source_guard, source_root) = temp_stage_dir();
+        let (_dest_guard, destination_root) = temp_stage_dir();
 
         for dir in [
             source_root.join(".cargo"),
@@ -2695,15 +2682,12 @@ serde = "1"
         assert!(!destination_root.join("examples").exists());
         let staged_manifest = fs::read_to_string(destination_root.join("Cargo.toml")).unwrap();
         assert!(staged_manifest.contains("[workspace.dependencies.i-slint-backend-android-activity]"));
-
-        fs::remove_dir_all(source_root).unwrap();
-        fs::remove_dir_all(destination_root).unwrap();
     }
 
     #[test]
     fn stage_cargo_package_snapshot_omits_target_directory() {
-        let source_root = temp_stage_dir("cargo-package-source");
-        let destination_root = temp_stage_dir("cargo-package-dest");
+        let (_source_guard, source_root) = temp_stage_dir();
+        let (_dest_guard, destination_root) = temp_stage_dir();
 
         fs::create_dir_all(source_root.join("src")).unwrap();
         fs::create_dir_all(source_root.join("themes")).unwrap();
@@ -2719,16 +2703,12 @@ serde = "1"
         assert!(destination_root.join("src").join("lib.rs").exists());
         assert!(destination_root.join("themes").join("default_theme.json").exists());
         assert!(!destination_root.join("target").exists());
-
-        fs::remove_dir_all(source_root).unwrap();
-        fs::remove_dir_all(destination_root).unwrap();
     }
 
-    fn temp_stage_dir(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("foundation-xtask-{label}-{unique}"));
-        fs::create_dir_all(&path).unwrap();
-        path
+    fn temp_stage_dir() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        (dir, path)
     }
 }
 

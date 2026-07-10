@@ -149,9 +149,9 @@ pub fn project_theme_slint_dir(project_root: &Path) -> PathBuf {
 /// Regenerates when the `rust/` index is missing or any source JSON is newer
 /// than it, so app builds always pick up edited themes without a manual
 /// `foundation themes build`.
-pub fn ensure_built(sdk: &SdkRoot) -> Result<PathBuf> {
-    let json_dir = json_dir()?;
-    let rust_dir = rust_dir()?;
+fn ensure_built_in(sdk: &SdkRoot, themes_dir: &Path) -> Result<PathBuf> {
+    let json_dir = themes_dir.join("json");
+    let rust_dir = themes_dir.join("rust");
     seed_base_themes(sdk, &json_dir)?;
 
     if needs_regen(&json_dir, &rust_dir) {
@@ -166,11 +166,20 @@ pub fn ensure_built(sdk: &SdkRoot) -> Result<PathBuf> {
 /// theme modules, so older source that still includes a base theme id keeps
 /// compiling if the config adds `theme` later.
 pub fn ensure_project_theme(sdk: &SdkRoot, config: &AppConfig, project_root: &Path) -> Result<PathBuf> {
+    ensure_project_theme_in(sdk, config, project_root, &themes_dir()?)
+}
+
+pub fn ensure_project_theme_in(
+    sdk: &SdkRoot,
+    config: &AppConfig,
+    project_root: &Path,
+    themes_dir: &Path,
+) -> Result<PathBuf> {
     let Some(theme) = config.theme.as_deref().map(str::trim).filter(|theme| !theme.is_empty()) else {
-        return ensure_built(sdk);
+        return ensure_built_in(sdk, themes_dir);
     };
 
-    let global_json_dir = json_dir()?;
+    let global_json_dir = themes_dir.join("json");
     seed_base_themes(sdk, &global_json_dir)?;
 
     let project_theme_root = project_root.join("target").join("foundation").join("themes");
