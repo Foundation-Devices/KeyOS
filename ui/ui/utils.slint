@@ -78,7 +78,7 @@ export global Utils {
     pure callback color-from-hsl(float, float, float, float) -> color;
     pure callback color-from-rgb(int, int, int, int) -> color;
 
-    pure callback shorten-string(string, int) -> string;
+    pure callback shorten-string(string, int, bool) -> string;
 
     pure public function get-card-bg-color(color: CardColor) -> brush {
         if (color == CardColor.blue) {
@@ -249,5 +249,6 @@ export global Utils {
     // Each of these increments or decrements by 1
     pure callback decrement-string(string) -> string;
     pure callback increment-string(string) -> string;
+
     pure callback filter-special-characters(string) -> string;
 }

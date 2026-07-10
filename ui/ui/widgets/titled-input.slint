@@ -26,6 +26,8 @@ export component TitledInput inherits VerticalLayout {
     in property <bool> locked: false;
     in property <string> accept-button-text;
     in property <bool> accept-button-enabled: !has-error && !has-notice;
+    in property <bool> check-character-limit: true;
+    in property <int> character-limit: 100;
 
     out property <bool> has-focus: input.has-focus;
 
@@ -64,6 +66,8 @@ export component TitledInput inherits VerticalLayout {
         locked: locked;
         accept-button-text: root.accept-button-text;
         accept-button-enabled: root.accept-button-enabled;
+        check-character-limit: root.check-character-limit;
+        character-limit: root.character-limit;
 
         edited(text) => {
             parent.edited(text);

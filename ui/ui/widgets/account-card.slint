@@ -31,12 +31,15 @@ export component AccountCard inherits LineCard {
             vertical-stretch: 1;
             padding-left: Size.sz6;
             padding-right: Size.sz4;
+            spacing: Size.sz2;
 
             VerticalLayout {
                 alignment: center;
                 HeadingSm {
                     text: name;
                     color: Palette.white;
+                    wrap: no-wrap;
+                    overflow: elide;
                 }
             }
 

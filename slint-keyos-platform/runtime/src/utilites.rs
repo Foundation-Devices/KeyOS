@@ -100,12 +100,17 @@ pub fn fill_array(size: i32, fill: i32, a: i32, b: i32) -> ModelRc<i32> {
     slint::ModelRc::from(the_model)
 }
 
-pub fn shorten_string(src: SharedString, max_len: i32) -> SharedString {
+pub fn shorten_string(src: SharedString, max_len: i32, elide: bool) -> SharedString {
     let max_len = max_len as usize;
     let mut s = src.to_string();
-    if s.len() > max_len {
-        s.truncate(max_len - 1);
-        s.push('…');
+    if s.chars().count() > max_len {
+        let end = s.char_indices().nth(max_len).map_or(s.len(), |(i, _)| i);
+        s.truncate(end);
+
+        if elide {
+            s.pop();
+            s.push('…');
+        }
     }
     s.into()
 }

@@ -37,6 +37,8 @@ export component Input inherits Rectangle {
     in property <bool> locked: false;
     in property <string> accept-button-text;
     in property <bool> accept-button-enabled: !has-error && !has-notice;
+    in property <bool> check-character-limit: true;
+    in property <int> character-limit: 100;
 
     callback accepted(string);
     callback edited(string);
@@ -143,6 +145,9 @@ export component Input inherits Rectangle {
                         }
 
                         edited() => {
+                            if (check-character-limit) {
+                                self.text = Utils.shorten-string(self.text, character-limit, false);
+                            }
                             if (input-type == InputType.number && bounded-number) {
                                 self.text = Utils.check-bounds(self.text, minimum, maximum);
                             }
@@ -269,4 +274,5 @@ export component PasswordInput inherits Input {
 
     // Override default properties with password-specific defaults
     show-clear-btn: false;  // Passwords typically don't show clear button by default
+    check-character-limit: false;
 }

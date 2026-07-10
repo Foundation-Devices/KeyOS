@@ -44,6 +44,7 @@ export component RenameModal inherits TextInputModal {
             show-clear-btn: true;
             text: ModalGlobal.rename-text;
             accept-button-enabled: self.text != "";
+            character-limit: 255;
             accepted => {
                 ModalGlobal.rename-confirmed(input.text);
             }

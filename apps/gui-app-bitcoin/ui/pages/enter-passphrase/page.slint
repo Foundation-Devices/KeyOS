@@ -33,6 +33,7 @@ component IdlePage inherits BasePage {
 
                 Input {
                     placeholder: TR2.lookup(TrId.EnterPassphraseFillerText);
+                    check-character-limit: false;
                     text: EnterPassphrase.passphrase;
 
                     edited(text) => {

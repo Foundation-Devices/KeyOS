@@ -81,7 +81,7 @@ component AppCard inherits Rectangle {
 
             HeadingLg {
                 color: Palette.content-primary;
-                text: Utils.shorten-string(app-name, Constants.max-title-length);
+                text: Utils.shorten-string(app-name, Constants.max-title-length, true);
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 padding-bottom: Size.sz4;

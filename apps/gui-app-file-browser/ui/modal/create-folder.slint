@@ -45,6 +45,7 @@ export component CreateFolderModal inherits Rectangle {
                 show-clear-btn: true;
                 accept-button-text: TR2.lookup(TrId.CommonKeyboardAdd);
                 accept-button-enabled: self.text != "";
+                character-limit: 255;
                 accepted => {
                     ModalGlobal.create-folder-confirmed(input.text);
                 }
