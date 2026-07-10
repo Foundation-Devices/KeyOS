@@ -54,7 +54,7 @@
         // pkgs.callPackage ./nix/slint.nix {}
         // pkgs.callPackage ./nix/cosign2.nix {inherit self;}
         // pkgs.callPackage ./nix/localazy.nix {}
-        // pkgs.callPackage ./nix/sim-runner.nix {};
+        // pkgs.callPackage ./nix/slint-runner.nix {};
 
       buildPackages = with pkgs;
         [
@@ -90,7 +90,7 @@
         ++ (with customPackages; [
           localazy
           rust-analyzer
-          sim-runner
+          slint-runner
           slint-lsp
           slint-viewer
         ])
@@ -117,7 +117,6 @@
 
       sharedLibs = with pkgs;
         [
-          fontconfig
           pcsclite
           libusb1
           zlib

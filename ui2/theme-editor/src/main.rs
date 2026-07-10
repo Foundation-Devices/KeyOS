@@ -3343,23 +3343,17 @@ fn clear_native_window_max_constraints(app: &AppWindow) {
 
 fn install_winit_window_sync(app: &AppWindow) {
     app.window().on_winit_window_event(|slint_window, event| {
-        let _ = slint_window.with_winit_window(|window: &winit::window::Window| {
-            window.set_max_inner_size(None::<winit::dpi::LogicalSize<f64>>);
-
-            match event {
-                winit::event::WindowEvent::Resized(size) => {
-                    let logical = size.to_logical::<f64>(window.scale_factor());
-                    slint_window
-                        .set_size(slint::LogicalSize::new(logical.width as f32, logical.height as f32));
-                }
-                winit::event::WindowEvent::ScaleFactorChanged { .. } => {
-                    let size = window.inner_size();
-                    let logical = size.to_logical::<f64>(window.scale_factor());
-                    slint_window
-                        .set_size(slint::LogicalSize::new(logical.width as f32, logical.height as f32));
-                }
-                _ => {}
+        let _ = slint_window.with_winit_window(|window: &winit::window::Window| match event {
+            winit::event::WindowEvent::Resized(size) => {
+                let logical = size.to_logical::<f64>(window.scale_factor());
+                slint_window.set_size(slint::LogicalSize::new(logical.width as f32, logical.height as f32));
             }
+            winit::event::WindowEvent::ScaleFactorChanged { .. } => {
+                let size = window.inner_size();
+                let logical = size.to_logical::<f64>(window.scale_factor());
+                slint_window.set_size(slint::LogicalSize::new(logical.width as f32, logical.height as f32));
+            }
+            _ => {}
         });
         EventResult::Propagate
     });

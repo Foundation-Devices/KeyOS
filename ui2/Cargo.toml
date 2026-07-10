@@ -6,4 +6,4 @@ resolver = "2"
 members = ["components", "theme-editor"]
 
 [workspace.dependencies]
-slint = "1.9"
+slint = { version = "1.9", default-features = false }

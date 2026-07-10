@@ -4,17 +4,19 @@
   lib,
   stdenv,
   writeShellApplication,
+  fontconfig,
   libxkbcommon,
   wayland,
   xorg,
 }: {
-  sim-runner = writeShellApplication {
-    name = "sim-runner";
+  slint-runner = writeShellApplication {
+    name = "slint-runner";
     text = ''
       export LD_LIBRARY_PATH="${
         lib.makeLibraryPath (
           [libxkbcommon]
           ++ lib.optionals stdenv.isLinux [
+            fontconfig
             wayland
             xorg.libX11
             xorg.libXcursor
@@ -23,7 +25,7 @@
         )
       }''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       export SLINT_BACKEND=winit-software
-      exec cargo xtask run --hosted "$@"
+      exec "$@"
     '';
   };
 }

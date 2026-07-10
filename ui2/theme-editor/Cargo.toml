@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-slint = { workspace = true, features = ["unstable-winit-030"] }
+slint = { workspace = true, features = ["compat-1-2", "unstable-winit-030", "renderer-software"] }
 components = { path = "../components" }
 rfd = "0.15"  # File dialogs
 serde = { version = "1.0", features = ["derive"] }

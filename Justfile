@@ -120,7 +120,7 @@ gen-icu-data:
     fi
 
 sim: gen-themes
-    sim-runner
+    slint-runner cargo xtask run --hosted
 
 sim-reload crate:
     cargo xtask reload {{crate}}
@@ -211,6 +211,9 @@ preview file locale="en" i18n_dir="":
 # from the plugin schemas (defaults/plugins/*.json). Idempotent; run by build/sim.
 gen-themes:
     cargo run --quiet --manifest-path ui2/theme-editor/Cargo.toml --bin slintthemegen -- --out-dir ui2/components/ui
+
+theme-editor:
+    slint-runner cargo run --manifest-path ui2/theme-editor/Cargo.toml --bin theme-editor
 
 # Verify the committed per-component theme files match the plugin schemas (CI guard;
 # fails if a plugin was edited without re-running gen-themes).
