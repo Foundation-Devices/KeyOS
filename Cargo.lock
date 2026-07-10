@@ -2222,9 +2222,9 @@ dependencies = [
 [[package]]
 name = "const-field-offset"
 version = "0.1.5"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
- "const-field-offset-macro 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "const-field-offset-macro 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "field-offset",
 ]
 
@@ -2242,7 +2242,7 @@ dependencies = [
 [[package]]
 name = "const-field-offset-macro"
 version = "0.1.5"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5358,13 +5358,13 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-linuxkms"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "bytemuck",
  "calloop 0.14.2",
  "drm",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "input",
  "memmap2 0.9.4",
  "nix 0.30.1",
@@ -5388,14 +5388,14 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-selector"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "cfg-if 1.0.0",
- "i-slint-backend-linuxkms 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-backend-winit 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-backend-linuxkms 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-backend-winit 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
 ]
 
 [[package]]
@@ -5437,7 +5437,7 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-winit"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "bytemuck",
  "cfg-if 1.0.0",
@@ -5447,10 +5447,10 @@ dependencies = [
  "futures",
  "glutin",
  "glutin-winit",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-renderer-skia 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-renderer-skia 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "imgref",
  "lyon_path",
  "muda",
@@ -5461,7 +5461,7 @@ dependencies = [
  "scoped-tls-hkt",
  "scopeguard",
  "softbuffer 0.4.6",
- "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "wasm-bindgen",
  "web-sys",
  "winit 0.30.13",
@@ -5484,7 +5484,7 @@ dependencies = [
 [[package]]
 name = "i-slint-common"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "cfg-if 1.0.0",
  "derive_more 2.0.1",
@@ -5526,14 +5526,14 @@ dependencies = [
 [[package]]
 name = "i-slint-compiler"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "by_address",
  "codemap",
  "codemap-diagnostic",
  "derive_more 2.0.1",
  "fontdue",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "image 0.25.6",
  "itertools 0.14.0",
  "linked_hash_set",
@@ -5604,7 +5604,7 @@ dependencies = [
 [[package]]
 name = "i-slint-core"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "ab_glyph",
  "auto_enums",
@@ -5613,11 +5613,11 @@ dependencies = [
  "cfg-if 1.0.0",
  "chrono",
  "clru",
- "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "derive_more 2.0.1",
  "euclid",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "image 0.25.6",
  "integer-sqrt",
  "lyon_algorithms",
@@ -5643,7 +5643,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-script",
  "unicode-segmentation",
- "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "wasm-bindgen",
  "web-sys",
  "web-time 1.1.0",
@@ -5663,7 +5663,7 @@ dependencies = [
 [[package]]
 name = "i-slint-core-macros"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "quote",
  "serde_json",
@@ -5737,18 +5737,18 @@ dependencies = [
 [[package]]
 name = "i-slint-renderer-skia"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "bytemuck",
  "cfg-if 1.0.0",
  "cfg_aliases 0.2.1",
- "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "derive_more 2.0.1",
  "glow",
  "glutin",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "lyon_path",
  "objc2 0.6.1",
  "objc2-app-kit 0.3.1",
@@ -5763,7 +5763,7 @@ dependencies = [
  "skia-safe",
  "softbuffer 0.4.6",
  "unicode-segmentation",
- "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "windows 0.61.3",
 ]
 
@@ -11251,18 +11251,18 @@ dependencies = [
 [[package]]
 name = "slint"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
- "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-backend-selector 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-backend-selector 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "num-traits",
  "once_cell",
  "pin-weak",
- "slint-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "slint-macros 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "unicode-segmentation",
- "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "vtable 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
 ]
 
 [[package]]
@@ -11280,10 +11280,10 @@ dependencies = [
 [[package]]
 name = "slint-build"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "derive_more 2.0.1",
- "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "spin_on",
  "toml_edit 0.22.27",
 ]
@@ -11300,8 +11300,8 @@ dependencies = [
  "fs",
  "futures-lite",
  "gui-server-api",
- "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-common 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "i-slint-core 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "i18n",
  "indoc",
  "itertools 0.13.0",
@@ -11318,7 +11318,7 @@ dependencies = [
  "serde",
  "server",
  "settings",
- "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "slint-keyos-platform-common",
  "slint-keyos-platform-macros",
  "slotmap",
@@ -11337,7 +11337,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "euclid",
- "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "image 0.25.6",
  "indoc",
  "itertools 0.13.0",
@@ -11348,8 +11348,8 @@ dependencies = [
  "resvg 0.44.0",
  "rkyv",
  "serde_json",
- "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "slint-build 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "slint-build 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "slint-keyos-platform-common",
  "slotmap",
  "spin_on",
@@ -11363,9 +11363,9 @@ dependencies = [
 name = "slint-keyos-platform-common"
 version = "0.1.0"
 dependencies = [
- "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "rkyv",
- "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
 ]
 
 [[package]]
@@ -11394,9 +11394,9 @@ dependencies = [
 [[package]]
 name = "slint-macros"
 version = "1.12.1"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
- "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "i-slint-compiler 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "proc-macro2",
  "quote",
  "spin_on",
@@ -11406,8 +11406,8 @@ dependencies = [
 name = "slintbook"
 version = "0.1.0"
 dependencies = [
- "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
- "slint-build 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "slint 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
+ "slint-build 1.12.1 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "slint-keyos-platform",
  "slint-keyos-platform-common",
 ]
@@ -13043,12 +13043,12 @@ dependencies = [
 [[package]]
 name = "vtable"
 version = "0.3.0"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
- "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "const-field-offset 0.1.5 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
  "portable-atomic",
  "stable_deref_trait",
- "vtable-macro 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11)",
+ "vtable-macro 0.3.0 (git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12)",
 ]
 
 [[package]]
@@ -13065,7 +13065,7 @@ dependencies = [
 [[package]]
 name = "vtable-macro"
 version = "0.3.0"
-source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation11#187572659d3e230d3c398317d78c1c5e00355d63"
+source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-foundation12#3591775c9917ea3d8711e54f1d210c1f0747f9f2"
 dependencies = [
  "proc-macro2",
  "quote",

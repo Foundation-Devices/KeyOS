@@ -7,7 +7,6 @@
   fetchFromGitHub,
   cmake,
   pkg-config,
-  qt6,
   fontconfig,
   libGL,
   xorg,
@@ -46,18 +45,22 @@ in {
 
     cargoLock.lockFile = "${src}/Cargo.lock";
     buildAndTestSubdir = "tools/viewer";
-    cargoBuildFlags = ["--features" "custom-translations"];
+    # Explicit backend selection: the default `backend-default` feature pulls
+    # in i-slint-backend-qt, whose build script probes for qmake. Selecting
+    # winit directly keeps Qt out of the dependency graph entirely.
+    cargoBuildFlags = [
+      "--no-default-features"
+      "--features"
+      "backend-winit,renderer-femtovg,renderer-software,custom-translations"
+    ];
 
     nativeBuildInputs = [
       cmake
       pkg-config
-      qt6.wrapQtAppsHook
     ];
 
     buildInputs =
       [
-        qt6.qtbase
-        qt6.qtsvg
         libGL
       ]
       ++ lib.optionals stdenv.hostPlatform.isLinux linuxViewerLibs;

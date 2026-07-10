@@ -13,17 +13,10 @@
 //!   cargo run --bin slintthemegen -- --out-dir <dir>        # write every file
 //!   cargo run --bin slintthemegen -- --check                # CI staleness guard
 
-// This helper only needs the repo-default plugin loader, but it shares the
-// theme editor's runtime plugin module so both paths normalize schemas the same
-// way.
-#[allow(dead_code, unused_imports)]
-#[path = "../plugin/mod.rs"]
-mod plugin;
-
 use std::path::PathBuf;
 
 use components::theme_gen::component_theme_slint;
-use plugin::load_all_plugins_from_repo;
+use theme_editor::plugin::load_all_plugins_from_repo;
 
 /// Shared default files sit beside `theme.slint`, so a relative import resolves.
 /// (The per-app generator uses `@ui/theme.slint` instead.)

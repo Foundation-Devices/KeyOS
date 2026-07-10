@@ -14,57 +14,6 @@ import { ButtonTheme, ButtonVariantProps, ButtonSizeProps } from "@components/bu
 // Re-export theme types for Rust access
 export { Theme, ButtonTheme, ButtonVariant, ButtonState, ControlSize, ButtonVariantProps, ButtonSizeProps, ThemeInfo, ThemeComponentInfo, VariantInfo, StateInfo, SizeInfo, PropertyDef, PropertyValueData }
 
-component ThemeListItem inherits Rectangle {
-    in property <string> title;
-    in property <bool> dark-mode;
-    in property <bool> selected: false;
-    in property <bool> builtin: false;
-    callback clicked();
-
-    height: 44px;
-    border-radius: 8px;
-    background: root.selected ? (dark-mode ? #2f3f44 : #e9f8f8) : item-touch.has-hover ? (dark-mode ? #2a2a2a : #f3f3f3) : transparent;
-    border-width: root.selected ? 1px : 0px;
-    border-color: root.selected ? #1a9a9a : transparent;
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 8px;
-
-        Text {
-            text: root.title;
-            color: root.selected ? (dark-mode ? #ffffff : #1a1a1a) : (dark-mode ? #d7d7d7 : #2a2a2a);
-            font-size: 13px;
-            font-weight: root.selected ? 600 : 500;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-        }
-
-        if root.builtin: Rectangle {
-            width: builtin-text.preferred-width + 12px;
-            height: 20px;
-            border-radius: 10px;
-            background: dark-mode ? #303030 : #ececec;
-
-            builtin-text := Text {
-                x: (parent.width - self.preferred-width) / 2;
-                y: (parent.height - self.preferred-height) / 2;
-                text: "Built-in";
-                color: dark-mode ? #a8a8a8 : #666666;
-                font-size: 10px;
-                font-weight: 600;
-            }
-        }
-    }
-
-    item-touch := TouchArea {
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
 export component AppWindow inherits Window {
     title: "Theme Editor";
     background: dark-mode ? #1a1a1a : #f5f5f5;

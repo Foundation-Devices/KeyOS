@@ -4,9 +4,9 @@
 
 mod color_utils;
 mod icons;
-mod plugin;
-mod theme_export;
 mod token_lookup;
+
+use theme_editor::{plugin, theme_export};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

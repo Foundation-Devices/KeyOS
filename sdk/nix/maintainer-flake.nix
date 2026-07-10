@@ -25,7 +25,7 @@
     rustToolchainSha256 = "sha256-NvWKV8CXj8AQXESvz5uGr6qv0JF0UHUdjYb2murEG/A=";
     sdkBuildConfig = builtins.fromTOML (builtins.readFile (root + "/sdk-build.toml"));
     foundationSlintVersion = sdkBuildConfig.submodules.slint.ref;
-    foundationSlintHash = "sha256-7vZ3LnTm1l3+Q4tRSogesNzGp/iCy4IIpkP0w5/l/9k=";
+    foundationSlintHash = "sha256-1xIDg+J22LxxbNQo/s4VojsnUATeDI7tfC+dIk1OoRQ=";
     systems = [
       "aarch64-darwin"
       "x86_64-darwin"
@@ -86,7 +86,8 @@
         exec cargo run \
           --manifest-path "''${SLINT_DIR}/tools/viewer/Cargo.toml" \
           --bin slint-viewer \
-          --features custom-translations \
+          --no-default-features \
+          --features backend-winit,renderer-femtovg,renderer-software,custom-translations \
           -- "$@"
         EOF
         chmod +x "$out/bin/foundation-slint-viewer"

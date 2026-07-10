@@ -37,7 +37,26 @@ in {
       lockFile = "${foundationSlint.source}/Cargo.lock";
     };
     buildAndTestSubdir = "tools/viewer";
-    cargoBuildFlags = ["--features" "custom-translations"];
+    # Explicit backend selection: the default `backend-default` feature pulls
+    # in i-slint-backend-qt, so nixpkgs' package builds the Qt backend and the
+    # previewed backend would diverge from the SDK viewer. Selecting winit
+    # directly keeps Qt out of the dependency graph entirely, so the Qt inputs
+    # inherited from nixpkgs can be dropped as well.
+    cargoBuildFlags = [
+      "--no-default-features"
+      "--features"
+      "backend-winit,renderer-femtovg,renderer-software,custom-translations"
+    ];
+    buildInputs =
+      builtins.filter (
+        drv: !(pkgs.lib.hasPrefix "qt" (drv.pname or drv.name))
+      )
+      old.buildInputs;
+    nativeBuildInputs =
+      builtins.filter (
+        drv: !(pkgs.lib.hasPrefix "wrap-qt" (drv.pname or drv.name))
+      )
+      old.nativeBuildInputs;
 
     doCheck = false;
     auditable = false;

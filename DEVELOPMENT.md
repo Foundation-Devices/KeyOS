@@ -367,7 +367,8 @@ For KeyOS development, install the custom `slint-viewer` from our Slint fork at 
     git clone https://github.com/Foundation-Devices/slint.git
     cd slint
     git checkout v1.12.1-foundation6
-    cargo install --path tools/viewer --features custom-translations --force
+    cargo install --path tools/viewer --no-default-features \
+        --features backend-winit,renderer-femtovg,renderer-software,custom-translations --force
 
 To view a slint file with KeyOS translations:
 

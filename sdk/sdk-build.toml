@@ -9,7 +9,7 @@ keyos_api_interfaces = ["app-manager", "backup", "camera", "crypto", "fs", "gui-
 [submodules.slint]
 path = "external/slint"
 repo = "git@github.com:Foundation-Devices/slint.git"
-ref = "v1.12.1-foundation11"
+ref = "v1.12.1-foundation12"
 env_override = "SLINT_DIR"
 
 [targets]
@@ -57,7 +57,13 @@ manifest = "external/slint/tools/viewer"
 package = "slint-viewer"
 artifact = "slint-viewer"
 binary = "foundation-slint-viewer"
-cargo_flags = ["--features", "custom-translations"]
+# Explicit backend selection: the default `backend-default` feature pulls in
+# i-slint-backend-qt, whose build script probes the environment for qmake.
+cargo_flags = [
+    "--no-default-features",
+    "--features",
+    "backend-winit,renderer-femtovg,renderer-software,custom-translations",
+]
 
 [[compile]]
 name = "keyos-log-viewer"

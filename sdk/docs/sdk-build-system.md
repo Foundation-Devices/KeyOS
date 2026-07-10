@@ -270,7 +270,11 @@ manifest = "external/slint/tools/viewer"
 package = "slint-viewer"
 artifact = "slint-viewer"
 binary = "foundation-slint-viewer"
-cargo_flags = ["--features", "custom-translations"]
+cargo_flags = [
+    "--no-default-features",
+    "--features",
+    "backend-winit,renderer-femtovg,renderer-software,custom-translations",
+]
 
 # ---------------------------------------------------------------------------
 # Copy: source code to include in the SDK distribution

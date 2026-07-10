@@ -3,10 +3,7 @@
 
 use std::path::PathBuf;
 
-#[path = "../plugin/mod.rs"]
-mod plugin;
-#[path = "../theme_export.rs"]
-mod theme_export;
+use theme_editor::theme_export;
 
 fn main() {
     if let Err(error) = run() {
