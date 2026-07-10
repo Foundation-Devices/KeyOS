@@ -83,11 +83,11 @@ pub fn execute() -> Result<()> {
 
     if all_passed {
         println!("All checks passed! Your environment is ready for KeyOS development.");
+        Ok(())
     } else {
-        println!("Some checks failed. Please fix the issues above before proceeding.");
+        // Exit non-zero so scripts and CI can gate on a broken environment.
+        anyhow::bail!("Some checks failed. Please fix the issues above before proceeding.");
     }
-
-    Ok(())
 }
 
 fn check_nix() -> CheckResult {
@@ -161,8 +161,11 @@ fn check_cargo() -> CheckResult {
 
 fn check_keyos_target() -> CheckResult {
     // Probe the actual custom target rather than relying on rustc's built-in target list.
-    let output =
-        Command::new("rustc").args(["--target", "armv7a-unknown-xous-elf", "--print", "cfg"]).output();
+    // `-Zunstable-options` is required since 1.96.0 nightlies to load custom (JSON) target
+    // specifications such as armv7a-unknown-xous-elf.
+    let output = Command::new("rustc")
+        .args(["--target", "armv7a-unknown-xous-elf", "-Zunstable-options", "--print", "cfg"])
+        .output();
 
     let passed = output.map(|o| o.status.success()).unwrap_or(false);
 

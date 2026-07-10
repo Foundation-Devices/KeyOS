@@ -52,3 +52,35 @@ jobs:
       - name: Test SDK xtask workspace
         working-directory: sdk
         run: nix develop --command cargo test --manifest-path Cargo.toml --workspace
+
+  test-sdk-user-environment:
+    name: Test SDK user environment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-nix-rust
+
+      # `foundation develop` copies the user flake into a scratch directory and
+      # enters it. Probe that exact shell with the real toolchain (no fakes) so
+      # toolchain regressions (pinned channel drift, custom target gates) fail
+      # here instead of on SDK users' machines.
+      - name: Stage the SDK user flake
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdk-user-flake"
+          cp sdk/nix/sdk-user-flake.nix "$RUNNER_TEMP/sdk-user-flake/flake.nix"
+          cp sdk/nix/sdk-user-flake.lock "$RUNNER_TEMP/sdk-user-flake/flake.lock"
+
+      # A compile failure leaves doctor.log without the expected lines, so the
+      # greps below also cover "the CLI builds inside the user shell".
+      - name: Run foundation doctor in the user shell
+        run: |
+          export FOUNDATION_SDK_ROOT="$PWD/sdk"
+          nix develop "path:$RUNNER_TEMP/sdk-user-flake" --no-write-lock-file --command \
+            cargo run --manifest-path sdk/crates/cli/Cargo.toml --package foundation -- doctor \
+            | tee doctor.log || true
+          # foundation-slint-viewer and foundation-asset-tool only exist in a
+          # packaged SDK bundle, so doctor cannot go fully green from a bare
+          # checkout and its exit status is masked. Assert the two things only
+          # the user shell provides: the custom KeyOS target and ARM binutils.
+          grep -F 'Checking KeyOS target: armv7a-unknown-xous-elf' doctor.log
+          grep -F 'Checking arm-none-eabi-strip: OK' doctor.log

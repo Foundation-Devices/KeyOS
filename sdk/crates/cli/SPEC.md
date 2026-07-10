@@ -552,11 +552,12 @@ Behavior:
   - `armv7a-unknown-xous-elf` target support
   - `arm-none-eabi-strip`
   - `cosign2`
+  - `foundation-asset-tool`
   - `foundation-slint-viewer` or `slint-viewer`
   - `git`
   - app-config names and app icon size when run inside an app project
 - Prints pass/fail plus suggested fixes
-- Is advisory: failed checks do not currently force a non-zero exit status
+- Exits non-zero when any check fails, so scripts and CI can gate on it
 
 ### `preview`
 

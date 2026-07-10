@@ -24,7 +24,10 @@ use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LI
 const TARGET_TRIPLE: &str = "armv7a-unknown-xous-elf";
 
 /// RUSTFLAGS for PIC builds
-const RUSTFLAGS_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie";
+///
+/// `-Zunstable-options` is required since 1.96.0 nightlies to load custom (JSON) target
+/// specifications such as armv7a-unknown-xous-elf.
+const RUSTFLAGS_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie -Zunstable-options";
 
 /// Execute the build command
 pub fn execute(release: bool) -> Result<()> {
