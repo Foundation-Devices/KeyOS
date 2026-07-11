@@ -252,8 +252,7 @@ fn resolve_identity_for_print(explicit_name: Option<&str>) -> Result<SigningIden
     if let Some(name) = explicit_name.map(str::trim).filter(|value| !value.is_empty()) {
         if !is_valid_identity_name(name) {
             anyhow::bail!(
-                "{}",
-                "Invalid publisher identity name '%{name}'. It cannot be empty or contain path separators."
+                "Invalid publisher identity name '{name}'. It cannot be empty or contain path separators."
             );
         }
         let mut identity = signing_identity_paths(name)?;
@@ -577,6 +576,16 @@ fn create_cosign2_config(config_path: &Path, private_key_path: &Path, public_key
 #[cfg(test)]
 mod tests {
     use crate::test_support::make_temp_dir;
+
+    #[test]
+    fn invalid_print_identity_error_includes_name() {
+        let error = super::resolve_identity_for_print(Some("invalid/name")).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid publisher identity name 'invalid/name'. It cannot be empty or contain path separators."
+        );
+    }
 
     #[cfg(unix)]
     #[test]
