@@ -85,6 +85,17 @@ export global Callbacks {
         return false;
     }
 
+    pure public function item-label-filler-text(seed-type: SeedViewType) -> string {
+        if (self.is-bitcoin(seed-type)) {
+            return TR2.lookup(TrId.CreateItemSeedItemLabelFillerText);
+        } else if (self.is-password(seed-type)) {
+            return TR2.lookup(TrId.CreateItemPasswordItemLabelFillerText);
+        } else if (self.is-nostr(seed-type)) {
+            return TR2.lookup(TrId.CreateItemNostrItemLabelFillerText);
+        }
+        return TR2.lookup(TrId.CreateItemSeedItemLabelFillerText);
+    }
+
     pure public function is-import(seed-type: SeedViewType) -> bool {
         if (seed-type == SeedViewType.password || seed-type == SeedViewType.nostr-key-import || seed-type == SeedViewType.bitcoin-import-12 || seed-type == SeedViewType.bitcoin-import-24) {
             return true;

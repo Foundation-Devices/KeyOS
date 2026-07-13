@@ -175,6 +175,8 @@ impl Default for AccountStore {
 }
 
 impl AccountStore {
+    pub const MAX_BIP32_INDEX: u32 = 0x7fff_ffff;
+
     pub fn insert_account_config(
         &mut self,
         id: AccountId,
@@ -369,9 +371,31 @@ impl AccountStore {
         None
     }
 
+    pub fn validate_index_string(&self, index: &str, network: NgNetwork) -> Option<String> {
+        let index = match Self::parse_index_string(index) {
+            Ok(Some(index)) => index,
+            Ok(None) => return None,
+            Err(message) => return Some(message),
+        };
+
+        self.validate_index(index, network)
+    }
+
+    pub fn parse_index_string(index: &str) -> Result<Option<u32>, String> {
+        let index = index.trim();
+        if index.is_empty() {
+            return Ok(None);
+        }
+
+        match index.parse::<u64>() {
+            Ok(index) if index <= Self::MAX_BIP32_INDEX as u64 => Ok(Some(index as u32)),
+            _ => Err(tr::lookup_id(TrId::CommonCreateAccountsanitizedCappedIndex).to_string()),
+        }
+    }
+
     pub fn validate_index(&self, index: u32, network: NgNetwork) -> Option<String> {
-        if index >= 0x80000000 {
-            return Some(format!("Index {index} exceeds maximum BIP32 hardened index (2147483647)"));
+        if index > Self::MAX_BIP32_INDEX {
+            return Some(tr::lookup_id(TrId::CommonCreateAccountsanitizedCappedIndex).to_string());
         }
         self.active_accounts()
             .filter_map(|(_id, a)| {

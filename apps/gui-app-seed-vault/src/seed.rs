@@ -16,6 +16,8 @@ use {
 pub enum SeedValidationError {
     #[error("Invalid label, labels must not be empty")]
     InvalidLabelError,
+    #[error("Index exceeds maximum BIP32 hardened index")]
+    CappedIndexError,
     #[error("Invalid password, passwords must not be empty")]
     EmptyPasswordError,
     #[error("Invalid nsec")]
@@ -68,12 +70,17 @@ impl std::fmt::Debug for SeedType {
 fn parse_index(seed_index: Option<String>) -> Result<u32, VaultError> {
     let index = seed_index
         .ok_or_else(|| VaultError::from(anyhow::anyhow!("Unable to make indexed seed type without an index")))
-        .map(|i| i.trim().parse::<u32>().unwrap_or(0))?;
-    if index >= 0x80000000 {
-        return Err(VaultError::from(anyhow::anyhow!(
-            "Index {index} exceeds maximum BIP32 hardened index (2147483647)"
-        )));
-    }
+        .and_then(|i| {
+            let i = i.trim();
+            if i.is_empty() {
+                return Ok(0);
+            }
+
+            match i.parse::<u64>() {
+                Ok(index) if index <= 0x7fff_ffff => Ok(index as u32),
+                _ => Err(VaultError::from(SeedValidationError::CappedIndexError)),
+            }
+        })?;
     Ok(index)
 }
 

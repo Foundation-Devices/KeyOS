@@ -60,7 +60,6 @@
   "empty.filesFiltered": " {0} files were filtered.",
   "empty.folderEmpty": "Folder is empty.",
   "empty.noMatchingFiles": "No matching files.",
-  "empty.oneFileFiltered": " 1 file was filtered.",
   "error.content": "Couldn’t load files. \nPlease try again or contact support.",
   "external.header": "Connect USB Device",
   "externalFormatStorage.content": "The connected storage needs formatting before Passport can use it. ",

@@ -143,6 +143,56 @@ pub fn check_bounds(num: SharedString, minimum: SharedString, maximum: SharedStr
     bounded_val.to_shared_string()
 }
 
+pub fn is_in_bounds(num: SharedString, minimum: SharedString, maximum: SharedString) -> bool {
+    if num.is_empty() {
+        return false;
+    }
+
+    let num_val = match num.trim().parse::<i64>() {
+        Ok(num_val) => num_val,
+        Err(_) => return false,
+    };
+
+    let min_result = minimum.trim().parse::<i64>();
+    let max_result = maximum.trim().parse::<i64>();
+
+    if let (Ok(min_val), Ok(max_val)) = (&min_result, &max_result) {
+        if min_val > max_val {
+            return false;
+        }
+    }
+
+    if let Ok(min_val) = min_result {
+        if num_val < min_val {
+            return false;
+        }
+    }
+
+    if let Ok(max_val) = max_result {
+        if num_val > max_val {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn exceeds_maximum(num: SharedString, maximum: SharedString) -> bool {
+    if num.is_empty() {
+        return false;
+    }
+
+    let num_val = match num.trim().parse::<i64>() {
+        Ok(num_val) => num_val,
+        Err(_) => return true,
+    };
+
+    match maximum.trim().parse::<i64>() {
+        Ok(max_val) => num_val > max_val,
+        Err(_) => false,
+    }
+}
+
 pub fn decrement_string(num: SharedString) -> SharedString {
     let num_val = num.trim().parse::<i64>().unwrap_or(0);
     let decremented = num_val.saturating_sub(1);

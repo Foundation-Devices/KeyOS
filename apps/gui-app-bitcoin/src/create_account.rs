@@ -113,7 +113,7 @@ pub fn init(state: StoredValue<AppState>) {
             state
                 .borrow()
                 .store
-                .validate_index(index.trim().parse::<u32>().unwrap_or(0), network.into())
+                .validate_index_string(index.as_str(), network.into())
                 .unwrap_or_default()
                 .into()
         }
@@ -181,11 +181,17 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
 
     global.set_state(CreateAccountState::Creating);
 
-    let create = CreateSingleSigAccount {
-        label: options.label.to_string(),
-        network: options.network.into(),
-        index: options.index.trim().parse::<u32>().unwrap_or(0),
+    let index = match crate::store::AccountStore::parse_index_string(options.index.as_str()) {
+        Ok(Some(index)) => index,
+        Ok(None) | Err(_) => {
+            log::error!("Failed to create single sig account: invalid index {:?}", options.index);
+            global.set_state(CreateAccountState::Error);
+            return;
+        }
     };
+
+    let create =
+        CreateSingleSigAccount { label: options.label.to_string(), network: options.network.into(), index };
 
     global.set_prefilled_mode(false);
 

@@ -245,6 +245,8 @@ export global Utils {
 
     // Checks and enforces bounds of numbers passed as strings to avoid being limited by i32
     pure callback check-bounds(string, string, string) -> string;
+    pure callback is-in-bounds(string, string, string) -> bool;
+    pure callback exceeds-maximum(string, string) -> bool;
 
     // Each of these increments or decrements by 1
     pure callback decrement-string(string) -> string;

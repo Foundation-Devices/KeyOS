@@ -148,9 +148,6 @@ export component Input inherits Rectangle {
                             if (check-character-limit) {
                                 self.text = Utils.shorten-string(self.text, character-limit, false);
                             }
-                            if (input-type == InputType.number && bounded-number) {
-                                self.text = Utils.check-bounds(self.text, minimum, maximum);
-                            }
                             if (root.filtered-character) {
                                 root.filtered-character = false;
                                 root.temp-has-notice = false;
@@ -183,6 +180,9 @@ export component Input inherits Rectangle {
                         }
 
                         key-pressed(event) => {
+                            if (root.input-type == InputType.number && root.bounded-number && Utils.exceeds-maximum(self.text, maximum) && event.text != Key.Backspace && event.text != Key.Delete && event.text != Key.Return) {
+                                return accept;
+                            }
                             root.key-pressed(event)
                         }
                     }

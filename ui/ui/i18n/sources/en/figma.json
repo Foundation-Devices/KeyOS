@@ -1,4 +1,7 @@
 {
+  "2": {
+    "4%": "2.4%"
+  },
   "Label": "BlueWallet",
   "Registration": "Registration",
   "Time": "15",
@@ -18,6 +21,22 @@
       "header": "Delete 2FA Code",
       "subheader": "Are you sure you want to delete  “{0}”? \nThere is no way to restore a deleted 2FA Code."
     },
+    "camera": {
+      "importFromFile": "Import from File"
+    },
+    "decryptFile": {
+      "content": "This is a password protected file. Carefully enter it below to unlock the contents for import.",
+      "failedToUnlockFile": "Failed to unlock file.",
+      "header": "very_long…name.json",
+      "title": "Decrypt File"
+    },
+    "decryptFileModalFailed": {
+      "content": "Passport couldn’t open this file. Please try again or use a different file format.",
+      "title": "Decryption Failed"
+    },
+    "decryptingFile": {
+      "decrypting": "Decrypting…"
+    },
     "editCard": {
       "account": "Account",
       "archiveCode": "Archive 2FA Code",
@@ -33,6 +52,10 @@
     "editCardModalLabelInUse": {
       "content": "The label is already in use. Please choose another label for this code.",
       "title": "Label is already in use"
+    },
+    "importFileModalUnsupported": {
+      "content": "Passport only supports JSON file formats for 2FA imports.",
+      "header": "Unsupported File Type"
     },
     "main": {
       "import": "Import",
@@ -60,6 +83,7 @@
     "mainAddCode": {
       "accountMissing": "Missing field, please add an Account.",
       "accountTextFiller": "Add the associated account",
+      "enterPassword": "Enter password",
       "issuerTextFiller": "Add the code issuer (optional)",
       "label": "Label",
       "labelAlreadyInUse": "Label already in use.",
@@ -206,6 +230,7 @@
       "indexUsed": "Index already in use."
     },
     "createAccountsanitized": {
+      "cappedIndex": "Maximum index is 2147483647",
       "emptyLabel": "Label cannot be empty.",
       "repeatedLabel": "Label already exists.",
       "specialCharsRemoved": "Special Characters were automatically removed."
@@ -407,8 +432,7 @@
     "empty": {
       "filesFiltered": " {0} files were filtered.",
       "folderEmpty": "Folder is empty.",
-      "noMatchingFiles": "No matching files.",
-      "oneFileFiltered": " 1 file was filtered."
+      "noMatchingFiles": "No matching files."
     },
     "error": {
       "content": "Couldn’t load files. \nPlease try again or contact support."
@@ -741,6 +765,9 @@
       "header": "Initiated Device Detected",
       "setUpAsNewDevice": "Set Up as New Device"
     },
+    "legacyRecoverSuccess": {
+      "header": "Seed Words Restored Successfully"
+    },
     "magicBackupFound": {
       "content": "Restoring your encrypted settings and data from the Foundation server",
       "header": "Encrypted Backup Found"
@@ -862,7 +889,7 @@
       "header": "Restoring from Magic Backups"
     },
     "recoverSuccess": {
-      "header": "Seed Words Restored Successfully"
+      "header": "Master Key Restored Successfully"
     },
     "recoverSuccessEnvoy": {
       "secondRestoredEnvoy": "Part 2 restored from Envoy"
@@ -879,9 +906,7 @@
       "seedRestoredKeycard": "Seed restored from Keycard"
     },
     "recoverWords": {
-      "expandTo24Word": "Expand to 24 Word Seed",
       "fillerText": "Enter word {0}",
-      "incorrectTryAgain": "One or more of your seed words are incorrect. Please review and try again.",
       "suggest": "Suggest",
       "tilte": "Seed Words",
       "title": "Seed Words"
@@ -1210,6 +1235,13 @@
       "support": "Support",
       "title": "About"
     },
+    "accessSeedWords": {
+      "ViewSeedWords": "View Seed Words",
+      "contentStep1": "<b figma-seg=\"s0\">Foundation and other legitimate companies will </b><b figma-seg=\"s1\">never ask</b><b figma-seg=\"s2\"> you to share these words.</b>",
+      "contentStep2": "<b figma-seg=\"s0\">Any request to share these words or enter them into an app or website is</b><b figma-seg=\"s1\"> a scam</b><b figma-seg=\"s2\">.</b>",
+      "contentStep3": "<b figma-seg=\"s0\">Anyone with access to your seed words gains </b><b figma-seg=\"s1\">full control</b><b figma-seg=\"s2\"> over your funds.</b>",
+      "title": "Warning"
+    },
     "advancedBackups": {
       "saveSeed": "Back Up to Keycards",
       "settingsAndDataBackup": "Settings & Data Backup",
@@ -1221,19 +1253,18 @@
       "header": "Advanced",
       "viewLogs": "View Logs"
     },
-    "autoShutdown": {
-      "never": "Never",
-      "title": "Auto Lock"
-    },
     "apps": {
       "appId": "App ID",
       "description": "Description",
+      "detailsTitle": "Apps Details",
       "developerMode": "Developer Mode",
-      "detailsTitle": "App Details",
+      "installTrustedPublisherCertificate": "Remove Trusted Publisher",
       "installedApps": "Installed Apps",
+      "invalidTrustedPublisherCertificate": "Invalid Trusted Publisher certificate.",
       "mcpControl": "MCP Control",
       "noInstalledApps": "No installed apps",
       "noRequestedPermissions": "No requested permissions",
+      "noTrustedPublishers": "No Trusted Publishers",
       "publisher": "Publisher",
       "removeApp": "Remove App",
       "removeAppDialog": {
@@ -1241,12 +1272,37 @@
         "header": "Remove App",
         "remove": "Remove"
       },
-      "requestedPermissions": "Requested Permissions",
+      "removeTrustedPublisher": "Remove Trusted Publisher",
+      "removeTrustedPublisherConfirm": "Are you sure you want to remove this Trusted Publisher?",
+      "removeTrustedPublisherConfirmButton": "Remove",
+      "requestedPermissions ": "Requested Permissions",
       "sectionSettings": "Settings",
       "size": "Size",
       "title": "Apps",
+      "trustedPublisherBasicConstraints": "Basic Constraints",
+      "trustedPublisherCertificateInstalled": "Trusted Publisher certificate successfully installed.",
+      "trustedPublisherCertificates": "Certificates",
+      "trustedPublisherCompany": "Company",
+      "trustedPublisherContactEmail": "Contact Email",
+      "trustedPublisherDetails": "Trusted Publisher",
+      "trustedPublisherExtendedKeyUsage": "Extended Key Usage",
+      "trustedPublisherKeyUsage": "Key Usage",
+      "trustedPublisherName": "Name",
+      "trustedPublisherPublicKey": "Public Key",
+      "trustedPublisherRemoveBlocked": "settings.apps.trustedPublisherRemoveBlocked",
+      "trustedPublisherRemoveFailed": "Unable to remove this Trusted Publisher.",
+      "trustedPublisherSerialNumber": "Serial Number",
+      "trustedPublisherSubject": "Subject",
+      "trustedPublisherSupportUrl": "Support URL",
+      "trustedPublishers": "Trusted Publishers",
+      "trustedPublishersIntro": "Install public key certificates for Trusted Publishers.",
+      "unableToRemoveTrustedPublisher": "Unable to remove Trusted Publisher",
       "usbLogging": "USB Logging",
       "version": "Version"
+    },
+    "autoShutdown": {
+      "never": "Never",
+      "title": "Auto Lock"
     },
     "backUpToKeycards": {
       "title": "Back Up to Keycards"
@@ -1485,7 +1541,8 @@
       "readingKeycardFailed": "Reading Keycard failed"
     },
     "main": {
-      "backedUpXAgo": "Device Backup synced {0} ago.",
+      "apps": "Apps",
+      "backedUpXAgo": "Backed up {0} ago.",
       "backup": "Backups",
       "envoyConnected": "Connected to Envoy",
       "envoyNotConnected": "No Connection to Envoy",
@@ -1570,9 +1627,6 @@
       "title": "Support",
       "visitUs": "Visit us for more information",
       "x": "X"
-    },
-    "supportModalDocumentation": {
-      "header": "Visit by scanning with your phone camera "
     },
     "termsOfUse": {
       "LastUpdated": "Last updated: {0}",
@@ -1730,7 +1784,6 @@
       "imported": "Imported",
       "index": "Index",
       "itemLabel": "Label",
-      "itemLabelFillerText": "Item Name",
       "length": "Length",
       "nostrKey": "Nostr Key",
       "password": "Password",
@@ -1739,6 +1792,15 @@
       "title": "Create New Item",
       "type": "Type",
       "typeTextFiller": "Select Type"
+    },
+    "createItemNostr": {
+      "itemLabelFillerText": "Item Name"
+    },
+    "createItemPassword": {
+      "itemLabelFillerText": "Item Name"
+    },
+    "createItemSeed": {
+      "itemLabelFillerText": "Wallet, Private"
     },
     "createItemSeedErrors": {
       "indexAlreadyInUse": "Index is already in use",
@@ -1751,12 +1813,14 @@
     "importItem": {
       "content": "Scan a QR code to import a new item to Passport Prime.",
       "importItem": "Import Item",
-      "manualImport": "Manual Import",
       "title": "Import Item"
     },
     "importItemFailed": {
       "content": "The scanned QR code does not contain data that is compatible with Passport Prime at this time.\n\nPlease try again or contact support.",
       "header": "QR Code Not Recognized"
+    },
+    "importNewItem": {
+      "title": "Import New Item"
     },
     "itemDetails": {
       "archive": "Archive",
@@ -1773,7 +1837,6 @@
       "viewKey": "View Key"
     },
     "itemDetailsSeed": {
-      "exportSeed": "Export Seed",
       "viewSeed": "View Seed"
     },
     "keyDeleteModal": {
@@ -1783,7 +1846,11 @@
     "main": {
       "header": "New Item",
       "newItem": "New Item",
-      "subheader": "Add a seed, password, or Nostr key. Generate a new item from your Master Key, or import one you already have."
+      "subheader": "Create and store your seeds, passwords and more."
+    },
+    "mainImport2FAModalAlreadyUsed": {
+      "content": "This {0} is already saved as “{1}”",
+      "title": "{0} is already in use"
     },
     "manualImport": {
       "header": "Import Existing Item",
@@ -1853,7 +1920,6 @@
       "accountDetails": "Account Details",
       "connectWallet": "Connect Wallet",
       "exportConfig": "Export Config",
-      "signMessage": "Sign Message",
       "signet": "Signet",
       "testnet": "Testnet",
       "title": "Accounts",
@@ -1993,7 +2059,6 @@
     },
     "detailsSinglesigMenu": {
       "archiveAccount": "Archive Account",
-      "connedctWallet": "Connect Wallet",
       "showPublicKey": "Show Public Key",
       "signMessage": "Sign Message"
     },
@@ -2110,20 +2175,8 @@
       "signQuantum": "Sign with QuantumLink"
     },
     "seedWords": {
-      "expandTo24Word": "Expand to 24 Word Seed",
-      "incorrectTryAgain": "One or more of your seed words are incorrect. Please review and try again.",
       "suggest": "Suggest",
       "title": "Seed Words"
-    },
-    "selectApp": {
-      "2fa": "2FA",
-      "content": "This QR code can be used by multiple apps. Select the app you'd like to continue with.",
-      "files": "Files",
-      "header": "Select an App",
-      "keys": "Keys",
-      "selectAnApp": "Select an app",
-      "vault": "Vault",
-      "wallet": "Wallet"
     },
     "settings": {
       "displayAmountDisplay": "Amount Display",

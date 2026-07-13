@@ -319,6 +319,8 @@ macro_rules! _internal_init_ui_utils {
         );
 
         $app.global::<$utils>().on_check_bounds($crate::utilites::check_bounds);
+        $app.global::<$utils>().on_is_in_bounds($crate::utilites::is_in_bounds);
+        $app.global::<$utils>().on_exceeds_maximum($crate::utilites::exceeds_maximum);
         $app.global::<$utils>().on_increment_string($crate::utilites::increment_string);
         $app.global::<$utils>().on_decrement_string($crate::utilites::decrement_string);
         $app.global::<$utils>().on_filter_special_characters($crate::utilites::filter_special_characters);

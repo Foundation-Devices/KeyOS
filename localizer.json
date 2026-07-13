@@ -59,7 +59,7 @@
     {
       "name": "vault",
       "path": "apps/gui-app-seed-vault",
-      "include": ["common.button", "common.keyboard", "common.recoverWords", "common.supportModalDocumentation"]
+      "include": ["common.button", "common.keyboard", "common.recoverWords", "common.supportModalDocumentation", "common.createAccountsanitized"]
     },
     {
       "name": "wallet",

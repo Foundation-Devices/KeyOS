@@ -72,6 +72,9 @@ impl ToValidationString for SeedValidationError {
             SeedValidationError::InvalidLabelError => {
                 tr::lookup_id(TrId::CreateItemSeedErrorsMissingField).to_string()
             }
+            SeedValidationError::CappedIndexError => {
+                tr::lookup_id(TrId::CommonCreateAccountsanitizedCappedIndex).to_string()
+            }
             // Note: empty passwords are caught in slint and don't currently have validation text
             ref other => other.to_string(),
         }

@@ -3,7 +3,7 @@
 
 import { Callbacks as CB } from "../../callbacks.slint";
 import { SeedView, SeedViewType } from "../../types.slint";
-import { Palette, Size, Importance, CallbackResult, ResultLevel } from "@ui/theme.slint";
+import { Palette, Size, Importance, CallbackResult, ResultLevel, Utils } from "@ui/theme.slint";
 import { IconButton, AppHeader, BasePage, PageBody, ScrollBody,
          ContentSection, ErrorModal, Dropdown, DropdownOverlay,
          TitledInput, ButtonSection, Button, TextMd,
@@ -17,12 +17,13 @@ export component CreatePage inherits BasePage {
 
     property <SeedView> new-seed;
     property <CallbackResult> result: { level: ResultLevel.info, success: true, text: "", title: "" };
-    property <bool> has-errors: type-picker.selected-index == -1 || label-error || (CB.index-required(new-seed.seed-type) && index-error);
+    property <bool> has-errors: type-picker.selected-index == -1 || label-error || (CB.index-required(new-seed.seed-type) && index-error) || (new-seed.seed-type == SeedViewType.password-generated && length-error);
     property <bool> label-error: true;
     property <string> index-message: "";
     property <bool> index-error: index-message != "";
     property <string> next-available-index: "";
     property <string> password-length: "21";
+    property <bool> length-error: false;
     property <string> learn-more-url: "";
 
     property <bool> index-input-has-focus: false;
@@ -106,7 +107,7 @@ export component CreatePage inherits BasePage {
 
                     if type-picker.selected-index != -1: TitledInput {
                         title: TR2.lookup(TrId.CreateItemItemLabel);
-                        placeholder: TR2.lookup(TrId.CreateItemItemLabelFillerText);
+                        placeholder: CB.item-label-filler-text(new-seed.seed-type);
                         text: new-seed.label;
                         message: TR2.lookup(TrId.CreateItemSeedErrorsMissingField);
                         has-notice: self.message != "";
@@ -184,6 +185,7 @@ export component CreatePage inherits BasePage {
                             if (new-seed.seed-type == SeedViewType.password-generated): TitledInput {
                                 title: TR2.lookup(TrId.CreateItemLength);
                                 text: password-length;
+                                has-notice: self.text == "";
                                 input-type: InputType.number;
                                 bounded-number: true;
                                 minimum: "10";
@@ -195,7 +197,20 @@ export component CreatePage inherits BasePage {
 
                                 edited(text) => {
                                     password-length = text;
-                                    new-seed.password.password = CB.generate-password(new-seed.indexed-seed.index, password-length);
+
+                                    if (text == "") {
+                                        new-seed.password.password = "";
+                                        self.has-notice = true;
+                                        length-error = true;
+                                    } else if (!Utils.is-in-bounds(text, self.minimum, self.maximum)) {
+                                        new-seed.password.password = "";
+                                        self.has-notice = true;
+                                        length-error = true;
+                                    } else {
+                                        new-seed.password.password = CB.generate-password(new-seed.indexed-seed.index, text);
+                                        self.has-notice = false;
+                                        length-error = false;
+                                    }
                                 }
 
                                 accepted(text) => {

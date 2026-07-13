@@ -331,7 +331,7 @@ export component FileList inherits VerticalLayout {
         }
         if (root.file-list.num-files-excluded-by-search > 0) {
             if (root.file-list.num-files-excluded-by-search == 1) {
-                return TR2.lookup(TrId.EmptyNoMatchingFiles) + TR2.lookup(TrId.EmptyOneFileFiltered);
+                return TR2.lookup(TrId.EmptyNoMatchingFiles) + TR2.lookup(TrId.FilteredSingleOneFileFiltered);
             }
             return TR2.lookup(TrId.EmptyNoMatchingFiles) + TR2.format(TrId.EmptyFilesFiltered, [root.file-list.num-files-excluded-by-search]);
         }
