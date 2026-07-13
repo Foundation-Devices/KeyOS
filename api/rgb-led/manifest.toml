@@ -1,6 +1,6 @@
 manifestVersion = "0"
 [servers."os/rgb-server"]
-SetTo = { id = 1, type = "scalar" }
-SetAllTo = { id = 0, type = "scalar" }
-AnimateAllTo = { id = 2, type = "scalar" }
+SetTo = { id = 1, type = "scalar", permissionGroup = "peripherals.feedback", approval = "autoAllow" }
+SetAllTo = { id = 0, type = "scalar", permissionGroup = "peripherals.feedback", approval = "autoAllow" }
+AnimateAllTo = { id = 2, type = "scalar", permissionGroup = "peripherals.feedback", approval = "autoAllow" }
 SubscribeColorUpdates = { id = 3, type = "scalarEvent", cfg = "not(keyos)" }

@@ -119,6 +119,9 @@ pub enum ThreadState {
     /// on the SWI instruction, so the syscall re-runs once a turn opens up.
     #[allow(dead_code)]
     RetryMapZero,
+    /// Waiting for the global permissions broker to resolve a blocked message send; the
+    /// request data lives in the kernel's permission-request table under this id.
+    RetryPermission { request_id: u16 },
 }
 
 #[derive(Debug, Clone)]

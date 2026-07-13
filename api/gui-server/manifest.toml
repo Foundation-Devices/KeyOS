@@ -1,44 +1,44 @@
 manifestVersion = "0"
 [servers."os/gui-server"]
-RegisterAppMessage = { id = 0, type = "blockingArchive" }
-SubmitFrame = { id = 3, type = "move" }
-SwitchTo = { id = 4, type = "scalar" }
-UpdateKeyboard = { id = 5, type = "archive" }
-HideKeyboard = { id = 6, type = "scalar" }
+RegisterAppMessage = { id = 0, type = "blockingArchive", permissionGroup = "ui-and-input.app-surface", approval = "autoAllow" }
+SubmitFrame = { id = 3, type = "move", permissionGroup = "ui-and-input.app-surface", approval = "autoAllow" }
+SwitchTo = { id = 4, type = "scalar", approval = "autoAllow" }
+UpdateKeyboard = { id = 5, type = "archive", permissionGroup = "ui-and-input.keyboard-request", approval = "autoAllow" }
+HideKeyboard = { id = 6, type = "scalar", permissionGroup = "ui-and-input.keyboard-request", approval = "autoAllow" }
 GetDeviceFrame = { id = 7, type = "lendMut", cfg = "not(keyos)" }
-ShowCamera = { id = 9, type = "scalar" }
-HideCamera = { id = 10, type = "scalar" }
+ShowCamera = { id = 9, type = "scalar", permissionGroup = "peripherals.camera-use", approval = "grantOnFirstUse" }
+HideCamera = { id = 10, type = "scalar", permissionGroup = "peripherals.camera-use", approval = "grantOnFirstUse" }
 SetScaleFactor = { id = 13, type = "scalar", cfg = "not(keyos)" }
-KeyPressed = { id = 16, type = "scalar" }
-KeyReleased = { id = 17, type = "scalar" }
-RequestRedraw = { id = 23, type = "scalar" }
-Shutdown = { id = 29, type = "blockingScalar" }
+KeyPressed = { id = 16, type = "scalar", approval = "autoAllow" }
+KeyReleased = { id = 17, type = "scalar", approval = "autoAllow" }
+RequestRedraw = { id = 23, type = "scalar", permissionGroup = "ui-and-input.app-surface", approval = "autoAllow" }
+Shutdown = { id = 29, type = "blockingScalar", approval = "autoAllow" }
 SimulatePowerButton = { id = 33, type = "scalar", cfg = "not(keyos)" }
-SwitchToLauncher = { id = 34, type = "blockingScalar" }
-CloseApp = { id = 35, type = "blockingScalar" }
-AnimateNextFrame = { id = 39, type = "scalar" }
-NavigateTo = { id = 40, type = "blockingArchive" }
-ShowModal = { id = 44, type = "blockingArchive" }
-FinishResponse = { id = 45, type = "blockingArchive" }
-NavigationCancel = { id = 46, type = "scalar" }
-GetPendingNavRequest = { id = 47, type = "blockingArchive" }
-LoginSuccess = { id = 48, type = "scalar" }
+SwitchToLauncher = { id = 34, type = "blockingScalar", approval = "autoAllow" }
+CloseApp = { id = 35, type = "blockingScalar", approval = "autoAllow" }
+AnimateNextFrame = { id = 39, type = "scalar", permissionGroup = "ui-and-input.app-surface", approval = "autoAllow" }
+NavigateTo = { id = 40, type = "blockingArchive", approval = "autoAllow" }
+ShowModal = { id = 44, type = "blockingArchive", permissionGroup = "ui-and-input.brokered-modal", approval = "grantOnFirstUse" }
+FinishResponse = { id = 45, type = "blockingArchive", permissionGroup = "ui-and-input.navigation-response", approval = "autoAllow" }
+NavigationCancel = { id = 46, type = "scalar", permissionGroup = "ui-and-input.navigation-response", approval = "autoAllow" }
+GetPendingNavRequest = { id = 47, type = "blockingArchive", permissionGroup = "ui-and-input.navigation-response", approval = "autoAllow" }
+LoginSuccess = { id = 48, type = "scalar", approval = "autoAllow" }
 SimulateKey = { id = 52, type = "scalar", cfg = "not(keyos)" }
 SimulateScroll = { id = 53, type = "scalar", cfg = "not(keyos)" }
 CaptureScreen = { id = 54, type = "lendMut" }
 InjectTouch = { id = 55, type = "scalar" }
 InjectKey = { id = 56, type = "scalar" }
 RunApp = { id = 57, type = "blockingArchive" }
-UpdateKioskPolicy = { id = 58, type = "scalar" }
+UpdateKioskPolicy = { id = 58, type = "scalar", approval = "autoAllow" }
 IsLocked = { id = 59, type = "blockingScalar" }
 InjectPowerButton = { id = 60, type = "scalar" }
 
 # Privileged registrations
-ClaimAlertsRole = { id = 120, type = "blockingScalar" }
-ClaimLockScreenRole = { id = 121, type = "blockingScalar" }
-ClaimSwitcherRole = { id = 122, type = "blockingScalar" }
-ClaimOnboardingRole = { id = 123, type = "blockingScalar" }
-ClaimSettingsRole = { id = 124, type = "blockingScalar" }
-ClaimLauncherRole = { id = 125, type = "blockingScalar" }
-RegisterKeyboard = { id = 126, type = "blockingArchive" }
-RegisterControlCenter = { id = 127, type = "blockingArchive" }
+ClaimAlertsRole = { id = 120, type = "blockingScalar", approval = "autoAllow" }
+ClaimLockScreenRole = { id = 121, type = "blockingScalar", approval = "autoAllow" }
+ClaimSwitcherRole = { id = 122, type = "blockingScalar", approval = "autoAllow" }
+ClaimOnboardingRole = { id = 123, type = "blockingScalar", approval = "autoAllow" }
+ClaimSettingsRole = { id = 124, type = "blockingScalar", approval = "autoAllow" }
+ClaimLauncherRole = { id = 125, type = "blockingScalar", approval = "autoAllow" }
+RegisterKeyboard = { id = 126, type = "blockingArchive", approval = "autoAllow" }
+RegisterControlCenter = { id = 127, type = "blockingArchive", approval = "autoAllow" }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { IconSize, Palette } from "@ui/theme.slint";
+import { Palette } from "@ui/theme.slint";
 import { JumboIcon } from "./jumbo-icon.slint";
 import { Icon } from "./icon.slint";
 
@@ -14,7 +14,8 @@ export component WrappedIcon inherits JumboIcon {
 
     Icon {
         name: inner-icon;
-        size: IconSize.px96;
+        // Track the outer icon so a resized circle keeps the designed 96-in-184 proportion.
+        size: root.height * 96 / 184;
         color: Palette.content-brand;
     }
 }

@@ -54,6 +54,69 @@ pub struct Message {
     pub r#type: MessageType,
     pub description: Option<String>,
     pub cfg: Option<String>,
+    /// Permission subgroup this message belongs to, as `"<group>.<subgroup>"` (e.g.
+    /// `"peripherals.camera-use"`); groups the message in the permission UI. Use a
+    /// group that exists in the app manager's `GROUP_LABELS`, or the UI falls back
+    /// to showing the raw key.
+    #[serde(rename = "permissionGroup", default, skip_serializing_if = "Option::is_none")]
+    pub permission_group: Option<String>,
+    /// The signature a sender must carry to hold this permission. Absent defaults from
+    /// [`Message::permission_group`]: a grouped message is grantable to third-party apps, so it
+    /// defaults to [`RequiredSignature::ThirdParty`]; an ungrouped message defaults to
+    /// [`RequiredSignature::Foundation`]. Set explicitly to override.
+    #[serde(rename = "requiredSignature", default, skip_serializing_if = "Option::is_none")]
+    pub required_signature: Option<RequiredSignature>,
+    /// How the permission is granted to a sideloaded app. Defaults to
+    /// [`ApprovalBehavior::NotUserGrantable`] when a message declares no `approval`.
+    #[serde(default, skip_serializing_if = "ApprovalBehavior::is_not_user_grantable")]
+    pub approval: ApprovalBehavior,
+}
+
+impl Message {
+    /// The signature a sender must carry to hold this permission, applying the
+    /// group-derived default when the manifest sets none.
+    pub fn required_signature(&self) -> RequiredSignature {
+        self.required_signature.unwrap_or({
+            // A message carrying a permission group is grantable to third-party apps; an
+            // ungrouped message is Foundation-only (built-in services and Foundation apps).
+            if self.permission_group.is_some() {
+                RequiredSignature::ThirdParty
+            } else {
+                RequiredSignature::Foundation
+            }
+        })
+    }
+}
+
+/// The signature a sender must carry to be granted a message permission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RequiredSignature {
+    /// Any validly signed app, including sideloaded third-party apps.
+    ThirdParty,
+    /// Only Foundation-signed processes (built-in services and Foundation apps).
+    Foundation,
+}
+
+/// How a message permission is granted to a sideloaded app.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalBehavior {
+    /// Granted automatically when the sender policy is satisfied.
+    AutoAllow,
+    /// The user is prompted once; the answer persists.
+    GrantOnFirstUse,
+    /// Never grantable through the permission UI. The default when a message declares no
+    /// `approval`.
+    #[default]
+    NotUserGrantable,
+}
+
+impl ApprovalBehavior {
+    pub fn is_approval_based(self) -> bool { matches!(self, Self::GrantOnFirstUse) }
+
+    /// Whether this is the default (used to omit it from serialized manifests).
+    pub fn is_not_user_grantable(&self) -> bool { matches!(self, Self::NotUserGrantable) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

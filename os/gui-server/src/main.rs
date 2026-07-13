@@ -18,6 +18,8 @@ mod keyboard;
 mod layers;
 mod modal;
 mod navigation;
+#[cfg(not(feature = "recovery-os"))]
+mod permissions;
 mod pwrbutton;
 mod registry;
 mod rgbled;
@@ -50,7 +52,7 @@ use {
     log::{debug, error, warn},
     server::{ArchiveRequest, MessageId as _, Server, ServerContext},
     std::{
-        collections::HashMap,
+        collections::{HashMap, VecDeque},
         time::{Duration, Instant},
     },
     xous::{MemoryFlags, MemoryRange, SystemEvent, CID, PID},
@@ -183,6 +185,12 @@ pub struct Gui {
 
     waiting_for_pid: Option<(PID, Option<ArchiveRequest<NavigateTo>>)>,
     notified_nav_request: Option<(PID, Vec<u8>)>,
+    /// Kernel ids of parked permission requests waiting for a display slot; each is re-resolved
+    /// against the grant state when it is popped for display.
+    #[cfg(not(feature = "recovery-os"))]
+    pending_permission_requests: VecDeque<u16>,
+    #[cfg(not(feature = "recovery-os"))]
+    app_manager: AppManagerApi,
     #[cfg(not(keyos))]
     pending_restore_name: Option<String>,
 
@@ -234,6 +242,16 @@ impl Server for Gui {
             OnFreeMemoryBelowThreshold::ID,
         )
         .expect("register free memory alert handler");
+
+        // The recovery image has no app manager to resolve prompts, so the permission broker
+        // is compiled out there and never subscribes.
+        #[cfg(not(feature = "recovery-os"))]
+        xous::register_system_event_handler(
+            SystemEvent::PermissionRequest,
+            context.sid(),
+            PermissionRequest::ID,
+        )
+        .expect("register permission request handler");
 
         #[cfg(keyos)]
         self.subscribe_to_gpio(context);
@@ -311,6 +329,10 @@ impl Gui {
             camera_window: Default::default(),
             waiting_for_pid: None,
             notified_nav_request: None,
+            #[cfg(not(feature = "recovery-os"))]
+            pending_permission_requests: VecDeque::new(),
+            #[cfg(not(feature = "recovery-os"))]
+            app_manager: AppManagerApi::default(),
             #[cfg(not(keyos))]
             pending_restore_name: None,
             animation_fb,
@@ -1083,6 +1105,12 @@ impl Gui {
         self.update_window_visibility();
         self.update_navigation_request_state();
         self.update_layers();
+
+        // Any transition may have moved us into a state that can host a queued permission
+        // prompt (a modal finished, or the device just unlocked); try to show the next one.
+        // Showing it re-enters `change_state` with a modal state, where this is a no-op.
+        #[cfg(not(feature = "recovery-os"))]
+        self.show_next_permission_prompt();
     }
 }
 

@@ -9,7 +9,7 @@ template = ["gui-app", "fs-generic"]
 "os/app-manager" = ["LaunchAppBlocking"]
 "os/bt" = ["GetBtAddr", "SubscribeBleState"]
 "os/haptics" = ["Vibrate"]
-"os/fs" = ["FormatEncryptedVolume", "Remove", "GetSystemWriteAccess", "GetUsbReadAccess", "GetSystemReadAccess"]
+"os/fs" = ["FormatEncryptedVolume", "Remove", "GetSystemWriteAccess", "GetUsbReadAccess", "GetSystemReadAccess", "FlushFs"]
 "os/gui-server" = ["SwitchToLauncher", "ClaimOnboardingRole"]
 "os/keycard" = [
     "IdentifyKeycard",

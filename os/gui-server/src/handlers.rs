@@ -10,6 +10,8 @@ mod capture;
 mod framebuffer;
 mod keyboard;
 mod navigation;
+#[cfg(not(feature = "recovery-os"))]
+pub(crate) mod permissions;
 mod register;
 mod scalar;
 #[cfg(not(feature = "recovery-os"))]
@@ -27,6 +29,24 @@ pub(crate) struct OnVsyncMessage;
 
 #[derive(Debug, Clone, Copy, server::Message)]
 pub(crate) struct OnFreeMemoryBelowThreshold;
+
+/// A blocked send parked on the permission broker; everything about it is fetched from the
+/// kernel by this id and answered by this id. The broker is compiled out on recovery.
+#[cfg(not(feature = "recovery-os"))]
+#[derive(Debug, Clone, Copy, server::Message)]
+pub(crate) struct PermissionRequest {
+    pub request_id: u16,
+}
+
+#[cfg(not(feature = "recovery-os"))]
+impl FromScalar<4> for PermissionRequest {
+    fn from_scalar(value: [u32; 4]) -> Self { Self { request_id: value[0] as u16 } }
+}
+
+#[cfg(not(feature = "recovery-os"))]
+impl AsScalar<4> for PermissionRequest {
+    fn as_scalar(&self) -> [u32; 4] { [self.request_id as u32, 0, 0, 0] }
+}
 
 #[derive(Debug, Clone, Copy, server::Message)]
 pub(crate) struct CloseAppTimeout;

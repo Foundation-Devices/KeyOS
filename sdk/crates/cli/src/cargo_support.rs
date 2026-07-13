@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT
 
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 
@@ -33,6 +34,42 @@ pub fn configure_host_build_environment(cmd: &mut Command) {
 
     #[cfg(not(target_os = "macos"))]
     let _ = cmd;
+}
+
+pub fn ensure_development_environment(command_name: &str) -> anyhow::Result<()> {
+    println!("Checking Nix environment...");
+
+    let in_nix = std::env::var("IN_NIX_SHELL").is_ok()
+        || std::env::var("NIX_BUILD_TOP").is_ok()
+        || std::env::var("FOUNDATION_SDK_ROOT").is_ok();
+
+    if in_nix {
+        return Ok(());
+    }
+
+    eprintln!("Nix development environment is not active.");
+    print!("Setup nix environment now? [Y/n]: ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim().to_lowercase();
+
+    if input.is_empty() || input == "y" || input == "yes" {
+        let status = Command::new("foundation").arg("develop").status();
+
+        match status {
+            Ok(s) if s.success() => {
+                println!("Please run '{command_name}' again inside the nix shell.");
+                std::process::exit(0);
+            }
+            _ => {
+                anyhow::bail!("Failed to start nix environment");
+            }
+        }
+    } else {
+        anyhow::bail!("This command requires nix environment. Run 'foundation develop' first.");
+    }
 }
 
 pub(crate) fn rendered_compiler_message(line: &str, project_root: &Path, sdk_root: &Path) -> Option<String> {

@@ -38,6 +38,9 @@ pub struct SystemServices {
 
     /// PID of the process that "owns" the current panic message
     panic_message_pid: Option<PID>,
+
+    /// In-flight permission requests parked on the permission broker
+    pub permission_requests: crate::permission_requests::PermissionRequests,
 }
 
 #[cfg(not(keyos))]
@@ -46,6 +49,7 @@ std::thread_local!(static SYSTEM_SERVICES: core::cell::RefCell<SystemServices> =
     servers: [const { None }; 128],
     panic_message: BufStr::new(),
     panic_message_pid: None,
+    permission_requests: crate::permission_requests::PermissionRequests::new(),
 }));
 
 #[cfg(keyos)]
@@ -55,6 +59,7 @@ static mut SYSTEM_SERVICES: SystemServices = SystemServices {
     servers: [const { None }; MAX_SERVER_COUNT],
     panic_message: BufStr::new(),
     panic_message_pid: None,
+    permission_requests: crate::permission_requests::PermissionRequests::new(),
 };
 
 impl SystemServices {
@@ -275,6 +280,24 @@ impl SystemServices {
         Scheduler::with_mut(|s| s.activate_current(self))
     }
 
+    /// Rewind `tid` in `pid` onto its `svc` so the parked syscall re-executes once readied.
+    /// Cross-process twin of [`Self::retry_syscall`]; the caller marks the thread Ready.
+    pub fn retry_syscall_pid(&mut self, pid: PID, tid: TID) -> Result<(), Error> {
+        // Temporarily switch into the target process memory space to reach its thread
+        // contexts, and switch back before propagating any rewind error.
+        let current_pid = current_pid();
+        if current_pid == pid {
+            return ArchProcess::current().retry_swi_instruction(tid);
+        }
+
+        self.process(pid)?.activate();
+        let result = ArchProcess::current().retry_swi_instruction(tid);
+
+        // Return to the original memory space.
+        self.process(current_pid).expect("couldn't switch back after rewinding syscall").activate();
+        result
+    }
+
     pub fn set_thread_result(&mut self, pid: PID, tid: TID, result: xous::Result) -> Result<(), Error> {
         // Temporarily switch into the target process memory space
         // in order to pass the return value.
@@ -290,6 +313,24 @@ impl SystemServices {
         // Return to the original memory space.
         self.process(current_pid).expect("couldn't switch back after setting context result").activate();
         Ok(())
+    }
+
+    /// Release a sender parked on a permission request that has just been invalidated,
+    /// delivering `error`. The caller must pass a sender it just obtained from
+    /// `tombstone_next`, which only yields still-valid requests, and a valid request always
+    /// still has its sender parked (a process tombstones its own parked sends without failing
+    /// them during teardown), so the sender is guaranteed to be parked on exactly this request.
+    fn fail_permission_request(&mut self, sender_pid: PID, sender_tid: TID, request_id: u16, error: Error) {
+        assert!(
+            self.process(sender_pid).map(|p| p.thread_state(sender_tid))
+                == Ok(ThreadState::RetryPermission { request_id }),
+            "fail_permission_request: sender {sender_pid:?}/{sender_tid} is not parked on request {request_id}",
+        );
+        self.set_thread_result(sender_pid, sender_tid, xous::Result::Error(error))
+            .expect("parked sender must accept its failure result");
+        self.process_mut(sender_pid)
+            .expect("parked sender's process must exist")
+            .set_thread_state(sender_tid, ThreadState::Ready);
     }
 
     /// Move memory from one process to another.
@@ -801,6 +842,16 @@ impl SystemServices {
             ConnectionSlot::Connected { sidx, .. } => {
                 let sidx = *sidx as usize;
                 *connection_slot = ConnectionSlot::Free;
+                // A permission request parked on this slot must never be granted to whatever
+                // the slot is reconnected to; release each waiting sender now with an error
+                // rather than leave it blocked on a connection that is gone.
+                let disconnecting_pid = current_pid();
+                while let Some((s_pid, s_tid, id)) = self
+                    .permission_requests
+                    .tombstone_next(|entry| entry.sender_pid == disconnecting_pid && entry.cid == cid)
+                {
+                    self.fail_permission_request(s_pid, s_tid, id, Error::ServerNotFound);
+                }
                 self.send_server_event(sidx, ServerEvent::Disconnected, Default::default())?;
                 klog!("Removing server from connection map");
             }
@@ -920,6 +971,12 @@ impl SystemServices {
             }
         }
 
+        // destroy_sidx above already released (via fail_permission_request) every sender
+        // parked on a server this process hosted. Now tombstone this process's own parked
+        // sends so a recycled pid can't match an old request; no wake, since its threads are
+        // being torn down anyway.
+        while self.permission_requests.tombstone_next(|entry| entry.sender_pid == pid).is_some() {}
+
         if let Some(ppid) = self.current_process().ppid {
             self.send_system_event(ppid, SystemEvent::ChildTerminated, [ret as _, 0, 0, 0]).ok();
         }
@@ -959,6 +1016,15 @@ impl SystemServices {
     }
 
     fn destroy_sidx(&mut self, sidx: usize) {
+        // A permission request parked on this server can never be granted once the slot is
+        // gone or recycled, even if the sender later reconnects the same cid elsewhere.
+        // Release each waiting sender now, before the server is torn down below.
+        while let Some((s_pid, s_tid, id)) =
+            self.permission_requests.tombstone_next(|entry| entry.sidx == sidx)
+        {
+            self.fail_permission_request(s_pid, s_tid, id, Error::ServerNotFound);
+        }
+
         // Return and dequeue any remaining messages
         self.servers[sidx].take().unwrap().destroy(self);
 
@@ -984,25 +1050,36 @@ impl SystemServices {
         Ok(())
     }
 
-    fn send_system_event(&mut self, dst_pid: PID, event: SystemEvent, args: [usize; 4]) -> Result<(), Error> {
+    /// Deliver `event` to `dst_pid` if it registered a handler for it. Returns `true` when a
+    /// handler received the message, `false` when the process has no handler for this event.
+    pub fn send_system_event(
+        &mut self,
+        dst_pid: PID,
+        event: SystemEvent,
+        args: [usize; 4],
+    ) -> Result<bool, Error> {
         if let Some((sid, id)) = self.process(dst_pid)?.get_event_handler(event) {
             if let Some(sidx) = self.sidx_from_sid(sid, dst_pid) {
                 let msg = Message::new_scalar(id, args[0], args[1], args[2], args[3]);
                 crate::syscall::send_message_inner(self, 0, sidx, msg)?;
+                return Ok(true);
             }
         }
-        Ok(())
+        Ok(false)
     }
 
-    #[cfg(keyos)]
-    pub fn broadcast_event(&mut self, event: SystemEvent, args: [usize; 4]) -> Result<(), Error> {
+    /// Deliver `event` to every process subscribed to it, returning how many actually received
+    /// it. A return of `0` means no handler is registered anywhere, which lets callers avoid
+    /// waiting on a response that can't come.
+    pub fn broadcast_event(&mut self, event: SystemEvent, args: [usize; 4]) -> Result<usize, Error> {
+        let mut delivered = 0;
         for pid in 1..=MAX_PROCESS_COUNT as u8 {
             let pid = PID::new(pid).unwrap();
-            if self.process(pid).is_ok() {
-                self.send_system_event(pid, event, args)?;
+            if self.process(pid).is_ok() && self.send_system_event(pid, event, args)? {
+                delivered += 1;
             }
         }
-        Ok(())
+        Ok(delivered)
     }
 
     /// Terminates the process with the given PID and return code.
@@ -1066,6 +1143,9 @@ impl SystemServices {
                         } else {
                             writeln!(output, "RetryQueueFull(NONEXISTENT)").ok()
                         }
+                    }
+                    ThreadState::RetryPermission { request_id } => {
+                        writeln!(output, "RetryPermission(request_id={request_id})").ok()
                     }
                     ThreadState::WaitBlocking { sidx } => {
                         if let Some(_server) = self.server_from_sidx(sidx) {

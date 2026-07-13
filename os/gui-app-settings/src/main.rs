@@ -27,6 +27,7 @@ use slint_keyos_platform::{
             filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
             lockscreen::{VerifyPinOptions, VerifyPinResult},
         },
+        InputMessage,
     },
     navigation::select_file,
     navigation::verify_pin,
@@ -97,6 +98,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     setup_callbacks(state);
     setup_save_settings_global(state);
     resume_update_if_needed(state);
+    setup_navigation_input(&cx, state);
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, PERIODIC_UPDATE_INTERVAL, move || {
@@ -107,6 +109,40 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.run().expect("UI running");
+}
+
+fn setup_navigation_input(cx: &AppContext, state: StoredValue<AppState>) {
+    cx.set_input_handler({
+        let gui = cx.gui.clone();
+        move |input| {
+            if input.msg != InputMessage::NavigationFocused {
+                return;
+            }
+
+            let Ok(Some(nav_bytes)) = gui.navigate_pending() else {
+                log::error!("Navigation focused but no pending nav request");
+                return;
+            };
+
+            let Ok(route) = std::str::from_utf8(&nav_bytes) else {
+                log::error!("Settings navigation request was not a UTF-8 route");
+                return;
+            };
+
+            if let Some(app_id) = app_details_route_app_id(route) {
+                select_installed_app(state, app_id);
+            }
+
+            let ui = state.borrow().ui();
+            ui.global::<Navigate>()
+                .invoke_navigate(route.into(), NavigateOptions { replace: true, animate: Animate::None });
+        }
+    });
+}
+
+fn app_details_route_app_id(route: &str) -> Option<&str> {
+    let query = route.strip_prefix("/settings/apps/details?")?;
+    query.split('&').find_map(|param| param.strip_prefix("app_id="))
 }
 
 fn setup_settings_global(state: StoredValue<AppState>) {
@@ -296,6 +332,10 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     globals.on_refresh_installed_apps(move || {
         refresh_installed_apps(state);
     });
+    globals.on_select_installed_app(move |app_id| select_installed_app(state, app_id.as_str()));
+    globals.on_set_app_permission_subgroup_grant(move |app_id, subgroup, approved| {
+        set_app_permission_subgroup_grant(state, app_id.as_str(), subgroup.as_str(), approved)
+    });
     globals.on_launch_installed_app(move |app_id| {
         let requested_app_id = app_id.to_string();
         let Ok(app_id) = app_manager::decode_app_id_str(&requested_app_id) else {
@@ -332,20 +372,10 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     let lang = locale.lang();
     let apps = state.borrow().app_manager.list_apps(lang, app_manager::AppFilter::third_party_only());
 
-    let installed_apps = apps
-        .into_iter()
-        .map(|app| InstalledApp {
-            app_id: app.app_id.into(),
-            name: app.name.into(),
-            publisher: app.publisher.into(),
-            can_launch: app.can_launch,
-            can_remove: app.can_remove,
-            version: app.version.into(),
-            size: format_app_size(app.size_bytes, lang).into(),
-            description: app.description.into(),
-            permission_groups: app_permission_groups(app.permissions),
-        })
-        .collect::<Vec<_>>();
+    let installed_apps = apps.iter().map(|app| installed_app(app.clone(), lang)).collect::<Vec<_>>();
+    // Cache the full list so the details page and permission toggles read from it rather than
+    // re-requesting each app.
+    *state.borrow().installed_apps.borrow_mut() = apps;
 
     // Flatten the apps + the fixed settings section into one row model so the
     // page can render them in a single virtualized ListView (Slint can't
@@ -409,15 +439,102 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     ui.global::<AppManagementGlobal>().set_apps_list_rows(ModelRc::new(VecModel::from(rows)));
 }
 
+fn select_installed_app(state: StoredValue<AppState>, app_id: &str) -> bool {
+    let locale = state.borrow().settings.get_locale();
+    let lang = locale.lang();
+    let app = state.borrow().installed_apps.borrow().iter().find(|a| a.app_id == app_id).cloned();
+    let Some(app) = app else {
+        log::warn!("could not select installed app {app_id}");
+        return false;
+    };
+
+    state.borrow().ui().global::<AppManagementGlobal>().set_selected_app(installed_app(app, lang));
+    true
+}
+
+/// A revoked grant only affects future permission checks the kernel routes through the
+/// broker: a running app keeps the connection permissions it was already granted. Close the
+/// app gracefully so the revocation takes effect now. gui-server refuses to close essential
+/// apps, and grants only exist for sideloaded apps anyway; an app without a window keeps its
+/// permissions until it exits.
+fn close_running_app_after_revoke(state: StoredValue<AppState>, app_id: &str) {
+    let Ok(app_id) = app_manager::decode_app_id_str(app_id) else {
+        return;
+    };
+    let Ok(Some(pid)) = server::xous::app_id_to_pid(&app_id) else {
+        return;
+    };
+    if let Err(error) = state.borrow().gui.close_app(pid) {
+        log::warn!("failed to close app 0x{app_id} (pid {pid}) after a permission revoke: {error:?}");
+    }
+}
+
+/// The Settings permission toggles are a persistent Allow/Deny choice; the transient
+/// "Not Now" decision only comes from the permission prompt, never from this UI.
+fn grant_decision(approved: bool) -> app_manager::PermissionGrantDecision {
+    if approved {
+        app_manager::PermissionGrantDecision::Allow
+    } else {
+        app_manager::PermissionGrantDecision::Deny
+    }
+}
+
+fn set_app_permission_subgroup_grant(
+    state: StoredValue<AppState>,
+    app_id: &str,
+    subgroup: &str,
+    approved: bool,
+) -> bool {
+    let result =
+        state.borrow().app_manager.set_app_permission_grant(app_id, subgroup, grant_decision(approved));
+    if result != app_manager::SetAppPermissionGrantResult::Updated {
+        log::error!("failed to set permission grant for app={app_id} subgroup={subgroup}: {result:?}");
+        return false;
+    }
+
+    if !approved {
+        close_running_app_after_revoke(state, app_id);
+    }
+    // Refresh the cache before re-selecting: select_installed_app reads it, so it must hold the
+    // post-toggle grant state or the details switch lags one action.
+    refresh_installed_apps(state);
+    select_installed_app(state, app_id);
+    true
+}
+
+fn installed_app(app: app_manager::InstalledAppInfo, lang: &str) -> InstalledApp {
+    InstalledApp {
+        app_id: app.app_id.into(),
+        name: app.name.into(),
+        publisher: app.publisher.into(),
+        can_launch: app.can_launch,
+        can_remove: app.can_remove,
+        version: app.version.into(),
+        size: format_app_size(app.size_bytes, lang).into(),
+        description: app.description.into(),
+        basic_permissions: app_permission_groups(app.basic_permissions),
+        approvable_permissions: app_permission_groups(app.approvable_permissions),
+    }
+}
+
 fn app_permission_groups(
-    permissions: Vec<app_manager::InstalledAppPermissionGroup>,
+    groups: Vec<app_manager::InstalledAppPermissionGroup>,
 ) -> ModelRc<AppPermissionGroup> {
-    let groups = permissions
+    let groups = groups
         .into_iter()
         .map(|group| AppPermissionGroup {
-            server: group.server.into(),
-            permissions: ModelRc::new(VecModel::from(
-                group.messages.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+            key: group.key.into(),
+            label: group.label.into(),
+            subgroups: ModelRc::new(VecModel::from(
+                group
+                    .subgroups
+                    .into_iter()
+                    .map(|subgroup| AppPermissionSubgroup {
+                        key: subgroup.key.into(),
+                        label: subgroup.label.into(),
+                        approved: subgroup.approved,
+                    })
+                    .collect::<Vec<_>>(),
             )),
         })
         .collect::<Vec<_>>();
@@ -571,9 +688,7 @@ fn remove_installed_app(state: StoredValue<AppState>, app_id: &str) -> SharedStr
         Ok(app_manager::RemoveInstalledAppResult::Removed)
         | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {
             refresh_installed_apps(state);
-            state.borrow().ui().global::<AppManagementGlobal>().set_selected_app_permission_groups(
-                ModelRc::new(VecModel::from(Vec::<AppPermissionGroup>::new())),
-            );
+            state.borrow().ui().global::<AppManagementGlobal>().set_selected_app(InstalledApp::default());
             SharedString::default()
         }
         Ok(app_manager::RemoveInstalledAppResult::Running) => {

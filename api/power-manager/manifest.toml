@@ -1,14 +1,14 @@
 manifestVersion = "0"
 [servers."os/power-manager"]
 SetPeripheralEnabled = { id = 0, type = "blockingScalar", cfg = "keyos" }
-Reboot = { id = 2, type = "blockingScalar" }
+Reboot = { id = 2, type = "blockingScalar", approval = "autoAllow" }
 
 [servers."os/power-manager-ext"]
-GetStatus = { id = 1, type = "blockingScalar" }
+GetStatus = { id = 1, type = "blockingScalar", permissionGroup = "power-and-firmware.battery-status", approval = "autoAllow" }
 SetUsbBoost = { id = 2, type = "blockingScalar" }
 SetOtgPriority = { id = 3, type = "scalar", cfg = "keyos" }
-GetExtendedStatus = { id = 4, type = "blockingArchive" }
+GetExtendedStatus = { id = 4, type = "blockingArchive", permissionGroup = "power-and-firmware.battery-status", approval = "autoAllow" }
 ClearChargeFault = { id = 5, type = "scalar" }
-StatusSubscribe = { id = 6, type = "scalarEvent" }
+StatusSubscribe = { id = 6, type = "scalarEvent", permissionGroup = "power-and-firmware.battery-status", approval = "autoAllow" }
 Shutdown = { id = 7, type = "blockingScalar" }
 SetBatteryPercent = { id = 20, type = "scalar", cfg = "not(keyos)" }

@@ -1,37 +1,37 @@
 manifestVersion = "0"
 [servers."os/ql-prestart"]
-StartWithoutFilesystem = { id = 64, type = "blockingScalar" }
+StartWithoutFilesystem = { id = 64, type = "blockingScalar", approval = "autoAllow" }
 
 [servers."os/quantum-link"]
-PublishPsbt = { id = 1, type = "blockingArchive" }
-SendAccountUpdate = { id = 2, type = "blockingArchive" }
-GetXidDocument = { id = 3, type = "blockingArchive" }
-SubscribeExchangeRate = { id = 10, type = "archiveEvent" }
+PublishPsbt = { id = 1, type = "blockingArchive", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+SendAccountUpdate = { id = 2, type = "blockingArchive", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+GetXidDocument = { id = 3, type = "blockingArchive", approval = "autoAllow" }
+SubscribeExchangeRate = { id = 10, type = "archiveEvent", permissionGroup = "network-and-pairing.status-and-rates", approval = "autoAllow" }
 SubscribeFirmwareFetch = { id = 11, type = "archiveEvent" }
-SubscribeEnvoyStatus = { id = 12, type = "archiveEvent" }
-SubscribeSignPsbt = { id = 14, type = "archiveEvent" }
-SubscribeAccountUpdate = { id = 15, type = "archiveEvent" }
-SubscribePairingEvent = { id = 16, type = "archiveEvent" }
+SubscribeEnvoyStatus = { id = 12, type = "archiveEvent", permissionGroup = "network-and-pairing.status-and-rates", approval = "autoAllow" }
+SubscribeSignPsbt = { id = 14, type = "archiveEvent", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+SubscribeAccountUpdate = { id = 15, type = "archiveEvent", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+SubscribePairingEvent = { id = 16, type = "archiveEvent", approval = "autoAllow" }
 SubscribeOnboardingState = { id = 18, type = "archiveEvent" }
-SubscribeSecurityCheckState = { id = 19, type = "archiveEvent" }
-CheckFirmwareUpdate = { id = 20, type = "blockingArchive" }
-StartFirmwareUpdate = { id = 21, type = "blockingArchive" }
-BackupShard = { id = 22, type = "blockingArchive" }
-RestoreShard = { id = 23, type = "blockingArchive" }
-NotifyOnboardingState = { id = 24, type = "blockingArchive" }
-EnvoyMagicBackupEnabled = { id = 27, type = "blockingArchive" }
-SubscribePublishedAccountUpdate = { id = 28, type = "archiveEvent" }
-SubscribeExchangeRateHistory = { id = 29, type = "archiveEvent" }
+SubscribeSecurityCheckState = { id = 19, type = "archiveEvent", approval = "autoAllow" }
+CheckFirmwareUpdate = { id = 20, type = "blockingArchive", approval = "autoAllow" }
+StartFirmwareUpdate = { id = 21, type = "blockingArchive", approval = "autoAllow" }
+BackupShard = { id = 22, type = "blockingArchive", approval = "autoAllow" }
+RestoreShard = { id = 23, type = "blockingArchive", approval = "autoAllow" }
+NotifyOnboardingState = { id = 24, type = "blockingArchive", approval = "autoAllow" }
+EnvoyMagicBackupEnabled = { id = 27, type = "blockingArchive", approval = "autoAllow" }
+SubscribePublishedAccountUpdate = { id = 28, type = "archiveEvent", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+SubscribeExchangeRateHistory = { id = 29, type = "archiveEvent", permissionGroup = "network-and-pairing.status-and-rates", approval = "autoAllow" }
 SendMagicBackupEvent = { id = 30, type = "blockingArchive" }
 SubscribeRestoreMagicBackup = { id = 31, type = "archiveEvent" }
 SendRestoreMagicBackupResult = { id = 32, type = "blockingArchive" }
 AwaitCreateMagicBackupResult = { id = 34, type = "blockingArchive" }
-StartRestoreMagicBackup = { id = 35, type = "blockingArchive" }
+StartRestoreMagicBackup = { id = 35, type = "blockingArchive", approval = "autoAllow" }
 MagicBackupStatus = { id = 37, type = "blockingArchive" }
-UnpairFromEnvoy = { id = 46, type = "blockingArchive" }
-NotifyFirmwareInstall = { id = 39, type = "blockingArchive" }
-SendApplyPassphrase = { id = 40, type = "blockingArchive" }
-SendPrimeMagicBackupEnabled = { id = 42, type = "blockingArchive" }
-SubscribeConnectionStatus = { id = 43, type = "scalarEvent" }
-EnvoyTimezone = { id = 44, type = "blockingArchive" }
-SendPrimeFiatPreference = { id = 45, type = "blockingArchive" }
+UnpairFromEnvoy = { id = 46, type = "blockingArchive", approval = "autoAllow" }
+NotifyFirmwareInstall = { id = 39, type = "blockingArchive", approval = "autoAllow" }
+SendApplyPassphrase = { id = 40, type = "blockingArchive", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }
+SendPrimeMagicBackupEnabled = { id = 42, type = "blockingArchive", approval = "autoAllow" }
+SubscribeConnectionStatus = { id = 43, type = "scalarEvent", permissionGroup = "network-and-pairing.status-and-rates", approval = "autoAllow" }
+EnvoyTimezone = { id = 44, type = "blockingArchive", permissionGroup = "network-and-pairing.status-and-rates", approval = "autoAllow" }
+SendPrimeFiatPreference = { id = 45, type = "blockingArchive", permissionGroup = "network-and-pairing.wallet-sync", requiredSignature = "foundation", approval = "grantOnFirstUse" }

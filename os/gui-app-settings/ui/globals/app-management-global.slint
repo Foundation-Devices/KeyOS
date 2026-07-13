@@ -1,9 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+// One permission subgroup: the unit the user sees and toggles. The individual
+// messages behind it stay internal to the OS.
+export struct AppPermissionSubgroup {
+    key: string,
+    label: string,
+    approved: bool,
+}
+
+// A top-level permission group, under which the subgroups collapse.
 export struct AppPermissionGroup {
-    server: string,
-    permissions: [string],
+    key: string,
+    label: string,
+    subgroups: [AppPermissionSubgroup],
 }
 
 export struct InstalledApp {
@@ -15,7 +25,8 @@ export struct InstalledApp {
     version: string,
     size: string,
     description: string,
-    permission_groups: [AppPermissionGroup],
+    basic_permissions: [AppPermissionGroup],
+    approvable_permissions: [AppPermissionGroup],
 }
 
 // A single row in the unified, virtualized apps list. The list mixes section
@@ -62,9 +73,11 @@ export enum TrustedPublisherImportResult {
 
 export global AppManagementGlobal {
     in property <[AppsListRow]> apps-list-rows: [];
-    in-out property <[AppPermissionGroup]> selected-app-permission-groups: [];
+    in-out property <InstalledApp> selected-app;
     callback refresh-installed-apps();
+    callback select-installed-app(string) -> bool;
     callback launch-installed-app(string);
+    callback set-app-permission-subgroup-grant(string, string, bool) -> bool;
     callback remove-installed-app(string) -> string;
     pure callback app-icon(string) -> image;
 

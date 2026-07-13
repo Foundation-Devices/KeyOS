@@ -15,12 +15,24 @@ use log::debug;
 use server::ArchiveRequest;
 use xous::PID;
 
+#[cfg(not(feature = "recovery-os"))]
+use crate::permissions::PendingPermissionPrompt;
 use crate::touch::TouchGestureOrigin;
 use crate::{AppCloseState, Gui, GuiState};
 
 const BACKGROUND_DARKEN_ALPHA_MAX: u8 = 255 - 24; // The higher, the darker
 
 const MODAL_SLIDE_STEP_PX: usize = 64;
+
+/// What the modal answers when it finishes: an external `ShowModal` IPC request from another
+/// process, or an internally originated permission prompt whose outcome is reported back to
+/// the kernel instead of a caller.
+#[derive(Debug)]
+pub(crate) enum ModalRequest {
+    External(ArchiveRequest<ShowModal>),
+    #[cfg(not(feature = "recovery-os"))]
+    Permission(PendingPermissionPrompt),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModalStateInner {
@@ -43,7 +55,7 @@ pub(crate) struct ModalState {
     state: ModalStateInner,
     top: PID,
     bottom: PID,
-    navigation_request: Option<ArchiveRequest<ShowModal>>,
+    navigation_request: Option<ModalRequest>,
 }
 
 impl ModalState {
@@ -91,14 +103,23 @@ impl ModalState {
     }
 
     pub fn respond(&mut self, result: NavigationResult) {
-        if let Some(r) = self.navigation_request.take() {
-            let _ = r.response.respond(result);
+        match self.navigation_request.take() {
+            Some(ModalRequest::External(r)) => {
+                let _ = r.response.respond(result);
+            }
+            #[cfg(not(feature = "recovery-os"))]
+            Some(ModalRequest::Permission(prompt)) => prompt.finish(result),
+            None => {}
         }
         self.state = ModalStateInner::Collapsing;
     }
 
     pub fn get_navigation_request(&self) -> Option<&[u8]> {
-        self.navigation_request.as_ref().map(|r| r.message.args.as_slice())
+        self.navigation_request.as_ref().map(|request| match request {
+            ModalRequest::External(r) => r.message.args.as_slice(),
+            #[cfg(not(feature = "recovery-os"))]
+            ModalRequest::Permission(prompt) => prompt.args(),
+        })
     }
 
     pub fn is_waiting(&self) -> bool { self.state == ModalStateInner::Waiting }
@@ -121,6 +142,21 @@ impl Gui {
     pub(crate) fn modal_activate(&mut self, modal_pid: PID, mut request: ArchiveRequest<ShowModal>) {
         debug!("Entered modal state, top PID: {modal_pid}");
         request.response.set_response(|| Err(NavigationError::CanceledBySystem));
+        let background_pid = request.response.pid();
+        let modal_style = request.message.modal_style;
+        self.modal_activate_inner(modal_pid, background_pid, modal_style, ModalRequest::External(request));
+    }
+
+    /// Bring up a modal for `modal_pid` over `background_pid`, answering `request` when it
+    /// finishes. The caller chooses the background window; internal callers (the permission
+    /// prompt) pass the current foreground pid they already hold.
+    pub(crate) fn modal_activate_inner(
+        &mut self,
+        modal_pid: PID,
+        background_pid: PID,
+        modal_style: ModalStyle,
+        request: ModalRequest,
+    ) {
         let state = match self.windows.get_mut(&modal_pid) {
             None => ModalStateInner::Waiting,
             Some(window) => {
@@ -137,7 +173,6 @@ impl Gui {
                 }
             }
         };
-        let modal_style = request.message.modal_style;
         let initial_height = match modal_style {
             ModalStyle::Instant => SCREEN_HEIGHT,
             _ => 0,
@@ -151,7 +186,7 @@ impl Gui {
             modal_height: initial_height,
             state: initial_state,
             top: modal_pid,
-            bottom: request.response.pid(),
+            bottom: background_pid,
             navigation_request: Some(request),
         }))
     }

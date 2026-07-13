@@ -13,7 +13,6 @@
     "GetMetadata",
     "NextEntry",
     "Flush",
-    "FlushFs",
     "Remove",
     "Rename",
     "AtomicCopy",

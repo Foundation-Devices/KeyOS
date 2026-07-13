@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { BasePage } from "@ui/widgets.slint";
 import { Button, Shield, Icon, HeadingMd, HeadingLg, Checkbox, WrappedIcon, TextLg, TextSm, TextMd,
          TextXs, TimerCircularProgress, Shimmer, IconButton, StepList, PopupMenu } from "@ui/widgets.slint";
 import { Size, Palette, UISize, Importance, Utils, Images } from "@ui/theme.slint";
@@ -16,27 +15,43 @@ import { IconSize } from "@ui/types.slint";
 import { GenericAlertGlobal } from "../../globals/globals.slint";
 import { Callbacks } from "../../callbacks.slint";
 
-export component GenericAlertPage inherits BasePage {
+export component GenericAlertPage inherits Rectangle {
+    width: UISize.screen-width;
+    height: UISize.popup-app-height - Size.sz8;
+    background: Palette.background-primary;
+
     VerticalLayout {
-        padding-left: 5px;
-        padding-right: 5px;
-        padding: Size.sz4;
+        width: parent.width;
+        height: parent.height;
+        padding-left: Size.sz6;
+        padding-right: Size.sz6;
+        padding-top: Size.sz4;
+        padding-bottom: Size.sz6;
+        spacing: Size.sz5;
         alignment: stretch;
 
-        AppHeader {
+        if GenericAlertGlobal.app-title != "": AppHeader {
             title: GenericAlertGlobal.app-title;
         }
 
         VerticalLayout {
             alignment: stretch;
-            padding-left: Size.sz6;
-            padding-right: Size.sz6;
-            padding-bottom: Size.sz11;
-            spacing: Size.sz6;
+            spacing: Size.sz5;
 
-            HorizontalLayout {
-                alignment: center;
+            // The jumbo circle is decorative, so it is the one element that gives way: it
+            // scales down when the text and buttons need the room. Otherwise a wrapped line
+            // pushes the last button below the popup edge, where it cannot be tapped.
+            icon-area := Rectangle {
+                preferred-height: IconSize.px184;
+                min-height: 0;
+                vertical-stretch: 0;
+                clip: true;
+
                 WrappedIcon {
+                    width: min(icon-area.height, IconSize.px184);
+                    height: self.width;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     outer-icon: "jumbo-circle";
                     inner-icon: GenericAlertGlobal.icon;
                 }

@@ -19,6 +19,7 @@ mod io;
 mod irq;
 mod macros;
 mod mem;
+mod permission_requests;
 mod platform;
 mod process;
 mod scheduler;

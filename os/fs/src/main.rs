@@ -391,6 +391,7 @@ impl server::ScalarHandler<ProcessDisconnected> for Server {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
+        self.clear_access_for_pid(sender);
         self.fs_internal.clear_pid(sender);
         #[cfg(feature = "recovery-os")]
         if let Some(mount) = self.fs_boot.as_mut() {

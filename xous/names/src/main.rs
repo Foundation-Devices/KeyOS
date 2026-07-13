@@ -202,12 +202,18 @@ impl NameServer {
             match result {
                 Ok(connection_id) => {
                     for permission in connection_permissions {
-                        xous::allow_messages_on_connection(
+                        if let Err(e) = xous::allow_messages_on_connection(
                             sender_pid,
                             connection_id,
                             *permission..*permission + 1,
-                        )
-                        .expect("permissions");
+                        ) {
+                            // Never panic here: crashing the name server takes down the boot
+                            // path. A permission we can't record (e.g. the connection's message
+                            // bitmask is full) just leaves that message denied at send time.
+                            log::error!(
+                                "Could not grant message {permission} on the connection from pid {sender_pid} to {server_name}: {e:?}"
+                            );
+                        }
                     }
 
                     log::trace!(
@@ -249,6 +255,16 @@ impl NameServer {
         self.registered_names_by_pid.entry(pid).or_default().insert(server_name.clone());
         log::trace!("request successful, SID is {:?}", sid);
         Ok(server_name)
+    }
+
+    /// The registered name of the server with the SID carried by `msg`. This maps SID to
+    /// name only (never the reverse), so it discloses no connection capability.
+    fn lookup_name_by_sid_impl(&self, msg: &MessageEnvelope) -> Result<String, xous::Error> {
+        let sid = sid_from_msg(msg)?;
+        self.name_table
+            .iter()
+            .find_map(|(name, table_sid)| (*table_sid == sid).then(|| name.clone()))
+            .ok_or(xous::Error::ServerNotFound)
     }
 
     fn unregister_pid(&mut self, pid: xous::PID) {
@@ -347,6 +363,18 @@ impl NameServer {
         })?;
 
         log::trace!("Parsed manifest for `{}`", manifest.app_name_en());
+
+        // fixed_sids inject a name -> SID binding straight into the name table, so a
+        // third-party manifest could claim a system server name or point one at a SID it
+        // controls. They are reserved for the built-in system manifests loaded at boot; reject
+        // any manifest arriving over this IPC path that declares one.
+        if !manifest.fixed_sids.is_empty() {
+            log::warn!(
+                "Rejecting manifest for `{}`: fixed_sids are reserved for system services",
+                manifest.app_name_en()
+            );
+            return Err(xous::Error::AccessDenied);
+        }
 
         self.process_manifest_update(&manifest)?;
         Ok(())
@@ -457,6 +485,10 @@ impl NameServer {
                     Ok(()) => respond_simple_success(msg),
                     Err(err) => respond_error(msg, err),
                 },
+                Some(api::Opcode::LookupNameBySid) => match self.lookup_name_by_sid_impl(&msg) {
+                    Ok(name) => respond_name(msg, &name),
+                    Err(err) => respond_error(msg, err),
+                },
                 None => {
                     error!("couldn't decode message: {:?}", msg);
                 }
@@ -526,6 +558,22 @@ fn respond_connect_success(mut msg: MessageEnvelope, cid: xous::CID) {
     mem.offset = None;
 }
 
+fn respond_name(mut msg: MessageEnvelope, name: &str) {
+    let bytes = name.as_bytes();
+    {
+        let mem = msg.body.memory_message_mut().unwrap();
+        // Bounds-check even though a name is far smaller than the lent page: an
+        // out-of-bounds write would panic this bootstrap-critical service.
+        if mem.buf.as_slice::<u8>().len() >= bytes.len() {
+            mem.buf.as_slice_mut::<u8>()[..bytes.len()].copy_from_slice(bytes);
+            mem.valid = xous::MemorySize::new(bytes.len());
+            mem.offset = None;
+            return;
+        }
+    }
+    respond_error(msg, xous::Error::InvalidArguments);
+}
+
 fn respond_simple_success(mut msg: MessageEnvelope) {
     let mem = msg.body.memory_message_mut().unwrap();
     mem.buf.as_slice_mut::<u32>()[0] = 0;
@@ -537,7 +585,7 @@ fn respond_simple_success(mut msg: MessageEnvelope) {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-    use app_manifest::{Locale, Manifest, Message, MessageType};
+    use app_manifest::{ApprovalBehavior, Locale, Manifest, Message, MessageType};
 
     use super::*;
 
@@ -574,7 +622,15 @@ mod tests {
             let mut messages = BTreeMap::new();
             messages.insert(
                 "Ping".to_string(),
-                Message { id: index + 1, r#type: MessageType::Scalar, description: None, cfg: None },
+                Message {
+                    id: index + 1,
+                    r#type: MessageType::Scalar,
+                    description: None,
+                    cfg: None,
+                    permission_group: None,
+                    required_signature: None,
+                    approval: ApprovalBehavior::NotUserGrantable,
+                },
             );
             manifest.servers.insert((*server_name).to_string(), messages);
         }
@@ -667,7 +723,6 @@ mod tests {
         let mut names = NameServer::default();
         let mut manifest = manifest_with_servers(&["app/server"]);
         manifest.permissions.insert("app/server".to_string(), BTreeSet::from(["Ping".to_string()]));
-        manifest.fixed_sids.insert("fixed/server".to_string(), "fixed-server-000".to_string());
         let app_id = AppId(manifest.app_id);
 
         names.process_manifest_update(&manifest).unwrap();
@@ -675,16 +730,13 @@ mod tests {
         assert!(names.connect_permissions.contains_key(&app_id));
         assert!(names.server_owners.contains_key("app/server"));
         assert!(names.message_name_to_id.contains_key(&message_key("app/server", "Ping")));
-        assert!(names.name_table.contains_key("fixed/server"));
 
         names.remove_manifest(app_id);
 
         assert!(!names.register_permissions.contains_key(&app_id));
         assert!(!names.connect_permissions.contains_key(&app_id));
         assert!(!names.server_owners.contains_key("app/server"));
-        assert!(!names.server_owners.contains_key("fixed/server"));
         assert!(!names.message_name_to_id.contains_key(&message_key("app/server", "Ping")));
-        assert!(!names.name_table.contains_key("fixed/server"));
     }
 
     #[test]

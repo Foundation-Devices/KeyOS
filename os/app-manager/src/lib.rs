@@ -9,19 +9,26 @@ use server::{
 use xous::{AppId, SystemEvent, PID};
 
 mod launch;
+mod permission_catalog;
+mod permission_grants;
 mod registry;
 mod system_messages;
 mod third_party_certs;
 
+use std::collections::{HashMap, HashSet};
+
 use app_manager::{
-    AppEvent, GetThirdPartyCertificates, ImportThirdPartyCertificate, ImportThirdPartyCertificateResult,
-    LaunchError, RemoveInstalledApp, RemoveInstalledAppResult, RemoveThirdPartyCertificate,
-    RemoveThirdPartyCertificateResult, ThirdPartyCertificateInfo,
+    AppEvent, GetPermissionRequestInfo, GetThirdPartyCertificates, ImportThirdPartyCertificate,
+    ImportThirdPartyCertificateResult, LaunchError, PermissionGrantDecision, PermissionRequestInfoResult,
+    RemoveInstalledApp, RemoveInstalledAppResult, RemoveThirdPartyCertificate,
+    RemoveThirdPartyCertificateResult, SetAppPermissionGrant, SetAppPermissionGrantResult,
+    ThirdPartyCertificateInfo,
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetQrMatchRules, InstalledAppInfo, LaunchApp, LaunchAppBlocking, ListApps,
     RefreshInstalledApps, SubscribeAppEvents,
 };
+use permission_grants::PermissionGrantStore;
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
 
@@ -43,9 +50,15 @@ pub fn listen() {
 pub struct AppManagerServer {
     app_event_subscribers: Vec<ArchiveEventSubscriber<AppEvent>>,
     app_registry: AppRegistry,
+    permission_grants: PermissionGrantStore,
+    /// Per-run "Not Now" answers, keyed by app id and permission subgroup. A subgroup here is
+    /// auto-denied without re-prompting until the app relaunches, so a spammy or malicious app
+    /// cannot loop the user on the same prompt (or walk through a subgroup's messages one by
+    /// one). In-memory only; cleared when the app next launches.
+    transient_permission_denies: HashMap<AppId, HashSet<String>>,
     third_party_cert_store: ThirdPartyCertificateStore,
-    names: server::xous_names::XousNames,
     panic_message_buf: xous::MemoryRange,
+    names: server::xous_names::XousNames,
 }
 
 impl Default for AppManagerServer {
@@ -57,9 +70,11 @@ impl Default for AppManagerServer {
         Self {
             app_event_subscribers: Vec::default(),
             app_registry: AppRegistry::default(),
+            permission_grants: PermissionGrantStore::default(),
+            transient_permission_denies: HashMap::new(),
             third_party_cert_store: ThirdPartyCertificateStore::default(),
-            names: server::xous_names::XousNames::new().expect("xous-names should be available at startup"),
             panic_message_buf,
+            names: server::xous_names::XousNames::new().expect("xous-names must be reachable"),
         }
     }
 }
@@ -86,6 +101,7 @@ impl BlockingArchiveHandler<ListApps> for AppManagerServer {
             &msg.locale,
             &self.third_party_cert_store.trusted_publishers(),
             &msg.filter,
+            &self.permission_grants,
         )
     }
 }
@@ -97,7 +113,7 @@ impl BlockingScalarHandler<RefreshInstalledApps> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Result<(), app_manager::AppManagerError> {
-        self.app_registry.scan_installed_apps().map_err(|e| {
+        self.rescan_and_cache().map_err(|e| {
             error!("failed to refresh installed apps: {e:?}");
             app_manager::AppManagerError::InternalError
         })
@@ -199,6 +215,12 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
 
         info!("removing sideloaded app 0x{} from {app_dir}", hex::encode(app_id.0));
 
+        if !self.permission_grants.remove_app_grants(app_id) {
+            error!("failed to revoke permission grants for sideloaded app 0x{}", hex::encode(app_id.0));
+            return RemoveInstalledAppResult::InternalError;
+        }
+        self.transient_permission_denies.remove(&app_id);
+
         let remove_result = FileSystem::default().remove(&app_dir, fs::Location::System);
 
         match remove_result {
@@ -211,7 +233,7 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
 
         self.app_registry.clear_registered_manifest(app_id);
 
-        match self.app_registry.scan_installed_apps() {
+        match self.rescan_and_cache() {
             Ok(()) => {
                 info!("removed sideloaded app 0x{}", hex::encode(app_id.0));
                 RemoveInstalledAppResult::Removed
@@ -224,9 +246,86 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
     }
 }
 
+impl BlockingArchiveHandler<SetAppPermissionGrant> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: SetAppPermissionGrant,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> SetAppPermissionGrantResult {
+        let app_id = match app_manager::decode_app_id_str(&msg.app_id) {
+            Ok(app_id) => app_id,
+            Err(e) => {
+                log::warn!("SetAppPermissionGrant: invalid app id {:?}: {e:?}", msg.app_id);
+                return SetAppPermissionGrantResult::AppNotFound;
+            }
+        };
+
+        match msg.decision {
+            PermissionGrantDecision::Allow => self.app_registry.set_permission_grant(
+                app_id,
+                &msg.subgroup,
+                true,
+                &mut self.permission_grants,
+            ),
+            PermissionGrantDecision::Deny => self.app_registry.set_permission_grant(
+                app_id,
+                &msg.subgroup,
+                false,
+                &mut self.permission_grants,
+            ),
+            PermissionGrantDecision::DenyForRun => {
+                self.transient_permission_denies.entry(app_id).or_default().insert(msg.subgroup);
+                SetAppPermissionGrantResult::Updated
+            }
+        }
+    }
+}
+
+impl BlockingArchiveHandler<GetPermissionRequestInfo> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: GetPermissionRequestInfo,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> PermissionRequestInfoResult {
+        let requesting_app_id = AppId(msg.sender_app_id);
+
+        let server_sid = xous::SID::from_array(msg.server_sid);
+        let server_name = match self.names.lookup_name_by_sid(server_sid) {
+            Ok(name) => name,
+            Err(xous::Error::ServerNotFound) => return PermissionRequestInfoResult::NotGrantable,
+            Err(error) => {
+                log::error!("GetPermissionRequestInfo: name lookup failed: {error:?}");
+                return PermissionRequestInfoResult::InternalError;
+            }
+        };
+
+        let result = self.app_registry.permission_request_info(
+            requesting_app_id,
+            &server_name,
+            msg.message_id,
+            &msg.locale,
+            &self.permission_grants,
+        );
+
+        if let PermissionRequestInfoResult::Prompt(info) = &result {
+            let denied = self
+                .transient_permission_denies
+                .get(&requesting_app_id)
+                .is_some_and(|denies| denies.contains(&info.subgroup));
+            if denied {
+                return PermissionRequestInfoResult::Denied;
+            }
+        }
+        result
+    }
+}
+
 impl Server for AppManagerServer {
     fn on_start(&mut self, context: &mut ServerContext<Self>) {
-        self.app_registry.scan_installed_apps().expect("Failed to scan installed apps");
+        self.rescan_and_cache().expect("Failed to scan installed apps");
+        FileSystem::default().subscribe_filesystem_events(context, fs::Location::AppData);
 
         xous::register_system_event_handler(SystemEvent::ChildTerminated, context.sid(), ChildCrashed::ID)
             .expect("Failed to register child terminated handler");
@@ -237,6 +336,14 @@ impl Server for AppManagerServer {
 
 impl AppManagerServer {
     pub fn new() -> anyhow::Result<Self> { Ok(Self::default()) }
+
+    /// Rescan installed apps and install the per-server permission cache the scan built, so the
+    /// cache never lags the installed app set.
+    fn rescan_and_cache(&mut self) -> anyhow::Result<()> {
+        let cache = self.app_registry.scan_installed_apps()?;
+        self.permission_grants.set_server_cache(cache);
+        Ok(())
+    }
 }
 
 impl BlockingScalarHandler<LaunchAppBlocking> for AppManagerServer {
@@ -343,6 +450,8 @@ impl AppManagerServer {
             return Ok(pid);
         }
 
+        self.transient_permission_denies.remove(&app_id);
+
         // The registry tracks the bundle's fs `app.elf` path; the device launches
         // it from the image, the simulator from the staged host binary.
         let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
@@ -354,14 +463,8 @@ impl AppManagerServer {
             return Err(LaunchError::NoTrustedPublisherCertificate);
         }
 
-        // Register names and resources only after the trust check, so an untrusted app never
-        // claims server names or resource access.
-        let manifest_bytes = self.app_registry.manifest_bytes(app_id).ok_or(LaunchError::UnknownAppId)?;
-        self.names.add_manifest(manifest_bytes).map_err(|e| {
-            error!("could not register manifest names for app 0x{app_id}: {e:?}");
-            LaunchError::NameRegistration
-        })?;
         self.register_app_resources(app_id)?;
+        self.app_registry.register_app_names(app_id, &self.permission_grants)?;
 
         // The manifest's signed file hashes guard app.elf and the resources at launch; on the
         // simulator nothing is signed, so the staged host binary just runs.
@@ -408,5 +511,13 @@ impl AppManagerServer {
             log::debug!("Panic message PID mismatch: expected {child_pid}, got {panic_pid}");
         }
         None
+    }
+}
+
+impl server::ScalarEventHandler<fs::FileSystemEvent> for AppManagerServer {
+    fn handle(&mut self, msg: fs::FileSystemEvent, _sender: PID, _context: &mut ServerContext<Self>) {
+        if msg.location == fs::Location::AppData && msg.event_type == fs::FileSystemEventType::Mounted {
+            self.permission_grants.try_mount_app_data();
+        }
     }
 }

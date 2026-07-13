@@ -30,6 +30,19 @@ pub enum Opcode {
     /// should be removed, and its length should be specified in the `valid` field.
     RemoveManifest = 2,
 
+    /// Look up the registered name of a server by its SID.
+    ///
+    /// # Message Types
+    ///
+    /// * MutableLend
+    ///
+    /// # Arguments
+    ///
+    /// The memory should carry the 16-byte SID, with `valid` set to 16. On success the
+    /// reply is the UTF-8 name at the start of the buffer, with its length in `valid`; a
+    /// not-found or error reply clears `valid` and puts the error code in the second word.
+    LookupNameBySid = 3,
+
     /// Connect to a Server, blocking if the Server does not exist. When the Server is started,
     /// return with either the CID or an AuthenticationRequest
     ///

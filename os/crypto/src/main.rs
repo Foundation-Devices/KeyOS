@@ -16,7 +16,7 @@ mod atsama5d2;
 mod hosted;
 
 #[cfg(keyos)]
-use atsama5d2::CryptoServer;
+use atsama5d2::{ClientDisconnected, CryptoServer};
 #[cfg(not(keyos))]
 use hosted::CryptoServer;
 
@@ -107,6 +107,21 @@ impl ScalarEventHandler<dma::messages::TransferComplete> for CryptoServer {
 impl ScalarHandler<AesClear> for CryptoServer {
     fn handle(&mut self, msg: AesClear, sender: xous::PID, _context: &mut server::ServerContext<Self>) {
         self.aes_clear(msg, sender);
+    }
+}
+
+// AES keys live in SECURAM and both context maps are keyed by pid, so a client that exits without
+// clearing them would strand its key slots; a reused pid could then reach a stale key. Clear the
+// departed client's contexts here.
+#[cfg(keyos)]
+impl ScalarHandler<ClientDisconnected> for CryptoServer {
+    fn handle(
+        &mut self,
+        _msg: ClientDisconnected,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.clear_client_contexts(sender);
     }
 }
 

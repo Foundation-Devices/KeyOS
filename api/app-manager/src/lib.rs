@@ -87,6 +87,40 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.send_blocking_archive(GetAppIcon { app_id: app_id.to_string() })
     }
 
+    pub fn set_app_permission_grant(
+        &self,
+        app_id: &str,
+        subgroup: &str,
+        decision: PermissionGrantDecision,
+    ) -> SetAppPermissionGrantResult
+    where
+        P: MessageAllowed<SetAppPermissionGrant>,
+    {
+        self.0.send_blocking_archive(SetAppPermissionGrant {
+            app_id: app_id.to_string(),
+            subgroup: subgroup.to_string(),
+            decision,
+        })
+    }
+
+    pub fn get_permission_request_info(
+        &self,
+        sender_app_id: [u8; 16],
+        server_sid: [u32; 4],
+        message_id: usize,
+        locale: &str,
+    ) -> PermissionRequestInfoResult
+    where
+        P: MessageAllowed<GetPermissionRequestInfo>,
+    {
+        self.0.send_blocking_archive(GetPermissionRequestInfo {
+            sender_app_id,
+            server_sid,
+            message_id,
+            locale: locale.to_string(),
+        })
+    }
+
     pub fn get_third_party_certificates(&self) -> Vec<ThirdPartyCertificateInfo>
     where
         P: MessageAllowed<GetThirdPartyCertificates>,

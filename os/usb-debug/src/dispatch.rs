@@ -162,7 +162,6 @@ impl DebugProtocol {
                         LaunchFailureReason::NoTrustedPublisherCertificate => {
                             LaunchAppStatus::NoTrustedPublisherCertificate
                         }
-                        LaunchFailureReason::MissingPermission => LaunchAppStatus::MissingPermission,
                         LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
                     };
                     Response::LaunchAck(LaunchAppResult::new(0, status).encode())

@@ -5,7 +5,7 @@ use core::convert::TryInto;
 
 use xous::{
     Error, MemoryAddress, MemoryFlags, MemoryMessage, MemoryRange, MemorySize, Message, MessageEnvelope,
-    MessageSender, Result, SysCall, SysCallResult, ThreadPriority, CID, SID, TID,
+    MessageSender, Result, SysCall, SysCallResult, SystemEvent, ThreadPriority, CID, SID, TID,
 };
 
 use crate::irq::{interrupt_claim_user, interrupt_free};
@@ -35,22 +35,10 @@ pub(crate) fn send_message(sender_tid: TID, cid: CID, message: Message) -> SysCa
             })
         };
 
-        let ConnectionSlot::Connected { sidx, permissions, .. } = ss.current_process().connection(cid)?
-        else {
+        let ConnectionSlot::Connected { sidx, .. } = ss.current_process().connection(cid)? else {
             return Err(Error::ServerNotFound);
         };
         let sidx = *sidx as usize;
-        let server = ss.server_from_sidx(sidx).unwrap();
-        if server.pid != current_pid() && !permissions.is_permitted(message.id()) {
-            println!(
-                "[!] Denying message send from {} to {:08x?}@{}, msgid={}",
-                current_pid(),
-                server.sid,
-                server.pid,
-                message.id(),
-            );
-            return Err(Error::AccessDenied);
-        }
         let blocking = message.is_blocking();
 
         send_message_inner(ss, sender_tid, sidx, message)?;
@@ -66,6 +54,102 @@ pub(crate) fn send_message(sender_tid: TID, cid: CID, message: Message) -> SysCa
         // This may or may not change to the server, depending on process priorities.
         Scheduler::with_mut(|s| s.activate_current(ss))
     })
+}
+
+/// Decide whether the current process may send `message` over `cid`, before the send path
+/// consumes it. `Ok(false)` means the connection permits it (or the server belongs to the
+/// sender) and the send may proceed. `Ok(true)` means a missing permission parked the sender
+/// (only possible when `may_wait`): the request now sits with the permission broker, the
+/// caller must yield, and the syscall re-runs once the broker resolves it. A sender that
+/// cannot wait, or a system with no broker subscribed, is denied with an error. The error and
+/// parked paths free the message buffer, which the send path would otherwise have owned.
+fn check_message_permission(
+    sender_tid: TID,
+    cid: CID,
+    message: &Message,
+    may_wait: bool,
+) -> core::result::Result<bool, Error> {
+    let result = SystemServices::with_mut(|ss| {
+        let ConnectionSlot::Connected { sidx, permissions, .. } = ss.current_process().connection(cid)?
+        else {
+            return Err(Error::ServerNotFound);
+        };
+        let server = ss.server_from_sidx(*sidx as usize).ok_or(Error::ServerNotFound)?;
+        if server.pid == current_pid() || permissions.is_permitted(message.id()) {
+            return Ok(false);
+        }
+
+        let sidx = *sidx as usize;
+        let server_pid = server.pid;
+        let server_sid = server.sid;
+        if !may_wait {
+            println!(
+                "[!] Denying message send from {} to {:08x?}@{}, msgid={}",
+                current_pid(),
+                server_sid,
+                server_pid,
+                message.id(),
+            );
+            return Err(Error::AccessDenied);
+        }
+
+        // Record the request (including the target resolved at this very moment) and hand
+        // the broker only its id, so the eventual grant can never apply to anything but this
+        // exact connection. A full table reports KernelTableFull so the sender can tell it
+        // apart from a denial and retry later.
+        let sender_app_id = ss.current_process().app_id();
+        let Some(request_id) =
+            ss.permission_requests.insert(sender_app_id, sender_tid, cid, sidx, server_sid, message.id())
+        else {
+            println!(
+                "[!] Denying message send from {} to {:08x?}@{}, msgid={}: permission request table full",
+                current_pid(),
+                server_sid,
+                server_pid,
+                message.id(),
+            );
+            return Err(Error::KernelTableFull);
+        };
+
+        // Broadcast to whichever process subscribed as the permission broker rather than
+        // hardcoding a specific app id in the kernel: a normal image has the GUI server
+        // handling it, while a headless or test image simply has no subscriber.
+        let delivered =
+            match ss.broadcast_event(SystemEvent::PermissionRequest, [request_id as usize, 0, 0, 0]) {
+                Ok(delivered) => delivered,
+                Err(error) => {
+                    ss.permission_requests.take(request_id);
+                    return Err(error);
+                }
+            };
+        if delivered == 0 {
+            // No broker can ever resolve the request, so deny the send instead of parking the
+            // thread forever waiting for a `ResolveMessagePermission` that will never arrive.
+            ss.permission_requests.take(request_id);
+            println!(
+                "[!] Denying message send from {} to {:08x?}@{}, msgid={}: no permission broker",
+                current_pid(),
+                server_sid,
+                server_pid,
+                message.id(),
+            );
+            return Err(Error::AccessDenied);
+        }
+        ss.current_process_mut().set_thread_state(sender_tid, ThreadState::RetryPermission { request_id });
+        Ok(true)
+    });
+
+    // The send never runs when the check denies or parks, so the buffer it would have freed
+    // is freed here. Hosted-only: a hosted retry is a fresh re-send that allocates its own
+    // buffer, while on hardware the rewound syscall re-translates the sender's own mapping.
+    #[cfg(not(keyos))]
+    if !matches!(result, Ok(false)) {
+        if let Some(range) = message.memory() {
+            crate::arch::free_message_buffer(*range);
+        }
+    }
+
+    result
 }
 
 pub(crate) fn send_message_inner(
@@ -378,7 +462,6 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::GetProcessId
         | SysCall::JoinThread(..)
         | SysCall::ServerEventHandler(..)
-        | SysCall::SystemEventHandler(..)
         | SysCall::AppendPanicMessage(..)
         | SysCall::GetAppId(..)
         | SysCall::AppIdToPid(..) => Ok(()),
@@ -436,8 +519,15 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
 
         SysCall::SetThreadPriority(prio) if *prio < ThreadPriority::System0 => Ok(()),
 
+        // Process-lifecycle events are ordinary parent/client notifications; the
+        // remaining events (LowFreeMemory, PermissionRequest) are system roles, and
+        // registering for them must be privileged so an app can't pose as e.g. the
+        // permission broker.
+        SysCall::SystemEventHandler(SystemEvent::ChildTerminated | SystemEvent::Disconnected, ..) => Ok(()),
+
         // Privileged calls
         SysCall::SetThreadPriority(..)
+        | SysCall::SystemEventHandler(..)
         | SysCall::ClaimInterrupt(..)
         | SysCall::FreeInterrupt(..)
         | SysCall::CreateProcess(..)
@@ -446,7 +536,9 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::TerminatePid(..)
         | SysCall::MirrorMemoryToPid(..)
         | SysCall::GetSystemStats(..)
-        | SysCall::GetPanicMessage(..) => is_permitted_by_mask(),
+        | SysCall::GetPanicMessage(..)
+        | SysCall::ResolveMessagePermission(..)
+        | SysCall::GetPermissionRequestData(..) => is_permitted_by_mask(),
 
         #[cfg(keyos)]
         SysCall::VirtToPhys(..) | SysCall::VirtToPhysPid(..) | SysCall::DebugCommand(..) => {
@@ -602,7 +694,12 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
         SysCall::ReturnScalar5(sender, arg1, arg2, arg3, arg4, arg5) => {
             return_result(tid, sender, Result::Scalar5(arg1, arg2, arg3, arg4, arg5))
         }
-        SysCall::TrySendMessage(cid, message) => send_message(tid, cid, message),
+        SysCall::TrySendMessage(cid, message) => {
+            // A non-waiting send cannot park for the permission broker, so a missing
+            // permission is denied on the spot.
+            check_message_permission(tid, cid, &message, false)?;
+            send_message(tid, cid, message)
+        }
         SysCall::TerminateProcess(ret) => SystemServices::with_mut(|ss| ss.terminate_current_process(ret)),
         SysCall::TerminatePid(pid, exit_code) => SystemServices::with_mut(|ss| {
             // The process is self-terminating, which is equivalent to TerminateProcess
@@ -632,6 +729,12 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             SystemServices::with_mut(|ss| ss.connect_to_server(pid, sid).map(Result::ConnectionID))
         }
         SysCall::SendMessage(cid, message) => {
+            if check_message_permission(tid, cid, &message, true)? {
+                // Parked for the permission broker: yield so it can run, and let this syscall
+                // re-run once the broker resolves the request.
+                return SystemServices::with_mut(|ss| Scheduler::with_mut(|s| s.activate_current(ss)));
+            }
+
             let result = send_message(tid, cid, message);
             match result {
                 Ok(o) => Ok(o),
@@ -645,6 +748,81 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
                 Err(e) => Err(e),
             }
         }
+        SysCall::ResolveMessagePermission(request_id, allow) => SystemServices::with_mut(|ss| {
+            let Some(request) = ss.permission_requests.take(request_id) else {
+                return Err(Error::ServerNotFound);
+            };
+
+            if !request.valid {
+                return Ok(Result::Ok);
+            }
+
+            // Grantable means the connection and server are unchanged and the sender is still
+            // parked (any invalidation would have woken it), so no re-validation is needed:
+            // apply the grant, then wake the sender to retry or with a denial.
+            let mut granted = false;
+            if allow {
+                if let Ok(ConnectionSlot::Connected { permissions, .. }) =
+                    ss.process_mut(request.sender_pid).and_then(|p| p.connection_mut(request.cid))
+                {
+                    // A full permission table (only a few high message-id slots exist) cannot
+                    // strand the sender: leave `granted` false and fall through to the denial.
+                    match permissions.add(request.message_id..request.message_id + 1) {
+                        Ok(_) => granted = true,
+                        Err(e) => {
+                            println!("[!] permission grant for request {request_id} failed, denying: {e:?}")
+                        }
+                    }
+                }
+            }
+
+            assert!(
+                ss.process(request.sender_pid).map(|p| p.thread_state(request.sender_tid))
+                    == Ok(ThreadState::RetryPermission { request_id }),
+                "grantable permission request {request_id} sender is not parked",
+            );
+            if granted {
+                // Rewind the parked thread onto its `svc` so the syscall re-executes in the
+                // kernel; the permission added above lets it through now.
+                ss.retry_syscall_pid(request.sender_pid, request.sender_tid)?;
+            } else {
+                ss.set_thread_result(
+                    request.sender_pid,
+                    request.sender_tid,
+                    Result::Error(Error::AccessDenied),
+                )?;
+            }
+            ss.process_mut(request.sender_pid)?.set_thread_state(request.sender_tid, ThreadState::Ready);
+
+            Ok(Result::Ok)
+        }),
+        SysCall::GetPermissionRequestData(request_id, field) => SystemServices::with(|ss| {
+            let request = ss.permission_requests.get(request_id).ok_or(Error::ServerNotFound)?;
+            // A tombstoned request lingers only to reserve its slot; its sender was already
+            // woken with a denial, so report it gone rather than let the broker prompt for it.
+            if !request.valid {
+                return Err(Error::ServerNotFound);
+            }
+            match field {
+                xous::PermissionRequestField::Target => {
+                    // The broker identifies the request by its server SID and message id; the
+                    // message id gets a full word of its own, so it carries the whole 32-bit
+                    // range.
+                    let (sid0, sid1, sid2, sid3) = request.server_sid.to_u32();
+                    Ok(Result::Scalar5(
+                        sid0 as usize,
+                        sid1 as usize,
+                        sid2 as usize,
+                        sid3 as usize,
+                        request.message_id,
+                    ))
+                }
+                xous::PermissionRequestField::AppId => {
+                    let [w0, w1, w2, w3] = <[u32; 4]>::from(&request.sender_app_id);
+                    Ok(Result::Scalar5(w0 as usize, w1 as usize, w2 as usize, w3 as usize, 0))
+                }
+            }
+        }),
         SysCall::Disconnect(cid) => {
             SystemServices::with_mut(|ss| ss.disconnect_from_server(cid).and(Ok(Result::Ok)))
         }

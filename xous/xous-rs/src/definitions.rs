@@ -691,9 +691,15 @@ pub enum SystemEvent {
     Disconnected = 1,
     /// Sent each time the number of free pages goes below LOW_MEMORY_THRESHOLD.
     LowFreeMemory = 2,
+    /// Sent when a process tries to send a message blocked by the connection's current
+    /// permission set. The broker fetches the request's details by id through
+    /// `GetPermissionRequestData`.
+    ///
+    /// arg1 => id of the parked permission request
+    PermissionRequest = 3,
 }
 
-pub const NUM_SYSTEM_EVENTS: usize = 3;
+pub const NUM_SYSTEM_EVENTS: usize = 4;
 
 impl From<usize> for SystemEvent {
     fn from(value: usize) -> Self {
@@ -701,6 +707,7 @@ impl From<usize> for SystemEvent {
             0 => Self::ChildTerminated,
             1 => Self::Disconnected,
             2 => Self::LowFreeMemory,
+            3 => Self::PermissionRequest,
             _ => Self::ChildTerminated,
         }
     }

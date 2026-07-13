@@ -1,7 +1,7 @@
 manifestVersion = "0"
 [servers."os/backup"]
-StatusSubscribe = { id = 1, type = "scalarEvent" }
-CreateBackup = { id = 2, type = "blockingArchive" }
-RestoreBackup = { id = 3, type = "blockingArchive" }
-SubscribeRestoreProgress = { id = 4, type = "archiveEvent" }
-CreateBackupFile = { id = 5, type = "blockingArchive" }
+StatusSubscribe = { id = 1, type = "scalarEvent", approval = "autoAllow" }
+CreateBackup = { id = 2, type = "blockingArchive", approval = "autoAllow" }
+RestoreBackup = { id = 3, type = "blockingArchive", approval = "autoAllow" }
+SubscribeRestoreProgress = { id = 4, type = "archiveEvent", approval = "autoAllow" }
+CreateBackupFile = { id = 5, type = "blockingArchive", approval = "autoAllow" }

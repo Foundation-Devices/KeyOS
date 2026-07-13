@@ -1,19 +1,24 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use app_manager::{
-    AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, ThirdPartyCertificateInfo,
+    AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, InstalledAppPermissionSubgroup,
+    LaunchError, PermissionRequestInfo, PermissionRequestInfoResult, ThirdPartyCertificateInfo,
 };
-use app_manifest::{Locale, Manifest};
+use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
 use log::error;
 use regex::Regex;
 use serde_json::to_vec;
 use xous::{AppId, PID};
 
-use crate::FileSystem;
+use crate::{
+    permission_catalog::{self, ServerPermissionCache},
+    permission_grants::{PermissionGrantState, PermissionGrantStore},
+    FileSystem,
+};
 
 const BUNDLED_ICON_FILE: &str = "icon.bin";
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
@@ -27,6 +32,28 @@ const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
 enum AppSource {
     BuiltIn,
     ThirdParty,
+}
+
+impl AppSource {
+    /// The signature level an app from this source carries: built-ins are Foundation-signed,
+    /// sideloads are third-party-signed. (Foundation-signed sideloads are not supported yet; the
+    /// load directory stands in for the signer until a later PR.)
+    fn signature(self) -> RequiredSignature {
+        match self {
+            AppSource::BuiltIn => RequiredSignature::Foundation,
+            AppSource::ThirdParty => RequiredSignature::ThirdParty,
+        }
+    }
+}
+
+/// How a declared message is available to an app once its signature is taken into account:
+/// granted automatically, granted through the user's subgroup decision, or not reachable at
+/// all (the signature requirement isn't met, or the message is not user-facing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageAvailability {
+    AutoAllow,
+    ApprovalBased,
+    Unavailable,
 }
 
 /// Removes sub-rules with invalid regex patterns, then removes rules that become empty.
@@ -97,21 +124,35 @@ pub(crate) struct AppRegistry {
 }
 
 impl AppRegistry {
-    pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<ServerPermissionCache> {
         let mut installed_apps = HashMap::new();
+
+        // Build the per-server cache as we scan. Adding a manifest also detects server-name
+        // collisions, so an app that declares a server already owned by a system service or an
+        // earlier app is rejected. Seed it with the system services first.
+        let mut cache = ServerPermissionCache::default();
+        for manifest in permission_catalog::system_manifests() {
+            cache.add_manifest(manifest).expect("system manifests must not declare colliding servers");
+        }
 
         // App location is the source of truth for trust classification: firmware-shipped apps
         // live under /keyos/apps and verify against the official keys, while sideloaded apps
         // live under /keyos/sideloaded-apps and only need a valid developer signature here.
         // The simulator reads the same dirs through fs and signs nothing.
-        Self::scan_apps_dir(&mut installed_apps, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false);
-        Self::scan_apps_dir(&mut installed_apps, FLUX_APPS_DIR, AppSource::BuiltIn, true);
-        Self::scan_apps_dir(&mut installed_apps, SIDELOADED_APPS_DIR, AppSource::ThirdParty, false);
+        Self::scan_apps_dir(&mut installed_apps, &mut cache, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false);
+        Self::scan_apps_dir(&mut installed_apps, &mut cache, FLUX_APPS_DIR, AppSource::BuiltIn, true);
+        Self::scan_apps_dir(
+            &mut installed_apps,
+            &mut cache,
+            SIDELOADED_APPS_DIR,
+            AppSource::ThirdParty,
+            false,
+        );
 
         self.installed_apps = installed_apps;
         log::info!("scan_installed_apps: registry tracks {} installed apps", self.installed_apps.len());
 
-        Ok(())
+        Ok(cache)
     }
 
     /// Read every app bundle under `apps_dir` (a `Location::System` path) through
@@ -119,6 +160,7 @@ impl AppRegistry {
     /// a real loading problem then shows up as a missing app.
     fn scan_apps_dir(
         installed_apps: &mut HashMap<AppId, AppInfo>,
+        cache: &mut ServerPermissionCache,
         apps_dir: &str,
         source: AppSource,
         is_flux: bool,
@@ -141,6 +183,14 @@ impl AppRegistry {
                     log::warn!("Skipping duplicate app_id=0x{} from {source:?}", hex::encode(app.id.0));
                 }
                 Ok(Some(app)) => {
+                    if let Err(collision) = cache.add_manifest(&app.manifest) {
+                        log::warn!(
+                            "Skipping app 0x{}: declares server `{}`, already owned by a system service or another app",
+                            hex::encode(app.id.0),
+                            collision.0
+                        );
+                        continue;
+                    }
                     installed_apps.insert(app.id, app);
                 }
                 Ok(None) => {}
@@ -215,29 +265,39 @@ impl AppRegistry {
         locale: &str,
         trusted_publishers: &[ThirdPartyCertificateInfo],
         filter: &app_manager::AppFilter,
+        permission_grants: &PermissionGrantStore,
     ) -> Vec<InstalledAppInfo> {
-        let mut apps = self
+        let ids = self
             .installed_apps
-            .values_mut()
+            .values()
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
             .filter(|app_info| filter.third_party.map_or(true, |want| app_info.is_third_party() == want))
-            .map(|app_info| {
-                let name = app_info.localized_name(locale);
-                let size_bytes = app_info.binary_size();
-                let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
-                InstalledAppInfo {
-                    app_id: format!("0x{}", app_info.id),
-                    publisher,
-                    can_launch,
-                    can_remove: app_info.is_third_party(),
-                    version: app_info.manifest.version.clone().unwrap_or_default(),
-                    size_bytes,
-                    description: app_info.description(),
-                    permissions: app_info.permission_groups(),
-                    name,
-                }
-            })
+            .map(|app_info| app_info.id)
             .collect::<Vec<_>>();
+
+        let mut apps = Vec::with_capacity(ids.len());
+        for id in ids {
+            // The binary size is cached lazily, so it takes the only mutable borrow; the
+            // permission sections then resolve policy across all installed manifests immutably.
+            let Some(app_info) = self.installed_apps.get_mut(&id) else { continue };
+            let size_bytes = app_info.binary_size();
+            let app_info = &self.installed_apps[&id];
+            let name = app_info.localized_name(locale);
+            let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
+            let (basic_permissions, approvable_permissions) = app_info.permission_groups(permission_grants);
+            apps.push(InstalledAppInfo {
+                app_id: format!("0x{}", app_info.id),
+                publisher,
+                can_launch,
+                can_remove: app_info.is_third_party(),
+                version: app_info.manifest.version.clone().unwrap_or_default(),
+                size_bytes,
+                description: app_info.description(),
+                basic_permissions,
+                approvable_permissions,
+                name,
+            });
+        }
 
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         apps
@@ -295,11 +355,6 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).and_then(|app_info| app_info.third_party_signer)
     }
 
-    /// The app's verified manifest JSON, for handing to the name server at launch.
-    pub(crate) fn manifest_bytes(&self, app_id: AppId) -> Option<&[u8]> {
-        self.installed_apps.get(&app_id).map(|app_info| app_info.manifest_bytes.as_slice())
-    }
-
     pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
 
     pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
@@ -342,6 +397,130 @@ impl AppRegistry {
     }
 
     pub(crate) fn terminate_app(&mut self, pid: PID) { self.running_apps.remove(&pid); }
+
+    /// Register the app's manifest names with the name server. Fails the
+    /// launch when the effective manifest cannot be produced or registered:
+    /// launching anyway would leave the app without server access and turn
+    /// the failure into silent runtime errors.
+    pub(crate) fn register_app_names(
+        &self,
+        app_id: AppId,
+        permission_grants: &PermissionGrantStore,
+    ) -> Result<(), LaunchError> {
+        let info = self.installed_apps.get(&app_id).ok_or(LaunchError::UnknownAppId)?;
+        let manifest_bytes = info.effective_manifest_bytes(permission_grants)?;
+        register_manifest_with_names(&manifest_bytes).map_err(|error| {
+            error!("could not register manifest names for app 0x{app_id}: {error:?}");
+            LaunchError::NameRegistration
+        })
+    }
+
+    pub(crate) fn set_permission_grant(
+        &self,
+        app_id: AppId,
+        subgroup: &str,
+        approved: bool,
+        permission_grants: &mut PermissionGrantStore,
+    ) -> app_manager::SetAppPermissionGrantResult {
+        let Some(app_info) = self.installed_apps.get(&app_id) else {
+            return app_manager::SetAppPermissionGrantResult::AppNotFound;
+        };
+        // Built-in permissions are not user-managed (see effective_manifest_bytes), so there is
+        // nothing to grant or revoke for them.
+        if !app_info.is_third_party() {
+            return app_manager::SetAppPermissionGrantResult::AppNotFound;
+        }
+
+        // A grant is recorded per subgroup, so it is valid as soon as the app declares at least
+        // one message of that subgroup the app's signature satisfies and the user may decide.
+        let mut declared = false;
+        let mut grantable = false;
+        for (server, messages) in &app_info.manifest.permissions {
+            for message in messages {
+                let Some(entry) = permission_grants.message_metadata(server, message) else {
+                    continue;
+                };
+                if entry.subgroup() != subgroup {
+                    continue;
+                }
+                declared = true;
+                if app_info.message_availability(entry) == MessageAvailability::ApprovalBased {
+                    grantable = true;
+                }
+            }
+        }
+        if !declared {
+            return app_manager::SetAppPermissionGrantResult::PermissionNotFound;
+        }
+        if !grantable {
+            return app_manager::SetAppPermissionGrantResult::NotUserGrantable;
+        }
+
+        permission_grants.set_grant(app_id, subgroup, approved)
+    }
+
+    pub(crate) fn permission_request_info(
+        &self,
+        sender_app_id: AppId,
+        server_name: &str,
+        message_id: usize,
+        locale: &str,
+        permission_grants: &PermissionGrantStore,
+    ) -> PermissionRequestInfoResult {
+        let Some(app_info) = self.installed_apps.get(&sender_app_id) else {
+            return PermissionRequestInfoResult::AppNotFound;
+        };
+        // Built-ins bypass the permission mechanism and are never parked for a prompt; this is
+        // defensive so a built-in message can't be routed through the grant flow.
+        if !app_info.is_third_party() {
+            return PermissionRequestInfoResult::NotGrantable;
+        }
+
+        // Message ids are unique within one named server, so the (name, id) pair resolves
+        // without ambiguity even when a process hosts several servers with overlapping ids.
+        let Some(message) = permission_grants.message_name_by_id(server_name, message_id) else {
+            return PermissionRequestInfoResult::NotGrantable;
+        };
+        let message = message.to_string();
+        if !app_info.manifest.permissions.get(server_name).is_some_and(|messages| messages.contains(&message))
+        {
+            return PermissionRequestInfoResult::NotGrantable;
+        }
+
+        let Some(entry) = permission_grants.message_metadata(server_name, &message) else {
+            return PermissionRequestInfoResult::NotGrantable;
+        };
+        if app_info.message_availability(entry) != MessageAvailability::ApprovalBased {
+            return PermissionRequestInfoResult::NotGrantable;
+        }
+
+        // The user decides at the subgroup level: the stored subgroup grant answers this message
+        // and every other message of the subgroup, so it is prompted at most once.
+        match permission_grants.subgroup_grant_state(app_info.id, entry.subgroup()) {
+            PermissionGrantState::Approved => PermissionRequestInfoResult::AlreadyApproved,
+            PermissionGrantState::Denied => PermissionRequestInfoResult::Denied,
+            PermissionGrantState::Unset => PermissionRequestInfoResult::Prompt(PermissionRequestInfo {
+                app_id: app_info.id,
+                app_name: app_info.localized_name(locale),
+                subgroup: entry.subgroup().to_string(),
+                label: entry.subgroup_label().to_string(),
+            }),
+        }
+    }
+}
+
+#[cfg(any(keyos, all(not(test), not(keyos))))]
+fn register_manifest_with_names(manifest_bytes: &[u8]) -> Result<(), xous::Error> {
+    let names =
+        server::xous_names::XousNames::new().expect("xous-names should be available during app scanning");
+
+    names.add_manifest(manifest_bytes)
+}
+
+#[cfg(all(test, not(keyos)))]
+fn register_manifest_with_names(_manifest_bytes: &[u8]) -> Result<(), xous::Error> {
+    // Plain Rust unit tests run outside the hosted Xous kernel.
+    Ok(())
 }
 
 #[cfg(any(keyos, all(not(test), not(keyos))))]
@@ -370,15 +549,102 @@ impl AppInfo {
             .unwrap_or_else(|| format!("0x{}", self.id))
     }
 
-    fn permission_groups(&self) -> Vec<InstalledAppPermissionGroup> {
-        self.manifest
-            .permissions
-            .iter()
-            .map(|(server, messages)| InstalledAppPermissionGroup {
-                server: server.clone(),
-                messages: messages.iter().cloned().collect(),
-            })
-            .collect()
+    fn message_availability(
+        &self,
+        entry: &crate::permission_catalog::MessageMetadata,
+    ) -> MessageAvailability {
+        if !entry.signature_satisfied_by(self.source.signature()) {
+            MessageAvailability::Unavailable
+        } else if entry.is_auto_allow() {
+            MessageAvailability::AutoAllow
+        } else if entry.is_approval_based() {
+            MessageAvailability::ApprovalBased
+        } else {
+            MessageAvailability::Unavailable
+        }
+    }
+
+    /// The app's permission subgroups, collapsed under their top-level groups and split by
+    /// kind: auto-granted (basic) and user-grantable (approvable). A message the app's
+    /// signature can't satisfy is left out of both.
+    fn permission_groups(
+        &self,
+        permission_grants: &PermissionGrantStore,
+    ) -> (Vec<InstalledAppPermissionGroup>, Vec<InstalledAppPermissionGroup>) {
+        let mut basic = Vec::new();
+        let mut approvable = Vec::new();
+
+        for (server, messages) in &self.manifest.permissions {
+            for message in messages {
+                let Some(entry) = permission_grants.message_metadata(server, message) else {
+                    continue;
+                };
+                let (groups, approved) = match self.message_availability(entry) {
+                    MessageAvailability::AutoAllow => (&mut basic, true),
+                    MessageAvailability::ApprovalBased => (
+                        &mut approvable,
+                        permission_grants.subgroup_grant_state(self.id, entry.subgroup())
+                            == PermissionGrantState::Approved,
+                    ),
+                    MessageAvailability::Unavailable => continue,
+                };
+                push_permission_subgroup(groups, entry, approved);
+            }
+        }
+
+        (basic, approvable)
+    }
+
+    fn effective_manifest_bytes(
+        &self,
+        permission_grants: &PermissionGrantStore,
+    ) -> Result<Vec<u8>, LaunchError> {
+        // Built-ins run with everything they declare and are not user-managed: trust comes from
+        // the /keyos/apps directory itself, so they bypass filtering, first-use prompts, and
+        // Settings entirely. Only sideloaded apps get their manifest narrowed to the granted set.
+        if !self.is_third_party() {
+            return Ok(self.manifest_bytes.clone());
+        }
+
+        let mut manifest = self.manifest.clone();
+        manifest.permissions = self.effective_permissions(permission_grants);
+        serde_json::to_vec(&manifest).map_err(|error| {
+            error!("failed to serialize effective manifest for app_id=0x{}: {error:?}", self.id);
+            LaunchError::InternalError
+        })
+    }
+
+    fn effective_permissions(
+        &self,
+        permission_grants: &PermissionGrantStore,
+    ) -> BTreeMap<String, BTreeSet<String>> {
+        let mut effective = BTreeMap::new();
+        for (server, messages) in &self.manifest.permissions {
+            let mut connectable = false;
+            for message in messages {
+                let Some(entry) = permission_grants.message_metadata(server, message) else {
+                    continue;
+                };
+                let allowed = match self.message_availability(entry) {
+                    MessageAvailability::AutoAllow => {
+                        connectable = true;
+                        true
+                    }
+                    MessageAvailability::ApprovalBased => {
+                        connectable = true;
+                        permission_grants.is_approved(self.id, server, message)
+                    }
+                    MessageAvailability::Unavailable => false,
+                };
+                if allowed {
+                    effective.entry(server.clone()).or_insert_with(BTreeSet::new).insert(message.clone());
+                }
+            }
+            if connectable {
+                effective.entry(server.clone()).or_insert_with(BTreeSet::new);
+            }
+        }
+        effective
     }
 
     /// The publisher name to show and whether the app may launch. A sideloaded app is launchable
@@ -448,6 +714,34 @@ impl AppInfo {
     }
 
     fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
+}
+
+/// File `entry`'s subgroup under its top-level group, creating either level on first sight.
+/// Several declared messages resolve to the same subgroup; the user sees one row.
+fn push_permission_subgroup(
+    groups: &mut Vec<InstalledAppPermissionGroup>,
+    entry: &crate::permission_catalog::MessageMetadata,
+    approved: bool,
+) {
+    let group = match groups.iter_mut().find(|group| group.key == entry.group()) {
+        Some(group) => group,
+        None => {
+            groups.push(InstalledAppPermissionGroup {
+                key: entry.group().to_string(),
+                label: entry.group_label().to_string(),
+                subgroups: Vec::new(),
+            });
+            groups.last_mut().expect("group pushed")
+        }
+    };
+
+    if !group.subgroups.iter().any(|subgroup| subgroup.key == entry.subgroup()) {
+        group.subgroups.push(InstalledAppPermissionSubgroup {
+            key: entry.subgroup().to_string(),
+            label: entry.subgroup_label().to_string(),
+            approved,
+        });
+    }
 }
 
 /// Read a bundle file through `fs`, refusing anything larger than `max_size_bytes` before
@@ -555,7 +849,7 @@ fn sideloaded_path_suffix(path: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     use app_manager::decode_app_id_str;
 
@@ -568,6 +862,20 @@ mod tests {
     fn app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
         let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
         app_info_with_source(app_id, name, elf_path, source)
+    }
+
+    fn third_party_app_with_permissions(permissions: &[(&str, &[&str])]) -> AppInfo {
+        let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        app.manifest.permissions = permissions
+            .iter()
+            .map(|(server, messages)| {
+                (
+                    (*server).to_string(),
+                    messages.iter().map(|message| (*message).to_string()).collect::<BTreeSet<_>>(),
+                )
+            })
+            .collect();
+        app
     }
 
     fn built_in_app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
@@ -600,6 +908,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn app_icon_read_cap_allows_raw_256_rgba_icon() {
+        let pixel_bytes = 256 * 256 * 4;
+        assert!(MAX_APP_ICON_SIZE_BYTES > pixel_bytes);
+    }
+
     fn registry_with(apps: Vec<AppInfo>) -> AppRegistry {
         AppRegistry {
             installed_apps: apps.into_iter().map(|app| (app.id, app)).collect::<HashMap<_, _>>(),
@@ -607,11 +921,33 @@ mod tests {
         }
     }
 
+    /// A grant store whose server cache is built from the registry's manifests, mirroring what
+    /// `scan_installed_apps` does at runtime, so the metadata lookups resolve in tests.
+    fn grants_for(registry: &AppRegistry) -> PermissionGrantStore {
+        let mut cache = ServerPermissionCache::default();
+        for manifest in permission_catalog::system_manifests() {
+            cache.add_manifest(manifest).unwrap();
+        }
+        for app in registry.installed_apps.values() {
+            let _ = cache.add_manifest(&app.manifest);
+        }
+        let mut grants = PermissionGrantStore::default();
+        grants.set_server_cache(cache);
+        grants
+    }
+
     #[test]
     fn installed_apps_excludes_system_manifests_without_app_file() {
         let mut registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
 
-        assert!(registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only()).is_empty());
+        assert!(registry
+            .list_apps(
+                "en",
+                &[],
+                &app_manager::AppFilter::third_party_only(),
+                &PermissionGrantStore::default()
+            )
+            .is_empty());
     }
 
     // A valid compressed-key prefix (0x02) followed by zeroes; decode_public_key_hex only checks
@@ -672,6 +1008,104 @@ mod tests {
     }
 
     #[test]
+    fn permission_request_info_prompts_for_requested_approval_based_permission() {
+        // Provide the camera server's manifest through an installed app so the message-id
+        // lookup does not depend on the xtask-generated SYSTEM_MANIFESTS (empty under plain
+        // `cargo test`).
+        let camera_app_id_hex = "0x6775692d6170702d63616d6572610000";
+        let mut camera = built_in_app_info(camera_app_id_hex, "Camera", Some("/keyos/apps/camera/app.elf"));
+        camera.manifest.servers = BTreeMap::from([(
+            "os/camera".to_string(),
+            BTreeMap::from([(
+                "Subscribe".to_string(),
+                app_manifest::Message {
+                    id: 1,
+                    r#type: app_manifest::MessageType::ScalarEvent,
+                    description: None,
+                    cfg: None,
+                    permission_group: Some("peripherals.camera-use".to_string()),
+                    required_signature: Some(app_manifest::RequiredSignature::ThirdParty),
+                    approval: app_manifest::ApprovalBehavior::GrantOnFirstUse,
+                },
+            )]),
+        )]);
+        let registry =
+            registry_with(vec![third_party_app_with_permissions(&[("os/camera", &["Subscribe"])]), camera]);
+
+        let result = registry.permission_request_info(
+            decode_app_id_str(THIRD_PARTY_APP_ID).unwrap(),
+            "os/camera",
+            1,
+            "en",
+            &grants_for(&registry),
+        );
+
+        match result {
+            PermissionRequestInfoResult::Prompt(info) => {
+                assert_eq!(info.app_id, decode_app_id_str(THIRD_PARTY_APP_ID).unwrap());
+                assert_eq!(info.app_name, "Example App");
+                assert_eq!(info.subgroup, "peripherals.camera-use");
+                assert_eq!(info.label, "Camera use");
+            }
+            other => panic!("unexpected permission request result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permission_request_info_rejects_built_in_sender() {
+        let built_in_id = "0x426974636f696e2057616c6c65740000";
+        let registry = registry_with(vec![built_in_app_info(
+            built_in_id,
+            "Bitcoin Wallet",
+            Some("/keyos/apps/bitcoin/app.elf"),
+        )]);
+        assert_eq!(
+            registry.permission_request_info(
+                decode_app_id_str(built_in_id).unwrap(),
+                "os/camera",
+                1,
+                "en",
+                &PermissionGrantStore::default(),
+            ),
+            PermissionRequestInfoResult::NotGrantable
+        );
+    }
+
+    #[test]
+    fn permission_request_info_rejects_basic_only_permissions() {
+        let registry =
+            registry_with(vec![third_party_app_with_permissions(&[("os/app-manager", &["GetAppName"])])]);
+
+        assert_eq!(
+            registry.permission_request_info(
+                decode_app_id_str(THIRD_PARTY_APP_ID).unwrap(),
+                "os/app-manager",
+                3,
+                "en",
+                &PermissionGrantStore::default(),
+            ),
+            PermissionRequestInfoResult::NotGrantable
+        );
+    }
+
+    #[test]
+    fn permission_request_info_rejects_unrequested_permission() {
+        let registry =
+            registry_with(vec![third_party_app_with_permissions(&[("os/app-manager", &["GetAppName"])])]);
+
+        assert_eq!(
+            registry.permission_request_info(
+                decode_app_id_str(THIRD_PARTY_APP_ID).unwrap(),
+                "os/camera",
+                1,
+                "en",
+                &PermissionGrantStore::default(),
+            ),
+            PermissionRequestInfoResult::NotGrantable
+        );
+    }
+
+    #[test]
     fn app_resources_location_uses_app_id_for_sideloaded_bundle() {
         let registry =
             registry_with(vec![app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH))]);
@@ -704,7 +1138,12 @@ mod tests {
         app.manifest.version = Some("1.2.3".to_string());
         let mut registry = registry_with(vec![app]);
 
-        let apps = registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only());
+        let apps = registry.list_apps(
+            "en",
+            &[],
+            &app_manager::AppFilter::third_party_only(),
+            &PermissionGrantStore::default(),
+        );
 
         assert!(apps[0].publisher.is_empty());
         assert!(!apps[0].can_launch);

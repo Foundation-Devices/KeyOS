@@ -1,16 +1,16 @@
 manifestVersion = "0"
 [servers."os/crypto"]
-AesSetup = { id = 1, type = "blockingArchive" }
-AesExecute = { id = 2, type = "lendMut" }
-AesAad = { id = 3, type = "blockingArchive" }
-AesGcmTag = { id = 4, type = "blockingArchive" }
-AesClear = { id = 5, type = "scalar" }
-Hmac = { id = 6, type = "blockingArchive" }
-ShamirSplit = { id = 7, type = "blockingArchive" }
-ShamirRecover = { id = 8, type = "blockingArchive" }
-ShaSetContext = { id = 9, type = "blockingArchive", cfg = "keyos" }
-ShaUpdate = { id = 10, type = "lendMut", cfg = "keyos" }
-ShaGetContext = { id = 11, type = "blockingArchive", cfg = "keyos" }
-ShaDrop = { id = 12, type = "scalar", cfg = "keyos" }
+AesSetup = { id = 1, type = "blockingArchive", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+AesExecute = { id = 2, type = "lendMut", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+AesAad = { id = 3, type = "blockingArchive", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+AesGcmTag = { id = 4, type = "blockingArchive", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+AesClear = { id = 5, type = "scalar", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+Hmac = { id = 6, type = "blockingArchive", permissionGroup = "cryptography.primitives", approval = "autoAllow" }
+ShamirSplit = { id = 7, type = "blockingArchive", permissionGroup = "cryptography.secret-sharing", approval = "autoAllow" }
+ShamirRecover = { id = 8, type = "blockingArchive", permissionGroup = "cryptography.secret-sharing", approval = "autoAllow" }
+ShaSetContext = { id = 9, type = "blockingArchive", cfg = "keyos", permissionGroup = "cryptography.hardware-hashing", approval = "autoAllow" }
+ShaUpdate = { id = 10, type = "lendMut", cfg = "keyos", permissionGroup = "cryptography.hardware-hashing", approval = "autoAllow" }
+ShaGetContext = { id = 11, type = "blockingArchive", cfg = "keyos", permissionGroup = "cryptography.hardware-hashing", approval = "autoAllow" }
+ShaDrop = { id = 12, type = "scalar", cfg = "keyos", permissionGroup = "cryptography.hardware-hashing", approval = "autoAllow" }
 DiskEncryptUnsafe = { id = 31, type = "blockingArchive", cfg = "keyos" }
 SubscribeDiskEncryptComplete = { id = 32, type = "scalarEvent", cfg = "keyos" }

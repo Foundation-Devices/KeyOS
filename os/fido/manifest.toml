@@ -5,15 +5,15 @@ appId = "0x8abc821d427553efab0c6b374d059bda"
 en = "FIDO Server"
 
 [servers."os/fido"]
-GetSelectedSecurityKey = { id = 0, type = "blockingScalar" }
-SelectSecurityKey = { id = 1, type = "scalar" }
-SubscribeKeyChanges = { id = 2, type = "archiveEvent" }
-SubscribePresenceKeepAlive = { id = 3, type = "archiveEvent" }
-SubscribeOperationOutcomes = { id = 4, type = "archiveEvent" }
-CreateSecurityKey = { id = 5, type = "blockingArchive" }
-EditSecurityKey = { id = 6, type = "blockingArchive" }
-SetArchived = { id = 7, type = "blockingScalar" }
-ListSecurityKeys = { id = 8, type = "blockingArchive" }
+GetSelectedSecurityKey = { id = 0, type = "blockingScalar", approval = "autoAllow" }
+SelectSecurityKey = { id = 1, type = "scalar", approval = "autoAllow" }
+SubscribeKeyChanges = { id = 2, type = "archiveEvent", approval = "autoAllow" }
+SubscribePresenceKeepAlive = { id = 3, type = "archiveEvent", approval = "autoAllow" }
+SubscribeOperationOutcomes = { id = 4, type = "archiveEvent", approval = "autoAllow" }
+CreateSecurityKey = { id = 5, type = "blockingArchive", approval = "autoAllow" }
+EditSecurityKey = { id = 6, type = "blockingArchive", approval = "autoAllow" }
+SetArchived = { id = 7, type = "blockingScalar", approval = "autoAllow" }
+ListSecurityKeys = { id = 8, type = "blockingArchive", approval = "autoAllow" }
 U2fProcessApdu = { id = 9, type = "blockingArchive" }
 CtapProcessCbor = { id = 10, type = "blockingArchive" }
 ResetState = { id = 11, type = "blockingScalar", cfg = "feature = \"test-app\"" }

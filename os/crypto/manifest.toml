@@ -7,6 +7,10 @@ extends = "../../api/crypto"
 [appName]
 en = "Crypto"
 
+# Kernel-delivered client-disconnect event, used to clear a departed client's AES/SHA contexts.
+[servers."os/crypto"]
+ClientDisconnected = { id = 64, type = "scalar", cfg = "keyos" }
+
 [permissions]
 "os/dma" = [
     "PeripheralTransferMsg",

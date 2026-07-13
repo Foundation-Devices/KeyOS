@@ -317,6 +317,7 @@ dependencies = [
  "serde_json",
  "server",
  "sha2",
+ "system-manifests",
  "tar",
  "thiserror 1.0.64",
  "x509-cert",

@@ -6,7 +6,7 @@ syscall = ["SetThreadPriority"]
 en = "Ambient light sensor"
 
 [servers."os/ambient-light"]
-AmbientLightSubscribe = { id = 1, type = "scalarEvent" }
+AmbientLightSubscribe = { id = 1, type = "scalarEvent", permissionGroup = "peripherals.sensors", approval = "autoAllow" }
 
 [permissions]
 "template" = ["i2c", "gpio"]

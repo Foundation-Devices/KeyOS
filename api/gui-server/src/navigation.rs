@@ -84,7 +84,11 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     where
         P: MessageAllowed<ShowModal>,
     {
-        let res = self.show_modal(ALERTS_APP_ID, ModalStyle::SlideUpFullscreen, &alert.serialize())?;
+        // The alerts app window is popup-sized (UISize.popup-app-height), so present it as a
+        // fixed popup rather than fullscreen: a fullscreen modal would stretch the card to the
+        // full screen height while the app only paints the top popup portion. Fixed (not
+        // draggable) keeps the user from swiping the card away, matching the permission prompt.
+        let res = self.show_modal(ALERTS_APP_ID, ModalStyle::SlideUpFixedPopup, &alert.serialize())?;
 
         match res {
             Ok(response) => Ok(alerts::AlertResult::from_slice(response.as_slice())

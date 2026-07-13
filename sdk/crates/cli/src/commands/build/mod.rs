@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,7 +17,7 @@ use foundation_core::{
 use foundation_ui::Prompts;
 
 use crate::assets::stage_hardware_assets;
-use crate::cargo_support::{emit_cargo_messages, emit_stderr_if_present};
+use crate::cargo_support::{emit_cargo_messages, emit_stderr_if_present, ensure_development_environment};
 use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
 /// Target triple for KeyOS hardware builds
@@ -34,7 +34,7 @@ pub fn execute(release: bool) -> Result<()> {
     println!("Building KeyOS application...");
 
     // Check nix environment
-    check_nix_environment()?;
+    ensure_development_environment("foundation build")?;
     let sdk = SdkRoot::discover()
         .context("Could not locate the Foundation SDK root from the active development shell.")?;
 
@@ -103,46 +103,6 @@ pub fn execute(release: bool) -> Result<()> {
     println!("  icon.bin");
     println!("  resources/");
     println!("Version: {}", config.version);
-
-    Ok(())
-}
-
-/// Check if we're in a nix environment
-fn check_nix_environment() -> Result<()> {
-    println!("Checking Nix environment...");
-
-    // Check for nix environment indicators
-    let in_nix = std::env::var("IN_NIX_SHELL").is_ok()
-        || std::env::var("NIX_BUILD_TOP").is_ok()
-        || std::env::var("FOUNDATION_SDK_ROOT").is_ok();
-
-    if !in_nix {
-        eprintln!("Nix development environment is not active.");
-        print!("Setup nix environment now? [Y/n]: ");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim().to_lowercase();
-
-        if input.is_empty() || input == "y" || input == "yes" {
-            // Run foundation develop
-            let status = Command::new("foundation").arg("develop").status();
-
-            match status {
-                Ok(s) if s.success() => {
-                    // User exited the nix shell, remind them to re-run
-                    println!("Please run 'foundation build' again inside the nix shell.");
-                    std::process::exit(0);
-                }
-                _ => {
-                    anyhow::bail!("Failed to start nix environment");
-                }
-            }
-        } else {
-            anyhow::bail!("Build requires nix environment. Run 'foundation develop' first.");
-        }
-    }
 
     Ok(())
 }

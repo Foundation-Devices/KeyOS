@@ -1,47 +1,47 @@
 manifestVersion = "0"
 [servers."os/fs"]
-OpenFileMessage = { id = 0, type = "blockingArchive" }
-ReadFile = { id = 1, type = "lendMut" }
-WriteFile = { id = 2, type = "lendMut" }
-SeekFile = { id = 3, type = "blockingArchive" }
-CloseFile = { id = 4, type = "blockingScalar" }
-Remove = { id = 5, type = "blockingArchive" }
-AtomicCopy = { id = 6, type = "blockingArchive" }
-OpenDirMessage = { id = 7, type = "blockingArchive" }
-CreateDirMessage = { id = 8, type = "blockingArchive" }
-NextEntry = { id = 9, type = "blockingArchive" }
-GetMetadata = { id = 10, type = "blockingArchive" }
-Rename = { id = 11, type = "blockingArchive" }
-TruncateFile = { id = 12, type = "blockingArchive" }
-CloseDir = { id = 13, type = "blockingScalar" }
-Flush = { id = 14, type = "blockingScalar" }
-MapFileMessage = { id = 15, type = "blockingArchive" }
-SubscribeFilesystemEvent = { id = 16, type = "scalarEvent" }
+OpenFileMessage = { id = 0, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+ReadFile = { id = 1, type = "lendMut", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+WriteFile = { id = 2, type = "lendMut", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+SeekFile = { id = 3, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+CloseFile = { id = 4, type = "blockingScalar", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+Remove = { id = 5, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+AtomicCopy = { id = 6, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+OpenDirMessage = { id = 7, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+CreateDirMessage = { id = 8, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+NextEntry = { id = 9, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+GetMetadata = { id = 10, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+Rename = { id = 11, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+TruncateFile = { id = 12, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+CloseDir = { id = 13, type = "blockingScalar", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+Flush = { id = 14, type = "blockingScalar", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+MapFileMessage = { id = 15, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+SubscribeFilesystemEvent = { id = 16, type = "scalarEvent", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
 ReadBlocks = { id = 17, type = "lendMut" }
 WriteBlocks = { id = 18, type = "lendMut" }
 BlockCount = { id = 19, type = "blockingScalar" }
-FlushFs = { id = 20, type = "blockingScalar" }
-SetLen = { id = 21, type = "blockingArchive" }
-FormatEncryptedVolume = { id = 23, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
-SetMtime = { id = 24, type = "blockingArchive" }
-AsyncRead = { id = 25, type = "blockingArchive" }
-AsyncWrite = { id = 26, type = "blockingArchive" }
-AsyncCopyBlock = { id = 27, type = "blockingScalar" }
-MountAirlock = { id = 28, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
-FormatAirlock = { id = 29, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
-FormatUsb = { id = 30, type = "blockingScalar" }
+FlushFs = { id = 20, type = "blockingScalar", approval = "autoAllow" }
+SetLen = { id = 21, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+FormatEncryptedVolume = { id = 23, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")", approval = "autoAllow" }
+SetMtime = { id = 24, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+AsyncRead = { id = 25, type = "blockingArchive", permissionGroup = "file-system.read-handles", approval = "autoAllow" }
+AsyncWrite = { id = 26, type = "blockingArchive", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+AsyncCopyBlock = { id = 27, type = "blockingScalar", permissionGroup = "file-system.write-and-mutate", approval = "autoAllow" }
+MountAirlock = { id = 28, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")", approval = "autoAllow" }
+FormatAirlock = { id = 29, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")", approval = "autoAllow" }
+FormatUsb = { id = 30, type = "blockingScalar", approval = "autoAllow" }
 RegisterAppResources = { id = 31, type = "blockingArchive" }
-GetUsbReadAccess = { id = 100, type = "blockingScalar" }
-GetUsbWriteAccess = { id = 101, type = "blockingScalar" }
-GetUserReadAccess = { id = 102, type = "blockingScalar" }
-GetUserWriteAccess = { id = 103, type = "blockingScalar" }
-GetAirlockReadAccess = { id = 104, type = "blockingScalar" }
-GetAirlockWriteAccess = { id = 105, type = "blockingScalar" }
+GetUsbReadAccess = { id = 100, type = "blockingScalar", permissionGroup = "file-system.usb-files", approval = "grantOnFirstUse" }
+GetUsbWriteAccess = { id = 101, type = "blockingScalar", permissionGroup = "file-system.usb-files", approval = "grantOnFirstUse" }
+GetUserReadAccess = { id = 102, type = "blockingScalar", permissionGroup = "file-system.user-files", approval = "grantOnFirstUse" }
+GetUserWriteAccess = { id = 103, type = "blockingScalar", permissionGroup = "file-system.user-files", approval = "grantOnFirstUse" }
+GetAirlockReadAccess = { id = 104, type = "blockingScalar", permissionGroup = "file-system.airlock-files", approval = "grantOnFirstUse" }
+GetAirlockWriteAccess = { id = 105, type = "blockingScalar", permissionGroup = "file-system.airlock-files", approval = "grantOnFirstUse" }
 GetBootReadAccess = { id = 106, type = "blockingScalar" }
 GetBootWriteAccess = { id = 107, type = "blockingScalar" }
 GetEncryptedRootReadAccess = { id = 108, type = "blockingScalar" }
 GetEncryptedRootWriteAccess = { id = 109, type = "blockingScalar" }
-GetSystemReadAccess = { id = 110, type = "blockingScalar" }
-GetSystemWriteAccess = { id = 111, type = "blockingScalar" }
-GetSystemAppDataReadAccess = { id = 112, type = "blockingScalar" }
-GetSystemAppDataWriteAccess = { id = 113, type = "blockingScalar" }
+GetSystemReadAccess = { id = 110, type = "blockingScalar", approval = "autoAllow" }
+GetSystemWriteAccess = { id = 111, type = "blockingScalar", approval = "autoAllow" }
+GetSystemAppDataReadAccess = { id = 112, type = "blockingScalar", approval = "autoAllow" }
+GetSystemAppDataWriteAccess = { id = 113, type = "blockingScalar", approval = "autoAllow" }

@@ -9,6 +9,7 @@ template = ["gui-app", "fs-generic"]
 "os/app-manager" = [
     "LaunchAppBlocking",
     "ListApps",
+    "SetAppPermissionGrant",
     "GetAppIcon",
     "GetThirdPartyCertificates",
     "ImportThirdPartyCertificate",
@@ -40,7 +41,14 @@ template = ["gui-app", "fs-generic"]
     "GetUsbReadAccess",
     "GetUsbWriteAccess",
 ]
-"os/gui-server" = ["SwitchTo", "SwitchToLauncher", "UpdateKioskPolicy", "ClaimSettingsRole"]
+"os/gui-server" = [
+    "SwitchTo",
+    "SwitchToLauncher",
+    "UpdateKioskPolicy",
+    "GetPendingNavRequest",
+    "ClaimSettingsRole",
+    "CloseApp",
+]
 "os/settings" = [
     "GetTimeZone",
     "SetTimeZone",

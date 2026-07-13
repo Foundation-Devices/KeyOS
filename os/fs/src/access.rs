@@ -64,4 +64,9 @@ impl Server {
             }
         }
     }
+
+    pub fn clear_access_for_pid(&mut self, pid: server::xous::PID) {
+        self.read_access.retain(|(access_pid, _)| *access_pid != pid);
+        self.write_access.retain(|(access_pid, _)| *access_pid != pid);
+    }
 }

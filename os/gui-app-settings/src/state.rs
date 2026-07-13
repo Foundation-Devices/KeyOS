@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    cell::RefCell,
     rc::Rc,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -44,6 +45,9 @@ pub struct AppState {
     pub ticktimer: TicktimerPrivileged,
     pub bt: BluetoothApi,
     pub app_manager: AppManagerApi,
+    /// The last `ListApps` result, cached so the app details page and permission toggles read
+    /// from it instead of re-requesting each app one by one. Refreshed by `refresh_installed_apps`.
+    pub installed_apps: RefCell<Vec<app_manager::InstalledAppInfo>>,
     pub ql_status: QlStatus,
 
     pub secp: Secp256k1<All>,
@@ -78,6 +82,7 @@ impl AppState {
             ticktimer: TicktimerPrivileged::default(),
             bt: BluetoothApi::default(),
             app_manager: AppManagerApi::default(),
+            installed_apps: RefCell::new(Vec::new()),
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             secp: Secp256k1::new(),
             last_backup: None,

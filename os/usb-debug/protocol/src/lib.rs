@@ -70,7 +70,6 @@ pub enum LaunchAppStatus {
     AppIdNotFound = 2,
     SignatureRejected = 3,
     NoTrustedPublisherCertificate = 4,
-    MissingPermission = 5,
     NotReady = 6,
     InternalError = 7,
 }

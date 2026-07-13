@@ -76,6 +76,47 @@ impl XousNames {
         }
     }
 
+    /// The registered name of the server with `sid`, or `ServerNotFound` when no server with
+    /// that SID is currently registered.
+    #[cfg(not(target_os = "none"))]
+    pub fn lookup_name_by_sid(&self, sid: xous::SID) -> Result<String, xous::Error> {
+        let mut request = AlignedBuffer { data: [0u8; 4096] };
+        request.data[0..16].copy_from_slice(&sid.to_bytes());
+        let msg = xous::MemoryMessage {
+            id: api::Opcode::LookupNameBySid as usize,
+            buf: unsafe {
+                // safety: `request` is #[repr(C, align(4096))] and exactly one page in size
+                xous::MemoryRange::new(
+                    &mut request as *mut _ as *mut u8 as usize,
+                    core::mem::size_of::<AlignedBuffer>(),
+                )?
+            },
+            offset: None,
+            valid: xous::MemorySize::new(16),
+        };
+        let response = xous::send_message(self.conn, xous::Message::MutableBorrow(msg))?;
+
+        let xous::Result::MemoryReturned(_, _, valid) = response else {
+            panic!("names: MutableBorrow reply was not MemoryReturned");
+        };
+
+        // On success the server returns the name at the start of the buffer with its length
+        // in `valid`; a not-found or error reply leaves `valid` clear and puts the error code
+        // (`ServerNotFound` when the SID is unregistered) in the second word.
+        match valid {
+            Some(valid) => {
+                let len = valid.get().min(api::NAME_MAX_LENGTH);
+                core::str::from_utf8(&request.data[0..len])
+                    .map(str::to_string)
+                    .map_err(|_| xous::Error::InvalidString)
+            }
+            None => {
+                let error = u32::from_le_bytes(request.data[4..8].try_into().unwrap());
+                Err(xous::Error::from_usize(error as usize))
+            }
+        }
+    }
+
     pub fn request_connection_impl(&self, name: &str, blocking: bool) -> Result<xous::CID, xous::Error> {
         let mut request = AlignedBuffer::new_connect_request(name);
         let msg = xous::MemoryMessage {

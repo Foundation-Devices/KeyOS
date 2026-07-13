@@ -6,16 +6,16 @@ memory = ["SRAM0"]
 en = "Recovery Worker Server"
 
 [servers."os/recovery-worker"]
-GetBootloaderInfo = { id = 0, type = "blockingArchive", cfg = "keyos" }
-GetKeyOsInfo = { id = 1, type = "blockingArchive", cfg = "keyos" }
-GetRecoveryInfo = { id = 2, type = "blockingArchive", cfg = "keyos" }
-ReadArchive = { id = 3, type = "blockingArchive", cfg = "keyos" }
-GetArchiveState = { id = 4, type = "blockingArchive", cfg = "keyos" }
-SubscribeProgress = { id = 5, type = "scalarEvent", cfg = "keyos" }
-GetAppBinVerificationState = { id = 6, type = "blockingArchive", cfg = "keyos" }
-CopyArchive = { id = 7, type = "scalar", cfg = "keyos" }
-StartRecovery = { id = 8, type = "scalar", cfg = "keyos" }
-GetLastError = { id = 9, type = "blockingArchive", cfg = "keyos" }
+GetBootloaderInfo = { id = 0, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+GetKeyOsInfo = { id = 1, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+GetRecoveryInfo = { id = 2, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+ReadArchive = { id = 3, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+GetArchiveState = { id = 4, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+SubscribeProgress = { id = 5, type = "scalarEvent", cfg = "keyos", approval = "autoAllow" }
+GetAppBinVerificationState = { id = 6, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
+CopyArchive = { id = 7, type = "scalar", cfg = "keyos", approval = "autoAllow" }
+StartRecovery = { id = 8, type = "scalar", cfg = "keyos", approval = "autoAllow" }
+GetLastError = { id = 9, type = "blockingArchive", cfg = "keyos", approval = "autoAllow" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]

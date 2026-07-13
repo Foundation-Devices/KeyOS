@@ -1,64 +1,68 @@
 manifestVersion = "0"
 [servers."os/settings"]
-LookupTimeZone = { id = 5, type = "blockingArchive" }
-ListTimeZone = { id = 6, type = "blockingArchive" }
+# `settings.ui-essentials`: presentation and localization state any UI app needs to
+# render consistently with the system (theme, accent, locale, time). Third-party readable.
+# `settings.device-configuration`: the rest (onboarding, security words, radios,
+# developer mode, calibration). Foundation-only reads.
+LookupTimeZone = { id = 5, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+ListTimeZone = { id = 6, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
 FlushAll = { id = 7, type = "scalar" }
-GetPrimeColor = { id = 9, type = "blockingScalar" }
+GetPrimeColor = { id = 9, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
 ResetSettings = { id = 10, type = "blockingScalar" }
-GetSystemTheme = { id = 20, type = "blockingScalar" }
-SetSystemTheme = { id = 21, type = "scalar" }
-SubscribeSystemTheme = { id = 22, type = "scalarEvent" }
-GetOnboardingStatus = { id = 23, type = "blockingArchive" }
-SetOnboardingStatus = { id = 24, type = "archive" }
-SubscribeOnboardingStatus = { id = 25, type = "archiveEvent" }
-GetScreenBrightness = { id = 26, type = "blockingScalar" }
-SetScreenBrightness = { id = 27, type = "scalar" }
-SubscribeScreenBrightness = { id = 28, type = "scalarEvent" }
-GetLocale = { id = 29, type = "blockingScalar" }
-SetLocale = { id = 30, type = "scalar" }
-SubscribeLocale = { id = 31, type = "scalarEvent" }
-GetDeviceName = { id = 32, type = "blockingArchive" }
-SetDeviceName = { id = 33, type = "archive" }
-SubscribeDeviceName = { id = 34, type = "archiveEvent" }
-GetShowSecurityWords = { id = 35, type = "blockingScalar" }
-SetShowSecurityWords = { id = 36, type = "scalar" }
-SubscribeShowSecurityWords = { id = 37, type = "scalarEvent" }
-GetAutoLock = { id = 38, type = "blockingScalar" }
-SetAutoLock = { id = 39, type = "scalar" }
-SubscribeAutoLock = { id = 40, type = "scalarEvent" }
-GetEnvoyTimeSync = { id = 41, type = "blockingScalar" }
-SetEnvoyTimeSync = { id = 42, type = "scalar" }
-SubscribeEnvoyTimeSync = { id = 43, type = "scalarEvent" }
-GetUseStandardTimeFormat = { id = 44, type = "blockingScalar" }
-SetUseStandardTimeFormat = { id = 45, type = "scalar" }
-SubscribeUseStandardTimeFormat = { id = 46, type = "scalarEvent" }
-GetTimeZone = { id = 47, type = "blockingArchive" }
-SetTimeZone = { id = 48, type = "archive" }
-SubscribeTimeZone = { id = 49, type = "archiveEvent" }
-GetDebugTouch = { id = 50, type = "blockingScalar" }
-SetDebugTouch = { id = 51, type = "scalar" }
-SubscribeDebugTouch = { id = 52, type = "scalarEvent" }
-GetAirlockMode = { id = 53, type = "blockingScalar" }
-SetAirlockMode = { id = 54, type = "scalar" }
-SubscribeAirlockMode = { id = 55, type = "scalarEvent" }
-GetTouchOffset = { id = 56, type = "blockingScalar" }
-SetTouchOffset = { id = 57, type = "scalar" }
-SubscribeTouchOffset = { id = 58, type = "scalarEvent" }
-GetMagicBackupEnabled = { id = 59, type = "blockingScalar" }
-SetMagicBackupEnabled = { id = 60, type = "scalar" }
-SubscribeMagicBackupEnabled = { id = 61, type = "scalarEvent" }
-GetNfcEnabled = { id = 62, type = "blockingScalar" }
-SetNfcEnabled = { id = 63, type = "scalar" }
-SubscribeNfcEnabled = { id = 64, type = "scalarEvent" }
-GetBluetoothEnabled = { id = 65, type = "blockingScalar" }
-SetBluetoothEnabled = { id = 66, type = "scalar" }
-SubscribeBluetoothEnabled = { id = 67, type = "scalarEvent" }
-GetCameraEnabled = { id = 68, type = "blockingScalar" }
-SetCameraEnabled = { id = 69, type = "scalar" }
-SubscribeCameraEnabled = { id = 70, type = "scalarEvent" }
-GetUsbEnabled = { id = 71, type = "blockingScalar" }
-SetUsbEnabled = { id = 72, type = "scalar" }
-SubscribeUsbEnabled = { id = 73, type = "scalarEvent" }
-GetDeveloperMode = { id = 74, type = "blockingScalar" }
-SetDeveloperMode = { id = 75, type = "scalar" }
-SubscribeDeveloperMode = { id = 76, type = "scalarEvent" }
+GetSystemTheme = { id = 20, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetSystemTheme = { id = 21, type = "scalar", approval = "autoAllow" }
+SubscribeSystemTheme = { id = 22, type = "scalarEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetOnboardingStatus = { id = 23, type = "blockingArchive", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetOnboardingStatus = { id = 24, type = "archive", approval = "autoAllow" }
+SubscribeOnboardingStatus = { id = 25, type = "archiveEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetScreenBrightness = { id = 26, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetScreenBrightness = { id = 27, type = "scalar", approval = "autoAllow" }
+SubscribeScreenBrightness = { id = 28, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetLocale = { id = 29, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetLocale = { id = 30, type = "scalar", approval = "autoAllow" }
+SubscribeLocale = { id = 31, type = "scalarEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetDeviceName = { id = 32, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetDeviceName = { id = 33, type = "archive", approval = "autoAllow" }
+SubscribeDeviceName = { id = 34, type = "archiveEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetShowSecurityWords = { id = 35, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetShowSecurityWords = { id = 36, type = "scalar", approval = "autoAllow" }
+SubscribeShowSecurityWords = { id = 37, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetAutoLock = { id = 38, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetAutoLock = { id = 39, type = "scalar", approval = "autoAllow" }
+SubscribeAutoLock = { id = 40, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetEnvoyTimeSync = { id = 41, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetEnvoyTimeSync = { id = 42, type = "scalar", approval = "autoAllow" }
+SubscribeEnvoyTimeSync = { id = 43, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetUseStandardTimeFormat = { id = 44, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetUseStandardTimeFormat = { id = 45, type = "scalar", approval = "autoAllow" }
+SubscribeUseStandardTimeFormat = { id = 46, type = "scalarEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetTimeZone = { id = 47, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetTimeZone = { id = 48, type = "archive", approval = "autoAllow" }
+SubscribeTimeZone = { id = 49, type = "archiveEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetDebugTouch = { id = 50, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+SetDebugTouch = { id = 51, type = "scalar", approval = "autoAllow" }
+SubscribeDebugTouch = { id = 52, type = "scalarEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
+GetAirlockMode = { id = 53, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetAirlockMode = { id = 54, type = "scalar", approval = "autoAllow" }
+SubscribeAirlockMode = { id = 55, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetTouchOffset = { id = 56, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetTouchOffset = { id = 57, type = "scalar", approval = "autoAllow" }
+SubscribeTouchOffset = { id = 58, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetMagicBackupEnabled = { id = 59, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetMagicBackupEnabled = { id = 60, type = "scalar", approval = "autoAllow" }
+SubscribeMagicBackupEnabled = { id = 61, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetNfcEnabled = { id = 62, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetNfcEnabled = { id = 63, type = "scalar", approval = "autoAllow" }
+SubscribeNfcEnabled = { id = 64, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetBluetoothEnabled = { id = 65, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetBluetoothEnabled = { id = 66, type = "scalar", approval = "autoAllow" }
+SubscribeBluetoothEnabled = { id = 67, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetCameraEnabled = { id = 68, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetCameraEnabled = { id = 69, type = "scalar", approval = "autoAllow" }
+SubscribeCameraEnabled = { id = 70, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetUsbEnabled = { id = 71, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetUsbEnabled = { id = 72, type = "scalar", approval = "autoAllow" }
+SubscribeUsbEnabled = { id = 73, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetDeveloperMode = { id = 74, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SetDeveloperMode = { id = 75, type = "scalar", approval = "autoAllow" }
+SubscribeDeveloperMode = { id = 76, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }

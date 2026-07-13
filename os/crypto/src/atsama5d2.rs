@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crypto::{error::CryptoError, messages::*, Direction, AES_BLOCK_SIZE};
+use server::MessageId as _;
 use {
     atsama5d27::{
         aes::{Aes, Iv},
@@ -19,6 +20,11 @@ use {
 
 dma::use_api!();
 power_manager::use_api!();
+
+/// Kernel-delivered when a client disconnects or exits; the scalar payload is unused because the
+/// message's sender is the departed pid.
+#[derive(Debug, server::Message)]
+pub(crate) struct ClientDisconnected(server::xous::CID);
 
 #[derive(server::Server)]
 #[name = "os/crypto"]
@@ -77,6 +83,12 @@ impl server::Server for CryptoServer {
         self.dma_disk_encrypt_rx
             .subscribe_transfer_complete(context)
             .expect("subscribe to os/dma TransferComplete");
+        xous::register_server_event_handler(
+            xous::ServerEvent::Disconnected,
+            context.sid(),
+            crate::ClientDisconnected::ID,
+        )
+        .expect("register os/crypto disconnect handler");
     }
 }
 
@@ -426,6 +438,25 @@ impl CryptoServer {
     pub fn aes_clear(&mut self, msg: AesClear, sender: PID) {
         if let Some(context) = self.aes_contexts.remove(&(sender, msg.0)) {
             self.deallocate_securam_slot(context.key_slot);
+        }
+    }
+
+    /// Drop every AES and SHA context owned by `pid`, freeing the SECURAM key slots they held.
+    /// Called when a client disconnects or exits so it cannot strand its keys for a reused pid.
+    pub fn clear_client_contexts(&mut self, pid: PID) {
+        let aes_ids: Vec<u8> =
+            self.aes_contexts.keys().filter(|(owner, _)| *owner == pid).map(|(_, id)| *id).collect();
+        for id in aes_ids {
+            if let Some(context) = self.aes_contexts.remove(&(pid, id)) {
+                self.deallocate_securam_slot(context.key_slot);
+            }
+        }
+
+        let had_sha = !self.sha_contexts.is_empty();
+        self.sha_contexts.retain(|(owner, _), _| *owner != pid);
+        // Match sha_drop: power the SHA block down once its last context is gone.
+        if had_sha && self.sha_contexts.is_empty() {
+            self.power_manager.disable_peripheral(PeripheralId::Sha).ok();
         }
     }
 

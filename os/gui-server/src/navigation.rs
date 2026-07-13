@@ -10,7 +10,7 @@ use log::{debug, error, warn};
 use server::ArchiveRequest;
 use xous::{AppId, PID};
 
-use crate::{AppManagerApi, Gui, GuiState, StartupState};
+use crate::{Gui, GuiState, StartupState};
 
 impl Gui {
     pub(crate) fn handle_show_modal_request(&mut self, request: ArchiveRequest<ShowModal>) {
@@ -71,33 +71,43 @@ impl Gui {
         }
     }
 
-    fn launch_app(&self, app_id: AppId) -> Option<PID> {
+    pub(crate) fn launch_app(&self, app_id: AppId) -> Option<PID> {
         self.launch_app_with_state(app_id).ok().map(|(pid, _)| pid)
     }
 
     fn launch_app_with_state(&self, app_id: AppId) -> Result<(PID, bool), RunAppResponse> {
-        let mut pid_res = xous::app_id_to_pid(&app_id)
+        let pid_res = xous::app_id_to_pid(&app_id)
             .map_err(|_| RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal })?;
         if let Some(pid) = pid_res {
             return Ok((pid, true));
         }
 
-        let app_manager_api = AppManagerApi::default();
-        pid_res = app_manager_api.launch_app_blocking(&app_id).map(Some).map_err(|error| {
-            error!("Couldn't launch the app: {error:?}");
-            match error {
-                app_manager::AppManagerError::UnknownAppId => RunAppResponse::AppIdNotFound,
-                app_manager::AppManagerError::VerificationFailed => {
-                    RunAppResponse::LaunchFailed { reason: LaunchFailureReason::SignatureRejected }
+        // An app that is not already running has to be launched through the app manager, which
+        // the recovery image does not have.
+        #[cfg(not(feature = "recovery-os"))]
+        {
+            let pid = self.app_manager.launch_app_blocking(&app_id).map_err(|error| {
+                error!("Couldn't launch the app: {error:?}");
+                match error {
+                    app_manager::AppManagerError::UnknownAppId => RunAppResponse::AppIdNotFound,
+                    app_manager::AppManagerError::VerificationFailed => {
+                        RunAppResponse::LaunchFailed { reason: LaunchFailureReason::SignatureRejected }
+                    }
+                    app_manager::AppManagerError::NoTrustedPublisherCertificate => {
+                        RunAppResponse::LaunchFailed {
+                            reason: LaunchFailureReason::NoTrustedPublisherCertificate,
+                        }
+                    }
+                    _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
                 }
-                app_manager::AppManagerError::NoTrustedPublisherCertificate => RunAppResponse::LaunchFailed {
-                    reason: LaunchFailureReason::NoTrustedPublisherCertificate,
-                },
-                _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
-            }
-        })?;
-
-        pid_res.map(|pid| (pid, false)).ok_or(RunAppResponse::AppIdNotFound)
+            })?;
+            Ok((pid, false))
+        }
+        #[cfg(feature = "recovery-os")]
+        {
+            log::warn!("No app manager on recovery; cannot launch {app_id:?}");
+            Err(RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal })
+        }
     }
 
     pub(crate) fn respond_to_nav_request(&mut self, response: NavigationResult) {

@@ -63,10 +63,22 @@ pub struct AppQrMatchRules {
     pub rules_json: Vec<u8>,
 }
 
+/// One permission subgroup of an app, the unit the user sees, approves, and denies. The
+/// individual messages behind it stay internal to the OS.
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InstalledAppPermissionSubgroup {
+    pub key: String,
+    pub label: String,
+    pub approved: bool,
+}
+
+/// A top-level permission group (the part of a subgroup key before the first `.`), under
+/// which the permission UI collapses its subgroups.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct InstalledAppPermissionGroup {
-    pub server: String,
-    pub messages: Vec<String>,
+    pub key: String,
+    pub label: String,
+    pub subgroups: Vec<InstalledAppPermissionSubgroup>,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -79,7 +91,43 @@ pub struct InstalledAppInfo {
     pub version: String,
     pub size_bytes: u64,
     pub description: String,
-    pub permissions: Vec<InstalledAppPermissionGroup>,
+    /// Auto-granted permissions (shown but not user-toggleable).
+    pub basic_permissions: Vec<InstalledAppPermissionGroup>,
+    /// Permissions the user can allow or deny.
+    pub approvable_permissions: Vec<InstalledAppPermissionGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum SetAppPermissionGrantResult {
+    Updated,
+    AppNotFound,
+    PermissionNotFound,
+    NotUserGrantable,
+    Unauthorized,
+    StorageUnavailable,
+    InternalError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct PermissionRequestInfo {
+    #[rkyv(with = WithAppId)]
+    pub app_id: AppId,
+    pub app_name: String,
+    /// Subgroup key the grant is recorded under (e.g. `peripherals.camera-use`).
+    pub subgroup: String,
+    /// User-facing name of the subgroup, shown in the prompt.
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum PermissionRequestInfoResult {
+    Prompt(PermissionRequestInfo),
+    AlreadyApproved,
+    Denied,
+    NotGrantable,
+    AppNotFound,
+    Unauthorized,
+    InternalError,
 }
 
 #[derive(
@@ -201,6 +249,42 @@ pub struct ListApps {
 #[response(Option<Vec<u8>>)]
 pub struct GetAppIcon {
     pub app_id: String,
+}
+
+/// How the user answered a permission prompt (or moved a Settings toggle) for one
+/// permission subgroup of an app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum PermissionGrantDecision {
+    /// Persist an approval ("Allow Always").
+    Allow,
+    /// Persist a denial ("Never Allow").
+    Deny,
+    /// Deny for the current run only ("Not Now"): the broker auto-denies further requests
+    /// for the same subgroup without re-prompting until the app is relaunched.
+    /// Not persisted; cleared when the app next launches.
+    DenyForRun,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(SetAppPermissionGrantResult)]
+pub struct SetAppPermissionGrant {
+    pub app_id: String,
+    /// Subgroup key (e.g. `peripherals.camera-use`); the grant covers every message in it.
+    pub subgroup: String,
+    pub decision: PermissionGrantDecision,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(PermissionRequestInfoResult)]
+pub struct GetPermissionRequestInfo {
+    /// The requesting app's id, captured by the kernel when the request was parked, so it is
+    /// stable even if the sender exits and its pid is recycled before the broker asks.
+    pub sender_app_id: [u8; 16],
+    /// The target server's SID as captured by the kernel when the request was parked; it
+    /// identifies the exact server even when one process hosts several.
+    pub server_sid: [u32; 4],
+    pub message_id: usize,
+    pub locale: String,
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

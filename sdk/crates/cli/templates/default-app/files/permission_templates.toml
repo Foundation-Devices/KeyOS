@@ -16,7 +16,6 @@
     "GetMetadata",
     "NextEntry",
     "Flush",
-    "FlushFs",
     "Remove",
     "Rename",
     "AtomicCopy",
@@ -24,18 +23,6 @@
     "AsyncWrite",
     "AsyncCopyBlock",
     "SubscribeFilesystemEvent",
-]
-[i2c]
-"os/i2c" = [
-    "ClaimPeripheral",
-    "SingleTransfer",
-]
-[gpio]
-"os/gpio" = [
-    "ClaimPin",
-    "EnableIrq",
-    "SetPin",
-    "GetPin",
 ]
 [gui-app]
 "os/fs" = [

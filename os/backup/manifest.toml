@@ -25,6 +25,7 @@ template = ["fs-generic", "crypto-aes"]
     "GetAirlockReadAccess",
     "GetAirlockWriteAccess",
     "SetMtime",
+    "FlushFs",
 ]
 "os/quantum-link" = [
     "EnvoyMagicBackupEnabled",

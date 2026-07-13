@@ -1,9 +1,9 @@
 manifestVersion = "0"
 [servers."os/camera"]
-Subscribe = { id = 1, type = "scalarEvent" }
-SetEnabled = { id = 2, type = "scalar" }
+Subscribe = { id = 1, type = "scalarEvent", permissionGroup = "peripherals.camera-use", approval = "grantOnFirstUse" }
+SetEnabled = { id = 2, type = "scalar", approval = "autoAllow" }
 NotifyVisible = { id = 3, type = "scalar" }
-IsEnabled = { id = 4, type = "blockingScalar" }
-IsInUse = { id = 5, type = "blockingScalar" }
-GetParams = { id = 6, type = "blockingArchive" }
-SetParams = { id = 7, type = "archive" }
+IsEnabled = { id = 4, type = "blockingScalar", permissionGroup = "peripherals.camera-status", approval = "autoAllow" }
+IsInUse = { id = 5, type = "blockingScalar", permissionGroup = "peripherals.camera-status", approval = "autoAllow" }
+GetParams = { id = 6, type = "blockingArchive", approval = "autoAllow" }
+SetParams = { id = 7, type = "archive", approval = "autoAllow" }

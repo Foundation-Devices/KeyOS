@@ -1,36 +1,36 @@
 manifestVersion = "0"
 [servers."os/security"]
-SetSeedAndPin = { id = 1, type = "blockingArchive" }
-ChangePin = { id = 2, type = "blockingArchive" }
-Login = { id = 3, type = "blockingArchive" }
-GetAttemptsRemaining = { id = 4, type = "blockingArchive" }
-GetFactoryResetCounter = { id = 5, type = "blockingArchive" }
-GetSeed = { id = 6, type = "blockingArchive" }
+SetSeedAndPin = { id = 1, type = "blockingArchive", approval = "autoAllow" }
+ChangePin = { id = 2, type = "blockingArchive", approval = "autoAllow" }
+Login = { id = 3, type = "blockingArchive", approval = "autoAllow" }
+GetAttemptsRemaining = { id = 4, type = "blockingArchive", approval = "autoAllow" }
+GetFactoryResetCounter = { id = 5, type = "blockingArchive", approval = "autoAllow" }
+GetSeed = { id = 6, type = "blockingArchive", approval = "autoAllow" }
 SetSeed = { id = 7, type = "blockingArchive" }
-GetAppSeed = { id = 8, type = "blockingArchive" }
+GetAppSeed = { id = 8, type = "blockingArchive", permissionGroup = "device-secrets.app-scoped-seed", approval = "grantOnFirstUse" }
 GetFirmwareTimestamp = { id = 9, type = "blockingArchive" }
 SetFirmwareTimestamp = { id = 10, type = "blockingArchive" }
 Logout = { id = 11, type = "blockingScalar" }
-LoggedIn = { id = 12, type = "blockingScalar" }
+LoggedIn = { id = 12, type = "blockingScalar", approval = "autoAllow" }
 GetPin = { id = 13, type = "blockingArchive", cfg = "not(keyos)" }
-Lockout = { id = 14, type = "blockingArchive" }
+Lockout = { id = 14, type = "blockingArchive", approval = "autoAllow" }
 SignWithSecurityCheckKey = { id = 15, type = "blockingArchive" }
-GetSecurityWords = { id = 16, type = "blockingArchive" }
+GetSecurityWords = { id = 16, type = "blockingArchive", approval = "autoAllow" }
 SetAttempts = { id = 17, type = "blockingArchive", cfg = "not(keyos)" }
-GetSeedFingerprint = { id = 18, type = "blockingArchive" }
-ComputeSeedFingerprint = { id = 19, type = "blockingArchive" }
-SignWithFidoKey = { id = 20, type = "blockingArchive" }
-GetOsVersionInfo = { id = 21, type = "blockingArchive" }
+GetSeedFingerprint = { id = 18, type = "blockingArchive", approval = "autoAllow" }
+ComputeSeedFingerprint = { id = 19, type = "blockingArchive", approval = "autoAllow" }
+SignWithFidoKey = { id = 20, type = "blockingArchive", approval = "autoAllow" }
+GetOsVersionInfo = { id = 21, type = "blockingArchive", permissionGroup = "device-secrets.general-status", approval = "autoAllow" }
 ScChallenge = { id = 22, type = "blockingArchive" }
-IsPinSet = { id = 23, type = "blockingArchive" }
-GetDeviceId = { id = 24, type = "blockingArchive" }
+IsPinSet = { id = 23, type = "blockingArchive", approval = "autoAllow" }
+GetDeviceId = { id = 24, type = "blockingArchive", approval = "autoAllow" }
 KeycardAuthenticityMac = { id = 25, type = "blockingArchive" }
 GetBluetoothChallengeSecret = { id = 26, type = "blockingArchive" }
 SetBluetoothCheckSecretSent = { id = 27, type = "blockingScalar" }
 SetBluetoothDeviceId = { id = 28, type = "blockingArchive" }
-GetRandom = { id = 29, type = "blockingArchive" }
-GetPinEntryMode = { id = 30, type = "blockingArchive" }
-GetMasterKeyState = { id = 31, type = "blockingScalar" }
+GetRandom = { id = 29, type = "blockingArchive", permissionGroup = "device-secrets.general-status", approval = "autoAllow" }
+GetPinEntryMode = { id = 30, type = "blockingArchive", approval = "autoAllow" }
+GetMasterKeyState = { id = 31, type = "blockingScalar", approval = "autoAllow" }
 GetFidoPubkey = { id = 32, type = "blockingArchive" }
-GetBootloaderBuildDate = { id = 33, type = "blockingArchive" }
+GetBootloaderBuildDate = { id = 33, type = "blockingArchive", permissionGroup = "device-secrets.general-status", approval = "autoAllow" }
 SubscribeDiskEncryptionKeysReady = { id = 34, type = "scalarEvent", cfg = "not(feature = \"recovery-os\")" }

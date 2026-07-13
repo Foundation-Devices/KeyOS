@@ -202,16 +202,9 @@ export component AppsPage inherits BasePage {
                     last: row.last;
 
                     clicked => {
-                        AppManagementGlobal.selected-app-permission-groups = row.app.permission_groups;
-                        Navigate.app-details({
-                            app-id: row.app.app_id,
-                            name: row.app.name,
-                            publisher: row.app.publisher,
-                            can-remove: row.app.can_remove,
-                            version: row.app.version,
-                            size: row.app.size,
-                            description: row.app.description,
-                        }, { });
+                        if AppManagementGlobal.select-installed-app(row.app.app_id) {
+                            Navigate.app-details({ app-id: row.app.app_id, focus: "" }, { });
+                        }
                     }
 
                     launch-clicked => {

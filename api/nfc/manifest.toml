@@ -1,7 +1,7 @@
 manifestVersion = "0"
 [servers."os/nfc"]
-ReadNdefRawMsg = { id = 0, type = "blockingArchive" }
+ReadNdefRawMsg = { id = 0, type = "blockingArchive", approval = "autoAllow" }
 WriteNdefRawMsg = { id = 1, type = "blockingArchive" }
-SetEnabled = { id = 2, type = "blockingScalar" }
-IsEnabled = { id = 3, type = "blockingScalar" }
-IsActive = { id = 4, type = "blockingScalar" }
+SetEnabled = { id = 2, type = "blockingScalar", approval = "autoAllow" }
+IsEnabled = { id = 3, type = "blockingScalar", permissionGroup = "device-connectivity.nfc-status", approval = "autoAllow" }
+IsActive = { id = 4, type = "blockingScalar", permissionGroup = "device-connectivity.nfc-status", approval = "autoAllow" }

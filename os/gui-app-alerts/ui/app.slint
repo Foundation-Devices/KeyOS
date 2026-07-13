@@ -5,12 +5,23 @@ import { Router } from "gen/router.slint";
 import { TR } from "@ui/i18n/i18n.slint";
 
 import { Images, CurrentTheme, Palettes, Utils, UISize } from "@ui/theme.slint";
-import { BaseWindow } from "@ui/widgets.slint";
+import { ModalWindow } from "@ui/widgets.slint";
 import { Callbacks } from "callbacks.slint";
 import { GenericAlertGlobal, AppCrashedGlobal } from "globals/globals.slint";
 
-export component AppWindow inherits BaseWindow {
-    Router { }
+export component AppWindow inherits Window {
+    width: UISize.screen-width;
+    height: UISize.popup-app-height;
+    // Let the app behind show through ModalWindow's rounded top corners; a Window
+    // otherwise defaults to the style's opaque background.
+    background: transparent;
+
+    ModalWindow {
+        Router {
+            width: parent.width;
+            height: parent.height;
+        }
+    }
 }
 
 export { GenericAlertGlobal, AppCrashedGlobal, CurrentTheme, Callbacks, TR, Utils, Images }

@@ -10,7 +10,7 @@ en = "Ticktimer"
 # infrastructure for much of its work; so these are just the privileged messages
 # for permission purposes.
 [servers."os/ticktimer"]
-SetSystemTime = { id = 20, type = "blockingScalar" }
+SetSystemTime = { id = 20, type = "blockingScalar", approval = "autoAllow" }
 
 [fixedSids]
 "os/ticktimer" = "ticktimer-server"

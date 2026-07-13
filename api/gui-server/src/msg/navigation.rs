@@ -32,9 +32,7 @@ pub enum LaunchFailureReason {
     SignatureRejected,
     /// No matching trusted publisher certificate is installed, so this third-party app cannot be trusted.
     NoTrustedPublisherCertificate,
-    /// Required permission not granted to the launching context.
-    MissingPermission,
-    /// Anything else — app-manager-internal failure, IPC failure, etc.
+    /// Anything else: app-manager-internal failure, IPC failure, etc.
     Internal,
 }
 

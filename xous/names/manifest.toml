@@ -11,3 +11,4 @@ AddManifest = { id = 1, type = "lendMut" }
 RemoveManifest = { id = 2, type = "lendMut" }
 BlockingConnect = { id = 6, type = "lendMut" }
 TryConnect = { id = 7, type = "lendMut" }
+LookupNameBySid = { id = 3, type = "lendMut" }

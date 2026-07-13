@@ -16,7 +16,10 @@ use anyhow::{bail, Context, Result};
 use foundation_core::{app_manifest_from_config, AppConfig, ProjectContext, SdkLayout, SdkRoot};
 
 use crate::assets::{stage_bundled_icon, stage_hardware_assets};
-use crate::cargo_support::{configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present};
+use crate::cargo_support::{
+    configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present,
+    ensure_development_environment,
+};
 use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
 const SCREENSHOTS_DIR_ENV: &str = "FOUNDATION_SIMULATOR_SCREENSHOTS_DIR";
@@ -34,6 +37,12 @@ pub fn execute() -> Result<()> {
     println!();
 
     let sdk = SdkRoot::discover().map_err(|_| anyhow::anyhow!("Could not locate the Foundation SDK root. Run this command from the SDK checkout or unpacked SDK bundle."))?;
+
+    // A source checkout builds against the Nix toolchain; an unpacked SDK bundle is
+    // self-contained, so only bootstrap Nix for the repo layout.
+    if matches!(sdk.layout(), SdkLayout::Repo) {
+        ensure_development_environment("foundation sim")?;
+    }
 
     // Find and read app-config.toml
     let project = ProjectContext::discover()?;

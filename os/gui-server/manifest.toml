@@ -1,7 +1,7 @@
 manifestVersion = "0"
 appId = "0x6775692d736572766572000000000000"
 memory = ["LCDC"]
-syscall = ["VirtToPhys", "VirtToPhysPid", "TerminatePid", "ClaimInterrupt", "GetSystemStats", "SetThreadPriority"]
+syscall = ["VirtToPhys", "VirtToPhysPid", "TerminatePid", "ClaimInterrupt", "GetSystemStats", "SetThreadPriority", "ResolveMessagePermission", "GetPermissionRequestData", "SystemEventHandler"]
 extends = "../../api/gui-server"
 
 [appName]
@@ -16,10 +16,16 @@ BlurDone = { id = 26, type = "scalar" }
 PowerButtonTimerCallback = { id = 42, type = "scalar" }
 AutoLockTimerCallback = { id = 43, type = "scalar" }
 ForceShutdownTimeout = { id = 50, type = "scalar" }
+PermissionRequest = { id = 66, type = "scalar", cfg = 'not(feature = "recovery-os")' }
 
 [permissions]
 "template" = ["i2c", "gpio"]
-"os/app-manager" = ["LaunchApp", "LaunchAppBlocking"]
+"os/app-manager" = [
+    "LaunchApp",
+    "LaunchAppBlocking",
+    "GetPermissionRequestInfo",
+    "SetAppPermissionGrant",
+]
 "os/bt" = ["Disconnect"]
 "os/fs" = ["SubscribeFilesystemEvent"]
 "os/camera" = ["NotifyVisible", "Subscribe"]

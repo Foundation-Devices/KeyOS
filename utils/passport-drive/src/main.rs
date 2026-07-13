@@ -41,7 +41,6 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
         LaunchAppStatus::NoTrustedPublisherCertificate => Some(
             "no matching trusted publisher certificate is installed; import the matching certificate in Settings > Apps > Trusted Publishers",
         ),
-        LaunchAppStatus::MissingPermission => Some("launch was rejected because the caller is missing permission"),
         LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
         LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
     }

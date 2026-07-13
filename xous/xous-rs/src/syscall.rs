@@ -356,6 +356,22 @@ pub enum SysCall {
     /// privilege is given.
     AllowMessagesCID(PID, CID, core::ops::Range<MessageId>),
 
+    /// Resolve a parked message permission request.
+    /// Privileged system services use this after the user has answered the global
+    /// permission prompt. If `allow` is true, the recorded message ID is also added to the
+    /// recorded connection's allowed messages, provided the connection still points at the
+    /// server captured when the request was parked. The request id comes from the
+    /// `PermissionRequest` system event.
+    ResolveMessagePermission(u16, bool),
+
+    /// Fetches one field of an in-flight permission request by its request id, selected by
+    /// [`PermissionRequestField`]. `Target` returns `Result::Scalar5(sid0, sid1, sid2, sid3,
+    /// message_id)`: the four words of the server SID followed by the full 32-bit message id.
+    /// `AppId` returns `Result::Scalar5` with the 16-byte captured sender app id in the first
+    /// four words, little-endian (the app id is stable even if the sender exits and its pid is
+    /// recycled).
+    GetPermissionRequestData(u16, PermissionRequestField),
+
     /// Requests the kernel to flush the virtual memory region from both L1 and L2 cache.
     ///
     /// ## Errors
@@ -465,6 +481,8 @@ pub enum SysCallNumber {
     SystemEventHandler = 54,
     AppendPanicMessage = 55,
     GetPanicMessage = 56,
+    ResolveMessagePermission = 57,
+    GetPermissionRequestData = 58,
 
     Invalid,
 }
@@ -528,6 +546,8 @@ impl SysCallNumber {
             54 => SystemEventHandler,
             55 => AppendPanicMessage,
             56 => GetPanicMessage,
+            57 => ResolveMessagePermission,
+            58 => GetPermissionRequestData,
             _ => Invalid,
         }
     }
@@ -781,6 +801,16 @@ impl SysCall {
                 0,
                 0,
             ],
+            SysCall::ResolveMessagePermission(request_id, allow) => [
+                SysCallNumber::ResolveMessagePermission as usize,
+                *request_id as usize,
+                usize::from(*allow),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
             #[cfg(keyos)]
             SysCall::FlushCache(mem, op) => [
                 SysCallNumber::InvalidateCache as usize,
@@ -857,6 +887,17 @@ impl SysCall {
             SysCall::GetPanicMessage(buf) => {
                 [SysCallNumber::GetPanicMessage as usize, buf.as_ptr() as usize, buf.len(), 0, 0, 0, 0, 0]
             }
+
+            SysCall::GetPermissionRequestData(request_id, field) => [
+                SysCallNumber::GetPermissionRequestData as usize,
+                *request_id as usize,
+                usize::from(*field),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
 
             SysCall::TerminatePid(pid, exit_code) => {
                 [SysCallNumber::TerminatePid as usize, pid.get() as usize, *exit_code as usize, 0, 0, 0, 0, 0]
@@ -1011,6 +1052,10 @@ impl SysCall {
             }
             SysCallNumber::AllowMessagesCID => {
                 SysCall::AllowMessagesCID(PID::new(a1 as _).ok_or(Error::InvalidSyscall)?, a2 as CID, a3..a4)
+            }
+            SysCallNumber::ResolveMessagePermission => SysCall::ResolveMessagePermission(a1 as u16, a2 != 0),
+            SysCallNumber::GetPermissionRequestData => {
+                SysCall::GetPermissionRequestData(a1 as u16, a2.into())
             }
             #[cfg(keyos)]
             SysCallNumber::InvalidateCache => {
@@ -1966,6 +2011,78 @@ pub fn allow_messages_on_connection(
 ) -> core::result::Result<(), Error> {
     crate::arch::syscall(SysCall::AllowMessagesCID(pid, cid, messages))?;
     Ok(())
+}
+
+#[inline]
+pub fn resolve_message_permission(request_id: u16, allow: bool) -> core::result::Result<(), Error> {
+    crate::arch::syscall(SysCall::ResolveMessagePermission(request_id, allow))?;
+    Ok(())
+}
+
+/// Selects which field of a parked permission request [`SysCall::GetPermissionRequestData`]
+/// returns. Each is fetched separately because a single scalar reply cannot hold both the
+/// 16-byte server SID and the 16-byte app id at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionRequestField {
+    /// The send's target: the server SID and the message id.
+    Target,
+    /// The captured sender app id.
+    AppId,
+}
+
+impl From<PermissionRequestField> for usize {
+    fn from(field: PermissionRequestField) -> usize {
+        match field {
+            PermissionRequestField::Target => 0,
+            PermissionRequestField::AppId => 1,
+        }
+    }
+}
+
+impl From<usize> for PermissionRequestField {
+    fn from(value: usize) -> Self {
+        match value {
+            1 => PermissionRequestField::AppId,
+            _ => PermissionRequestField::Target,
+        }
+    }
+}
+
+/// The target of an in-flight permission request, fetched by the permission broker to identify
+/// which server and message the parked send was aiming at.
+#[derive(Debug, Clone, Copy)]
+pub struct PermissionRequestData {
+    pub server_sid: SID,
+    pub message_id: MessageId,
+}
+
+#[inline]
+pub fn get_permission_request_data(request_id: u16) -> core::result::Result<PermissionRequestData, Error> {
+    let result =
+        crate::arch::syscall(SysCall::GetPermissionRequestData(request_id, PermissionRequestField::Target))?;
+    let crate::Result::Scalar5(sid0, sid1, sid2, sid3, message_id) = result else {
+        return Err(Error::InternalError);
+    };
+    Ok(PermissionRequestData {
+        server_sid: SID::from_u32(sid0 as u32, sid1 as u32, sid2 as u32, sid3 as u32),
+        message_id,
+    })
+}
+
+/// The sender's app id for an in-flight permission request, captured when it was parked. Use
+/// this stable identity rather than a sender pid, which can be recycled.
+#[inline]
+pub fn get_permission_request_app_id(request_id: u16) -> core::result::Result<AppId, Error> {
+    let result =
+        crate::arch::syscall(SysCall::GetPermissionRequestData(request_id, PermissionRequestField::AppId))?;
+    let crate::Result::Scalar5(w0, w1, w2, w3, _) = result else {
+        return Err(Error::InternalError);
+    };
+    let mut app_id = [0u8; crate::APP_ID_SIZE];
+    for (chunk, word) in app_id.chunks_exact_mut(4).zip([w0, w1, w2, w3]) {
+        chunk.copy_from_slice(&(word as u32).to_le_bytes());
+    }
+    Ok(AppId(app_id))
 }
 
 #[inline]

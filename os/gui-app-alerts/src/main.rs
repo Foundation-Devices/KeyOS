@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-#[cfg(keyos)]
 use slint_keyos_platform::gui_server_api;
 use slint_keyos_platform::{
     app,
@@ -27,7 +26,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     set_input_handler(&cx, state);
 
-    #[cfg(keyos)]
     init_state(state);
 
     ui.run().expect("Failed to run UI");
@@ -58,6 +56,8 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
                 generic_alert_global.set_button1_title(options.button1_title.into());
                 generic_alert_global
                     .set_button2_title(options.button2_title.unwrap_or("".to_string()).into());
+                generic_alert_global
+                    .set_button3_title(options.button3_title.unwrap_or("".to_string()).into());
 
                 ui.global::<Navigate>().invoke_generic_alert(Default::default());
             }
@@ -68,7 +68,6 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
     });
 }
 
-#[cfg(keyos)]
 fn init_state(state: StoredValue<AppState>) {
     let ui = state.borrow().ui.unwrap();
 

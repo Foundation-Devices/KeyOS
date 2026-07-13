@@ -6,15 +6,15 @@ syscall = ["SetThreadPriority"]
 en = "Update Server"
 
 [servers."os/update"]
-SubscribeUpdateProgress = { id = 0, type = "archiveEvent" }
-StartUpdate = { id = 1, type = "archive" }
-ContinueUpdate = { id = 2, type = "archive" }
+SubscribeUpdateProgress = { id = 0, type = "archiveEvent", approval = "autoAllow" }
+StartUpdate = { id = 1, type = "archive", approval = "autoAllow" }
+ContinueUpdate = { id = 2, type = "archive", approval = "autoAllow" }
 DownloadStallTick = { id = 3, type = "scalar" }
-FirmwareVersion = { id = 4, type = "blockingArchive" }
-ApplyDownloadedUpdate = { id = 5, type = "archive" }
-GetUpdateApplied = { id = 6, type = "blockingScalar" }
-ClearUpdateApplied = { id = 7, type = "scalar" }
-GetUpdateStatus = { id = 8, type = "blockingArchive" }
+FirmwareVersion = { id = 4, type = "blockingArchive", approval = "autoAllow" }
+ApplyDownloadedUpdate = { id = 5, type = "archive", approval = "autoAllow" }
+GetUpdateApplied = { id = 6, type = "blockingScalar", approval = "autoAllow" }
+ClearUpdateApplied = { id = 7, type = "scalar", approval = "autoAllow" }
+GetUpdateStatus = { id = 8, type = "blockingArchive", approval = "autoAllow" }
 FirmwareInstallWorkerEvent = { id = 9, type = "archive", cfg = "keyos" }
 
 [permissions]
@@ -24,6 +24,7 @@ template = ["fs-generic", "crypto-sha"]
     "GetSystemWriteAccess",
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
+    "FlushFs",
 ]
 "os/power-manager-ext" = ["GetStatus"]
 "os/quantum-link" = ["SubscribeFirmwareFetch", "StartFirmwareUpdate"]

@@ -6,8 +6,8 @@ syscall = ["SetThreadPriority"]
 en = "Accelerometer sensor"
 
 [servers."os/accelerometer"]
-AccelerometerSubscribe = { id = 1, type = "scalarEvent" }
-AccelerometerPoll = { id = 64, type = "blockingScalar" }
+AccelerometerSubscribe = { id = 1, type = "scalarEvent", permissionGroup = "peripherals.sensors", approval = "autoAllow" }
+AccelerometerPoll = { id = 64, type = "blockingScalar", permissionGroup = "peripherals.sensors", approval = "autoAllow" }
 
 [permissions]
 "template" = ["i2c", "gpio"]

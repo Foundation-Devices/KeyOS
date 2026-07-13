@@ -1,15 +1,15 @@
 manifestVersion = "0"
 [servers."os/bt"]
-GetBtAddr = { id = 0, type = "blockingArchive" }
-EnableBle = { id = 1, type = "blockingScalar" }
-DisableBle = { id = 2, type = "blockingScalar" }
+GetBtAddr = { id = 0, type = "blockingArchive", approval = "autoAllow" }
+EnableBle = { id = 1, type = "blockingScalar", approval = "autoAllow" }
+DisableBle = { id = 2, type = "blockingScalar", approval = "autoAllow" }
 Reset = { id = 3, type = "blockingScalar" }
-GetState = { id = 4, type = "blockingScalar" }
+GetState = { id = 4, type = "blockingScalar", permissionGroup = "device-connectivity.bluetooth-status", approval = "autoAllow" }
 SubscribeBle = { id = 5, type = "archiveEvent" }
 SendBle = { id = 6, type = "blockingArchive" }
-SubscribeBleState = { id = 7, type = "scalarEvent" }
+SubscribeBleState = { id = 7, type = "scalarEvent", permissionGroup = "device-connectivity.bluetooth-status", approval = "autoAllow" }
 Poll = { id = 8, type = "scalar" }
-DisableAdvChannels = { id = 9, type = "blockingScalar" }
+DisableAdvChannels = { id = 9, type = "blockingScalar", approval = "autoAllow" }
 Disconnect = { id = 10, type = "blockingScalar" }
-GetBleVersionInfo = { id = 31, type = "blockingArchive" }
-TestEcho = { id = 32, type = "blockingArchive" }
+GetBleVersionInfo = { id = 31, type = "blockingArchive", permissionGroup = "device-connectivity.bluetooth-status", approval = "autoAllow" }
+TestEcho = { id = 32, type = "blockingArchive", approval = "autoAllow" }

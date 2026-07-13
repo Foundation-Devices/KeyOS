@@ -75,6 +75,7 @@ pub(crate) fn for_each_process_row(mut on_row: impl FnMut(ProcessListRow<'_>)) -
                     ThreadState::WaitJoin { .. } => 'j',
                     ThreadState::RetryConnect { .. } => 'c',
                     ThreadState::RetryQueueFull { .. } => 'q',
+                    ThreadState::RetryPermission { .. } => 'p',
                     ThreadState::WaitBlocking { .. } => 'b',
                     ThreadState::WaitReceive { .. } => 'w',
                     ThreadState::WaitFutex { .. } => 'f',
