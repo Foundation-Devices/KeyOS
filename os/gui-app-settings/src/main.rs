@@ -745,15 +745,18 @@ fn setup_datetime_globals(state: StoredValue<AppState>) {
         state.borrow().timezone.set_search(&search_text);
     });
 
-    dt_globals.on_date_changed(move |y: i32, m: i32, d: i32| {
-        state
-            .borrow()
-            .update_system_time(|current| current.with().year(y as _).month(m as _).day(d as _).build().ok());
-    });
-
-    dt_globals.on_time_changed(move |hh: i32, mm: i32, ss: i32| {
+    dt_globals.on_datetime_changed(move |y: i32, m: i32, d: i32, hh: i32, mm: i32, ss: i32| {
         state.borrow().update_system_time(|current| {
-            current.with().hour(hh as _).minute(mm as _).second(ss as _).build().ok()
+            current
+                .with()
+                .year(y as _)
+                .month(m as _)
+                .day(d as _)
+                .hour(hh as _)
+                .minute(mm as _)
+                .second(ss as _)
+                .build()
+                .ok()
         });
     });
     {

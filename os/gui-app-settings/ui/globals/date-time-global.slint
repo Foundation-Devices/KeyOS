@@ -24,8 +24,8 @@ export global DateTimeGlobal {
     in-out property <int> minute: 15;
     in-out property <int> second: 25;
 
-    callback date-changed(int, int, int);
-    callback time-changed(int, int, int);
+    // year, month, day, hour, minute, second applied as a single clock write.
+    callback datetime-changed(int, int, int, int, int, int);
 
     in-out property <bool> envoy-time-sync: false;
     callback set-envoy-time-sync(bool);
