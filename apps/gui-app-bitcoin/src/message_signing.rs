@@ -32,13 +32,27 @@ const SIGNMESSAGE_PREFIX: &str = "signmessage";
 const ASCII_PREFIX: &str = "ascii:";
 const BASE_FILENAME: &str = "signed-message.txt";
 const SIGNED_MESSAGES_DIR: &str = "signed_messages/";
-
 fn set_error_and_navigate(ui: &AppWindow, global: &SignMessage) {
     global.set_state(SignMessageState::Error);
     if ui.global::<RouteState>().get_active() != RouteOption::SignMessage {
         ui.global::<Navigate>()
             .invoke_sign_message(NavigateOptions { replace: false, animate: Animate::None });
     }
+}
+
+fn empty_signed_message() -> MessageSignatureView {
+    MessageSignatureView { message: "".into(), address: "".into(), signature: "".into() }
+}
+
+fn reset_sign_message_state(global: &SignMessage) {
+    global.set_state(SignMessageState::Idle);
+    global.set_message("".into());
+    global.set_derivation_path("".into());
+    global.set_address("".into());
+    global.set_account_id("".into());
+    global.set_signed_message(empty_signed_message());
+    global.set_file_save_state(FileSaveState::Idle);
+    global.set_saved_file_path("".into());
 }
 
 fn validate_derivation_path_and_account(
@@ -115,7 +129,7 @@ pub fn init(state: StoredValue<AppState>) {
 
     global.on_cancel_signing(move || {
         let ui = state.borrow().ui();
-        ui.global::<SignMessage>().set_state(SignMessageState::Idle);
+        reset_sign_message_state(&ui.global::<SignMessage>());
     });
 
     global.on_sign_message(move || {
@@ -156,6 +170,11 @@ pub fn init(state: StoredValue<AppState>) {
 }
 
 fn start_sign_message(state: StoredValue<AppState>, account_id: String) -> anyhow::Result<()> {
+    let ui = state.borrow().ui();
+    let global = ui.global::<SignMessage>();
+    reset_sign_message_state(&global);
+    global.set_account_id(account_id.to_shared_string());
+
     let opts = ScanQrOptions {
         header_title: tr::lookup_id(TrId::SignMessageTitle).into(),
         message: String::new(),
@@ -200,9 +219,6 @@ fn start_sign_message(state: StoredValue<AppState>, account_id: String) -> anyho
         }
     };
 
-    let ui = state.borrow().ui();
-    let global = ui.global::<SignMessage>();
-
     let parts: Vec<&str> = string.splitn(3, ' ').collect();
 
     let (derivation_path_str, message) = if parts.len() == 3 && parts[0] == SIGNMESSAGE_PREFIX {
@@ -236,7 +252,6 @@ fn start_sign_message(state: StoredValue<AppState>, account_id: String) -> anyho
     global.set_derivation_path(derivation_path_str.to_shared_string());
     global.set_address(address.to_string().to_shared_string());
     global.set_message(message.to_shared_string());
-    global.set_account_id(account_id.to_shared_string());
     global.set_state(SignMessageState::Sign);
 
     if ui.global::<RouteState>().get_active() != RouteOption::SignMessage {

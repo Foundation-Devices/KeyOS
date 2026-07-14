@@ -201,7 +201,6 @@ component ErrorPage inherits JumboIconPageBody {
             label: TR2.lookup(TrId.CommonButtonRetry);
             importance: primary;
             clicked => {
-                SignMessage.cancel-signing();
                 Navigate.backward-animate(Animate.None);
                 SignMessage.start-sign-message(SignMessage.account-id);
             }
