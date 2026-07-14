@@ -140,6 +140,14 @@ impl ScalarEventSubscriptionHandler<Subscribe> for MassStorageServer {
         subscriber: server::ScalarEventSubscriber<MassStorageEvent>,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), server::Infallible> {
+        if let Some(backend) = self.backend.as_ref() {
+            subscriber
+                .send(&MassStorageEvent::Connect {
+                    block_size: backend.block_size() as usize,
+                    block_count: backend.block_count() as usize,
+                })
+                .ok();
+        }
         self.subscribers.push(subscriber);
         Ok(())
     }

@@ -5,7 +5,7 @@
 pub mod device;
 #[cfg(keyos)]
 pub mod host;
-#[cfg(all(keyos, not(feature = "recovery-os")))]
+#[cfg(keyos)]
 pub mod subscription;
 
 #[cfg(keyos)]
@@ -35,7 +35,6 @@ fn main() {
     {
         std::thread::spawn(|| server::listen(device::implementation::UsbDeviceServer::new()));
 
-        #[cfg(not(feature = "recovery-os"))]
         std::thread::spawn(|| server::listen(subscription::SubscriptionServer::default()));
 
         server::listen(host::implementation::UsbHostServer::new())

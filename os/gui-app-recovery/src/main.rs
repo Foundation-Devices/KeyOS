@@ -86,8 +86,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let ui = ui.clone_strong();
 
         move || {
-            UsbHost::default().set_enabled(true).ok();
-
             let ui = ui.clone_strong();
             slint_keyos_platform::spawn_local(async move {
                 let mut sub = slint_keyos_platform::subscribe_scalar::<
