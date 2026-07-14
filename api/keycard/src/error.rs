@@ -45,6 +45,8 @@ pub enum KeycardError {
     SchemeMismatch,
     #[error("Shard timestamp {found} doesn't match expected {expected}")]
     TimestampMismatch { expected: u32, found: u32 },
+    #[error("Duplicate shard index {index}")]
+    DuplicateShardIndex { index: usize },
     #[error("Other error")]
     Other,
 }
@@ -109,6 +111,7 @@ impl AsScalar<3> for KeycardError {
             KeycardError::InvalidScheme => [17, 0, 0],
             KeycardError::SchemeMismatch => [18, 0, 0],
             KeycardError::TimestampMismatch { expected, found } => [19, *expected, *found],
+            KeycardError::DuplicateShardIndex { index } => [20, *index as u32, 0],
             KeycardError::Other => [0, 0, 0],
         }
     }
@@ -136,6 +139,7 @@ impl FromScalar<3> for KeycardError {
             17 => KeycardError::InvalidScheme,
             18 => KeycardError::SchemeMismatch,
             19 => KeycardError::TimestampMismatch { expected: value[1], found: value[2] },
+            20 => KeycardError::DuplicateShardIndex { index: value[1] as usize },
             _ => KeycardError::Other,
         }
     }

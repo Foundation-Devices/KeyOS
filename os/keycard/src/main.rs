@@ -155,6 +155,14 @@ impl KeycardServer {
             return Err(KeycardError::DifferentDeviceId);
         }
 
+        // A share index already in the pool means another shard (keycard or Envoy) already
+        // carries this part: the backup set is invalid. Reject rather than admitting a
+        // duplicate, which would otherwise corrupt reconstruction.
+        let shard_index = shard.seed_shamir_share_index();
+        if self.shards.iter().any(|s| s.seed_shamir_share_index() == shard_index) {
+            return Err(KeycardError::DuplicateShardIndex { index: shard_index });
+        }
+
         // Validate timestamp
         let shard_timestamp = shard.timestamp();
         if let Some(expected) = self.expected_timestamp {
@@ -308,10 +316,16 @@ impl KeycardServer {
         }
 
         let part_of_magic_backup = shard.part_of_magic_backup();
-        // make sure to not add the same shard twice
-        if !self.shards.iter().any(|s| s.seed_shamir_share_index() == shard.seed_shamir_share_index()) {
-            self.shards.push(shard);
+        // Callers dedup by physical UID before loading, so a share index that is already in
+        // the pool comes from a different keycard carrying the same part: the backup set is
+        // invalid (a healthy backup assigns a distinct index per shard). Reject it loudly
+        // rather than dropping it silently, which would otherwise surface later as a
+        // confusing NotEnoughShards at CheckBackup.
+        let shard_index = shard.seed_shamir_share_index();
+        if self.shards.iter().any(|s| s.seed_shamir_share_index() == shard_index) {
+            return Err(KeycardError::DuplicateShardIndex { index: shard_index });
         }
+        self.shards.push(shard);
         log::debug!("Shards in pool: {:02x?}", self.shards);
         Ok(LoadedShard {
             id: KeycardId(uid),
