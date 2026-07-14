@@ -1,13 +1,32 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Button, TextLg, Icon, JumboIcon, Shield, HeadingMd, TextMd, TimerCircularProgress, ButtonSection, WrappedIcon, JumboIconPageBody } from "@ui/widgets.slint";
+import {
+    Button,
+    TextLg,
+    Icon,
+    JumboIcon,
+    Shield,
+    HeadingMd,
+    TextMd,
+    TimerCircularProgress,
+    ButtonSection,
+    WrappedIcon,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
 import { Font } from "@ui/fonts.slint";
 import { Palette, Size, Utils, UISize } from "@ui/theme.slint";
 import { Navigate } from "../../../gen/navigate.slint";
-import { OnboardingCallbacks, MasterSeedState, SeedGlobal } from "../../../onboarding-callbacks.slint";
+import {
+    OnboardingCallbacks,
+    MasterSeedState,
+    SeedGlobal,
+} from "../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
-import { OnboardingBasePage, OnboardingContentSection } from "../../../widgets/base-page.slint";
+import {
+    OnboardingBasePage,
+    OnboardingContentSection,
+} from "../../../widgets/base-page.slint";
 import { StepLine, StepLineSection } from "@ui/widgets/step-list.slint";
 
 component MasterKeyGenerated inherits StepLine {

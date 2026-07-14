@@ -1,34 +1,42 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {ListView} from "std-widgets.slint";
-import {CurrentTheme, Importance, Images, Palette, Palettes, Size, UISize, Utils} from "@ui/theme.slint";
-import {HeadingLg, TextMd, SegmentedControl } from "@ui/widgets.slint";
+import { ListView } from "std-widgets.slint";
+import {
+    CurrentTheme,
+    Importance,
+    Images,
+    Palette,
+    Palettes,
+    Size,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
+import { HeadingLg, TextMd, SegmentedControl } from "@ui/widgets.slint";
 
 // Import all pages
-import {TypographyPage} from "pages/typography-page.slint";
-import {LocalizationsPage} from "pages/localizations-page.slint";
-import {CardsPage} from "pages/cards-page.slint";
-import {ColorsPage} from "pages/colors-page.slint";
-import {ContainersPage} from "pages/containers-page.slint";
-import {ButtonsPage} from "pages/buttons-page.slint";
-import {IconButtonsPage} from "pages/icon-buttons-page.slint";
-import {IconsPage} from "pages/icons-page.slint";
-import {InputsPage} from "pages/inputs-page.slint";
-import {JumboIconsPage} from "pages/jumbo-icons-page.slint";
-import {LinksPage} from "pages/links-page.slint";
-import {TogglesPage} from "pages/toggles-page.slint";
-import {NavSortSearchPage} from "pages/nav-sort-search-page.slint";
-import {MiscellaneousPage} from "pages/miscellaneous-page.slint";
-import {ProgressPage} from "pages/progress-page.slint";
-import {QrcodePage} from "pages/qrcode-page.slint";
-import {ShapesPage} from "pages/shapes-page.slint";
-import {SvgPage} from "pages/svg-page.slint";
-import {SettingsDataPage} from "pages/settings/settings-data.slint";
+import { TypographyPage } from "pages/typography-page.slint";
+import { LocalizationsPage } from "pages/localizations-page.slint";
+import { CardsPage } from "pages/cards-page.slint";
+import { ColorsPage } from "pages/colors-page.slint";
+import { ContainersPage } from "pages/containers-page.slint";
+import { ButtonsPage } from "pages/buttons-page.slint";
+import { IconButtonsPage } from "pages/icon-buttons-page.slint";
+import { IconsPage } from "pages/icons-page.slint";
+import { InputsPage } from "pages/inputs-page.slint";
+import { JumboIconsPage } from "pages/jumbo-icons-page.slint";
+import { LinksPage } from "pages/links-page.slint";
+import { TogglesPage } from "pages/toggles-page.slint";
+import { NavSortSearchPage } from "pages/nav-sort-search-page.slint";
+import { MiscellaneousPage } from "pages/miscellaneous-page.slint";
+import { ProgressPage } from "pages/progress-page.slint";
+import { QrcodePage } from "pages/qrcode-page.slint";
+import { ShapesPage } from "pages/shapes-page.slint";
+import { SvgPage } from "pages/svg-page.slint";
+import { SettingsDataPage } from "pages/settings/settings-data.slint";
 
 // Local re-exports for Rust access
 export { Utils, Images, CurrentTheme }
-
 struct PageInfo {
     title: string,
 }

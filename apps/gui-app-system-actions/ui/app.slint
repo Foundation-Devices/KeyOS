@@ -2,13 +2,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { VerticalBox, HorizontalBox, TextEdit } from "std-widgets.slint";
-import { AccountCard, Icon, HeadingLg, HeadingMd, Shield, HeadingSm, TextLg, SwitchControlled, BasePage } from "@ui/widgets.slint";
-import { Importance, CurrentTheme, Palette, Palettes, Images, Size, UISize, Utils } from "@ui/theme.slint";
+import {
+    AccountCard,
+    Icon,
+    HeadingLg,
+    HeadingMd,
+    Shield,
+    HeadingSm,
+    TextLg,
+    SwitchControlled,
+    BasePage,
+} from "@ui/widgets.slint";
+import {
+    Importance,
+    CurrentTheme,
+    Palette,
+    Palettes,
+    Images,
+    Size,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
 import { Slider } from "@ui/widgets/slider.slint";
 import { Button } from "@ui/widgets/button.slint";
 
 export { Utils, Images, CurrentTheme }
-
 export global Callbacks {
     callback reboot();
     callback shut-down();

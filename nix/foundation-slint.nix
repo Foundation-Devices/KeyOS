@@ -9,7 +9,10 @@
   pkg-config,
   fontconfig,
   libGL,
-  xorg,
+  libx11,
+  libxcursor,
+  libxi,
+  libxcb,
   libxkbcommon,
   wayland,
   localSrc ? null,
@@ -29,10 +32,10 @@
 
   linuxViewerLibs = [
     fontconfig
-    xorg.libX11
-    xorg.libXcursor
-    xorg.libXi
-    xorg.libxcb
+    libx11
+    libxcursor
+    libxi
+    libxcb
     libxkbcommon
     wayland
   ];

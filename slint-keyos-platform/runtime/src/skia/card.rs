@@ -232,7 +232,7 @@ pub fn line_card(
         paint.shader = if template.contains("radial-bg") {
             let center = Point::from_xy(width * 0.5, height * 0.5);
             let radius = width.min(height) * 0.5;
-            RadialGradient::new(center, center, radius, stops, SpreadMode::Pad, Transform::identity())
+            RadialGradient::new(center, 0.0, center, radius, stops, SpreadMode::Pad, Transform::identity())
                 .unwrap()
         } else {
             LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity()).unwrap()

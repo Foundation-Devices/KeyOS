@@ -1,8 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { BaseWindow, BasePage, ScrollBody, NavHeader, Button, HeadingLg, HeadingMd, TextMd, Switch } from "@ui/widgets.slint";
-import { Palette, Size, Images, CurrentTheme, Palettes, Utils } from "@ui/theme.slint";
+import {
+    BaseWindow,
+    BasePage,
+    ScrollBody,
+    NavHeader,
+    Button,
+    HeadingLg,
+    HeadingMd,
+    TextMd,
+    Switch,
+} from "@ui/widgets.slint";
+import {
+    Palette,
+    Size,
+    Images,
+    CurrentTheme,
+    Palettes,
+    Utils,
+} from "@ui/theme.slint";
 
 export global Callbacks {
     callback start-benchmark(int, bool);

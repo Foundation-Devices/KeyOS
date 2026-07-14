@@ -2,10 +2,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { SecurityKeyCallbacks as CB } from "../../security-key-callbacks.slint";
-import { AuthenticatingState, EditCaller } from "../../security-key-types.slint";
-import { Palette, Importance, Size, Images, IconSize, Utils } from "@ui/theme.slint";
+import {
+    AuthenticatingState,
+    EditCaller,
+} from "../../security-key-types.slint";
+import {
+    Palette,
+    Importance,
+    Size,
+    Images,
+    IconSize,
+    Utils,
+} from "@ui/theme.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
-import { HeadingMd, TextMd, BasePage, NavHeader, Shield, Pagination, WrappedIcon, Button, TimerCircularProgress, Icon, Dropdown, DropdownModel, DropdownOverlay } from "@ui/widgets.slint";
+import {
+    HeadingMd,
+    TextMd,
+    BasePage,
+    NavHeader,
+    Shield,
+    Pagination,
+    WrappedIcon,
+    Button,
+    TimerCircularProgress,
+    Icon,
+    Dropdown,
+    DropdownModel,
+    DropdownOverlay,
+} from "@ui/widgets.slint";
 import { CardPageVersion, EditPageVersion } from "@ui/pages.slint";
 import { AuthenticateProps } from "./props.slint";
 import { TR2, TrId } from "../../gen/tr.slint";

@@ -2,13 +2,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Palette, Size, UISize } from "@ui/theme.slint";
-import { Button, ButtonSection, Dialog, HeadingMd, TextSm, TimerCircularProgress, JumboIconPageBody, WrappedIcon } from "@ui/widgets.slint";
+import {
+    Button,
+    ButtonSection,
+    Dialog,
+    HeadingMd,
+    TextSm,
+    TimerCircularProgress,
+    JumboIconPageBody,
+    WrappedIcon,
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { Navigate, Animate } from "../../../../gen/navigate.slint";
-import { OnboardingCallbacks, KeycardRestoreGlobal, SeedGlobal, RestoreBackupState } from "../../../../onboarding-callbacks.slint";
-import { OnboardingBasePage, OnboardingContentSection } from "../../../../widgets/base-page.slint";
+import {
+    OnboardingCallbacks,
+    KeycardRestoreGlobal,
+    SeedGlobal,
+    RestoreBackupState,
+} from "../../../../onboarding-callbacks.slint";
+import {
+    OnboardingBasePage,
+    OnboardingContentSection,
+} from "../../../../widgets/base-page.slint";
 import { RestoreMagicBackupProps } from "props.slint";
 
 component LoadingView inherits JumboIconPageBody {

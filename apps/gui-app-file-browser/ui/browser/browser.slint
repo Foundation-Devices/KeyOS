@@ -1,14 +1,30 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { IconButton, SearchInput, TextSm, BasePage, HeadingMd } from "@ui/widgets.slint";
-import { Importance, Images, Size, Palette, CurrentTheme } from "@ui/theme.slint";
+import {
+    IconButton,
+    SearchInput,
+    TextSm,
+    BasePage,
+    HeadingMd,
+} from "@ui/widgets.slint";
+import {
+    Importance,
+    Images,
+    Size,
+    Palette,
+    CurrentTheme,
+} from "@ui/theme.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 
 import { BrowserGlobal, SortMode, SortDirection } from "./global.slint";
-import { FilePopupMenu, SelectModePopupMenu, SortPopupMenu } from "./popup.slint";
+import {
+    FilePopupMenu,
+    SelectModePopupMenu,
+    SortPopupMenu,
+} from "./popup.slint";
 import { LocationSwitcher } from "../location-switcher.slint";
-import { ActiveModal, ModalGlobal} from "../modal/global.slint";
+import { ActiveModal, ModalGlobal } from "../modal/global.slint";
 import { CopyMoveModal } from "../modal/copy-move.slint";
 import { CreateFolderModal } from "../modal/create-folder.slint";
 import { DeleteModal } from "../modal/delete.slint";
@@ -17,10 +33,7 @@ import { RenameModal } from "../modal/rename.slint";
 import { FileList, FileListLoading, FileListType } from "../file-list.slint";
 
 export { Images, CurrentTheme }
-
 component BrowserBody inherits Rectangle {
-    padding: Size.sz4;
-
     FileList {
         padding-left: Size.sz6;
         padding-right: Size.sz6;

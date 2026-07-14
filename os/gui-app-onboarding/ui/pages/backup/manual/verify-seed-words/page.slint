@@ -1,21 +1,36 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Button, TextLg, Icon, JumboIcon, Shield, HeadingMd, TextMd, TimerCircularProgress, HeadingSm, HeadingLg, Input, ButtonSection, NavHeader } from "@ui/widgets.slint";
+import {
+    Button,
+    TextLg,
+    Icon,
+    JumboIcon,
+    Shield,
+    HeadingMd,
+    TextMd,
+    TimerCircularProgress,
+    HeadingSm,
+    HeadingLg,
+    Input,
+    ButtonSection,
+    NavHeader,
+} from "@ui/widgets.slint";
 import { OnboardingBasePage } from "../../../../widgets/base-page.slint";
 import { Font } from "@ui/fonts.slint";
 import { Palette, Size, Utils, UISize, Importance } from "@ui/theme.slint";
 import { VerifySeedWordsProps } from "props.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
-import { SeedGlobal, SeedWordChallenge } from "../../../../onboarding-callbacks.slint";
+import {
+    SeedGlobal,
+    SeedWordChallenge,
+} from "../../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { ProgressIndicator } from "../../../../widgets/progress-indicator.slint";
+import {
+    ProgressIndicator,
+} from "../../../../widgets/progress-indicator.slint";
 
-enum WordState {
-    Pending,
-    Success,
-    Failure
-}
+enum WordState { Pending, Success, Failure }
 
 export component VerifySeedWordsPage inherits OnboardingBasePage {
     in property <VerifySeedWordsProps> props;

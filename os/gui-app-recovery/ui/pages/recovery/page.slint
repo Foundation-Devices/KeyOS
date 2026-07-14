@@ -1,9 +1,32 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Button, ButtonSection, Shield, Icon, HeadingMd, HeadingXl, TextLg, TextSm, TextMd,
-         TextXs, TimerCircularProgress, Shimmer, IconButton, PopupMenu, ConfirmationModal, BasePage } from "@ui/widgets.slint";
-import { Size, Palette, UISize, Importance, Utils, Images } from "@ui/theme.slint";
+import {
+    Button,
+    ButtonSection,
+    Shield,
+    Icon,
+    HeadingMd,
+    HeadingXl,
+    TextLg,
+    TextSm,
+    TextMd,
+    TextXs,
+    TimerCircularProgress,
+    Shimmer,
+    IconButton,
+    PopupMenu,
+    ConfirmationModal,
+    BasePage,
+} from "@ui/widgets.slint";
+import {
+    Size,
+    Palette,
+    UISize,
+    Importance,
+    Utils,
+    Images,
+} from "@ui/theme.slint";
 import { UIColors } from "@ui/palettes/ui-colors.slint";
 import { AppHeader } from "@ui/widgets/app-header.slint";
 import { JumboIcon } from "@ui/widgets/jumbo-icon.slint";
@@ -14,7 +37,11 @@ import { Divider } from "@ui/widgets/divider.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 import { IconSize } from "@ui/types.slint";
 import { Callbacks } from "../../callbacks.slint";
-import { RecoveryGlobal, RecoveryStep, RecoveryValidationStep } from "../../globals/recovery-global.slint";
+import {
+    RecoveryGlobal,
+    RecoveryStep,
+    RecoveryValidationStep,
+} from "../../globals/recovery-global.slint";
 import { Navigate } from "../../gen/navigate.slint";
 
 export component RecoveryPage inherits BasePage {

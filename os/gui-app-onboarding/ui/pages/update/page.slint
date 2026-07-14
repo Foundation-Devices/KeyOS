@@ -3,10 +3,22 @@
 
 import { Palette } from "@ui/theme.slint";
 import { Navigate } from "../../gen/navigate.slint";
-import { HeadingMd, TextSm, TextMd, ButtonSection, Button, NavHeader } from "@ui/widgets.slint";
+import {
+    HeadingMd,
+    TextSm,
+    TextMd,
+    ButtonSection,
+    Button,
+    NavHeader,
+} from "@ui/widgets.slint";
 import { OnboardingCallbacks } from "../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import { ShieldSection, ShieldContent, OnboardingShieldPage, OverlayImage } from "../../widgets/shield-page.slint";
+import {
+    ShieldSection,
+    ShieldContent,
+    OnboardingShieldPage,
+    OverlayImage,
+} from "../../widgets/shield-page.slint";
 
 export component UpdateDevicePage inherits OnboardingShieldPage {
     property <string> current-version: OnboardingCallbacks.current-keyos-version;

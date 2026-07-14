@@ -3,14 +3,25 @@
 
 use std::path::Path;
 
-use i_slint_compiler::{diagnostics::Spanned, langtype::Type};
+use i_slint_compiler::{
+    diagnostics::{ByteFormat, Spanned},
+    langtype::{Struct, StructName, Type},
+};
 use miette::SourceOffset;
 
 pub(crate) fn make_source_offset(src: impl AsRef<str>, node: &impl Spanned) -> SourceOffset {
     let source_file = node.source_file().expect("source file");
     let span = node.span();
-    let (line, col) = source_file.line_column(span.offset);
+    let (line, col) = source_file.line_column(span.offset, ByteFormat::Utf8);
     SourceOffset::from_location(src.as_ref(), line, col)
+}
+
+// The user-declared struct name, if any; builtin and anonymous structs have none.
+pub(crate) fn struct_name(s: &Struct) -> Option<&str> {
+    match &s.name {
+        StructName::User { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
 }
 
 pub(crate) fn type_string(ty: &Type) -> String {
@@ -30,7 +41,7 @@ pub(crate) fn type_string(ty: &Type) -> String {
         Type::Model => "model".into(),
         Type::Array(t) => format!("[{}]", type_string(t)),
         Type::Struct(s) => {
-            if let Some(name) = &s.name {
+            if let Some(name) = s.name.slint_name() {
                 name.to_string()
             } else {
                 unreachable!()
@@ -51,6 +62,10 @@ pub(crate) fn type_string(ty: &Type) -> String {
         Type::UnitProduct(_) => unreachable!(),
         Type::ElementReference => unreachable!(),
         Type::LayoutCache => unreachable!(),
+        Type::Keys => unreachable!(),
+        Type::DataTransfer => unreachable!(),
+        Type::ArrayOfU16 => unreachable!(),
+        Type::StyledText => unreachable!(),
     }
 }
 

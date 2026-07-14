@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {Linecap, GradientDirection, GradientStop, Importance, CardColor} from "./types.slint";
-import {UIColors} from "./palettes/ui-colors.slint";
+import {
+    Linecap,
+    GradientDirection,
+    GradientStop,
+    Importance,
+    CardColor,
+} from "./types.slint";
+import { UIColors } from "./palettes/ui-colors.slint";
 
 export global Utils {
     pure callback color-to-hex(color) -> string;
@@ -59,7 +65,7 @@ export global Utils {
 
     // size, tick, passive-color, active-color
     pure callback loader(length, int, color, color) -> image;
-    
+
     // size, tick, passive-color, active-color, thickness
     pure callback circular-progress(length, int, color, color, float) -> image;
     pure callback long_text(string) -> string;

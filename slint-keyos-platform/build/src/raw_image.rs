@@ -13,6 +13,7 @@ pub fn convert_image_to_raw(path: &Path) -> image::ImageResult<(String, Vec<u8>)
     let (image, source_format, original_size) = load_image(
         i_slint_compiler::fileaccess::VirtualFile { canon_path: path.to_owned(), builtin_contents: None },
         1.0,
+        None,
     )?;
 
     let texture = generate_texture(image, source_format, original_size);

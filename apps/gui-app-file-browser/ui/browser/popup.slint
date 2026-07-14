@@ -1,11 +1,23 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { PopupMenu, PopupMenuItem, TextMd, TextSm, Icon, Button } from "@ui/widgets.slint";
+import {
+    PopupMenu,
+    PopupMenuItem,
+    TextMd,
+    TextSm,
+    Icon,
+    Button,
+} from "@ui/widgets.slint";
 import { Palette, Size, Importance } from "@ui/theme.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 
-import { BrowserGlobal, SortMode, SortDirection, AirlockMode } from "./global.slint";
+import {
+    BrowserGlobal,
+    SortMode,
+    SortDirection,
+    AirlockMode,
+} from "./global.slint";
 
 export component SelectModePopupMenu inherits PopupMenu {
     property <bool> has-single-selected: BrowserGlobal.selected-count == 1;

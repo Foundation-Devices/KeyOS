@@ -1,10 +1,36 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { LauncherCallbacks as CB, State, LauncherPageData, LauncherItemData } from "../../launcher-callbacks.slint";
+import {
+    LauncherCallbacks as CB,
+    State,
+    LauncherPageData,
+    LauncherItemData,
+} from "../../launcher-callbacks.slint";
 import { MainProps } from "./props.slint";
-import { BasePage, Circle, Divider, HeadingMd, Icon, IconButton, PopupMenu, TextMd, TextSm, TimerLoader } from "@ui/widgets.slint";
-import { CurrentTheme, Font, IconSize, Images, Palette, Size, Timings, UISize, Utils } from "@ui/theme.slint";
+import {
+    BasePage,
+    Circle,
+    Divider,
+    HeadingMd,
+    Icon,
+    IconButton,
+    PopupMenu,
+    TextMd,
+    TextSm,
+    TimerLoader,
+} from "@ui/widgets.slint";
+import {
+    CurrentTheme,
+    Font,
+    IconSize,
+    Images,
+    Palette,
+    Size,
+    Timings,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 
 component PageDot inherits Rectangle {

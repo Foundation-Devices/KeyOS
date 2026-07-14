@@ -4,7 +4,7 @@
   description = "Foundation SDK user environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -82,9 +82,9 @@
                 libGL
                 libxkbcommon
                 systemd
-                xorg.libX11
-                xorg.libXcursor
-                xorg.libXi
+                libx11
+                libxcursor
+                libxi
                 wayland
               ]
             );

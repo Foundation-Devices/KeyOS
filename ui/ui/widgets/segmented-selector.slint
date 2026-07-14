@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-import {Icon} from "./icon.slint";
-import {HeadingSm} from "./txt.slint";
-import {Palette, Size} from "@ui/theme.slint";
+import { Icon } from "./icon.slint";
+import { HeadingSm } from "./txt.slint";
+import { Palette, Size } from "@ui/theme.slint";
 
-export struct SegmentModel {
-    label: string,
-    icon: string}
+export struct SegmentModel { label: string, icon: string }
 
 export component SegmentedSelector inherits Rectangle {
     // Override inherited properties

@@ -4,7 +4,12 @@
 import { Button } from "@components/button.slint";
 import { ButtonVariant, ControlSize, Theme } from "@components/theme.slint";
 import { SidebarPanel, RowLayout, TreeSectionHeader } from "theme_editor.slint";
-import { IconButton, IconButtonVariant, IconButtonSize, IconButtonShape } from "@components/icon_button.slint";
+import {
+    IconButton,
+    IconButtonVariant,
+    IconButtonSize,
+    IconButtonShape,
+} from "@components/icon_button.slint";
 import { Chip, ChipVariant, ChipSize, ChipColor } from "@components/chip.slint";
 import { Icon } from "@components/icon.slint";
 import { Input, InputVariant } from "@components/input.slint";
@@ -17,7 +22,12 @@ import { RadioGroup } from "@components/radio_group.slint";
 import { Switch } from "@components/switch.slint";
 import { Slider } from "@components/slider.slint";
 import { SegmentedControl } from "@components/segmented_control.slint";
-import { Tabs, TabsVariant, TabsColor, TabsOrientation } from "@components/tabs.slint";
+import {
+    Tabs,
+    TabsVariant,
+    TabsColor,
+    TabsOrientation,
+} from "@components/tabs.slint";
 import { SlideToConfirm } from "@components/slide_to_confirm.slint";
 import { Link } from "@components/link.slint";
 import { Card } from "@components/card.slint";
@@ -27,10 +37,18 @@ import { Accordion, AccordionItemData } from "@components/accordion.slint";
 import { Dialog, DialogVariant } from "@components/dialog.slint";
 import { Sheet } from "@components/sheet.slint";
 import { Toast, ToastVariant, ToastPosition } from "@components/toast.slint";
-import { ProgressBar, ProgressBarTone, ProgressValueFormat } from "@components/progress_bar.slint";
+import {
+    ProgressBar,
+    ProgressBarTone,
+    ProgressValueFormat,
+} from "@components/progress_bar.slint";
 import { Spinner, SpinnerSize, SpinnerTone } from "@components/spinner.slint";
 import { MediaImage } from "@components/image_view.slint";
-import { Divider, DividerOrientation, DividerLabelAlignment } from "@components/divider.slint";
+import {
+    Divider,
+    DividerOrientation,
+    DividerLabelAlignment,
+} from "@components/divider.slint";
 import { EditorTextField } from "editor_text_field.slint";
 
 // Simple toggle switch for boolean props (right-aligned like other controls)
@@ -3701,7 +3719,7 @@ export component Preview inherits Rectangle {
                                             vertical-alignment: center;
                                         }
 
-                                    // Preset buttons
+                                        // Preset buttons
                                     for preset in [
                                             { label: "320", width: 320 },
                                             { label: "375", width: 375 },
@@ -3729,7 +3747,7 @@ export component Preview inherits Rectangle {
                                             }
                                         }
 
-                                    // Responsive toggle
+                                        // Responsive toggle
                                     Rectangle {
                                             width: 70px;
                                             height: 24px;
@@ -3751,7 +3769,7 @@ export component Preview inherits Rectangle {
                                             }
                                         }
 
-                                    // Slider when responsive
+                                        // Slider when responsive
                                     if root.is-responsive: vp-slider := Rectangle {
                                             width: 100px;
                                             height: 24px;
@@ -3930,7 +3948,7 @@ export component Preview inherits Rectangle {
                         // section (padding-left: 20 inside body padding 16 → base 36).
                         splitter-base-x: 36px;
 
-                                // Component Props section
+                        // Component Props section
                                 component-props-header := TreeSectionHeader {
                             title: "Component Props";
                             dark-mode: root.dark-mode;

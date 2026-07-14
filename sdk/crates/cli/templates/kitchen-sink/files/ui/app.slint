@@ -1,9 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT
 
-import { Theme, UISize, Images, ButtonVariant, ControlSize } from "@ui/theme.slint";
+import {
+    Theme,
+    UISize,
+    Images,
+    ButtonVariant,
+    ControlSize,
+} from "@ui/theme.slint";
 import { Button } from "@ui/button.slint";
-import { IconButton, IconButtonVariant, IconButtonSize, IconButtonShape } from "@ui/icon_button.slint";
+import {
+    IconButton,
+    IconButtonVariant,
+    IconButtonSize,
+    IconButtonShape,
+} from "@ui/icon_button.slint";
 import { Chip, ChipVariant, ChipSize, ChipColor } from "@ui/chip.slint";
 import { Input, InputVariant } from "@ui/input.slint";
 import { Search } from "@ui/search.slint";
@@ -23,11 +34,19 @@ import { Menu, MenuRow } from "@ui/menu.slint";
 import { MenuItem } from "@ui/menu_item.slint";
 import { Accordion } from "@ui/accordion.slint";
 import { MediaImage } from "@ui/image_view.slint";
-import { Divider, DividerOrientation, DividerLabelAlignment } from "@ui/divider.slint";
+import {
+    Divider,
+    DividerOrientation,
+    DividerLabelAlignment,
+} from "@ui/divider.slint";
 import { Dialog, DialogVariant } from "@ui/dialog.slint";
 import { Sheet } from "@ui/sheet.slint";
 import { Toast, ToastVariant, ToastPosition } from "@ui/toast.slint";
-import { ProgressBar, ProgressBarTone, ProgressValueFormat } from "@ui/progress_bar.slint";
+import {
+    ProgressBar,
+    ProgressBarTone,
+    ProgressValueFormat,
+} from "@ui/progress_bar.slint";
 import { Spinner, SpinnerSize, SpinnerTone } from "@ui/spinner.slint";
 import { Icon } from "@ui/icon.slint";
 
@@ -57,7 +76,6 @@ export {
     SpinnerSize,
     SpinnerTone,
 }
-
 component PageTitle inherits Text {
     in property <string> copy: "";
     text: root.copy;

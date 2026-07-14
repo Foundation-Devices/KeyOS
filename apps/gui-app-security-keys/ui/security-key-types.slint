@@ -10,7 +10,8 @@ export struct KeyView {
     index: int,
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+    derive(serde::Serialize, serde::Deserialize))
 export enum EditCaller {
     add,
     main,
@@ -18,9 +19,9 @@ export enum EditCaller {
 }
 
 export enum AuthenticatingState {
-    wait,
-    registration-confirm,
-    authentication-confirm,
-    registration-success,
-    authentication-success,
-}
+        wait,
+        registration-confirm,
+        authentication-confirm,
+        registration-success,
+        authentication-success,
+    }

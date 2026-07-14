@@ -10,14 +10,7 @@ export struct FontInfo {
     letter-spacing: length,
 }
 
-export enum FontSize {
-    xs,
-    sm,
-    md,
-    lg,
-    xl,
-    time
-}
+export enum FontSize { xs, sm, md, lg, xl, time }
 
 export global Font {
     out property <FontInfo> heading-xl: { family: "Montserrat", size: 40px, weight: 600, italic: false, letter-spacing: 0px };

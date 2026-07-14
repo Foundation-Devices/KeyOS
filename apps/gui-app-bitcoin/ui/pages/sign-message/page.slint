@@ -1,10 +1,30 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { BasePage, NavHeader, PageBody, ContentSection, ButtonSection, Button, SlideToButton, JumboIconPageBody, HeadingMd, TextMd, WrappedIcon, BtcAddress, QrCodeCard, Modal, ConfirmationModal } from "@ui/widgets.slint";
+import {
+    BasePage,
+    NavHeader,
+    PageBody,
+    ContentSection,
+    ButtonSection,
+    Button,
+    SlideToButton,
+    JumboIconPageBody,
+    HeadingMd,
+    TextMd,
+    WrappedIcon,
+    BtcAddress,
+    QrCodeCard,
+    Modal,
+    ConfirmationModal,
+} from "@ui/widgets.slint";
 import { Importance, Palette, Size } from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import { SignMessage, SignMessageState, FileSaveState } from "../../sign-message.slint";
+import {
+    SignMessage,
+    SignMessageState,
+    FileSaveState,
+} from "../../sign-message.slint";
 import { SignMessageProps } from "./props.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
 

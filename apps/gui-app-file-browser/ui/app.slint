@@ -5,7 +5,12 @@ import { ModalWindow } from "@ui/widgets.slint";
 import { Palette, UISize, Utils, Images, CurrentTheme } from "@ui/theme.slint";
 import { TR } from "@ui/i18n/i18n.slint";
 
-import { BrowserGlobal, AirlockMode, SortDirection, SortMode } from "./browser/global.slint";
+import {
+    BrowserGlobal,
+    AirlockMode,
+    SortDirection,
+    SortMode,
+} from "./browser/global.slint";
 import { FileBrowser } from "./browser/browser.slint";
 import { PickerGlobal } from "./picker/global.slint";
 import { PickerBody } from "./picker/picker.slint";
@@ -17,7 +22,6 @@ export { AirlockMode, SortDirection, SortMode }
 export * from "gen/exports.slint";
 
 export component AppWindow inherits Window {
-    padding: 0;
     width: UISize.screen-width;
     height: PickerGlobal.is-active ? UISize.popup-app-height : UISize.screen-height;
     background: Palette.transparent;

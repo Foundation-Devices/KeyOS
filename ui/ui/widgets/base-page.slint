@@ -8,7 +8,12 @@ import { TextSm, HeadingMd } from "./txt.slint";
 import { Icon } from "./icon.slint";
 import { PopupMenu } from "./popup-menu.slint";
 import { Shield } from "./shield.slint";
-import { Images, CurrentTheme, CallbackResult, ResultLevel } from "@ui/theme.slint";
+import {
+    Images,
+    CurrentTheme,
+    CallbackResult,
+    ResultLevel,
+} from "@ui/theme.slint";
 
 export component BaseWindow inherits Window {
     width: UISize.screen-width;
@@ -264,7 +269,6 @@ export component ShieldPage inherits Rectangle {
     y: UISize.control-center-status-bar-height;
     width: UISize.screen-width;
     height: UISize.app-window-height - Size.sz5;
-    padding-top: Size.sz1;
 
     in property <length> top-inner-padding: Size.sz6;
     in property <bool> mask: true;

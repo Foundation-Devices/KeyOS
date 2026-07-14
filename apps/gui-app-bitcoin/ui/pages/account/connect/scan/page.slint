@@ -1,13 +1,35 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { NavHeader, BasePage, ContentSection, PageBody, TextMd, ButtonSection, Button, DynamicQrCode, Modal, ErrorModal, QrCodeCard, JumboIconPageBody, WrappedIcon, HeadingMd, TimerCircularProgress, ConfirmationModal } from "@ui/widgets.slint";
-import { Palette, Importance, Size} from "@ui/theme.slint";
+import {
+    NavHeader,
+    BasePage,
+    ContentSection,
+    PageBody,
+    TextMd,
+    ButtonSection,
+    Button,
+    DynamicQrCode,
+    Modal,
+    ErrorModal,
+    QrCodeCard,
+    JumboIconPageBody,
+    WrappedIcon,
+    HeadingMd,
+    TimerCircularProgress,
+    ConfirmationModal,
+} from "@ui/widgets.slint";
+import { Palette, Importance, Size } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 
 import { CreateAccount } from "../../../../create-account.slint";
 import { Callbacks, AccountView } from "../../../../callbacks.slint";
-import { ExportAccount, ExportAccountState, ExportFormats, VisualFormat } from "../../../../export-account.slint";
+import {
+    ExportAccount,
+    ExportAccountState,
+    ExportFormats,
+    VisualFormat,
+} from "../../../../export-account.slint";
 import { Navigate, Animate } from "../../../../gen/navigate.slint";
 
 import { AccountProps } from "../../props.slint";

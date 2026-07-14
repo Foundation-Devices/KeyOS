@@ -1,13 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT
 
-import { Theme, UISize, Images, ButtonVariant, ButtonState, ControlSize } from "@ui/theme.slint";
+import {
+    Theme,
+    UISize,
+    Images,
+    ButtonVariant,
+    ButtonState,
+    ControlSize,
+} from "@ui/theme.slint";
 import { Callbacks } from "callbacks.slint";
 import { Button } from "@ui/button.slint";
 import { Card } from "@ui/card.slint";
 
 export { Callbacks, Theme, Images, ButtonVariant, ButtonState, ControlSize }
-
 component PrimaryAction inherits Button {
     background: Theme.palette-primary;
     foreground: #ffffff;

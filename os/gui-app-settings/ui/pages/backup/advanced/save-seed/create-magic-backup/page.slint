@@ -1,13 +1,19 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { KeycardBackupPage } from "@ui/pages/keycard-backup/keycard-backup-page.slint";
+import {
+    KeycardBackupPage,
+} from "@ui/pages/keycard-backup/keycard-backup-page.slint";
 import { BasePage, PageBody } from "@ui/widgets.slint";
-import { KeycardBackupErrorDialog } from "@ui/pages/keycard-backup/keycard-backup-error.slint";
+import {
+    KeycardBackupErrorDialog,
+} from "@ui/pages/keycard-backup/keycard-backup-error.slint";
 
 import { Navigate } from "../../../../../gen/navigate.slint";
 import { TrId, TR2 } from "../../../../../gen/tr.slint";
-import { KeycardBackupGlobal } from "../../../../../globals/keycard-backup-global.slint";
+import {
+    KeycardBackupGlobal,
+} from "../../../../../globals/keycard-backup-global.slint";
 import { SettingsNavHeader } from "../../../../../widgets/nav-header.slint";
 
 export component CreateMagicBackupPage inherits BasePage {

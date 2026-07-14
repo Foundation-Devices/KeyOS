@@ -2,95 +2,101 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Size, Timings, Importance, Palette } from "@ui/theme.slint";
-import { SearchInput, SegmentedControl, Button, TextSm } from "@ui/widgets.slint";
+import {
+    SearchInput,
+    SegmentedControl,
+    Button,
+    TextSm,
+} from "@ui/widgets.slint";
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+    derive(serde::Serialize, serde::Deserialize))
 export enum CardPageVersion {
     main,
     archive,
 }
 
 export component CardListLayout inherits VerticalLayout {
-    alignment: start;
-    padding-left: Size.sz4;
-    padding-right: Size.sz4;
-    padding-top: Size.sz4;
-    padding-bottom: Size.zero;
-    spacing: Size.sz6;
-}
+        alignment: start;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        padding-top: Size.sz4;
+        padding-bottom: Size.zero;
+        spacing: Size.sz6;
+    }
 
 export component CardList inherits VerticalLayout {
-    in property <int> sort-mode: 0;
-    in property <[string]> sort-mode-titles;
-    in property <string> search-text: "";
-    in property <string> new-text: "";
-    in property <string> bottom-text: "";
+        in property <int> sort-mode: 0;
+        in property <[string]> sort-mode-titles;
+        in property <string> search-text: "";
+        in property <string> new-text: "";
+        in property <string> bottom-text: "";
 
-    property <bool> reorder-mode: false;
+        property <bool> reorder-mode: false;
     //No idea how this is working correctly, what we want is to snap in reorder mode and animate in normal mode, which is what this does somehow
     property <duration> animation-duration: !reorder-mode ? 0 : Timings.prop-change;
 
-    callback set-sort-mode(int);
-    callback search(string);
-    callback new();
+        callback set-sort-mode(int);
+        callback search(string);
+        callback new();
 
-    public function show-search-bar() {
-        flickable.viewport-y = 0;
-    }
-
-    public function enter-reorder-mode() {
-        animation-duration = 0;
-        reorder-mode = true;
-    }
-
-    public function exit-reorder-mode() {
-        reorder-mode = false;
-        animation-duration = Timings.prop-change;
-    }
-
-    CardListLayout {
-        if reorder-mode: SegmentedControl {
-            labels: sort-mode-titles;
-            selected-index: sort-mode;
-
-            changed(label, mode) => {
-                set-sort-mode(mode);
-            }
+        public function show-search-bar() {
+            flickable.viewport-y = 0;
         }
-    }
 
-    flickable := Flickable {
-        animate viewport-y { duration: animation-duration; }
-        viewport-y: reorder-mode ? 0 : -(Size.sz14 + scroll-content.padding-top);
-        scroll-content := CardListLayout {
-            padding-bottom: Size.sz4;
+        public function enter-reorder-mode() {
+            animation-duration = 0;
+            reorder-mode = true;
+        }
 
-            if !reorder-mode: SearchInput {
-                text: search-text;
-                edited(text) => {
-                    search(text);
-                }
-            }
+        public function exit-reorder-mode() {
+            reorder-mode = false;
+            animation-duration = Timings.prop-change;
+        }
 
-            @children
+        CardListLayout {
+            if reorder-mode: SegmentedControl {
+                labels: sort-mode-titles;
+                selected-index: sort-mode;
 
-            if (bottom-text != "" && !reorder-mode): HorizontalLayout {
-                alignment: center;
-                TextSm {
-                    text: bottom-text;
-                    color: Palette.content-tertiary;
-                }
-            }
-
-            if (new-text != "" && !reorder-mode): Button {
-                importance: Importance.tertiary;
-                icon: "plus";
-                label: new-text;
-
-                clicked() => {
-                    new();
+                changed(label, mode) => {
+                    set-sort-mode(mode);
                 }
             }
         }
+
+        flickable := Flickable {
+            animate viewport-y { duration: animation-duration; }
+            viewport-y: reorder-mode ? 0 : -(Size.sz14 + scroll-content.padding-top);
+            scroll-content := CardListLayout {
+                padding-bottom: Size.sz4;
+
+                if !reorder-mode: SearchInput {
+                    text: search-text;
+                    edited(text) => {
+                        search(text);
+                    }
+                }
+
+                @children
+
+                if (bottom-text != "" && !reorder-mode): HorizontalLayout {
+                    alignment: center;
+                    TextSm {
+                        text: bottom-text;
+                        color: Palette.content-tertiary;
+                    }
+                }
+
+                if (new-text != "" && !reorder-mode): Button {
+                    importance: Importance.tertiary;
+                    icon: "plus";
+                    label: new-text;
+
+                    clicked() => {
+                        new();
+                    }
+                }
+            }
+        }
     }
-}

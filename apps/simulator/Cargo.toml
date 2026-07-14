@@ -20,14 +20,14 @@ xous = { workspace = true }
 
 # Host-only desktop tool on the femtovg GPU renderer. Stock crates.io Slint, kept a
 # separate package from the firmware's fork so renderer-femtovg can't unify onto the
-# device's software-renderer Slint, but pinned to the fork's exact upstream =1.12.1
+# device's software-renderer Slint, but pinned to the fork's exact upstream =1.17.0
 # so both share one skia-bindings; a different version would link native `skia`
 # twice, which Cargo forbids. renderer-software stays on or i-slint-core fails to
 # link bytemuck (its Pod derives are gated behind that feature).
 [dependencies.slint]
 default-features = false
 features = ["std", "serde", "backend-winit", "unstable-winit-030", "renderer-femtovg", "renderer-software", "compat-1-2"]
-version = "=1.12.1"
+version = "=1.17.0"
 
 [build-dependencies.slint-build]
-version = "=1.12.1"
+version = "=1.17.0"

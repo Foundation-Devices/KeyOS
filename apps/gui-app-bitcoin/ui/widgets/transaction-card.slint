@@ -1,9 +1,30 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { CardColor, Palette, Size, Importance, UISize, Utils } from "@ui/theme.slint";
+import {
+    CardColor,
+    Palette,
+    Size,
+    Importance,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 import { LightPalette } from "@ui/palettes/light-palette.slint";
-import { HeadingSm, TextMd, TextSm, TextXs, TextLg, Icon, LineCard, CryptoFiatField, CardField, Link, BtcAddress, Pagination, CircleIcon } from "@ui/widgets.slint";
+import {
+    HeadingSm,
+    TextMd,
+    TextSm,
+    TextXs,
+    TextLg,
+    Icon,
+    LineCard,
+    CryptoFiatField,
+    CardField,
+    Link,
+    BtcAddress,
+    Pagination,
+    CircleIcon,
+} from "@ui/widgets.slint";
 
 export enum PsbtOutputKind {
     Change,

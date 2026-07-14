@@ -3,184 +3,229 @@
 
 // Structures for basic properties of a theme
 
-import {Font, FontHelpers, FontInfo, FontSize} from "./fonts.slint";
-export {Font, FontHelpers, FontInfo, FontSize}
-
-import {LightPalette} from "./palettes/light-palette.slint";
-import {DarkPalette} from "./palettes/dark-palette.slint";
-import {UISize, Size, IconSize, Timings, Importance, Linecap, BorderStyle, GradientDirection, GradientStop, CardColor, ResultLevel, CallbackResult, ScanQrAction} from "./types.slint";
-export {UISize, Size, IconSize, Timings, Importance, Linecap, BorderStyle, GradientDirection, GradientStop, CardColor, ResultLevel, CallbackResult, ScanQrAction}
-
-@rust-attr(repr(u8))
+import { Font, FontHelpers, FontInfo, FontSize } from "./fonts.slint";
+export { Font, FontHelpers, FontInfo, FontSize }
+import { LightPalette } from "./palettes/light-palette.slint";
+import { DarkPalette } from "./palettes/dark-palette.slint";
+import {
+    UISize,
+    Size,
+    IconSize,
+    Timings,
+    Importance,
+    Linecap,
+    BorderStyle,
+    GradientDirection,
+    GradientStop,
+    CardColor,
+    ResultLevel,
+    CallbackResult,
+    ScanQrAction,
+} from "./types.slint";
+export {
+    UISize,
+    Size,
+    IconSize,
+    Timings,
+    Importance,
+    Linecap,
+    BorderStyle,
+    GradientDirection,
+    GradientStop,
+    CardColor,
+    ResultLevel,
+    CallbackResult,
+    ScanQrAction,
+}
+@ rust-attr (
+    repr(u8))
 export enum Palettes {
     light,
     dark,
 }
 
 export global CurrentTheme {
-    in-out property <Palettes> palette: Palettes.light;
-    out property <bool> is-dark: palette == Palettes.dark;
-    out property <bool> is-light: palette == Palettes.light;
-}
+        in-out property <Palettes> palette: Palettes.light;
+        out property <bool> is-dark: palette == Palettes.dark;
+        out property <bool> is-light: palette == Palettes.light;
+    }
 
 export global Palette {
     // Content
     out property <brush> content-button: CurrentTheme.palette == Palettes.light ? LightPalette.content-button : DarkPalette.content-button;
-    out property <brush> content-button-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.content-button-disabled : DarkPalette.content-button-disabled;
-    out property <brush> content-primary: CurrentTheme.palette == Palettes.light ? LightPalette.content-primary : DarkPalette.content-primary;
-    out property <brush> content-secondary: CurrentTheme.palette == Palettes.light ? LightPalette.content-secondary : DarkPalette.content-secondary;
-    out property <brush> content-tertiary: CurrentTheme.palette == Palettes.light ? LightPalette.content-tertiary : DarkPalette.content-tertiary;
-    out property <brush> content-primary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-primary-inverse : DarkPalette.content-primary-inverse;
-    out property <brush> content-secondary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-secondary-inverse : DarkPalette.content-secondary-inverse;
-    out property <brush> content-tertiary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-tertiary-inverse : DarkPalette.content-tertiary-inverse;
-    out property <brush> content-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.content-disabled : DarkPalette.content-disabled;
-    out property <brush> content-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-brand : DarkPalette.content-brand;
-    out property <brush> content-copper-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-copper-brand : DarkPalette.content-copper-brand;
-    out property <brush> content-lightcopper-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-lightcopper-brand : DarkPalette.content-lightcopper-brand;
-    out property <brush> content-link: CurrentTheme.palette == Palettes.light ? LightPalette.content-link : DarkPalette.content-link;
-    out property <brush> content-link-hover: CurrentTheme.palette == Palettes.light ? LightPalette.content-link-hover : DarkPalette.content-link-hover;
-    out property <brush> content-link-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.content-link-pressed : DarkPalette.content-link-pressed;
-    out property <brush> content-notice: CurrentTheme.palette == Palettes.light ? LightPalette.content-notice : DarkPalette.content-notice;
-    out property <brush> content-notice-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-notice-bold : DarkPalette.content-notice-bold;
-    out property <brush> content-negative: CurrentTheme.palette == Palettes.light ? LightPalette.content-negative : DarkPalette.content-negative;
-    out property <brush> content-negative-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-negative-bold : DarkPalette.content-negative-bold;
-    out property <brush> content-positive: CurrentTheme.palette == Palettes.light ? LightPalette.content-positive : DarkPalette.content-positive;
-    out property <brush> content-positive-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-positive-bold : DarkPalette.content-positive-bold;
+        out property <brush> content-button-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.content-button-disabled : DarkPalette.content-button-disabled;
+        out property <brush> content-primary: CurrentTheme.palette == Palettes.light ? LightPalette.content-primary : DarkPalette.content-primary;
+        out property <brush> content-secondary: CurrentTheme.palette == Palettes.light ? LightPalette.content-secondary : DarkPalette.content-secondary;
+        out property <brush> content-tertiary: CurrentTheme.palette == Palettes.light ? LightPalette.content-tertiary : DarkPalette.content-tertiary;
+        out property <brush> content-primary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-primary-inverse : DarkPalette.content-primary-inverse;
+        out property <brush> content-secondary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-secondary-inverse : DarkPalette.content-secondary-inverse;
+        out property <brush> content-tertiary-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.content-tertiary-inverse : DarkPalette.content-tertiary-inverse;
+        out property <brush> content-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.content-disabled : DarkPalette.content-disabled;
+        out property <brush> content-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-brand : DarkPalette.content-brand;
+        out property <brush> content-copper-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-copper-brand : DarkPalette.content-copper-brand;
+        out property <brush> content-lightcopper-brand: CurrentTheme.palette == Palettes.light ? LightPalette.content-lightcopper-brand : DarkPalette.content-lightcopper-brand;
+        out property <brush> content-link: CurrentTheme.palette == Palettes.light ? LightPalette.content-link : DarkPalette.content-link;
+        out property <brush> content-link-hover: CurrentTheme.palette == Palettes.light ? LightPalette.content-link-hover : DarkPalette.content-link-hover;
+        out property <brush> content-link-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.content-link-pressed : DarkPalette.content-link-pressed;
+        out property <brush> content-notice: CurrentTheme.palette == Palettes.light ? LightPalette.content-notice : DarkPalette.content-notice;
+        out property <brush> content-notice-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-notice-bold : DarkPalette.content-notice-bold;
+        out property <brush> content-negative: CurrentTheme.palette == Palettes.light ? LightPalette.content-negative : DarkPalette.content-negative;
+        out property <brush> content-negative-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-negative-bold : DarkPalette.content-negative-bold;
+        out property <brush> content-positive: CurrentTheme.palette == Palettes.light ? LightPalette.content-positive : DarkPalette.content-positive;
+        out property <brush> content-positive-bold: CurrentTheme.palette == Palettes.light ? LightPalette.content-positive-bold : DarkPalette.content-positive-bold;
 
-    // Background
+        // Background
     out property <brush> background-primary: CurrentTheme.palette == Palettes.light ? LightPalette.background-primary : DarkPalette.background-primary;
-    out property <brush> background-primary-alternative: CurrentTheme.palette == Palettes.light ? LightPalette.background-primary-alternative : DarkPalette.background-primary-alternative;
-    out property <brush> background-hover: CurrentTheme.palette == Palettes.light ? LightPalette.background-hover : DarkPalette.background-hover;
-    out property <brush> background-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.background-pressed : DarkPalette.background-pressed;
-    out property <brush> background-selected: CurrentTheme.palette == Palettes.light ? LightPalette.background-selected : DarkPalette.background-selected;
-    out property <brush> background-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.background-disabled : DarkPalette.background-disabled;
-    out property <brush> background-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.background-inverse : DarkPalette.background-inverse;
-    out property <brush> background-brand: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand : DarkPalette.background-brand;
-    out property <brush> background-brand-hover: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-hover : DarkPalette.background-brand-hover;
-    out property <brush> background-brand-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-pressed : DarkPalette.background-brand-pressed;
-    out property <brush> background-brand-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-disabled : DarkPalette.background-brand-disabled;
-    out property <brush> background-info: CurrentTheme.palette == Palettes.light ? LightPalette.background-info : DarkPalette.background-info;
-    out property <brush> background-info-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-info-subtle : DarkPalette.background-info-subtle;
-    out property <brush> background-notice: CurrentTheme.palette == Palettes.light ? LightPalette.background-notice : DarkPalette.background-notice;
-    out property <brush> background-notice-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-notice-subtle : DarkPalette.background-notice-subtle;
-    out property <brush> background-negative: CurrentTheme.palette == Palettes.light ? LightPalette.background-negative : DarkPalette.background-negative;
-    out property <brush> background-negative-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-negative-subtle : DarkPalette.background-negative-subtle;
-    out property <brush> background-positive: CurrentTheme.palette == Palettes.light ? LightPalette.background-positive : DarkPalette.background-positive;
-    out property <brush> background-positive-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-positive-subtle : DarkPalette.background-positive-subtle;
+        out property <brush> background-primary-alternative: CurrentTheme.palette == Palettes.light ? LightPalette.background-primary-alternative : DarkPalette.background-primary-alternative;
+        out property <brush> background-hover: CurrentTheme.palette == Palettes.light ? LightPalette.background-hover : DarkPalette.background-hover;
+        out property <brush> background-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.background-pressed : DarkPalette.background-pressed;
+        out property <brush> background-selected: CurrentTheme.palette == Palettes.light ? LightPalette.background-selected : DarkPalette.background-selected;
+        out property <brush> background-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.background-disabled : DarkPalette.background-disabled;
+        out property <brush> background-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.background-inverse : DarkPalette.background-inverse;
+        out property <brush> background-brand: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand : DarkPalette.background-brand;
+        out property <brush> background-brand-hover: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-hover : DarkPalette.background-brand-hover;
+        out property <brush> background-brand-pressed: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-pressed : DarkPalette.background-brand-pressed;
+        out property <brush> background-brand-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.background-brand-disabled : DarkPalette.background-brand-disabled;
+        out property <brush> background-info: CurrentTheme.palette == Palettes.light ? LightPalette.background-info : DarkPalette.background-info;
+        out property <brush> background-info-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-info-subtle : DarkPalette.background-info-subtle;
+        out property <brush> background-notice: CurrentTheme.palette == Palettes.light ? LightPalette.background-notice : DarkPalette.background-notice;
+        out property <brush> background-notice-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-notice-subtle : DarkPalette.background-notice-subtle;
+        out property <brush> background-negative: CurrentTheme.palette == Palettes.light ? LightPalette.background-negative : DarkPalette.background-negative;
+        out property <brush> background-negative-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-negative-subtle : DarkPalette.background-negative-subtle;
+        out property <brush> background-positive: CurrentTheme.palette == Palettes.light ? LightPalette.background-positive : DarkPalette.background-positive;
+        out property <brush> background-positive-subtle: CurrentTheme.palette == Palettes.light ? LightPalette.background-positive-subtle : DarkPalette.background-positive-subtle;
 
-    // Border
+        // Border
     out property <brush> border-primary: CurrentTheme.palette == Palettes.light ? LightPalette.border-primary : DarkPalette.border-primary;
-    out property <brush> border-secondary: CurrentTheme.palette == Palettes.light ? LightPalette.border-secondary : DarkPalette.border-secondary;
-    out property <brush> border-tertiary: CurrentTheme.palette == Palettes.light ? LightPalette.border-tertiary : DarkPalette.border-tertiary;
-    out property <brush> border-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.border-disabled : DarkPalette.border-disabled;
-    out property <brush> border-brand: CurrentTheme.palette == Palettes.light ? LightPalette.border-brand : DarkPalette.border-brand;
-    out property <brush> border-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.border-inverse : DarkPalette.border-inverse;
-    out property <brush> border-focus: CurrentTheme.palette == Palettes.light ? LightPalette.border-focus : DarkPalette.border-focus;
-    out property <brush> border-info: CurrentTheme.palette == Palettes.light ? LightPalette.border-info : DarkPalette.border-info;
-    out property <brush> border-notice: CurrentTheme.palette == Palettes.light ? LightPalette.border-notice : DarkPalette.border-notice;
-    out property <brush> border-negative: CurrentTheme.palette == Palettes.light ? LightPalette.border-negative : DarkPalette.border-negative;
-    out property <brush> border-positive: CurrentTheme.palette == Palettes.light ? LightPalette.border-positive : DarkPalette.border-positive;
+        out property <brush> border-secondary: CurrentTheme.palette == Palettes.light ? LightPalette.border-secondary : DarkPalette.border-secondary;
+        out property <brush> border-tertiary: CurrentTheme.palette == Palettes.light ? LightPalette.border-tertiary : DarkPalette.border-tertiary;
+        out property <brush> border-disabled: CurrentTheme.palette == Palettes.light ? LightPalette.border-disabled : DarkPalette.border-disabled;
+        out property <brush> border-brand: CurrentTheme.palette == Palettes.light ? LightPalette.border-brand : DarkPalette.border-brand;
+        out property <brush> border-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.border-inverse : DarkPalette.border-inverse;
+        out property <brush> border-focus: CurrentTheme.palette == Palettes.light ? LightPalette.border-focus : DarkPalette.border-focus;
+        out property <brush> border-info: CurrentTheme.palette == Palettes.light ? LightPalette.border-info : DarkPalette.border-info;
+        out property <brush> border-notice: CurrentTheme.palette == Palettes.light ? LightPalette.border-notice : DarkPalette.border-notice;
+        out property <brush> border-negative: CurrentTheme.palette == Palettes.light ? LightPalette.border-negative : DarkPalette.border-negative;
+        out property <brush> border-positive: CurrentTheme.palette == Palettes.light ? LightPalette.border-positive : DarkPalette.border-positive;
 
-    // Special purpose
+        // Special purpose
     out property <brush> circular-progress-background: CurrentTheme.palette == Palettes.light ? LightPalette.circular-progress-background : DarkPalette.circular-progress-background;
 
-    // Overlay
+        // Overlay
     out property <brush> overlay-50: CurrentTheme.palette == Palettes.light ? LightPalette.overlay-50 : DarkPalette.overlay-50;
-    out property <brush> overlay-50-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.overlay-50-inverse : DarkPalette.overlay-50-inverse;
+        out property <brush> overlay-50-inverse: CurrentTheme.palette == Palettes.light ? LightPalette.overlay-50-inverse : DarkPalette.overlay-50-inverse;
 
-    // Common
+        // Common
     out property <brush> transparent: #FFFFFF00;
-    out property <brush> black: #000000FF;
-    out property <brush> white: #FFFFFFFF;
-    out property <brush> overlay: #111111E6;
-}
+        out property <brush> black: #000000FF;
+        out property <brush> white: #FFFFFFFF;
+        out property <brush> overlay: #111111E6;
+    }
 
 export global ColorHelpers {
-    pure public function get-btn-bg-color(importance: Importance, pressed: bool, enabled: bool) -> brush {
+        pure public function get-btn-bg-color(importance: Importance, pressed: bool, enabled: bool) -> brush {
         // Disabled
         if (!enabled) {
-            if (importance == Importance.primary) {
-                return Palette.background-brand-disabled;
-            } else if (importance == Importance.secondary) {
-                return Palette.background-disabled;
-            } else if (importance == Importance.tertiary) {
-                return Palette.transparent;
-            } else if (importance == Importance.notice) {
-                return Palette.background-notice-subtle;
-            } else if (importance == Importance.normal) {
-                return Palette.transparent;
-            } else if (importance == Importance.white) {
-                return Palette.transparent;
-            } else { // if (importance == Importance.negative)
+                if (importance == Importance.primary) {
+                    return Palette.background-brand-disabled;
+                } else if (importance == Importance.secondary) {
+                    return Palette.background-disabled;
+                } else if (importance == Importance.tertiary) {
+                    return Palette.transparent;
+                } else if (importance == Importance.notice) {
+                    return Palette.background-notice-subtle;
+                } else if (importance == Importance.normal) {
+                    return Palette.transparent;
+                } else if (importance == Importance.white) {
+                    return Palette.transparent;
+                } else { // if (importance == Importance.negative)
                 return Palette.background-negative-subtle;
+                }
             }
-        }
 
         // Pressed
         if (pressed) {
-            if (importance == Importance.primary) {
-                return Palette.background-brand-pressed;
-            } else if (importance == Importance.secondary) {
-                return Palette.background-pressed;
-            } else if (importance == Importance.tertiary) {
-                return Palette.transparent;
-            } else if (importance == Importance.notice) {
-                return Palette.content-notice-bold;
-            } else if (importance == Importance.normal) {
-                return Palette.transparent;
-            } else if (importance == Importance.white) {
-                return Palette.transparent;
-            } else { // if (importance == Importance.negative)
+                if (importance == Importance.primary) {
+                    return Palette.background-brand-pressed;
+                } else if (importance == Importance.secondary) {
+                    return Palette.background-pressed;
+                } else if (importance == Importance.tertiary) {
+                    return Palette.transparent;
+                } else if (importance == Importance.notice) {
+                    return Palette.content-notice-bold;
+                } else if (importance == Importance.normal) {
+                    return Palette.transparent;
+                } else if (importance == Importance.white) {
+                    return Palette.transparent;
+                } else { // if (importance == Importance.negative)
                 return Palette.content-negative-bold;
+                }
             }
-        }
 
         // Normal
         if (importance == Importance.primary) {
-            return Palette.background-brand;
-        } else if (importance == Importance.secondary) {
-            return Palette.background-primary-alternative;
-        } else if (importance == Importance.tertiary) {
-            return Palette.transparent;
-        } else if (importance == Importance.notice) {
-            return Palette.background-notice;
-        } else if (importance == Importance.normal) {
-            return Palette.transparent;
-        } else if (importance == Importance.white) {
-            return Palette.transparent;
-        } else { // if (importance == Importance.negative)
-            return Palette.background-negative;
-        }
-    }
-
-    pure public function get-btn-content-color(importance: Importance, pressed: bool, enabled: bool) -> brush {
-        // Disabled
-        if (!enabled) {
-            if (importance == Importance.primary) {
-                return Palette.content-button-disabled;
+                return Palette.background-brand;
             } else if (importance == Importance.secondary) {
-                return Palette.content-disabled;
+                return Palette.background-primary-alternative;
             } else if (importance == Importance.tertiary) {
-                return Palette.content-disabled;
+                return Palette.transparent;
             } else if (importance == Importance.notice) {
-                return Palette.content-button;
+                return Palette.background-notice;
             } else if (importance == Importance.normal) {
-                return Palette.content-disabled;
+                return Palette.transparent;
             } else if (importance == Importance.white) {
-                return Palette.content-disabled;
+                return Palette.transparent;
             } else { // if (importance == Importance.negative)
-                return Palette.content-button;
+            return Palette.background-negative;
             }
         }
+
+        pure public function get-btn-content-color(importance: Importance, pressed: bool, enabled: bool) -> brush {
+        // Disabled
+        if (!enabled) {
+                if (importance == Importance.primary) {
+                    return Palette.content-button-disabled;
+                } else if (importance == Importance.secondary) {
+                    return Palette.content-disabled;
+                } else if (importance == Importance.tertiary) {
+                    return Palette.content-disabled;
+                } else if (importance == Importance.notice) {
+                    return Palette.content-button;
+                } else if (importance == Importance.normal) {
+                    return Palette.content-disabled;
+                } else if (importance == Importance.white) {
+                    return Palette.content-disabled;
+                } else { // if (importance == Importance.negative)
+                return Palette.content-button;
+                }
+            }
             
         // Pressed
         if (pressed) {
-            if (importance == Importance.primary) {
+                if (importance == Importance.primary) {
+                    return Palette.content-button;
+                } else if (importance == Importance.secondary) {
+                    return Palette.content-primary;
+                } else if (importance == Importance.tertiary) {
+                    return Palette.content-link-pressed;
+                } else if (importance == Importance.notice) {
+                    return Palette.content-button;
+                } else if (importance == Importance.normal) {
+                    return Palette.content-primary;
+                } else if (importance == Importance.white) {
+                    return Palette.white;
+                } else { // if (importance == Importance.negative)
+                return Palette.content-button;
+                }
+            }
+
+        // Normal
+        if (importance == Importance.primary) {
                 return Palette.content-button;
             } else if (importance == Importance.secondary) {
-                return Palette.content-primary;
+                return Palette.content-secondary;
             } else if (importance == Importance.tertiary) {
-                return Palette.content-link-pressed;
+                return Palette.content-link;
             } else if (importance == Importance.notice) {
                 return Palette.content-button;
             } else if (importance == Importance.normal) {
@@ -188,31 +233,12 @@ export global ColorHelpers {
             } else if (importance == Importance.white) {
                 return Palette.white;
             } else { // if (importance == Importance.negative)
-                return Palette.content-button;
+            return Palette.content-button;
             }
         }
-
-        // Normal
-        if (importance == Importance.primary) {
-            return Palette.content-button;
-        } else if (importance == Importance.secondary) {
-            return Palette.content-secondary;
-        } else if (importance == Importance.tertiary) {
-            return Palette.content-link;
-        } else if (importance == Importance.notice) {
-            return Palette.content-button;
-        } else if (importance == Importance.normal) {
-            return Palette.content-primary;
-        } else if (importance == Importance.white) {
-            return Palette.white;
-        } else { // if (importance == Importance.negative)
-            return Palette.content-button;
-        }
     }
-}
 
-import {Utils} from "./utils.slint";
-export {Utils}
-
-import {Images} from "./images.slint";
-export {Images}
+import { Utils } from "./utils.slint";
+export { Utils }
+    import { Images } from "./images.slint";
+export { Images }

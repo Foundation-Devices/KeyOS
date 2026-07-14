@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+    derive(serde::Serialize, serde::Deserialize))
 export enum SaveSettingsStatus {
     start,
     saving,
@@ -10,8 +11,8 @@ export enum SaveSettingsStatus {
 }
 
 export global SaveSettingsGlobal {
-    in-out property <SaveSettingsStatus> status: SaveSettingsStatus.start;
-    in-out property <string> backup-path;
+        in-out property <SaveSettingsStatus> status: SaveSettingsStatus.start;
+        in-out property <string> backup-path;
 
-    callback save-settings-file();
-}
+        callback save-settings-file();
+    }

@@ -5,10 +5,8 @@ import { KeyView, EditCaller } from "../../security-key-types.slint";
 
 import { CallbackResult } from "@ui/theme.slint";
 export { CallbackResult }
-
 import { EditPageVersion } from "@ui/pages.slint";
 export { EditPageVersion }
-
 @rust-attr(route(path = "/edit?{caller}&{key}&{version}"))
 export struct EditProps {
     caller: EditCaller,

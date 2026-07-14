@@ -1,8 +1,28 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette, UISize, Palettes, CurrentTheme, Images, Utils, Size } from "@ui/theme.slint";
-import { TextSm, BasePage, BaseWindow, NavHeader, TextMd, Icon, LoginLayout, PinEntry, PasswordEntry, TextLg, HeadingMd } from "@ui/widgets.slint";
+import {
+    Palette,
+    UISize,
+    Palettes,
+    CurrentTheme,
+    Images,
+    Utils,
+    Size,
+} from "@ui/theme.slint";
+import {
+    TextSm,
+    BasePage,
+    BaseWindow,
+    NavHeader,
+    TextMd,
+    Icon,
+    LoginLayout,
+    PinEntry,
+    PasswordEntry,
+    TextLg,
+    HeadingMd,
+} from "@ui/widgets.slint";
 import { IconButton } from "@ui/widgets/icon-button.slint";
 import { TR2, TrId } from "gen/tr.slint";
 
@@ -512,5 +532,5 @@ export component AppWindow inherits BaseWindow {
 }
 
 import { TR } from "@ui/i18n/i18n.slint";
-export { CurrentTheme, Images, Utils, TR}
+export { CurrentTheme, Images, Utils, TR }
 export * from "gen/exports.slint";

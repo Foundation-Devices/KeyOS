@@ -7,7 +7,9 @@
   fontconfig,
   libxkbcommon,
   wayland,
-  xorg,
+  libx11,
+  libxcursor,
+  libxi,
 }: {
   slint-runner = writeShellApplication {
     name = "slint-runner";
@@ -18,9 +20,9 @@
           ++ lib.optionals stdenv.isLinux [
             fontconfig
             wayland
-            xorg.libX11
-            xorg.libXcursor
-            xorg.libXi
+            libx11
+            libxcursor
+            libxi
           ]
         )
       }''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

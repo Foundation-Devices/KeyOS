@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Router } from "gen/router.slint";
-import { Size, Images, CurrentTheme, Palettes, Utils, UISize, Timings } from "@ui/theme.slint";
+import {
+    Size,
+    Images,
+    CurrentTheme,
+    Palettes,
+    Utils,
+    UISize,
+    Timings,
+} from "@ui/theme.slint";
 import { Callbacks } from "callbacks.slint";
 import { TR } from "@ui/i18n/i18n.slint";
 import { BaseWindow } from "@ui/widgets.slint"; 
@@ -18,7 +26,9 @@ import { PinGlobal } from "./globals/pin-global.slint";
 import { QlGlobal } from "./globals/ql-global.slint"; 
 import { SettingGlobal } from "./globals/setting-global.slint";
 import { UpdateGlobal } from "./globals/update-global.slint";
-import { VerifyKeycardBackupGlobal } from "./globals/verify-keycard-global.slint";
+import {
+    VerifyKeycardBackupGlobal,
+} from "./globals/verify-keycard-global.slint";
 import { SaveSettingsGlobal } from "./globals/save-settings-global.slint";
 
 export {
@@ -36,8 +46,6 @@ export {
     VerifyKeycardBackupGlobal,
     SaveSettingsGlobal,
 }
-
-
 export component AppWindow inherits BaseWindow {
     Router { }
 }

@@ -12,18 +12,32 @@ import { Chip, ChipVariant, ChipSize } from "@components/chip.slint";
 import { Dialog, DialogVariant } from "@components/dialog.slint";
 import { Dropdown } from "@components/dropdown.slint";
 import { Icon } from "@components/icon.slint";
-import { IconButton, IconButtonVariant, IconButtonSize, IconButtonShape } from "@components/icon_button.slint";
+import {
+    IconButton,
+    IconButtonVariant,
+    IconButtonSize,
+    IconButtonShape,
+} from "@components/icon_button.slint";
 import { MediaImage } from "@components/image_view.slint";
 import { Input, InputVariant } from "@components/input.slint";
 import { Link } from "@components/link.slint";
 import { Menu } from "@components/menu.slint";
 import { MenuItem } from "@components/menu_item.slint";
-import { ProgressBar, ProgressBarTone, ProgressValueFormat } from "@components/progress_bar.slint";
+import {
+    ProgressBar,
+    ProgressBarTone,
+    ProgressValueFormat,
+} from "@components/progress_bar.slint";
 import { Radio } from "@components/radio.slint";
 import { RadioGroup } from "@components/radio_group.slint";
 import { Search } from "@components/search.slint";
 import { SegmentedControl } from "@components/segmented_control.slint";
-import { Tabs, TabsColor, TabsOrientation, TabsVariant } from "@components/tabs.slint";
+import {
+    Tabs,
+    TabsColor,
+    TabsOrientation,
+    TabsVariant,
+} from "@components/tabs.slint";
 import { TextArea, TextAreaVariant } from "@components/textarea.slint";
 import { Slider } from "@components/slider.slint";
 import { Sheet } from "@components/sheet.slint";
@@ -32,7 +46,11 @@ import { Spinner, SpinnerTone, SpinnerSize } from "@components/spinner.slint";
 import { Switch } from "@components/switch.slint";
 import { Toast, ToastVariant } from "@components/toast.slint";
 import { Theme, ButtonVariant, ControlSize } from "@components/theme.slint";
-import { Divider, DividerOrientation, DividerLabelAlignment } from "@components/divider.slint";
+import {
+    Divider,
+    DividerOrientation,
+    DividerLabelAlignment,
+} from "@components/divider.slint";
 import { EditorTextField } from "editor_text_field.slint";
 
 // Shared label-column WIDTH (px) for every theme-editor row, so labels and
@@ -158,8 +176,7 @@ export component SidebarPanel inherits Rectangle {
                     RowLayout.label-width = clamp(
                         RowLayout.label-width + (self.mouse-x - self.pressed-x),
                         140px,
-                        280px
-                    );
+                        280px);
                 }
             }
         }
@@ -430,26 +447,17 @@ component ThemePreviewCell inherits Rectangle {
     }
 
     pure function slider-track-height() -> length {
-        let
-        prop = root.size-prop("track-height"
-        , root.preview-version);
+        let prop = root.size-prop("track-height", root.preview-version);
         return prop.is-overridden ? prop.float-value * 1px : root.default-slider-track-height();
     }
 
-        pure function slider-thumb-size() -> length {
-            let
-            prop = root.size-prop("thumb-size"
-            , root.preview-version);
+    pure function slider-thumb-size() -> length {
+        let prop = root.size-prop("thumb-size", root.preview-version);
         return prop.is-overridden ? prop.float-value * 1px : root.slider-track-height()
             * 2;
-    
-        
-        
-        
-        
-        }
+    }
 
-        pure function button-variant() -> ButtonVariant {
+    pure function button-variant() -> ButtonVariant {
         if root.variant-key == "secondary" { return ButtonVariant.secondary; }
         if root.variant-key == "tertiary" || root.variant-key == "outline" { return ButtonVariant.tertiary; }
         if root.variant-key == "ghost" { return ButtonVariant.ghost; }
@@ -720,8 +728,7 @@ component ThemePreviewCell inherits Rectangle {
         height: self.preferred-height;
         label: "Notes";
         description: root.preview-disabled ? "" : "Use this field for longer input and summaries.";
-        value:
-            root.preview-disabled ? "This text area is disabled in the current state." :
+        value: root.preview-disabled ? "This text area is disabled in the current state." :
             root.preview-focused ? "Focused text areas should make the active border obvious." :
             "";
         placeholder: "Add a longer note...";
@@ -930,18 +937,15 @@ component ThemePreviewCell inherits Rectangle {
         force-focused: root.preview-focused;
         force-pressed: root.preview-pressed;
         disabled: root.preview-disabled;
-        text-color:
-            !root.preview-visited && root.variant-prop("text-color", root.preview-version).is-overridden ?
-                root.variant-prop("text-color", root.preview-version).color-value :
-                transparent;
-        underline-color:
-            !root.preview-visited && root.variant-prop("underline-color", root.preview-version).is-overridden ?
-                root.variant-prop("underline-color", root.preview-version).color-value :
-                transparent;
-        visited-color:
-            root.variant-prop("visited-color", root.preview-version).is-overridden ?
-                root.variant-prop("visited-color", root.preview-version).color-value :
-                transparent;
+        text-color: !root.preview-visited && root.variant-prop("text-color", root.preview-version).is-overridden ?
+            root.variant-prop("text-color", root.preview-version).color-value :
+            transparent;
+        underline-color: !root.preview-visited && root.variant-prop("underline-color", root.preview-version).is-overridden ?
+            root.variant-prop("underline-color", root.preview-version).color-value :
+            transparent;
+        visited-color: root.variant-prop("visited-color", root.preview-version).is-overridden ?
+            root.variant-prop("visited-color", root.preview-version).color-value :
+            transparent;
         font-family: root.size-prop("font-family", root.preview-version).is-overridden ? root.size-prop("font-family", root.preview-version).string-value : "Montserrat";
         font-size: root.size-prop("font-size", root.preview-version).is-overridden ? root.size-prop("font-size", root.preview-version).float-value * 1px : 0px;
         row-height: root.size-prop("row-height", root.preview-version).is-overridden ? root.size-prop("row-height", root.preview-version).float-value * 1px : 0px;
@@ -1311,200 +1315,202 @@ component NumberInput inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 4px;
 
-        // Reset button (only shown when overridden) - to the left of value editor
+            // Reset button (only shown when overridden) - to the left of value editor
         if allow-reset && !is-inherited: Rectangle {
-            width: 18px;
-            height: 24px;  // Match row height for vertical centering
+                width: 18px;
+                height: 24px;  // Match row height for vertical centering
 
             Rectangle {
-                x: 0;
-                y: (parent.height - 18px) / 2;
-                width: 18px;
-                height: 18px;
+                    x: 0;
+                    y: (parent.height - 18px) / 2;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 4px;
+                    background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
+
+                    Text {
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: (parent.height - self.preferred-height) / 2;
+                        text: "↺";
+                        color: dark-mode ? #888888 : #666666;
+                        font-size: 12px;
+                    }
+
+                    reset-touch := TouchArea {
+                        clicked => { root.reset(); }
+                    }
+                }
+            }
+
+            // Value editor (shown when NOT in token mode)
+        if !is-token-mode || !allow-token-mode: Rectangle {
+                width: root.editor-width;
+                height: 22px;
+                background: dark-mode ? #1a1a1a : #f0f0f0;
                 border-radius: 4px;
-                background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
+                opacity: is-inherited ? 0.7 : 1.0;
+
+                HorizontalLayout {
+                    Rectangle {
+                        width: 22px;
+                        background: minus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
+
+                        Text {
+                            x: (parent.width - self.preferred-width) / 2;
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "−";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 14px;
+                        }
+
+                        minus-touch := TouchArea {
+                            clicked => {
+                                if (value - step >= min-value) {
+                                    value = value - step;
+                                    is-overridden = !check-equal(value, default-value);
+                                    debug(label, show-all, is-overridden, show-all || is-overridden);
+                                    root.sync-edit-text();
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        clip: true;
+
+                        number-input-field := TextInput {
+                            x: 4px;
+                            y: 0px;
+                            width: parent.width - root.suffix-slot-width - 8px;
+                            height: parent.height;
+                            text <=> root.edit-text;
+                            color: dark-mode ? #ffffff : #1a1a1a;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            input-type: number;
+
+                            edited => {
+                                if (self.text == "" || self.text == "-" || self.text == "." || self.text == "-.") {
+                                    return;
+                                }
+                                if (self.text.is-float()) {
+                                    value = clamp(self.text.to-float(), min-value, max-value);
+                                    is-overridden = !check-equal(value, default-value);
+                                    debug(label, show-all, is-overridden, show-all || is-overridden);
+                                }
+                            }
+
+                            accepted => {
+                                root.commit-edit();
+                                root.sync-edit-text();
+                            }
+
+                            changed has-focus => {
+                                root.editing = self.has-focus;
+                                if (!self.has-focus) {
+                                    root.commit-edit();
+                                    root.sync-edit-text();
+                                }
+                            }
+                        }
+
+                        suffix-text := Text {
+                            visible: root.suffix != "";
+                            x: parent.width - root.suffix-slot-width;
+                            y: 0px;
+                            width: root.suffix-slot-width;
+                            height: parent.height;
+                            text: root.suffix;
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 22px;
+                        background: plus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
+
+                        Text {
+                            x: (parent.width - self.preferred-width) / 2;
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "+";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 14px;
+                        }
+
+                        plus-touch := TouchArea {
+                            clicked => {
+                                if (value + step <= max-value) {
+                                    value = value + step;
+                                    is-overridden = !check-equal(value, default-value);
+                                    debug(label, show-all, is-overridden, show-all || is-overridden);
+                                    root.sync-edit-text();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Spacer keeps the compact numeric field left-aligned at the column start.
+        if !is-token-mode || !allow-token-mode: Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            // Token selector (shown when in token mode) - fills the control column.
+        if allow-token-mode && is-token-mode: Rectangle {
+                horizontal-stretch: 1;
+                height: 22px;
+                opacity: is-inherited ? 0.7 : 1.0;
+
+                Dropdown {
+                    width: parent.width;
+                    label: "";
+                    size: ControlSize.sm;
+                    options: root.number-tokens;
+                    selected-index <=> root.selected-token;
+                    placeholder: root.number-tokens.length > 0 ? root.number-tokens[0] : "";
+                    max-visible-items: 8;
+                    font-size: 11px;
+                    control-height: 22px;
+                    option-height: 24px;
+                    padding-horizontal: 8px;
+                    icon-size: 12px;
+                    border-radius: 4px;
+                }
+            }
+
+            // Token/Value mode toggle button (#/$)
+        if allow-token-mode: Rectangle {
+                width: 20px;
+                height: 22px;
+                background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
+                border-radius: 4px;
 
                 Text {
                     x: (parent.width - self.preferred-width) / 2;
                     y: (parent.height - self.preferred-height) / 2;
-                    text: "↺";
-                    color: dark-mode ? #888888 : #666666;
+                    text: is-token-mode ? "$" : "#";
+                    color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
                     font-size: 12px;
+                    font-weight: 600;
                 }
 
-                reset-touch := TouchArea {
-                    clicked => { root.reset(); }
-                }
-            }
-        }
-
-        // Value editor (shown when NOT in token mode)
-        if !is-token-mode || !allow-token-mode: Rectangle {
-            width: root.editor-width;
-            height: 22px;
-            background: dark-mode ? #1a1a1a : #f0f0f0;
-            border-radius: 4px;
-            opacity: is-inherited ? 0.7 : 1.0;
-
-            HorizontalLayout {
-                Rectangle {
-                    width: 22px;
-                    background: minus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
-
-                    Text {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                        text: "−";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 14px;
-                    }
-
-                    minus-touch := TouchArea {
-                        clicked => {
-                            if (value - step >= min-value) {
-                                value = value - step;
-                                is-overridden = !check-equal(value, default-value);
-                                debug(label, show-all, is-overridden, show-all || is-overridden);
-                                root.sync-edit-text();
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    horizontal-stretch: 1;
-                    clip: true;
-
-                    number-input-field := TextInput {
-                        x: 4px;
-                        y: 0px;
-                        width: parent.width - root.suffix-slot-width - 8px;
-                        height: parent.height;
-                        text <=> root.edit-text;
-                        color: dark-mode ? #ffffff : #1a1a1a;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                        horizontal-alignment: right;
-                        input-type: number;
-
-                        edited => {
-                            if (self.text == "" || self.text == "-" || self.text == "." || self.text == "-.") {
-                                return;
-                            }
-                            if (self.text.is-float()) {
-                                value = clamp(self.text.to-float(), min-value, max-value);
-                                is-overridden = !check-equal(value, default-value);
-                                debug(label, show-all, is-overridden, show-all || is-overridden);
-                            }
-                        }
-
-                        accepted => {
-                            root.commit-edit();
-                            root.sync-edit-text();
-                        }
-
-                        changed has-focus => {
-                            root.editing = self.has-focus;
-                            if (!self.has-focus) {
-                                root.commit-edit();
-                                root.sync-edit-text();
-                            }
-                        }
-                    }
-
-                    suffix-text := Text {
-                        visible: root.suffix != "";
-                        x: parent.width - root.suffix-slot-width;
-                        y: 0px;
-                        width: root.suffix-slot-width;
-                        height: parent.height;
-                        text: root.suffix;
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
-                    }
-                }
-
-                Rectangle {
-                    width: 22px;
-                    background: plus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
-
-                    Text {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                        text: "+";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 14px;
-                    }
-
-                    plus-touch := TouchArea {
-                        clicked => {
-                            if (value + step <= max-value) {
-                                value = value + step;
-                                is-overridden = !check-equal(value, default-value);
-                                debug(label, show-all, is-overridden, show-all || is-overridden);
-                                root.sync-edit-text();
-                            }
+                mode-toggle-touch := TouchArea {
+                    clicked => {
+                        is-token-mode = !is-token-mode;
+                        if (is-token-mode) {
+                            value = selected-token-value;
+                            is-overridden = !check-equal(value, default-value);
+                            debug(label, show-all, is-overridden, show-all || is-overridden);
                         }
                     }
                 }
             }
-        }
-
-        // Spacer keeps the compact numeric field left-aligned at the column start.
-        if !is-token-mode || !allow-token-mode: Rectangle { horizontal-stretch: 1; }
-
-        // Token selector (shown when in token mode) - fills the control column.
-        if allow-token-mode && is-token-mode: Rectangle {
-            horizontal-stretch: 1;
-            height: 22px;
-            opacity: is-inherited ? 0.7 : 1.0;
-
-            Dropdown {
-                width: parent.width;
-                label: "";
-                size: ControlSize.sm;
-                options: root.number-tokens;
-                selected-index <=> root.selected-token;
-                placeholder: root.number-tokens.length > 0 ? root.number-tokens[0] : "";
-                max-visible-items: 8;
-                font-size: 11px;
-                control-height: 22px;
-                option-height: 24px;
-                padding-horizontal: 8px;
-                icon-size: 12px;
-                border-radius: 4px;
-            }
-        }
-
-        // Token/Value mode toggle button (#/$)
-        if allow-token-mode: Rectangle {
-            width: 20px;
-            height: 22px;
-            background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
-            border-radius: 4px;
-
-            Text {
-                x: (parent.width - self.preferred-width) / 2;
-                y: (parent.height - self.preferred-height) / 2;
-                text: is-token-mode ? "$" : "#";
-                color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            mode-toggle-touch := TouchArea {
-                clicked => {
-                    is-token-mode = !is-token-mode;
-                    if (is-token-mode) {
-                        value = selected-token-value;
-                        is-overridden = !check-equal(value, default-value);
-                        debug(label, show-all, is-overridden, show-all || is-overridden);
-                    }
-                }
-            }
-        }
         }
     }
 }
@@ -1524,7 +1530,17 @@ component FontSelectorRow inherits Rectangle {
     in property <[string]> font-tokens: ["Font.primary", "Font.secondary", "Font.tertiary"];
     in property <[string]> font-token-values: ["Arial", "Verdana", "Georgia"];
     in-out property <int> selected-token: 0;
-    in property <[string]> actual-font-options: ["Arial", "Verdana", "Trebuchet MS", "Georgia", "Palatino", "Times New Roman", "Courier New", "Menlo", "Monaco"];
+    in property <[string]> actual-font-options: [
+        "Arial",
+        "Verdana",
+        "Trebuchet MS",
+        "Georgia",
+        "Palatino",
+        "Times New Roman",
+        "Courier New",
+        "Menlo",
+        "Monaco"
+    ];
     in-out property <int> selected-actual-font: 0;
     property <bool> is-inherited: !is-overridden;
     property <string> selected-token-value:
@@ -1586,105 +1602,105 @@ component FontSelectorRow inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 4px;
 
-        if allow-reset && !is-inherited: Rectangle {
-            width: 18px;
-            height: 24px;
-
-            Rectangle {
-                x: 0;
-                y: (parent.height - 18px) / 2;
+            if allow-reset && !is-inherited: Rectangle {
                 width: 18px;
-                height: 18px;
+                height: 24px;
+
+                Rectangle {
+                    x: 0;
+                    y: (parent.height - 18px) / 2;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 4px;
+                    background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
+
+                    Text {
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: (parent.height - self.preferred-height) / 2;
+                        text: "↺";
+                        color: dark-mode ? #888888 : #666666;
+                        font-size: 12px;
+                    }
+
+                    reset-touch := TouchArea {
+                        clicked => { root.reset(); }
+                    }
+                }
+            }
+
+            if allow-token-mode && is-token-mode: Rectangle {
+                horizontal-stretch: 1;
+                height: 22px;
+                opacity: is-inherited ? 0.7 : 1.0;
+
+                Dropdown {
+                    width: parent.width;
+                    label: "";
+                    size: ControlSize.sm;
+                    options: root.font-tokens;
+                    selected-index <=> root.selected-token;
+                    placeholder: root.font-tokens.length > 0 ? root.font-tokens[0] : "";
+                    max-visible-items: 8;
+                    font-size: 11px;
+                    control-height: 22px;
+                    option-height: 24px;
+                    padding-horizontal: 8px;
+                    icon-size: 12px;
+                    border-radius: 4px;
+                    font-family: root.value;
+                }
+            }
+
+            if !allow-token-mode || !is-token-mode: Rectangle {
+                horizontal-stretch: 1;
+                height: 22px;
+                opacity: is-inherited ? 0.7 : 1.0;
+
+                Dropdown {
+                    width: parent.width;
+                    label: "";
+                    size: ControlSize.sm;
+                    options: root.actual-font-options;
+                    selected-index <=> root.selected-actual-font;
+                    placeholder: root.actual-font-options.length > 0 ? root.actual-font-options[0] : "";
+                    max-visible-items: 8;
+                    font-size: 11px;
+                    control-height: 22px;
+                    option-height: 24px;
+                    padding-horizontal: 8px;
+                    icon-size: 12px;
+                    border-radius: 4px;
+                    font-family: root.value;
+                }
+            }
+
+            if allow-token-mode: Rectangle {
+                width: 20px;
+                height: 22px;
+                background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
                 border-radius: 4px;
-                background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
 
                 Text {
                     x: (parent.width - self.preferred-width) / 2;
                     y: (parent.height - self.preferred-height) / 2;
-                    text: "↺";
-                    color: dark-mode ? #888888 : #666666;
+                    text: is-token-mode ? "$" : "#";
+                    color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
                     font-size: 12px;
+                    font-weight: 600;
                 }
 
-                reset-touch := TouchArea {
-                    clicked => { root.reset(); }
-                }
-            }
-        }
-
-        if allow-token-mode && is-token-mode: Rectangle {
-            horizontal-stretch: 1;
-            height: 22px;
-            opacity: is-inherited ? 0.7 : 1.0;
-
-            Dropdown {
-                width: parent.width;
-                label: "";
-                size: ControlSize.sm;
-                options: root.font-tokens;
-                selected-index <=> root.selected-token;
-                placeholder: root.font-tokens.length > 0 ? root.font-tokens[0] : "";
-                max-visible-items: 8;
-                font-size: 11px;
-                control-height: 22px;
-                option-height: 24px;
-                padding-horizontal: 8px;
-                icon-size: 12px;
-                border-radius: 4px;
-                font-family: root.value;
-            }
-        }
-
-        if !allow-token-mode || !is-token-mode: Rectangle {
-            horizontal-stretch: 1;
-            height: 22px;
-            opacity: is-inherited ? 0.7 : 1.0;
-
-            Dropdown {
-                width: parent.width;
-                label: "";
-                size: ControlSize.sm;
-                options: root.actual-font-options;
-                selected-index <=> root.selected-actual-font;
-                placeholder: root.actual-font-options.length > 0 ? root.actual-font-options[0] : "";
-                max-visible-items: 8;
-                font-size: 11px;
-                control-height: 22px;
-                option-height: 24px;
-                padding-horizontal: 8px;
-                icon-size: 12px;
-                border-radius: 4px;
-                font-family: root.value;
-            }
-        }
-
-        if allow-token-mode: Rectangle {
-            width: 20px;
-            height: 22px;
-            background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
-            border-radius: 4px;
-
-            Text {
-                x: (parent.width - self.preferred-width) / 2;
-                y: (parent.height - self.preferred-height) / 2;
-                text: is-token-mode ? "$" : "#";
-                color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            mode-toggle-touch := TouchArea {
-                clicked => {
-                    is-token-mode = !is-token-mode;
-                    if (is-token-mode) {
-                        value = selected-token-value;
-                    } else {
-                        value = selected-actual-value;
+                mode-toggle-touch := TouchArea {
+                    clicked => {
+                        is-token-mode = !is-token-mode;
+                        if (is-token-mode) {
+                            value = selected-token-value;
+                        } else {
+                            value = selected-actual-value;
+                        }
+                        is-overridden = value != default-value;
                     }
-                    is-overridden = value != default-value;
                 }
             }
-        }
         }
     }
 }
@@ -1799,146 +1815,150 @@ component ColorRow inherits Rectangle {
                 horizontal-stretch: 1;
                 spacing: 4px;
 
-            // Reset button (only shown when overridden) - to the left of value editor
+                // Reset button (only shown when overridden) - to the left of value editor
             if allow-reset && !is-inherited: Rectangle {
-                width: 18px;
-                height: 24px;  // Match row height for vertical centering
+                    width: 18px;
+                    height: 24px;  // Match row height for vertical centering
 
                 Rectangle {
-                    x: 0;
-                    y: (parent.height - 18px) / 2;
-                    width: 18px;
-                    height: 18px;
-                    border-radius: 4px;
-                    background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
+                        x: 0;
+                        y: (parent.height - 18px) / 2;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 4px;
+                        background: reset-touch.has-hover ? (dark-mode ? #3a3a3a : #e0e0e0) : transparent;
 
-                    Text {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                        text: "↺";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 12px;
-                    }
+                        Text {
+                            x: (parent.width - self.preferred-width) / 2;
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "↺";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 12px;
+                        }
 
-                    reset-touch := TouchArea {
-                        clicked => { root.reset(); }
+                        reset-touch := TouchArea {
+                            clicked => { root.reset(); }
+                        }
                     }
                 }
-            }
 
-            // Value editor (shown when NOT in token mode)
+                // Value editor (shown when NOT in token mode)
             if !is-token-mode || !allow-token-mode: Rectangle {
-                width: 80px;
-                height: 22px;
-                background: dark-mode ? #1a1a1a : #f0f0f0;
-                border-radius: 4px;
-                opacity: is-inherited ? 0.7 : 1.0;
+                    width: 80px;
+                    height: 22px;
+                    background: dark-mode ? #1a1a1a : #f0f0f0;
+                    border-radius: 4px;
+                    opacity: is-inherited ? 0.7 : 1.0;
 
-                HorizontalLayout {
-                    padding: 3px;
-                    spacing: 4px;
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 4px;
+
+                        Rectangle {
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 4px;
+                            background: value;
+                            border-width: 1px;
+                            border-color: dark-mode ? #3a3a3a : #d0d0d0;
+                        }
+
+                        Text {
+                            text: picker-open ? "Close" : "Edit";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 10px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            if (!picker-open) {
+                            // Opening picker: format current color as hex
+                            hex-text = format-hex(value);
+                            }
+                            picker-open = !picker-open;
+                        }
+                    }
+                }
+
+                // Spacer keeps the compact swatch button left-aligned at column start.
+            if !is-token-mode || !allow-token-mode: Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                // Token selector (shown when in token mode) - fills the control column.
+            if allow-token-mode && is-token-mode: Rectangle {
+                    horizontal-stretch: 1;
+                    height: 22px;
+                    opacity: is-inherited ? 0.7 : 1.0;
 
                     Rectangle {
+                        x: 0px;
+                        y: (parent.height - 16px) / 2;
                         width: 16px;
                         height: 16px;
                         border-radius: 4px;
-                        background: value;
+                        background: root.value;
                         border-width: 1px;
                         border-color: dark-mode ? #3a3a3a : #d0d0d0;
                     }
 
-                    Text {
-                        text: picker-open ? "Close" : "Edit";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 10px;
-                        vertical-alignment: center;
-                    }
-                }
-
-                TouchArea {
-                    clicked => {
-                        if (!picker-open) {
-                            // Opening picker: format current color as hex
-                            hex-text = format-hex(value);
+                    Dropdown {
+                        x: 20px;
+                        y: 0px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        label: "";
+                        size: ControlSize.sm;
+                        options: root.color-tokens;
+                        selected-index <=> root.selected-token;
+                        placeholder: root.color-tokens.length > 0 ? root.color-tokens[0] : "";
+                        max-visible-items: 8;
+                        font-size: 11px;
+                        control-height: 22px;
+                        option-height: 24px;
+                        padding-horizontal: 8px;
+                        icon-size: 12px;
+                        border-radius: 4px;
+                        changed(index, _label) => {
+                            root.selected-token = index;
+                            root.is-overridden = true;
                         }
-                        picker-open = !picker-open;
                     }
                 }
-            }
 
-            // Spacer keeps the compact swatch button left-aligned at column start.
-            if !is-token-mode || !allow-token-mode: Rectangle { horizontal-stretch: 1; }
-
-            // Token selector (shown when in token mode) - fills the control column.
-            if allow-token-mode && is-token-mode: Rectangle {
-                horizontal-stretch: 1;
-                height: 22px;
-                opacity: is-inherited ? 0.7 : 1.0;
-
-                Rectangle {
-                    x: 0px;
-                    y: (parent.height - 16px) / 2;
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 4px;
-                    background: root.value;
-                    border-width: 1px;
-                    border-color: dark-mode ? #3a3a3a : #d0d0d0;
-                }
-
-                Dropdown {
-                    x: 20px;
-                    y: 0px;
-                    width: parent.width - 20px;
-                    height: parent.height;
-                    label: "";
-                    size: ControlSize.sm;
-                    options: root.color-tokens;
-                    selected-index <=> root.selected-token;
-                    placeholder: root.color-tokens.length > 0 ? root.color-tokens[0] : "";
-                    max-visible-items: 8;
-                    font-size: 11px;
-                    control-height: 22px;
-                    option-height: 24px;
-                    padding-horizontal: 8px;
-                    icon-size: 12px;
-                    border-radius: 4px;
-                    changed(index, _label) => {
-                        root.selected-token = index;
-                        root.is-overridden = true;
-                    }
-                }
-            }
-
-            // Token/Value mode toggle button (#/$)
+                // Token/Value mode toggle button (#/$)
             if allow-token-mode: Rectangle {
-                width: 20px;
-                height: 22px;
-                background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
-                border-radius: 4px;
+                    width: 20px;
+                    height: 22px;
+                    background: mode-toggle-touch.has-hover ? (dark-mode ? #2a2a2a : #e0e0e0) : (dark-mode ? #1a1a1a : #f0f0f0);
+                    border-radius: 4px;
 
-                Text {
-                    x: (parent.width - self.preferred-width) / 2;
-                    y: (parent.height - self.preferred-height) / 2;
-                    text: is-token-mode ? "$" : "#";
-                    color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
-                    font-size: 12px;
-                    font-weight: 600;
-                }
+                    Text {
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: (parent.height - self.preferred-height) / 2;
+                        text: is-token-mode ? "$" : "#";
+                        color: is-token-mode ? #1a9a9a : (dark-mode ? #888888 : #666666);
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
 
-                mode-toggle-touch := TouchArea {
-                    clicked => {
-                        is-token-mode = !is-token-mode;
-                        picker-open = false;  // Close picker when switching modes
+                    mode-toggle-touch := TouchArea {
+                        clicked => {
+                            is-token-mode = !is-token-mode;
+                            picker-open = false;  // Close picker when switching modes
+                    }
                     }
                 }
-            }
             }
         }
 
         // Color picker (aligned to right side, fits content)
         if picker-open: HorizontalLayout {
-            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
 
             Rectangle {
                 width: self.preferred-width;
@@ -2011,10 +2031,7 @@ component ColorRow inherits Rectangle {
                     HorizontalLayout {
                         spacing: 4px;
 
-                        for preset-color in [
-                            #1a9a9a, #2abaaa, #158080, #0d6969,
-                            #3b82f6, #2563eb, #1d4ed8, #1e40af
-                        ]: Rectangle {
+                        for preset-color in [#1a9a9a, #2abaaa, #158080, #0d6969, #3b82f6, #2563eb, #1d4ed8, #1e40af]: Rectangle {
                             width: 22px;
                             height: 22px;
                             border-radius: 4px;
@@ -2038,10 +2055,7 @@ component ColorRow inherits Rectangle {
                     HorizontalLayout {
                         spacing: 4px;
 
-                        for preset-color in [
-                            #22c55e, #16a34a, #ef4444, #dc2626,
-                            #f59e0b, #d97706, #8b5cf6, #7c3aed
-                        ]: Rectangle {
+                        for preset-color in [#22c55e, #16a34a, #ef4444, #dc2626, #f59e0b, #d97706, #8b5cf6, #7c3aed]: Rectangle {
                             width: 22px;
                             height: 22px;
                             border-radius: 4px;
@@ -2065,10 +2079,7 @@ component ColorRow inherits Rectangle {
                     HorizontalLayout {
                         spacing: 4px;
 
-                        for preset-color in [
-                            #ffffff, #f5f5f5, #e8e8e8, #d0d0d0,
-                            #888888, #666666, #3a3a3a, #1a1a1a
-                        ]: Rectangle {
+                        for preset-color in [#ffffff, #f5f5f5, #e8e8e8, #d0d0d0, #888888, #666666, #3a3a3a, #1a1a1a]: Rectangle {
                             width: 22px;
                             height: 22px;
                             border-radius: 4px;
@@ -2287,8 +2298,7 @@ component GenericVariantPropEditor inherits Rectangle {
         visible: prop-def.prop-type == "float" || prop-def.prop-type == "int";
         label: prop-def.display-name;
         dark-mode: root.dark-mode;
-        suffix:
-            prop-def.name == "animation-speed" ? "RPM" :
+        suffix: prop-def.name == "animation-speed" ? "RPM" :
             prop-def.name == "opacity" || prop-def.name == "button-opacity" || prop-def.name == "font-weight" ? "" :
             "px";
         value <=> root.local-float;
@@ -2423,8 +2433,7 @@ component GenericSizePropEditor inherits Rectangle {
         visible: prop-def.prop-type == "float" || prop-def.prop-type == "int";
         label: prop-def.display-name;
         dark-mode: root.dark-mode;
-        suffix:
-            prop-def.name == "animation-speed" ? "RPM" :
+        suffix: prop-def.name == "animation-speed" ? "RPM" :
             prop-def.name == "opacity" || prop-def.name == "button-opacity" || prop-def.name == "font-weight" ? "" :
             "px";
         value <=> root.local-float;
@@ -2561,7 +2570,18 @@ export component ThemeEditor inherits Rectangle {
     in-out property <int> token-font-secondary-index: 0;
     in-out property <int> token-font-tertiary-index: 0;
     in property <[string]> font-token-options: ["Font.primary", "Font.secondary", "Font.tertiary"];
-    in property <[string]> actual-font-options: ["Montserrat", "Arial", "Verdana", "Trebuchet MS", "Georgia", "Palatino", "Times New Roman", "Courier New", "Menlo", "Monaco"];
+    in property <[string]> actual-font-options: [
+        "Montserrat",
+        "Arial",
+        "Verdana",
+        "Trebuchet MS",
+        "Georgia",
+        "Palatino",
+        "Times New Roman",
+        "Courier New",
+        "Menlo",
+        "Monaco"
+    ];
     in property <[string]> number-token-options: [
         "font-size-sm",
         "font-size-md",
@@ -3014,7 +3034,9 @@ export component ThemeEditor inherits Rectangle {
                     clicked => { root.theme-changed(idx); }
                 }
 
-                Rectangle { vertical-stretch: 1; }
+                Rectangle {
+                    vertical-stretch: 1;
+                }
 
                 // New Theme button
                 Rectangle {
@@ -3048,7 +3070,9 @@ export component ThemeEditor inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 8px; }
+                Rectangle {
+                    height: 8px;
+                }
 
                 // Import JSON button
                 Rectangle {
@@ -3077,7 +3101,9 @@ export component ThemeEditor inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 4px; }
+                Rectangle {
+                    height: 4px;
+                }
 
                 // Export JSON button
                 Rectangle {
@@ -3105,7 +3131,9 @@ export component ThemeEditor inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 4px; }
+                Rectangle {
+                    height: 4px;
+                }
             }
         }
 
@@ -3217,7 +3245,9 @@ export component ThemeEditor inherits Rectangle {
                                             }
                                         }
 
-                                        Rectangle { height: 4px; }
+                                        Rectangle {
+                                            height: 4px;
+                                        }
 
                                         Text {
                                             text: root.selected-component-name + " Variants";
@@ -3235,7 +3265,9 @@ export component ThemeEditor inherits Rectangle {
                                             wrap: word-wrap;
                                         }
 
-                                        Rectangle { height: 4px; }
+                                        Rectangle {
+                                            height: 4px;
+                                        }
 
                                         HorizontalLayout {
                                             spacing: 12px;
@@ -3331,8 +3363,7 @@ export component ThemeEditor inherits Rectangle {
                                 root.settings-panel-width = clamp(
                                     root.settings-panel-width - (self.mouse-x - self.pressed-x),
                                     250px,
-                                    main-area.drag-start-total-width - 250px
-                                );
+                                    main-area.drag-start-total-width - 250px);
                             }
                         }
                     }
@@ -3386,7 +3417,9 @@ export component ThemeEditor inherits Rectangle {
                                 }
                             }
 
-                            Rectangle { height: 8px; }
+                            Rectangle {
+                                height: 8px;
+                            }
 
                             // Theme name editor
                             HorizontalLayout {
@@ -3431,7 +3464,9 @@ export component ThemeEditor inherits Rectangle {
                                 }
                             }
 
-                            Rectangle { height: 8px; }
+                            Rectangle {
+                                height: 8px;
+                            }
 
                             // Parent theme selector (Default Theme has no parent)
                             if selected-theme != 0: EnumSelector {
@@ -3440,9 +3475,9 @@ export component ThemeEditor inherits Rectangle {
                                 selector-width: 140px;
                                 // Options: all themes except the current one
                                 options: selected-theme == 1 ? ["Default Theme", "Verdant Theme", "Sunset Serif", "Signal Mono"] :
-                                         selected-theme == 2 ? ["Default Theme", "My Custom Theme", "Sunset Serif", "Signal Mono"] :
-                                         selected-theme == 3 ? ["Default Theme", "My Custom Theme", "Verdant Theme", "Signal Mono"] :
-                                         ["Default Theme", "My Custom Theme", "Verdant Theme", "Sunset Serif"];
+                                    selected-theme == 2 ? ["Default Theme", "My Custom Theme", "Sunset Serif", "Signal Mono"] :
+                                    selected-theme == 3 ? ["Default Theme", "My Custom Theme", "Verdant Theme", "Signal Mono"] :
+                                    ["Default Theme", "My Custom Theme", "Verdant Theme", "Sunset Serif"];
                                 selected-index: 0;  // Default to inheriting from Default Theme
                             }
 
@@ -3467,7 +3502,9 @@ export component ThemeEditor inherits Rectangle {
                                 }
                             }
 
-                            Rectangle { height: 12px; }
+                            Rectangle {
+                                height: 12px;
+                            }
 
                             // TOKENS section
                             tokens-header := TreeSectionHeader {
@@ -3670,7 +3707,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "xs";
                                         dark-mode: root.dark-mode;
                                         value <=> token-spacing-xs;
-                                        min-value: 0; max-value: 16; step: 1;
+                                        min-value: 0;
+                                        max-value: 16;
+                                        step: 1;
                                         default-value: 4;
                                     }
 
@@ -3678,7 +3717,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-spacing-sm;
-                                        min-value: 0; max-value: 24; step: 2;
+                                        min-value: 0;
+                                        max-value: 24;
+                                        step: 2;
                                         default-value: 8;
                                     }
 
@@ -3686,7 +3727,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-spacing-md;
-                                        min-value: 0; max-value: 48; step: 4;
+                                        min-value: 0;
+                                        max-value: 48;
+                                        step: 4;
                                         default-value: 12;
                                     }
 
@@ -3694,7 +3737,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-spacing-lg;
-                                        min-value: 0; max-value: 64; step: 4;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 4;
                                         default-value: 16;
                                     }
 
@@ -3702,7 +3747,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "xl";
                                         dark-mode: root.dark-mode;
                                         value <=> token-spacing-xl;
-                                        min-value: 0; max-value: 96; step: 8;
+                                        min-value: 0;
+                                        max-value: 96;
+                                        step: 8;
                                         default-value: 24;
                                     }
                                 }
@@ -3722,7 +3769,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-size-sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-size-sm;
-                                        min-value: 0; max-value: 160; step: 1;
+                                        min-value: 0;
+                                        max-value: 160;
+                                        step: 1;
                                         default-value: 48;
                                     }
 
@@ -3730,7 +3779,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-size-md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-size-md;
-                                        min-value: 0; max-value: 160; step: 1;
+                                        min-value: 0;
+                                        max-value: 160;
+                                        step: 1;
                                         default-value: 56;
                                     }
 
@@ -3738,7 +3789,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-size-lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-size-lg;
-                                        min-value: 0; max-value: 160; step: 1;
+                                        min-value: 0;
+                                        max-value: 160;
+                                        step: 1;
                                         default-value: 64;
                                     }
 
@@ -3746,7 +3799,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "icon-size-sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-icon-size-sm;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 20;
                                     }
 
@@ -3754,7 +3809,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "icon-size-md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-icon-size-md;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 24;
                                     }
 
@@ -3762,7 +3819,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "icon-size-lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-icon-size-lg;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 28;
                                     }
 
@@ -3770,7 +3829,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-radius-sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-radius-sm;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 20;
                                     }
 
@@ -3778,7 +3839,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-radius-md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-radius-md;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 24;
                                     }
 
@@ -3786,7 +3849,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-radius-lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-radius-lg;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 28;
                                     }
 
@@ -3794,7 +3859,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-padding-inline-sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-padding-inline-sm;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 14;
                                     }
 
@@ -3802,7 +3869,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-padding-inline-md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-padding-inline-md;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 16;
                                     }
 
@@ -3810,7 +3879,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "control-padding-inline-lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-control-padding-inline-lg;
-                                        min-value: 0; max-value: 64; step: 1;
+                                        min-value: 0;
+                                        max-value: 64;
+                                        step: 1;
                                         default-value: 20;
                                     }
                                 }
@@ -3831,7 +3902,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "font-size-sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-font-size-sm;
-                                        min-value: 8; max-value: 32; step: 1;
+                                        min-value: 8;
+                                        max-value: 32;
+                                        step: 1;
                                         default-value: 20;
                                     }
 
@@ -3839,7 +3912,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "font-size-md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-font-size-md;
-                                        min-value: 8; max-value: 36; step: 1;
+                                        min-value: 8;
+                                        max-value: 36;
+                                        step: 1;
                                         default-value: 22;
                                     }
 
@@ -3847,7 +3922,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "font-size-lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-font-size-lg;
-                                        min-value: 8; max-value: 40; step: 1;
+                                        min-value: 8;
+                                        max-value: 40;
+                                        step: 1;
                                         default-value: 24;
                                     }
 
@@ -3895,7 +3972,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "sm";
                                         dark-mode: root.dark-mode;
                                         value <=> token-radius-sm;
-                                        min-value: 0; max-value: 24; step: 1;
+                                        min-value: 0;
+                                        max-value: 24;
+                                        step: 1;
                                         default-value: 8;
                                     }
 
@@ -3903,7 +3982,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "md";
                                         dark-mode: root.dark-mode;
                                         value <=> token-radius-md;
-                                        min-value: 0; max-value: 32; step: 2;
+                                        min-value: 0;
+                                        max-value: 32;
+                                        step: 2;
                                         default-value: 16;
                                     }
 
@@ -3920,7 +4001,9 @@ export component ThemeEditor inherits Rectangle {
                                         label: "lg";
                                         dark-mode: root.dark-mode;
                                         value <=> token-radius-lg;
-                                        min-value: 0; max-value: 40; step: 2;
+                                        min-value: 0;
+                                        max-value: 40;
+                                        step: 2;
                                         default-value: 24;
                                     }
 
@@ -3928,13 +4011,17 @@ export component ThemeEditor inherits Rectangle {
                                         label: "full";
                                         dark-mode: root.dark-mode;
                                         value <=> token-radius-full;
-                                        min-value: 0; max-value: 9999; step: 100;
+                                        min-value: 0;
+                                        max-value: 9999;
+                                        step: 100;
                                         default-value: 9999;
                                     }
                                 }
                             }
 
-                            Rectangle { height: 8px; }
+                            Rectangle {
+                                height: 8px;
+                            }
 
                             // COMPONENTS section
                             components-header := TreeSectionHeader {
@@ -4198,7 +4285,18 @@ export component ThemeTokenPanel inherits Rectangle {
     in-out property <float> token-radius-lg: 24.0;
     in-out property <float> token-radius-full: 9999.0;
     in-out property <int> token-radius-default-index: 2;
-    in property <[string]> actual-font-options: ["Montserrat", "Arial", "Verdana", "Trebuchet MS", "Georgia", "Palatino", "Times New Roman", "Courier New", "Menlo", "Monaco"];
+    in property <[string]> actual-font-options: [
+        "Montserrat",
+        "Arial",
+        "Verdana",
+        "Trebuchet MS",
+        "Georgia",
+        "Palatino",
+        "Times New Roman",
+        "Courier New",
+        "Menlo",
+        "Monaco"
+    ];
 
     changed token-font-primary-index => { root.token-font-primary = root.actual-font-options[root.token-font-primary-index]; }
     changed token-font-secondary-index => { root.token-font-secondary = root.actual-font-options[root.token-font-secondary-index]; }
@@ -4241,233 +4339,477 @@ export component ThemeTokenPanel inherits Rectangle {
         title: "Tokens";
         splitter-base-x: 32px;
 
-            colors-header := TreeSectionHeader {
-                title: "Colors";
+        colors-header := TreeSectionHeader {
+            title: "Colors";
+            dark-mode: root.dark-mode;
+        }
+
+        if colors-header.expanded: VerticalLayout {
+            padding-left: 16px;
+            spacing: 6px;
+
+            if !root.dark-mode: ColorRow {
+                label: "primary";
                 dark-mode: root.dark-mode;
+                value <=> light-token-primary;
+                default-value: #1a9a9a;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("primary", c, false); }
             }
-
-            if colors-header.expanded: VerticalLayout {
-                padding-left: 16px;
-                spacing: 6px;
-
-                if !root.dark-mode: ColorRow {
-                    label: "primary";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-primary;
-                    default-value: #1a9a9a;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("primary", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "primary-pressed";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-primary-pressed;
-                    default-value: #158080;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("primary-pressed", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "secondary";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-secondary;
-                    default-value: #e8e4df;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("secondary", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "danger";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-danger;
-                    default-value: #dc2626;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("danger", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "surface";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-surface;
-                    default-value: #ffffff;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("surface", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "background";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-background;
-                    default-value: #ffffff;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("background", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "text";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-text;
-                    default-value: #1a1a1a;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("text", c, false); }
-                }
-                if !root.dark-mode: ColorRow {
-                    label: "text-muted";
-                    dark-mode: root.dark-mode;
-                    value <=> light-token-text-muted;
-                    default-value: #6b6b6b;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("text-muted", c, false); }
-                }
-
-                if root.dark-mode: ColorRow {
-                    label: "primary";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-primary;
-                    default-value: #2abaaa;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("primary", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "primary-pressed";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-primary-pressed;
-                    default-value: #1a9a9a;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("primary-pressed", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "secondary";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-secondary;
-                    default-value: #3a3a3a;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("secondary", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "danger";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-danger;
-                    default-value: #ef4444;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("danger", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "surface";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-surface;
-                    default-value: #1e1e1e;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("surface", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "background";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-background;
-                    default-value: #121212;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("background", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "text";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-text;
-                    default-value: #fafafa;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("text", c, true); }
-                }
-                if root.dark-mode: ColorRow {
-                    label: "text-muted";
-                    dark-mode: root.dark-mode;
-                    value <=> dark-token-text-muted;
-                    default-value: #9a9a9a;
-                    parse-hex(hex) => { return root.parse-hex-color(hex); }
-                    format-hex(c) => { return root.format-hex-color(c); }
-                    value-changed(c) => { root.token-value-changed("text-muted", c, true); }
-                }
-            }
-
-            spacing-header := TreeSectionHeader {
-                title: "Spacing";
+            if !root.dark-mode: ColorRow {
+                label: "primary-pressed";
                 dark-mode: root.dark-mode;
+                value <=> light-token-primary-pressed;
+                default-value: #158080;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("primary-pressed", c, false); }
             }
-
-            if spacing-header.expanded: VerticalLayout {
-                padding-left: 16px;
-                spacing: 6px;
-
-                NumberInput { label: "xs"; dark-mode: root.dark-mode; value <=> token-spacing-xs; min-value: 0; max-value: 16; step: 1; default-value: 4; }
-                NumberInput { label: "sm"; dark-mode: root.dark-mode; value <=> token-spacing-sm; min-value: 0; max-value: 24; step: 2; default-value: 8; }
-                NumberInput { label: "md"; dark-mode: root.dark-mode; value <=> token-spacing-md; min-value: 0; max-value: 48; step: 4; default-value: 12; }
-                NumberInput { label: "lg"; dark-mode: root.dark-mode; value <=> token-spacing-lg; min-value: 0; max-value: 64; step: 4; default-value: 16; }
-                NumberInput { label: "xl"; dark-mode: root.dark-mode; value <=> token-spacing-xl; min-value: 0; max-value: 96; step: 8; default-value: 24; }
-            }
-
-            control-scale-header := TreeSectionHeader {
-                title: "Control Scale";
+            if !root.dark-mode: ColorRow {
+                label: "secondary";
                 dark-mode: root.dark-mode;
+                value <=> light-token-secondary;
+                default-value: #e8e4df;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("secondary", c, false); }
             }
-
-            if control-scale-header.expanded: VerticalLayout {
-                padding-left: 16px;
-                spacing: 6px;
-
-                NumberInput { label: "control-size-sm"; dark-mode: root.dark-mode; value <=> token-control-size-sm; min-value: 0; max-value: 160; step: 1; default-value: 48; }
-                NumberInput { label: "control-size-md"; dark-mode: root.dark-mode; value <=> token-control-size-md; min-value: 0; max-value: 160; step: 1; default-value: 56; }
-                NumberInput { label: "control-size-lg"; dark-mode: root.dark-mode; value <=> token-control-size-lg; min-value: 0; max-value: 160; step: 1; default-value: 64; }
-                NumberInput { label: "icon-size-sm"; dark-mode: root.dark-mode; value <=> token-icon-size-sm; min-value: 0; max-value: 64; step: 1; default-value: 20; }
-                NumberInput { label: "icon-size-md"; dark-mode: root.dark-mode; value <=> token-icon-size-md; min-value: 0; max-value: 64; step: 1; default-value: 24; }
-                NumberInput { label: "icon-size-lg"; dark-mode: root.dark-mode; value <=> token-icon-size-lg; min-value: 0; max-value: 64; step: 1; default-value: 28; }
-                NumberInput { label: "control-radius-sm"; dark-mode: root.dark-mode; value <=> token-control-radius-sm; min-value: 0; max-value: 64; step: 1; default-value: 20; }
-                NumberInput { label: "control-radius-md"; dark-mode: root.dark-mode; value <=> token-control-radius-md; min-value: 0; max-value: 64; step: 1; default-value: 24; }
-                NumberInput { label: "control-radius-lg"; dark-mode: root.dark-mode; value <=> token-control-radius-lg; min-value: 0; max-value: 64; step: 1; default-value: 28; }
-                NumberInput { label: "control-padding-inline-sm"; dark-mode: root.dark-mode; value <=> token-control-padding-inline-sm; min-value: 0; max-value: 64; step: 1; default-value: 14; }
-                NumberInput { label: "control-padding-inline-md"; dark-mode: root.dark-mode; value <=> token-control-padding-inline-md; min-value: 0; max-value: 64; step: 1; default-value: 16; }
-                NumberInput { label: "control-padding-inline-lg"; dark-mode: root.dark-mode; value <=> token-control-padding-inline-lg; min-value: 0; max-value: 64; step: 1; default-value: 20; }
-            }
-
-            typography-header := TreeSectionHeader {
-                title: "Typography";
+            if !root.dark-mode: ColorRow {
+                label: "danger";
                 dark-mode: root.dark-mode;
+                value <=> light-token-danger;
+                default-value: #dc2626;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("danger", c, false); }
             }
-
-            if typography-header.expanded: VerticalLayout {
-                padding-left: 16px;
-                spacing: 6px;
-
-                NumberInput { label: "font-size-sm"; dark-mode: root.dark-mode; value <=> token-font-size-sm; min-value: 8; max-value: 32; step: 1; default-value: 20; }
-                NumberInput { label: "font-size-md"; dark-mode: root.dark-mode; value <=> token-font-size-md; min-value: 8; max-value: 36; step: 1; default-value: 22; }
-                NumberInput { label: "font-size-lg"; dark-mode: root.dark-mode; value <=> token-font-size-lg; min-value: 8; max-value: 40; step: 1; default-value: 24; }
-                EnumRow { label: "Font.primary"; dark-mode: root.dark-mode; options: root.actual-font-options; default-index: 0; selected-index <=> token-font-primary-index; selector-width: 140px; }
-                EnumRow { label: "Font.secondary"; dark-mode: root.dark-mode; options: root.actual-font-options; default-index: 0; selected-index <=> token-font-secondary-index; selector-width: 140px; }
-                EnumRow { label: "Font.tertiary"; dark-mode: root.dark-mode; options: root.actual-font-options; default-index: 0; selected-index <=> token-font-tertiary-index; selector-width: 140px; }
-            }
-
-            radius-header := TreeSectionHeader {
-                title: "Radius";
+            if !root.dark-mode: ColorRow {
+                label: "surface";
                 dark-mode: root.dark-mode;
+                value <=> light-token-surface;
+                default-value: #ffffff;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("surface", c, false); }
+            }
+            if !root.dark-mode: ColorRow {
+                label: "background";
+                dark-mode: root.dark-mode;
+                value <=> light-token-background;
+                default-value: #ffffff;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("background", c, false); }
+            }
+            if !root.dark-mode: ColorRow {
+                label: "text";
+                dark-mode: root.dark-mode;
+                value <=> light-token-text;
+                default-value: #1a1a1a;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("text", c, false); }
+            }
+            if !root.dark-mode: ColorRow {
+                label: "text-muted";
+                dark-mode: root.dark-mode;
+                value <=> light-token-text-muted;
+                default-value: #6b6b6b;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("text-muted", c, false); }
             }
 
-            if radius-header.expanded: VerticalLayout {
-                padding-left: 16px;
-                spacing: 6px;
-
-                NumberInput { label: "sm"; dark-mode: root.dark-mode; value <=> token-radius-sm; min-value: 0; max-value: 24; step: 1; default-value: 8; }
-                NumberInput { label: "md"; dark-mode: root.dark-mode; value <=> token-radius-md; min-value: 0; max-value: 32; step: 2; default-value: 16; }
-                EnumRow { label: "default"; dark-mode: root.dark-mode; options: ["sm", "md", "lg", "full"]; default-index: 2; selected-index <=> token-radius-default-index; selector-width: 120px; }
-                NumberInput { label: "lg"; dark-mode: root.dark-mode; value <=> token-radius-lg; min-value: 0; max-value: 40; step: 2; default-value: 24; }
-                NumberInput { label: "full"; dark-mode: root.dark-mode; value <=> token-radius-full; min-value: 0; max-value: 9999; step: 100; default-value: 9999; }
+            if root.dark-mode: ColorRow {
+                label: "primary";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-primary;
+                default-value: #2abaaa;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("primary", c, true); }
             }
+            if root.dark-mode: ColorRow {
+                label: "primary-pressed";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-primary-pressed;
+                default-value: #1a9a9a;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("primary-pressed", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "secondary";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-secondary;
+                default-value: #3a3a3a;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("secondary", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "danger";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-danger;
+                default-value: #ef4444;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("danger", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "surface";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-surface;
+                default-value: #1e1e1e;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("surface", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "background";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-background;
+                default-value: #121212;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("background", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "text";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-text;
+                default-value: #fafafa;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("text", c, true); }
+            }
+            if root.dark-mode: ColorRow {
+                label: "text-muted";
+                dark-mode: root.dark-mode;
+                value <=> dark-token-text-muted;
+                default-value: #9a9a9a;
+                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                format-hex(c) => { return root.format-hex-color(c); }
+                value-changed(c) => { root.token-value-changed("text-muted", c, true); }
+            }
+        }
+
+        spacing-header := TreeSectionHeader {
+            title: "Spacing";
+            dark-mode: root.dark-mode;
+        }
+
+        if spacing-header.expanded: VerticalLayout {
+            padding-left: 16px;
+            spacing: 6px;
+
+            NumberInput {
+                label: "xs";
+                dark-mode: root.dark-mode;
+                value <=> token-spacing-xs;
+                min-value: 0;
+                max-value: 16;
+                step: 1;
+                default-value: 4;
+            }
+
+            NumberInput {
+                label: "sm";
+                dark-mode: root.dark-mode;
+                value <=> token-spacing-sm;
+                min-value: 0;
+                max-value: 24;
+                step: 2;
+                default-value: 8;
+            }
+
+            NumberInput {
+                label: "md";
+                dark-mode: root.dark-mode;
+                value <=> token-spacing-md;
+                min-value: 0;
+                max-value: 48;
+                step: 4;
+                default-value: 12;
+            }
+
+            NumberInput {
+                label: "lg";
+                dark-mode: root.dark-mode;
+                value <=> token-spacing-lg;
+                min-value: 0;
+                max-value: 64;
+                step: 4;
+                default-value: 16;
+            }
+
+            NumberInput {
+                label: "xl";
+                dark-mode: root.dark-mode;
+                value <=> token-spacing-xl;
+                min-value: 0;
+                max-value: 96;
+                step: 8;
+                default-value: 24;
+            }
+        }
+
+        control-scale-header := TreeSectionHeader {
+            title: "Control Scale";
+            dark-mode: root.dark-mode;
+        }
+
+        if control-scale-header.expanded: VerticalLayout {
+            padding-left: 16px;
+            spacing: 6px;
+
+            NumberInput {
+                label: "control-size-sm";
+                dark-mode: root.dark-mode;
+                value <=> token-control-size-sm;
+                min-value: 0;
+                max-value: 160;
+                step: 1;
+                default-value: 48;
+            }
+
+            NumberInput {
+                label: "control-size-md";
+                dark-mode: root.dark-mode;
+                value <=> token-control-size-md;
+                min-value: 0;
+                max-value: 160;
+                step: 1;
+                default-value: 56;
+            }
+
+            NumberInput {
+                label: "control-size-lg";
+                dark-mode: root.dark-mode;
+                value <=> token-control-size-lg;
+                min-value: 0;
+                max-value: 160;
+                step: 1;
+                default-value: 64;
+            }
+
+            NumberInput {
+                label: "icon-size-sm";
+                dark-mode: root.dark-mode;
+                value <=> token-icon-size-sm;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 20;
+            }
+
+            NumberInput {
+                label: "icon-size-md";
+                dark-mode: root.dark-mode;
+                value <=> token-icon-size-md;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 24;
+            }
+
+            NumberInput {
+                label: "icon-size-lg";
+                dark-mode: root.dark-mode;
+                value <=> token-icon-size-lg;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 28;
+            }
+
+            NumberInput {
+                label: "control-radius-sm";
+                dark-mode: root.dark-mode;
+                value <=> token-control-radius-sm;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 20;
+            }
+
+            NumberInput {
+                label: "control-radius-md";
+                dark-mode: root.dark-mode;
+                value <=> token-control-radius-md;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 24;
+            }
+
+            NumberInput {
+                label: "control-radius-lg";
+                dark-mode: root.dark-mode;
+                value <=> token-control-radius-lg;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 28;
+            }
+
+            NumberInput {
+                label: "control-padding-inline-sm";
+                dark-mode: root.dark-mode;
+                value <=> token-control-padding-inline-sm;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 14;
+            }
+
+            NumberInput {
+                label: "control-padding-inline-md";
+                dark-mode: root.dark-mode;
+                value <=> token-control-padding-inline-md;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 16;
+            }
+
+            NumberInput {
+                label: "control-padding-inline-lg";
+                dark-mode: root.dark-mode;
+                value <=> token-control-padding-inline-lg;
+                min-value: 0;
+                max-value: 64;
+                step: 1;
+                default-value: 20;
+            }
+        }
+
+        typography-header := TreeSectionHeader {
+            title: "Typography";
+            dark-mode: root.dark-mode;
+        }
+
+        if typography-header.expanded: VerticalLayout {
+            padding-left: 16px;
+            spacing: 6px;
+
+            NumberInput {
+                label: "font-size-sm";
+                dark-mode: root.dark-mode;
+                value <=> token-font-size-sm;
+                min-value: 8;
+                max-value: 32;
+                step: 1;
+                default-value: 20;
+            }
+
+            NumberInput {
+                label: "font-size-md";
+                dark-mode: root.dark-mode;
+                value <=> token-font-size-md;
+                min-value: 8;
+                max-value: 36;
+                step: 1;
+                default-value: 22;
+            }
+
+            NumberInput {
+                label: "font-size-lg";
+                dark-mode: root.dark-mode;
+                value <=> token-font-size-lg;
+                min-value: 8;
+                max-value: 40;
+                step: 1;
+                default-value: 24;
+            }
+
+            EnumRow {
+                label: "Font.primary";
+                dark-mode: root.dark-mode;
+                options: root.actual-font-options;
+                default-index: 0;
+                selected-index <=> token-font-primary-index;
+                selector-width: 140px;
+            }
+
+            EnumRow {
+                label: "Font.secondary";
+                dark-mode: root.dark-mode;
+                options: root.actual-font-options;
+                default-index: 0;
+                selected-index <=> token-font-secondary-index;
+                selector-width: 140px;
+            }
+
+            EnumRow {
+                label: "Font.tertiary";
+                dark-mode: root.dark-mode;
+                options: root.actual-font-options;
+                default-index: 0;
+                selected-index <=> token-font-tertiary-index;
+                selector-width: 140px;
+            }
+        }
+
+        radius-header := TreeSectionHeader {
+            title: "Radius";
+            dark-mode: root.dark-mode;
+        }
+
+        if radius-header.expanded: VerticalLayout {
+            padding-left: 16px;
+            spacing: 6px;
+
+            NumberInput {
+                label: "sm";
+                dark-mode: root.dark-mode;
+                value <=> token-radius-sm;
+                min-value: 0;
+                max-value: 24;
+                step: 1;
+                default-value: 8;
+            }
+
+            NumberInput {
+                label: "md";
+                dark-mode: root.dark-mode;
+                value <=> token-radius-md;
+                min-value: 0;
+                max-value: 32;
+                step: 2;
+                default-value: 16;
+            }
+
+            EnumRow {
+                label: "default";
+                dark-mode: root.dark-mode;
+                options: ["sm", "md", "lg", "full"];
+                default-index: 2;
+                selected-index <=> token-radius-default-index;
+                selector-width: 120px;
+            }
+
+            NumberInput {
+                label: "lg";
+                dark-mode: root.dark-mode;
+                value <=> token-radius-lg;
+                min-value: 0;
+                max-value: 40;
+                step: 2;
+                default-value: 24;
+            }
+
+            NumberInput {
+                label: "full";
+                dark-mode: root.dark-mode;
+                value <=> token-radius-full;
+                min-value: 0;
+                max-value: 9999;
+                step: 100;
+                default-value: 9999;
+            }
+        }
     }
 }
 
@@ -4511,7 +4853,18 @@ export component ComponentThemeWorkspace inherits Rectangle {
     in property <string> token-font-tertiary: "Montserrat";
     in property <[string]> component-page-mode-options: ["Theme", "Props"];
     in property <[string]> font-token-options: ["Font.primary", "Font.secondary", "Font.tertiary"];
-    in property <[string]> actual-font-options: ["Montserrat", "Arial", "Verdana", "Trebuchet MS", "Georgia", "Palatino", "Times New Roman", "Courier New", "Menlo", "Monaco"];
+    in property <[string]> actual-font-options: [
+        "Montserrat",
+        "Arial",
+        "Verdana",
+        "Trebuchet MS",
+        "Georgia",
+        "Palatino",
+        "Times New Roman",
+        "Courier New",
+        "Menlo",
+        "Monaco"
+    ];
     in property <[string]> number-token-options: [
         "font-size-sm",
         "font-size-md",
@@ -4565,8 +4918,8 @@ export component ComponentThemeWorkspace inherits Rectangle {
         component-selected-size;
     property <string> active-variant-key:
         variant-list.length > 0 && active-variant-index >= 0 && active-variant-index < variant-list.length ?
-            variant-list[active-variant-index].key :
-            "default";
+        variant-list[active-variant-index].key :
+        "default";
     property <string> preview-state-key:
         state-list.length > 0 && preview-state-index >= 0 && preview-state-index < state-list.length ?
         state-list[preview-state-index].key :
@@ -4676,20 +5029,16 @@ export component ComponentThemeWorkspace inherits Rectangle {
         }
         if root.selected-component-key == "tabs" {
             let control-height = root.preview-size-length(size_key, "control-height", root.default-control-height(size_key));
-            let list-padding =
-                root.preview-size-length(
+            let list-padding = root.preview-size-length(
                     size_key,
                     "list-padding",
-                    root.active-variant-key == "underlined" ? 0px : 4px
-                );
-            let panel-min-height =
-                root.preview-size-length(
+                    root.active-variant-key == "underlined" ? 0px : 4px);
+            let panel-min-height = root.preview-size-length(
                     size_key,
                     "panel-min-height",
                     size_key == "sm" || size_key == "small" ? 88px :
-                    size_key == "lg" || size_key == "large" ? 120px :
-                    104px
-                );
+                size_key == "lg" || size_key == "large" ? 120px :
+                104px);
             return max(220px, control-height + list-padding * 2 + 12px + panel-min-height + 24px);
         }
         if root.selected-component-key == "dialog" {
@@ -4724,25 +5073,19 @@ export component ComponentThemeWorkspace inherits Rectangle {
             // (per-size) plus 40px (10px y offset in ThemePreviewCell + small bottom
             // margin). The Menu component now uses menu-height as a min, not a
             // ceiling, so its actual rendered height tracks content.
-            let item-height =
-                size_key == "sm" || size_key == "small" ? 56px :
+            let item-height = size_key == "sm" || size_key == "small" ? 56px :
                 size_key == "lg" || size_key == "large" ? 72px :
                 64px;
             return item-height * 3 + 40px;
         }
         if root.selected-component-key == "accordion" {
-            let header-height =
-                root.preview-size-length(size_key, "header-height", root.default-accordion-header-height(size_key));
-            let font-size =
-                root.preview-size-length(size_key, "font-size", root.default-font-size(size_key));
-            let padding-horizontal =
-                root.preview-size-length(
+            let header-height = root.preview-size-length(size_key, "header-height", root.default-accordion-header-height(size_key));
+            let font-size = root.preview-size-length(size_key, "font-size", root.default-font-size(size_key));
+            let padding-horizontal = root.preview-size-length(
                     size_key,
                     "padding-horizontal",
-                    root.default-accordion-padding-horizontal(size_key)
-                );
-            let expanded-item-height =
-                header-height + 11px + font-size * 3 + padding-horizontal * 1.5;
+                    root.default-accordion-padding-horizontal(size_key));
+            let expanded-item-height = header-height + 11px + font-size * 3 + padding-horizontal * 1.5;
             let collapsed-item-height = header-height + 11px;
             return max(expanded-item-height + collapsed-item-height * 2 + 20px, 220px);
         }
@@ -4754,12 +5097,10 @@ export component ComponentThemeWorkspace inherits Rectangle {
     pure function preview-grid-row-height() -> length {
         let first-key = root.size-list.length > 0 ? root.size-list[0].key : "default";
         let first-height = root.component-preview-cell-height(first-key);
-        let second-height =
-            root.size-list.length > 1 ?
+        let second-height = root.size-list.length > 1 ?
             root.component-preview-cell-height(root.size-list[1].key) :
             first-height;
-        let third-height =
-            root.size-list.length > 2 ?
+        let third-height = root.size-list.length > 2 ?
             root.component-preview-cell-height(root.size-list[2].key) :
             second-height;
         return max(first-height, max(second-height, third-height));
@@ -4770,8 +5111,7 @@ export component ComponentThemeWorkspace inherits Rectangle {
     preview-panel := Rectangle {
         x: 0px;
         y: 0px;
-        width:
-            parent.width > root.settings-panel-width + 6px ?
+        width: parent.width > root.settings-panel-width + 6px ?
             parent.width - root.settings-panel-width - 6px :
             0px;
         height: parent.height;
@@ -4945,8 +5285,7 @@ export component ComponentThemeWorkspace inherits Rectangle {
                     root.settings-panel-width = clamp(
                         root.settings-panel-width - (self.mouse-x - self.pressed-x),
                         250px,
-                        root.settings-drag-start-total - 250px
-                    );
+                        root.settings-drag-start-total - 250px);
                 }
             }
         }
@@ -4965,51 +5304,51 @@ export component ComponentThemeWorkspace inherits Rectangle {
         title: root.selected-component-name + " Theme";
         splitter-base-x: 28px;
 
-                    if root.size-prop-defs.length > 0: VerticalLayout {
-                        spacing: 4px;
+        if root.size-prop-defs.length > 0: VerticalLayout {
+            spacing: 4px;
 
-                        component-sizes-header := TreeSectionHeader {
-                            title: "Sizes";
-                            dark-mode: root.dark-mode;
-                        }
+            component-sizes-header := TreeSectionHeader {
+                title: "Sizes";
+                dark-mode: root.dark-mode;
+            }
 
-                        if component-sizes-header.expanded: VerticalLayout {
-                            padding-left: 12px;
-                            spacing: 4px;
+            if component-sizes-header.expanded: VerticalLayout {
+                padding-left: 12px;
+                spacing: 4px;
 
-                            EnumSelector {
-                                label: "Edit Size";
-                                dark-mode: root.dark-mode;
-                                options: root.size-name-list;
-                                selected-index <=> root.component-selected-size;
-                                selector-width: 132px;
-                                changed selected-index => { root.btn-size-changed(self.selected-index); }
-                            }
+                EnumSelector {
+                    label: "Edit Size";
+                    dark-mode: root.dark-mode;
+                    options: root.size-name-list;
+                    selected-index <=> root.component-selected-size;
+                    selector-width: 132px;
+                    changed selected-index => { root.btn-size-changed(self.selected-index); }
+                }
 
-                            for prop[prop-index] in root.size-prop-defs: Rectangle {
-                                clip: true;
+                for prop[prop-index] in root.size-prop-defs: Rectangle {
+                    clip: true;
 
-                                size-prop-editor := GenericSizePropEditor {
-                                    visible: prop-index < root.current-size-values.length;
-                                    dark-mode: root.dark-mode;
-                                    prop-def: prop;
-                                    prop-value: prop-index < root.current-size-values.length ? root.current-size-values[prop-index] : {
-                                        color-value: #000000,
-                                        float-value: 0,
-                                        int-value: 0,
-                                        bool-value: false,
-                                        string-value: "",
-                                        is-overridden: false,
-                                        is-token-mode: false,
-                                        selected-token: 0,
-                                        selected-actual-index: 0,
-                                    };
-                                    sync-version: root.size-values-version;
-                                    font-token-options: root.font-token-options;
-                                    font-token-values: [root.token-font-primary, root.token-font-secondary, root.token-font-tertiary];
-                                    actual-font-options: root.actual-font-options;
-                                    number-token-options: root.number-token-options;
-                                    number-token-values: root.number-token-values;
+                    size-prop-editor := GenericSizePropEditor {
+                        visible: prop-index < root.current-size-values.length;
+                        dark-mode: root.dark-mode;
+                        prop-def: prop;
+                        prop-value: prop-index < root.current-size-values.length ? root.current-size-values[prop-index] : {
+                            color-value: #000000,
+                            float-value: 0,
+                            int-value: 0,
+                            bool-value: false,
+                            string-value: "",
+                            is-overridden: false,
+                            is-token-mode: false,
+                            selected-token: 0,
+                            selected-actual-index: 0,
+                        };
+                        sync-version: root.size-values-version;
+                        font-token-options: root.font-token-options;
+                        font-token-values: [root.token-font-primary, root.token-font-secondary, root.token-font-tertiary];
+                        actual-font-options: root.actual-font-options;
+                        number-token-options: root.number-token-options;
+                        number-token-values: root.number-token-values;
                                     // Enable the reset (↺) button when the row has something
                                     // meaningful to reset to:
                                     //   - Concrete-size row: clear the per-size override and
@@ -5020,91 +5359,91 @@ export component ComponentThemeWorkspace inherits Rectangle {
                                     //   - Default row of a top-level component (no parent):
                                     //     no reset (Default IS the source there).
                                     enable-reset: (root.size-name-list.length > root.active-size-index
-                                        && root.size-name-list[root.active-size-index] != "Default")
-                                        || root.component-has-parent;
-                                    check-float-equal(v, d) => { return root.check-float-equal(v, d); }
-                                    value-changed(val) => { root.size-prop-changed(root.active-size-index, prop-index, val); }
-                                    clear-override => { root.clear-size-override(root.active-size-index, prop-index); }
-                                }
-
-                                height: size-prop-editor.visible ? size-prop-editor.height : 0px;
-                            }
-                        }
+                            && root.size-name-list[root.active-size-index] != "Default")
+                            || root.component-has-parent;
+                        check-float-equal(v, d) => { return root.check-float-equal(v, d); }
+                        value-changed(val) => { root.size-prop-changed(root.active-size-index, prop-index, val); }
+                        clear-override => { root.clear-size-override(root.active-size-index, prop-index); }
                     }
 
-                    if root.variant-prop-defs.length > 0: VerticalLayout {
-                        spacing: 4px;
+                    height: size-prop-editor.visible ? size-prop-editor.height : 0px;
+                }
+            }
+        }
 
-                        component-variants-header := TreeSectionHeader {
-                            title: "Variants";
-                            dark-mode: root.dark-mode;
-                        }
+        if root.variant-prop-defs.length > 0: VerticalLayout {
+            spacing: 4px;
 
-                        if component-variants-header.expanded: VerticalLayout {
-                            padding-left: 12px;
-                            spacing: 4px;
+            component-variants-header := TreeSectionHeader {
+                title: "Variants";
+                dark-mode: root.dark-mode;
+            }
 
-                            EnumSelector {
-                                label: "Edit Variant";
-                                dark-mode: root.dark-mode;
-                                options: root.variant-name-list;
-                                selected-index <=> root.component-selected-variant;
-                                selector-width: 148px;
-                                changed selected-index => { root.btn-variant-changed(self.selected-index); }
-                            }
+            if component-variants-header.expanded: VerticalLayout {
+                padding-left: 12px;
+                spacing: 4px;
 
-                            for state[state-index] in root.state-list: VerticalLayout {
-                                state-header := TreeSectionHeader {
-                                    title: state.name + " State";
-                                    dark-mode: root.dark-mode;
-                                    expanded: state-index == 0;
-                                }
+                EnumSelector {
+                    label: "Edit Variant";
+                    dark-mode: root.dark-mode;
+                    options: root.variant-name-list;
+                    selected-index <=> root.component-selected-variant;
+                    selector-width: 148px;
+                    changed selected-index => { root.btn-variant-changed(self.selected-index); }
+                }
 
-                                if state-header.expanded: VerticalLayout {
+                for state[state-index] in root.state-list: VerticalLayout {
+                    state-header := TreeSectionHeader {
+                        title: state.name + " State";
+                        dark-mode: root.dark-mode;
+                        expanded: state-index == 0;
+                    }
+
+                    if state-header.expanded: VerticalLayout {
                                     // No extra indent: every prop row shares one left
                                     // edge so the value column aligns across sections.
                                     padding-left: 0px;
-                                    spacing: 0px;
+                        spacing: 0px;
 
-                                    for prop[prop-index] in root.variant-prop-defs: Rectangle {
-                                        property <int> value-index: state-index * root.variant-prop-defs.length + prop-index;
-                                        clip: true;
+                        for prop[prop-index] in root.variant-prop-defs: Rectangle {
+                            property <int> value-index: state-index * root.variant-prop-defs.length + prop-index;
+                            clip: true;
 
-                                        variant-prop-editor := GenericVariantPropEditor {
-                                            visible: value-index < root.current-variant-values.length;
-                                            dark-mode: root.dark-mode;
-                                            prop-def: prop;
-                                            prop-value: value-index < root.current-variant-values.length ? root.current-variant-values[value-index] : {
-                                                color-value: #000000,
-                                                float-value: 0,
-                                                int-value: 0,
-                                                bool-value: false,
-                                                string-value: "",
-                                                is-overridden: false,
-                                                is-token-mode: false,
-                                                selected-token: 0,
-                                                selected-actual-index: 0,
-                                            };
-                                            sync-version: root.variant-values-version;
-                                            parse-hex(hex) => { return root.parse-hex-color(hex); }
-                                            format-hex(color) => { return root.format-hex-color(color); }
-                                            check-color-equal(value, default) => { return root.check-color-equal(value, default); }
-                                            check-float-equal(value, default) => { return root.check-float-equal(value, default); }
-                                            value-changed(val) => { root.variant-prop-changed(state-index, prop-index, val); }
-                                        }
-
-                                        height: variant-prop-editor.visible ? variant-prop-editor.height : 0px;
-                                    }
-                                }
+                            variant-prop-editor := GenericVariantPropEditor {
+                                visible: value-index < root.current-variant-values.length;
+                                dark-mode: root.dark-mode;
+                                prop-def: prop;
+                                prop-value: value-index < root.current-variant-values.length ? root.current-variant-values[value-index] : {
+                                    color-value: #000000,
+                                    float-value: 0,
+                                    int-value: 0,
+                                    bool-value: false,
+                                    string-value: "",
+                                    is-overridden: false,
+                                    is-token-mode: false,
+                                    selected-token: 0,
+                                    selected-actual-index: 0,
+                                };
+                                sync-version: root.variant-values-version;
+                                parse-hex(hex) => { return root.parse-hex-color(hex); }
+                                format-hex(color) => { return root.format-hex-color(color); }
+                                check-color-equal(value, default) => { return root.check-color-equal(value, default); }
+                                check-float-equal(value, default) => { return root.check-float-equal(value, default); }
+                                value-changed(val) => { root.variant-prop-changed(state-index, prop-index, val); }
                             }
+
+                            height: variant-prop-editor.visible ? variant-prop-editor.height : 0px;
                         }
                     }
+                }
+            }
+        }
 
-                    if root.variant-prop-defs.length == 0 && root.size-prop-defs.length == 0: Text {
-                        text: "No editable theme props are defined for this component yet.";
-                        color: dark-mode ? #666666 : #999999;
-                        font-size: 11px;
-                        wrap: word-wrap;
-                    }
+        if root.variant-prop-defs.length == 0 && root.size-prop-defs.length == 0: Text {
+            text: "No editable theme props are defined for this component yet.";
+            color: dark-mode ? #666666 : #999999;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
     }
-    }
+}

@@ -1,11 +1,33 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AuthenticatorCallbacks as CB } from "../../authenticator-callbacks.slint";
+import {
+    AuthenticatorCallbacks as CB,
+} from "../../authenticator-callbacks.slint";
 import { ScanQrCaller } from "../../authenticator-types.slint";
-import { Palette, Size, Importance, CardColor, Utils, ResultLevel } from "@ui/theme.slint";
-import { CardPill, IconButton, LineCard, Arc, TextLg, TextSm,
-         AppHeader, OverlayMenu, PopupMenuItem, BasePage, Movable, Link, ConfirmationModal } from "@ui/widgets.slint";
+import {
+    Palette,
+    Size,
+    Importance,
+    CardColor,
+    Utils,
+    ResultLevel,
+} from "@ui/theme.slint";
+import {
+    CardPill,
+    IconButton,
+    LineCard,
+    Arc,
+    TextLg,
+    TextSm,
+    AppHeader,
+    OverlayMenu,
+    PopupMenuItem,
+    BasePage,
+    Movable,
+    Link,
+    ConfirmationModal,
+} from "@ui/widgets.slint";
 import { MainProps } from "./props.slint";
 import { EditPageVersion, CardPageVersion, CardList } from "@ui/pages.slint";
 import { Navigate } from "../../gen/navigate.slint";

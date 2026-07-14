@@ -814,7 +814,7 @@ fn setup_pin_global(state: StoredValue<AppState>) {
 }
 
 fn setup_log_global(state: StoredValue<AppState>) {
-    const MAX_LINE_LEN: usize = 59;
+    const MAX_LINE_LEN: usize = 56;
 
     let ui = state.borrow().ui();
     let log_global = ui.global::<LogGlobal>();

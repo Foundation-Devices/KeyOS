@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
-import { Button, HeadingLg, HeadingMd, TextMd, BasePage, IconButton } from "@ui/widgets.slint";
+import {
+    Button,
+    HeadingLg,
+    HeadingMd,
+    TextMd,
+    BasePage,
+    IconButton,
+} from "@ui/widgets.slint";
 import { Palette, Size, UISize } from "@ui/theme.slint";
 import { Callbacks } from "../../callbacks.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
@@ -176,7 +183,6 @@ export component HapticsPagePage inherits BasePage {
                             HorizontalLayout {
                                 padding: 8px;
                                 TextMd {
-                                    padding: 8px;
                                     text: pattern;
                                     color: Palette.content-primary;
                                     width: 100%;

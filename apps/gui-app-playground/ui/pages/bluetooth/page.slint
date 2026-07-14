@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
-import { Button, HeadingLg, HeadingMd, TextMd, BasePage, IconButton } from "@ui/widgets.slint";
+import {
+    Button,
+    HeadingLg,
+    HeadingMd,
+    TextMd,
+    BasePage,
+    IconButton,
+} from "@ui/widgets.slint";
 import { Palette, Size, UISize } from "@ui/theme.slint";
 import { Callbacks } from "../../callbacks.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
@@ -60,7 +67,6 @@ export component BluetoothPagePage inherits BasePage {
             text: "SPI Test status:\n" + Callbacks.bt-spi-test-status;
             width: 100%;
             height: 80px;
-            padding-top: 20px;
             horizontal-alignment: center;
         }
     }

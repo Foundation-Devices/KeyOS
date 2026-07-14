@@ -1,14 +1,34 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AppHeader, BasePage, Chip, Drawer, Icon, IconButton, NavHeader, PageBody, QrCodeCard, RadioButton, TextLg, TextSm, CompressedBtcAddress, BtcAddress } from "@ui/widgets.slint";
+import {
+    AppHeader,
+    BasePage,
+    Chip,
+    Drawer,
+    Icon,
+    IconButton,
+    NavHeader,
+    PageBody,
+    QrCodeCard,
+    RadioButton,
+    TextLg,
+    TextSm,
+    CompressedBtcAddress,
+    BtcAddress,
+} from "@ui/widgets.slint";
 import { Size, Palette, Importance } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
 
 import { AccountProps } from "../props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
-import { KeychainKind, AddressType, Callbacks, AccountView } from "../../../callbacks.slint";
+import {
+    KeychainKind,
+    AddressType,
+    Callbacks,
+    AccountView,
+} from "../../../callbacks.slint";
 import { Overlay } from "../../../widgets/overlay.slint";
 import { ListView } from "std-widgets.slint";
 

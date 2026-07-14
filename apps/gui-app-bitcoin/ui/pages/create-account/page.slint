@@ -5,12 +5,25 @@ import { CreateAccountProps } from "./props.slint";
 import { CreateAccount, CreateAccountState } from "../../create-account.slint";
 import { SignPsbt } from "../../sign-psbt.slint";
 import { Network } from "../../callbacks.slint";
-import { IconButton, AppHeader, BasePage, PageBody,
-         ContentSection, Dropdown, DropdownOverlay,
-         TitledInput, ButtonSection, Button, TextMd, ShowHide,
-         TimerCircularProgress, NavHeader, HeadingMd,
-         WrappedIcon, JumboIconPageBody 
-     } from "@ui/widgets.slint";
+import {
+    IconButton,
+    AppHeader,
+    BasePage,
+    PageBody,
+    ContentSection,
+    Dropdown,
+    DropdownOverlay,
+    TitledInput,
+    ButtonSection,
+    Button,
+    TextMd,
+    ShowHide,
+    TimerCircularProgress,
+    NavHeader,
+    HeadingMd,
+    WrappedIcon,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
 import { Palette, Size, Importance, CardColor } from "@ui/theme.slint";
 import { Navigate } from "../../gen/navigate.slint";
 import { TR2, TrId } from "../../gen/tr.slint";

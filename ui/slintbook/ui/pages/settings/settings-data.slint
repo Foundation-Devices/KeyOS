@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { 
-    MenuSection, 
-    MenuSectionContainer, 
+import {
+    MenuSection,
+    MenuSectionContainer,
     MenuSectionLayout,
     MenuBooleanItem,
     MenuActionItem,
     HLine,
     RadioItem,
-    MenuItemLayout
+    MenuItemLayout,
 } from "@ui/widgets/settings-menu.slint";
 import { UISize } from "@ui/theme.slint";
 import { PageBody, Slider, NavHeader } from "@ui/widgets.slint";
@@ -18,7 +18,7 @@ import { ScrollView } from "std-widgets.slint";
 component SettingDataMenu {
     width: UISize.screen-width;
     height: UISize.screen-height;
-    
+
     // Top-level properties
     property <bool> a-bool: false;
     property <string> s1: "";
@@ -33,7 +33,7 @@ component SettingDataMenu {
         PageBody {
             VerticalLayout {
                 spacing: 16px;
-                
+
                 // Top level items
                 MenuSectionContainer {
                     MenuSectionLayout {
@@ -57,7 +57,7 @@ component SettingDataMenu {
                         }
                     }
                 }
-                
+
                 // String Settings section
                 MenuSection {
                     title: "String Settings";
@@ -68,7 +68,7 @@ component SettingDataMenu {
                         }
                     }
                 }
-                
+
                 // Enum Settings section
                 MenuSection {
                     title: "Enum Settings";

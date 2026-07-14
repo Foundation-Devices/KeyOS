@@ -16,7 +16,7 @@ use i_slint_compiler::{
 use miette::SourceSpan;
 use slint_keyos_platform_common::analyze_path::{AnalyzedPath, Segment};
 
-use super::common::{make_source_offset, slint_import_path};
+use super::common::{make_source_offset, slint_import_path, struct_name};
 use super::error::{RouteError, RouteErrorList};
 
 #[derive(Debug, Default)]
@@ -156,8 +156,8 @@ impl PropsField {
     pub fn new(root: &Path, key: String, ty: Type) -> Self {
         let (name, node) = match &ty {
             Type::Struct(s) => {
-                let node = s.node.as_ref().expect("struct node");
-                (s.name.as_ref().map(|n| n.to_string()), Some(node.to_source_location()))
+                let node = s.node().expect("struct node");
+                (struct_name(s).map(|n| n.to_string()), Some(node.to_source_location()))
             }
             Type::Enumeration(enumeration) => {
                 let enum_node = enumeration.node.as_ref().expect("enum node");

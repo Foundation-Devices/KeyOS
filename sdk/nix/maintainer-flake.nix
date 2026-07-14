@@ -7,7 +7,7 @@
   description = "Foundation SDK maintainer development and release environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -25,7 +25,7 @@
     rustToolchainSha256 = "sha256-NvWKV8CXj8AQXESvz5uGr6qv0JF0UHUdjYb2murEG/A=";
     sdkBuildConfig = builtins.fromTOML (builtins.readFile (root + "/sdk-build.toml"));
     foundationSlintVersion = sdkBuildConfig.submodules.slint.ref;
-    foundationSlintHash = "sha256-1xIDg+J22LxxbNQo/s4VojsnUATeDI7tfC+dIk1OoRQ=";
+    foundationSlintHash = "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE=";
     systems = [
       "aarch64-darwin"
       "x86_64-darwin"
@@ -140,9 +140,9 @@
             ]
             ++ lib.optionals stdenv.isLinux [
               systemd
-              xorg.libX11
-              xorg.libXcursor
-              xorg.libXi
+              libx11
+              libxcursor
+              libxi
               wayland
             ]
           );
@@ -205,13 +205,6 @@
         ;
     };
   in {
-    packages = forAllSystems (
-      system: let
-        inherit (mkSystem system) foundationSlint;
-      in {
-        foundation-slint-viewer = foundationSlint."foundation-slint-viewer";
-      }
-    );
     devShells = forAllSystems (
       system: let
         inherit (mkSystem system) maintainerShell;

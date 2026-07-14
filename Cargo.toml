@@ -294,12 +294,12 @@ ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.4.
     "sha2",
 ] }
 
-i-slint-backend-winit = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12" }
-i-slint-common = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12" }
-i-slint-compiler = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12" }
-i-slint-core = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12", default-features = false }
-slint = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12", default-features = false }
-slint-build = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation12" }
+i-slint-backend-winit = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2" }
+i-slint-common = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2" }
+i-slint-compiler = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2" }
+i-slint-core = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2", default-features = false }
+slint = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2", default-features = false }
+slint-build = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.17.0-foundation2" }
 
 [profile.release]
 codegen-units = 1  # 1 better optimizations

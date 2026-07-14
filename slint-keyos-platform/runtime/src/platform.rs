@@ -13,7 +13,7 @@ use gui_server_api::{
     touch::{Touch, TouchKind},
     GuiApi, InputMessage, Key, NextFrameAnimationKind,
 };
-use i_slint_core::{item_rendering::DirtyRegion, renderer::RendererSealed};
+use i_slint_core::{partial_renderer::DirtyRegion, renderer::RendererSealed};
 use server::FromScalar;
 #[cfg(not(feature = "recovery-os"))]
 use slint::{platform::WindowAdapter, private_unstable_api::re_exports::WindowInner};
@@ -25,6 +25,8 @@ use xous::{envelope::Envelope, DropDeallocate, MemoryRange};
 use xous_ticktimer::{Ticktimer, TicktimerCallback};
 
 use crate::{core::EventLoopStatus, pixel::KeyosPixel, window::KeyOsWindow, Runtime, StoredValue};
+
+const DEFAULT_FONT: &str = "Montserrat";
 
 /// Width of the area on the left edge of the screen from which we detect a swipe right gesture.
 const SWIPE_RIGHT_EDGE_AREA_WIDTH_PX: usize = 30; // TODO(SFT-5093): tweak setting
@@ -151,6 +153,8 @@ where
 pub struct KeyOsPlatform<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> {
     start: Instant,
     state: RefCell<KeyOsEventLoopState<WIDTH, HEIGHT, PG>>,
+    /// Font blobs loaded before the Slint context exists; registered in `bind_context`.
+    pending_fonts: RefCell<Vec<&'static [u8]>>,
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> KeyOsPlatform<WIDTH, HEIGHT, PG> {
@@ -158,11 +162,12 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> KeyOsPla
         let window = KeyOsWindow::new(cx.gui.clone(), PhysicalSize::new(WIDTH as u32, HEIGHT as u32));
 
         crate::runtime::handle::global::init();
-        crate::fonts::register_fonts(&cx.fs);
+        let pending_fonts = RefCell::new(crate::fonts::register_fonts(&cx.fs));
 
         let wake_callback = TicktimerCallback::new(cx.gui.sid()).unwrap();
         Self {
             start: Instant::now(),
+            pending_fonts,
             state: RefCell::new(KeyOsEventLoopState {
                 window,
                 gui: cx.gui,
@@ -217,6 +222,15 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> slint::p
         // Since on MCUs, there can be only one window, just return a clone of self.window.
         // We'll also use the same window in the event loop.
         Ok(self.state.borrow().window.clone())
+    }
+
+    fn bind_context(&self, ctx: i_slint_core::SlintContextWeak, _: i_slint_core::InternalToken) {
+        let ctx = ctx.upgrade().expect("Slint context alive during bind_context");
+        let mut fc = ctx.font_context().borrow_mut();
+        for data in self.pending_fonts.borrow_mut().drain(..) {
+            fc.register_static_font(data);
+        }
+        fc.set_default_font_family(DEFAULT_FONT);
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {

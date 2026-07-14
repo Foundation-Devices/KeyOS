@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
-import {Size, Palette, Font, UISize, Images, Utils} from "@ui/theme.slint";
-import {Icon} from "./icon.slint";
-import {IconButton} from "./icon-button.slint";
-import {TextMd, TextXs} from "./txt.slint";
-import {Circle} from "./circle.slint";
+import { Size, Palette, Font, UISize, Images, Utils } from "@ui/theme.slint";
+import { Icon } from "./icon.slint";
+import { IconButton } from "./icon-button.slint";
+import { TextMd, TextXs } from "./txt.slint";
+import { Circle } from "./circle.slint";
 
 export component Input inherits Rectangle {
     // Public properties
@@ -103,7 +103,7 @@ export component Input inherits Rectangle {
             HorizontalLayout {
                 horizontal-stretch: 1;
                 spacing: Size.sz2;
-        
+
                 // Stack the placeholder and TextInput on top of each other
                 Rectangle {
                     width: 100%;
@@ -199,7 +199,7 @@ export component Input inherits Rectangle {
                 }
             }
         }
-    
+
         // TODO: Talk to Edi about this being an IconButton variant
         // The icon can then just be the X (same for "add")
         if (input-type == InputType.password || (enabled && (input-type == InputType.number || (root.show-clear-btn && text-input.text != "")))): VerticalLayout {

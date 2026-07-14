@@ -4,7 +4,6 @@
 import { TR2, TrId } from "gen/tr.slint";
 import { CardColor } from "@ui/theme.slint";
 export { CardColor }
-
 export enum Network {
     Bitcoin,
     Testnet4,
@@ -52,10 +51,8 @@ export struct AccountView {
     network: Network,
     color: CardColor,
     archived: bool,
-
     single: SingleSigView,
     multi: MultiSigView,
-
     skeleton: bool,
 }
 

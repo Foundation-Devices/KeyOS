@@ -67,7 +67,8 @@ export struct GradientStop {
     stop: percent,
 }
 
-@rust-attr(repr(u8))
+@ rust-attr (
+    repr(u8))
 export enum GradientDirection {
     none,
     vertical,
@@ -77,7 +78,8 @@ export enum GradientDirection {
     radial,
 }
 
-@rust-attr(repr(u8))
+@ rust-attr (
+        repr(u8))
 export enum CardColor {
     dark-grey,
     purple,
@@ -91,7 +93,8 @@ export enum CardColor {
     red,
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+            derive(serde::Serialize, serde::Deserialize))
 export enum ResultLevel {
     info,
     error,
@@ -99,13 +102,14 @@ export enum ResultLevel {
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct CallbackResult {
-    level: ResultLevel,
-    success: bool,
-    text: string,
-    title: string,
-}
+                level: ResultLevel,
+                success: bool,
+                text: string,
+                title: string,
+            }
 
-@rust-attr(repr(u8))
+@ rust-attr (
+                repr(u8))
 export enum ScanQrAction {
     left-clicked,
     right-clicked,

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {Images, Size} from "@ui/theme.slint";
-import {DarkPalette} from "@ui/palettes/dark-palette.slint";
+import { Images, Size } from "@ui/theme.slint";
+import { DarkPalette } from "@ui/palettes/dark-palette.slint";
 
 export component Battery inherits Rectangle {
     in property <int> percentage: 50;
@@ -24,7 +24,6 @@ export component Battery inherits Rectangle {
         height: 11px;
         background: battery-fill-color;
         border-radius: 1px;
-        padding: 2px;
     }
 
     // Battery outline

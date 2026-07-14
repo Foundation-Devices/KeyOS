@@ -39,7 +39,7 @@
         inherit system;
         config = {
           allowUnfree = true;
-          permittedInsecurePackages = ["segger-jlink-qt4-810"];
+          permittedInsecurePackages = ["segger-jlink-qt4-874"];
           segger-jlink.acceptLicense = true;
         };
       };
@@ -50,7 +50,7 @@
           # upstream slint-lsp for CI (faster)
           slint-lsp-upstream = slint-lsp;
         })
-        // pkgs.callPackage ./nix/rust-toolchain.nix {inherit self fenix;}
+        // pkgs.callPackage ./nix/rust-toolchain.nix {inherit self fenix system;}
         // pkgs.callPackage ./nix/slint.nix {}
         // pkgs.callPackage ./nix/cosign2.nix {inherit self;}
         // pkgs.callPackage ./nix/localazy.nix {}
@@ -122,7 +122,7 @@
           zlib
         ]
         ++ darwinPkgs
-        ++ lib.optionals stdenv.isLinux [udev];
+        ++ lib.optionals stdenv.isLinux [udev fontconfig];
 
       mkShell = packages:
         pkgs.mkShellNoCC (

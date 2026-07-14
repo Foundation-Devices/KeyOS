@@ -3,7 +3,17 @@
 
 import { ListView } from "std-widgets.slint";
 
-import { Icon, RadioButton, Shimmer, TextMd, TextSm, HeadingMd, TimerCircularProgress, JumboIcon, Button } from "@ui/widgets.slint";
+import {
+    Icon,
+    RadioButton,
+    Shimmer,
+    TextMd,
+    TextSm,
+    HeadingMd,
+    TimerCircularProgress,
+    JumboIcon,
+    Button,
+} from "@ui/widgets.slint";
 import { Palette, Size, IconSize, Importance } from "@ui/theme.slint";
 import { TR2, TrId } from "gen/tr.slint";
 import { CurrentTheme } from "@ui/theme.slint";
@@ -148,7 +158,6 @@ component FileLoadingEntry inherits Rectangle {
                     starting-step: root.loading-phase;
                     Rectangle {
                         border-radius: Size.sz6;
-                        padding: Size.sz2;
                         background: Palette.content-tertiary.brighter(50%);
                     }
                 }

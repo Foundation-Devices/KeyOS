@@ -1,8 +1,34 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import { Icon, TextMd, TextSm, TextLg, TextXl, SliderBrightness, Switch, MenuSectionLayout, MenuItemLayout, HLine, ItemTextPreview, Button, BasePage, PageBody, ContentSection, ButtonSection, MenuSection, MenuSectionContainer } from "@ui/widgets.slint";
-import { IconSize, Palette, Palettes, Importance, Timings, CurrentTheme } from "@ui/theme.slint";
+import {
+    Icon,
+    TextMd,
+    TextSm,
+    TextLg,
+    TextXl,
+    SliderBrightness,
+    Switch,
+    MenuSectionLayout,
+    MenuItemLayout,
+    HLine,
+    ItemTextPreview,
+    Button,
+    BasePage,
+    PageBody,
+    ContentSection,
+    ButtonSection,
+    MenuSection,
+    MenuSectionContainer,
+} from "@ui/widgets.slint";
+import {
+    IconSize,
+    Palette,
+    Palettes,
+    Importance,
+    Timings,
+    CurrentTheme,
+} from "@ui/theme.slint";
 import { Size } from "@ui/types.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
@@ -60,7 +86,6 @@ export component BatteryPage inherits BasePage {
                     MenuItemLayout {
                         first: true;
                         last: true;
-                        padding: Size.sz4;
                         label: BatteryGlobal.last-fault;
                         ButtonSection {
                             Button {

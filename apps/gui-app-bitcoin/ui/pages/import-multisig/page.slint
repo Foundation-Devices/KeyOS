@@ -1,7 +1,19 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { BasePage, NavHeader, PageBody, ContentSection, TextMd, ButtonSection, Button, TitledInput, HeadingMd, WrappedIcon, ScrollBody } from "@ui/widgets.slint";
+import {
+    BasePage,
+    NavHeader,
+    PageBody,
+    ContentSection,
+    TextMd,
+    ButtonSection,
+    Button,
+    TitledInput,
+    HeadingMd,
+    WrappedIcon,
+    ScrollBody,
+} from "@ui/widgets.slint";
 import { Importance, Palette, Size, ResultLevel } from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
@@ -9,7 +21,7 @@ import { Utils } from "@ui/utils.slint";
 import { ImportMultiSigProps } from "./props.slint";
 
 import { ViewMultiSig } from "../../widgets/multisig.slint";
-import { NetworkKind, Network, MultiSigView} from "../../callbacks.slint";
+import { NetworkKind, Network, MultiSigView } from "../../callbacks.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
 import { VerifyAddress } from "../../verify-address.slint";
 import { CreateAccount, CreateAccountState } from "../../create-account.slint";

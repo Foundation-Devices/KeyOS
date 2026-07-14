@@ -1,13 +1,23 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Button, Icon, TimerCircularProgress, ButtonSection, WrappedIcon, JumboIconPageBody } from "@ui/widgets.slint";
+import {
+    Button,
+    Icon,
+    TimerCircularProgress,
+    ButtonSection,
+    WrappedIcon,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
 import { StepList, StepModel } from "@ui/widgets/step-list.slint";
 import { KeyCardAnimation } from "@ui/widgets/key-card-animation.slint";
 import { Palette, Size } from "@ui/theme.slint";
 import { StepLine, StepLineSection } from "@ui/widgets/step-list.slint";
 import { HeadingMd } from "@ui/widgets/txt.slint";
-import { KeycardBackupError, KeycardBackupErrorDialog } from "keycard-backup-error.slint";
+import {
+    KeycardBackupError,
+    KeycardBackupErrorDialog,
+} from "keycard-backup-error.slint";
 
 export component KeycardBackupPage inherits VerticalLayout {
     in property <bool> magic;

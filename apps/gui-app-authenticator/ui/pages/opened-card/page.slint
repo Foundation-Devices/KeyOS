@@ -1,11 +1,30 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AuthenticatorCallbacks as CB } from "../../authenticator-callbacks.slint";
+import {
+    AuthenticatorCallbacks as CB,
+} from "../../authenticator-callbacks.slint";
 import { AuthView } from "../../authenticator-types.slint";
-import { Palette, Size, UISize, Importance, ResultLevel } from "@ui/theme.slint";
-import { IconButton, TimerCircularProgress, TextLg, TextMd, TextSm, AppHeader, Link, HeadingXl,
-         BasePage, ContentSection, PageBody } from "@ui/widgets.slint";
+import {
+    Palette,
+    Size,
+    UISize,
+    Importance,
+    ResultLevel,
+} from "@ui/theme.slint";
+import {
+    IconButton,
+    TimerCircularProgress,
+    TextLg,
+    TextMd,
+    TextSm,
+    AppHeader,
+    Link,
+    HeadingXl,
+    BasePage,
+    ContentSection,
+    PageBody,
+} from "@ui/widgets.slint";
 import { OpenedCardProps } from "./props.slint";
 import { EditPageVersion } from "@ui/pages.slint";
 import { Navigate } from "../../gen/navigate.slint";

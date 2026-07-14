@@ -2,13 +2,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Palette, Size } from "@ui/theme.slint";
-import { Button, ButtonSection, HeadingMd, NavHeader, TextMd, WrappedIcon, JumboIconPageBody } from "@ui/widgets.slint";
+import {
+    Button,
+    ButtonSection,
+    HeadingMd,
+    NavHeader,
+    TextMd,
+    WrappedIcon,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 
 import { Navigate } from "../../../../gen/navigate.slint";
-import { SeedGlobal,  MasterSeedState, OnboardingCallbacks } from "../../../../onboarding-callbacks.slint";
-import { OnboardingBasePage, OnboardingContentSection } from "../../../../widgets/base-page.slint";
-import { RestoreSeedLoading, RestoreSuccessContent, RestoreFailed } from "../../../../widgets/restore-seed.slint";
+import {
+    SeedGlobal,
+    MasterSeedState,
+    OnboardingCallbacks,
+} from "../../../../onboarding-callbacks.slint";
+import {
+    OnboardingBasePage,
+    OnboardingContentSection,
+} from "../../../../widgets/base-page.slint";
+import {
+    RestoreSeedLoading,
+    RestoreSuccessContent,
+    RestoreFailed,
+} from "../../../../widgets/restore-seed.slint";
 
 
 component Success inherits JumboIconPageBody {

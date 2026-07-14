@@ -1,16 +1,31 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AccountCard, Icon, HeadingLg, HeadingMd, Shield, HeadingLg } from "@ui/widgets.slint";
-import { Importance, CurrentTheme, Palette, Palettes, Images, Size, UISize, Utils } from "@ui/theme.slint";
+import {
+    AccountCard,
+    Icon,
+    HeadingLg,
+    HeadingMd,
+    Shield,
+    HeadingLg,
+} from "@ui/widgets.slint";
+import {
+    Importance,
+    CurrentTheme,
+    Palette,
+    Palettes,
+    Images,
+    Size,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
 import { Slider } from "@ui/widgets/slider.slint";
 import { Button } from "@ui/widgets/button.slint";
 import { TR2, TrId } from "gen/tr.slint";
-import {TR} from "@ui/i18n/i18n.slint"; // Only used to fix the compilation, can be removed later
+import { TR } from "@ui/i18n/i18n.slint"; // Only used to fix the compilation, can be removed later
 
 export * from "gen/exports.slint";
 export { TR, Utils, Images, CurrentTheme }
-
 export global Constants {
     out property <int> max-title-length: 17;
     out property <length> app-card-width: UISize.screen-width / 2;
@@ -84,7 +99,6 @@ component AppCard inherits Rectangle {
                 text: Utils.shorten-string(app-name, Constants.max-title-length, true);
                 vertical-alignment: center;
                 horizontal-alignment: center;
-                padding-bottom: Size.sz4;
             }
 
             Image {

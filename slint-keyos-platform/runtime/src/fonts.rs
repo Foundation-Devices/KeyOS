@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundationdevices.com>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-const DEFAULT_FONT: &str = "Montserrat";
-
 use std::io::Read;
 
-pub fn register_fonts<P>(fs: &fs::FileSystem<P>)
+/// Collects the font blobs found on the search path as `&'static [u8]`. The caller registers them
+/// with the `FontContext` once the Slint context exists (see `KeyOsPlatform::bind_context`).
+pub fn register_fonts<P>(fs: &fs::FileSystem<P>) -> Vec<&'static [u8]>
 where
     P: server::CheckedPermissions,
     P: server::MessageAllowed<fs::messages::OpenDirMessage>,
@@ -21,18 +21,19 @@ where
     // provide. App resources are untrusted, so they are read and leaked rather
     // than memory-mapped (mapping an app-controlled file is unsafe); the trusted
     // common assets stay mapped.
+    let mut fonts: Vec<&'static [u8]> = Vec::new();
     let mut app_fonts: Vec<String> = Vec::new();
     for_each_font_in_location(fs, fs::Location::AppResources, false, |font_name| {
-        register_leaked_font(fs, fs::Location::AppResources, font_name);
+        fonts.push(load_leaked_font(fs, fs::Location::AppResources, font_name));
         app_fonts.push(font_name.to_owned());
     });
     for_each_font_in_location(fs, fs::Location::CommonAssets, true, |font_name| {
         if app_fonts.iter().any(|name| name == font_name) {
             return;
         }
-        register_mapped_font(fs, fs::Location::CommonAssets, font_name);
+        fonts.push(load_mapped_font(fs, fs::Location::CommonAssets, font_name));
     });
-    i_slint_common::sharedfontdb::set_default_font_family(DEFAULT_FONT);
+    fonts
 }
 
 fn for_each_font_in_location<P, F>(
@@ -61,7 +62,7 @@ fn for_each_font_in_location<P, F>(
     }
 }
 
-fn register_mapped_font<P>(fs: &fs::FileSystem<P>, location: fs::Location, font_name: &str)
+fn load_mapped_font<P>(fs: &fs::FileSystem<P>, location: fs::Location, font_name: &str) -> &'static [u8]
 where
     P: server::CheckedPermissions,
     P: fs::MapFilePermissions,
@@ -70,11 +71,10 @@ where
         .map_file(location, format!("fonts/{font_name}"))
         .unwrap_or_else(|e| panic!("Could not load font {font_name} from {location:?}: {e:?}"));
     // Transmuting to static because we know we are not dropping this memory.
-    let mapping = unsafe { core::mem::transmute::<&[u8], &'static [u8]>(mapping.as_slice()) };
-    register_font_from_memory(font_name, mapping);
+    unsafe { core::mem::transmute::<&[u8], &'static [u8]>(mapping.as_slice()) }
 }
 
-fn register_leaked_font<P>(fs: &fs::FileSystem<P>, location: fs::Location, font_name: &str)
+fn load_leaked_font<P>(fs: &fs::FileSystem<P>, location: fs::Location, font_name: &str) -> &'static [u8]
 where
     P: server::CheckedPermissions,
     P: server::MessageAllowed<fs::messages::OpenFileMessage>,
@@ -87,10 +87,5 @@ where
     let mut font_data = Vec::new();
     file.read_to_end(&mut font_data)
         .unwrap_or_else(|e| panic!("Could not read font {font_name} from {location:?}: {e:?}"));
-    register_font_from_memory(font_name, font_data.leak());
-}
-
-fn register_font_from_memory(font_name: &str, font_data: &'static [u8]) {
-    i_slint_common::sharedfontdb::register_font_from_memory(font_data)
-        .unwrap_or_else(|e| panic!("Could not register font {font_name}: {e:?}"));
+    font_data.leak()
 }

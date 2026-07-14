@@ -137,10 +137,9 @@ struct CompilerContext {
 
 impl CompilerContext {
     fn new(config: CompilerConfiguration) -> Self {
-        let registry = TypeRegister::builtin();
         let loader = {
             let mut diag = BuildDiagnostics::default();
-            let loader = TypeLoader::new(registry, config.clone(), &mut diag);
+            let loader = TypeLoader::new(config.clone(), &mut diag);
             if diag.has_errors() {
                 panic!("failed to create loader");
             }
@@ -170,6 +169,7 @@ impl CompilerContext {
             reexports,
             &mut diag,
             &registry,
+            false,
         );
 
         i_slint_compiler::passes::run_minimal_typecheck_passes(&mut doc, loader, &mut diag);

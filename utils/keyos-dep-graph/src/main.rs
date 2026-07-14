@@ -469,12 +469,14 @@ fn render_mermaid_graph(
     use std::fmt::Write as _;
 
     let mut graph = String::new();
+    // REUSE-IgnoreStart -- SPDX header emitted into the generated markdown, not this file's license
     writeln!(
         &mut graph,
         "<!-- SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz> -->"
     )
     .unwrap();
     writeln!(&mut graph, "<!-- SPDX-License-Identifier: GPL-3.0-or-later -->").unwrap();
+    // REUSE-IgnoreEnd
     writeln!(&mut graph).unwrap();
     writeln!(&mut graph, "```mermaid").unwrap();
     writeln!(&mut graph, "stateDiagram-v2").unwrap();

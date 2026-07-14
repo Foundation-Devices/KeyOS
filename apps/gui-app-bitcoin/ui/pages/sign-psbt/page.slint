@@ -1,12 +1,34 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { IconButton, NavHeader, BasePage, TextMd, Button, SlideToButton, PageBody, ContentSection, ButtonSection, JumboIconPageBody, TimerCircularProgress, HeadingMd, DynamicQrCode, WrappedIcon, ConfirmationModal, Modal } from "@ui/widgets.slint";
+import {
+    IconButton,
+    NavHeader,
+    BasePage,
+    TextMd,
+    Button,
+    SlideToButton,
+    PageBody,
+    ContentSection,
+    ButtonSection,
+    JumboIconPageBody,
+    TimerCircularProgress,
+    HeadingMd,
+    DynamicQrCode,
+    WrappedIcon,
+    ConfirmationModal,
+    Modal,
+} from "@ui/widgets.slint";
 import { Palette, Size, UISize, ResultLevel, CardColor } from "@ui/theme.slint";
 import { TransactionCard } from "../../widgets/transaction-card.slint";
 import { Animate, Navigate } from "../../gen/navigate.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import { SignPsbt, SignPsbtState, PsbtOriginView, FileSaveState } from "../../sign-psbt.slint";
+import {
+    SignPsbt,
+    SignPsbtState,
+    PsbtOriginView,
+    FileSaveState,
+} from "../../sign-psbt.slint";
 import { Callbacks } from "../../callbacks.slint";
 import { SignPsbtProps } from "./props.slint";
 

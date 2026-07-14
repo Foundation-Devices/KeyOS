@@ -1,13 +1,31 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { BasePage, Button, TextSm, PageBody, ButtonSection, ContentSection, MenuSection, MenuSectionLayout, MenuItemLayout, ItemTextPreview, HLine, Input, NavHeader, TitledInput } from "@ui/widgets.slint";
+import {
+    BasePage,
+    Button,
+    TextSm,
+    PageBody,
+    ButtonSection,
+    ContentSection,
+    MenuSection,
+    MenuSectionLayout,
+    MenuItemLayout,
+    ItemTextPreview,
+    HLine,
+    Input,
+    NavHeader,
+    TitledInput,
+} from "@ui/widgets.slint";
 import { Importance, Palette, Size } from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
 
 import { Navigate } from "../../gen/navigate.slint";
-import { EnterPassphrase, EnterPassphraseState } from "../../enter-passphrase.slint";
+import {
+    EnterPassphrase,
+    EnterPassphraseState,
+} from "../../enter-passphrase.slint";
 import { CreateAccount } from "../../create-account.slint";
 
 component IdlePage inherits BasePage {

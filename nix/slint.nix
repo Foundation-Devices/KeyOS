@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
 {pkgs}: let
-  version = "v1.12.1-foundation6";
+  version = "v1.17.0-foundation2";
   foundationSlint = pkgs.callPackage ./foundation-slint.nix {
     inherit version;
-    hash = "sha256-sCOZ+aXKmx+c2sfnNhjjM+oEUHQpBX2s54LNPTrDKTE=";
+    hash = "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE=";
   };
 in {
   # https://github.com/NixOS/nixpkgs/blob/nixos-unstable/pkgs/by-name/sl/slint-lsp/package.nix

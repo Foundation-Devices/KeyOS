@@ -2,9 +2,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { SecurityKeyCallbacks as CB } from "../../security-key-callbacks.slint";
-import { EditCaller, AuthenticatingState } from "../../security-key-types.slint";
-import { Button, Editable, Icon, IconButton, CircleIcon, AppHeader, LineCard,
-         TextLg, TextSm, TextMd, Divider, BasePage, OverlayMenu, PopupMenuItem, Link, Movable, ErrorModal } from "@ui/widgets.slint";
+import {
+    EditCaller,
+    AuthenticatingState,
+} from "../../security-key-types.slint";
+import {
+    Button,
+    Editable,
+    Icon,
+    IconButton,
+    CircleIcon,
+    AppHeader,
+    LineCard,
+    TextLg,
+    TextSm,
+    TextMd,
+    Divider,
+    BasePage,
+    OverlayMenu,
+    PopupMenuItem,
+    Link,
+    Movable,
+    ErrorModal,
+} from "@ui/widgets.slint";
 import { Importance, Palette, Size, CardColor, Utils } from "@ui/theme.slint";
 import { CardPageVersion, CardList, EditPageVersion } from "@ui/pages.slint";
 import { MainProps } from "./props.slint";

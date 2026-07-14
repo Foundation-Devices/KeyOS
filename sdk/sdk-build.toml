@@ -9,7 +9,7 @@ keyos_api_interfaces = ["app-manager", "backup", "camera", "crypto", "fs", "gui-
 [submodules.slint]
 path = "external/slint"
 repo = "git@github.com:Foundation-Devices/slint.git"
-ref = "v1.12.1-foundation12"
+ref = "v1.17.0-foundation2"
 env_override = "SLINT_DIR"
 
 [targets]

@@ -1,15 +1,34 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Button, ButtonSection, Icon, Shield, HeadingMd, TextSm, AppHeader, IconButton, ScrollBody, JumboIconPageBody } from "@ui/widgets.slint";
-import { Images, Size, UISize} from "@ui/theme.slint";
+import {
+    Button,
+    ButtonSection,
+    Icon,
+    Shield,
+    HeadingMd,
+    TextSm,
+    AppHeader,
+    IconButton,
+    ScrollBody,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
+import { Images, Size, UISize } from "@ui/theme.slint";
 import { OnboardingBasePage } from "../../../../widgets/base-page.slint";
 import { Palette, Size, Utils, CardColor, UISize } from "@ui/theme.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
 import { Input } from "@ui/widgets/input.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { OnboardingCallbacks,  MasterSeedState, SeedGlobal } from "../../../../onboarding-callbacks.slint";
-import { RestoreSeedLoading, RestoreSuccessContent, RestoreFailed } from "../../../../widgets/restore-seed.slint";
+import {
+    OnboardingCallbacks,
+    MasterSeedState,
+    SeedGlobal,
+} from "../../../../onboarding-callbacks.slint";
+import {
+    RestoreSeedLoading,
+    RestoreSuccessContent,
+    RestoreFailed,
+} from "../../../../widgets/restore-seed.slint";
 
 global SeedState {
     in-out property <[string]> words;

@@ -4,7 +4,15 @@
 import { ListView } from "std-widgets.slint";
 
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { BasePage, PageBody, ContentSection, ButtonSection, WrappedIcon, Button, ScrollFadeMask } from "@ui/widgets.slint";
+import {
+    BasePage,
+    PageBody,
+    ContentSection,
+    ButtonSection,
+    WrappedIcon,
+    Button,
+    ScrollFadeMask,
+} from "@ui/widgets.slint";
 import { Palette, Size } from "@ui/theme.slint";
 
 import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
@@ -46,6 +54,7 @@ export component ViewLogsPage inherits BasePage {
         vertical-scrollbar-policy: always-off;
         for line in LogGlobal.log-lines: LogLine {
             text: line;
+            width: flickable.width;
         }
         scrolled() => {
             glue-bottom = at-bottom;

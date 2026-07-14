@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 LOCAL_TARGET_DIR="${REPO_ROOT}/sdk/target/slint-lsp"
 LOCAL_BIN="${LOCAL_TARGET_DIR}/debug/slint-lsp"
-MIN_VERSION="1.12.0"
+MIN_VERSION="1.17.0"
 
 slint_source_root() {
     if [[ -n "${SLINT_DIR:-}" ]]; then

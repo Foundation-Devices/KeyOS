@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { TR2, TrId } from "gen/tr.slint";
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+    derive(serde::Serialize, serde::Deserialize))
 export enum DisplayAmount {
     Auto,
     Btc,
     Sats,
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize, num_derive::FromPrimitive, num_derive::ToPrimitive))
+@ rust-attr (
+        derive(serde::Serialize, serde::Deserialize, num_derive::FromPrimitive, num_derive::ToPrimitive))
 export enum ShowFiatValue {
     Disabled,
     // Major currencies first
@@ -35,7 +37,8 @@ export enum ShowFiatValue {
     ZMW, ZWL,
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+@ rust-attr (
+            derive(serde::Serialize, serde::Deserialize))
 export enum ImportPolicy {
     AskToImport,
     RequireExisting,
@@ -43,30 +46,30 @@ export enum ImportPolicy {
 }
 
 export global Settings {
-    in-out property <DisplayAmount> display-amount;
-    callback set-display-amount(amount: DisplayAmount);
+                in-out property <DisplayAmount> display-amount;
+                callback set-display-amount(amount: DisplayAmount);
 
-    in-out property <ShowFiatValue> show-fiat-value;
-    callback set-show-fiat-value(value: ShowFiatValue);
-    out property <bool> show-fiat-value-enabled: show-fiat-value != ShowFiatValue.Disabled;
+                in-out property <ShowFiatValue> show-fiat-value;
+                callback set-show-fiat-value(value: ShowFiatValue);
+                out property <bool> show-fiat-value-enabled: show-fiat-value != ShowFiatValue.Disabled;
 
-    in-out property <[ShowFiatValue]> all-currencies;
-    callback search-show-fiat-value(text: string);
-    pure callback fiat-value-code(value: ShowFiatValue) -> string;
-    pure callback fiat-value-symbol(value: ShowFiatValue) -> string;
-    pure callback fiat-value-name(value: ShowFiatValue) -> string;
+                in-out property <[ShowFiatValue]> all-currencies;
+                callback search-show-fiat-value(text: string);
+                pure callback fiat-value-code(value: ShowFiatValue) -> string;
+                pure callback fiat-value-symbol(value: ShowFiatValue) -> string;
+                pure callback fiat-value-name(value: ShowFiatValue) -> string;
 
-    in-out property <ImportPolicy> import-policy;
-    callback set-import-policy(policy: ImportPolicy);
+                in-out property <ImportPolicy> import-policy;
+                callback set-import-policy(policy: ImportPolicy);
 
-    in-out property <bool> show-passphrase-warning;
-    callback set-show-passphrase-warning(show: bool);
+                in-out property <bool> show-passphrase-warning;
+                callback set-show-passphrase-warning(show: bool);
 
-    public pure function display-amount-to-string(amount: DisplayAmount) -> string {
-        amount == DisplayAmount.Auto ? "Auto" : amount == DisplayAmount.Btc ? "BTC" : "Sats";
-    }
+                public pure function display-amount-to-string(amount: DisplayAmount) -> string {
+                    amount == DisplayAmount.Auto ? "Auto" : amount == DisplayAmount.Btc ? "BTC" : "Sats";
+                }
 
-    public pure function import-policy-to-string(policy: ImportPolicy) -> string {
-        policy == ImportPolicy.AskToImport ? TR2.lookup(TrId.SettingsPolicyAskToImport) : policy == ImportPolicy.RequireExisting ? TR2.lookup(TrId.SettingsPolicyRequireExisting) : TR2.lookup(TrId.SettingsPolicySkipVerification);
-    }
-}
+                public pure function import-policy-to-string(policy: ImportPolicy) -> string {
+                    policy == ImportPolicy.AskToImport ? TR2.lookup(TrId.SettingsPolicyAskToImport) : policy == ImportPolicy.RequireExisting ? TR2.lookup(TrId.SettingsPolicyRequireExisting) : TR2.lookup(TrId.SettingsPolicySkipVerification);
+                }
+            }

@@ -15,7 +15,7 @@ use miette::{LabeledSpan, NamedSource};
 pub use model::*;
 use slint_keyos_platform_common::analyze_path::AnalyzedPath;
 use {
-    common::slint_import_path,
+    common::{slint_import_path, struct_name},
     error::{MultiFileErrorList, RouteErrorList, SourceError},
     file_finder::find_props_iter,
     load::load_slint_file,
@@ -128,22 +128,16 @@ fn validate_props(root: &Path, path: &Path) -> Result<RouteProps, RouteErrorList
             )
         })?;
 
+    // @rust-attr annotations live on the parent StructDeclaration node, not the
+    // Struct type, so walk up from the object-type node to read them. An empty
+    // list here surfaces later as a MissingRouteAttribute from validation.
     let rust_attributes = props_struct
-        .rust_attributes
-        .clone()
-        .ok_or_else(|| {
-            SourceError::props(
-                &export_name,
-                path,
-                document.src.clone(),
-                "Missing `route` attribute on props struct",
-                Some("Missing route attribute"),
-                Some("Add `@rust-attr(route(path = \"...\"))` to the struct"),
-            )
-        })?
-        .into_iter()
-        .map(Into::into)
-        .collect::<Vec<String>>();
+        .node()
+        .and_then(|node| {
+            node.parent().and_then(i_slint_compiler::parser::syntax_nodes::StructDeclaration::new)
+        })
+        .map(|decl| decl.AtRustAttr().map(|attr| attr.text().to_string()).collect::<Vec<String>>())
+        .unwrap_or_default();
 
     let fields = props_struct
         .fields
@@ -327,7 +321,7 @@ fn validate_page_slint(
             }
         })
         .fold((Vec::new(), Vec::new()), |(mut successes, mut failures), (key, decl, s)| {
-            if let Some(name) = s.name.as_ref().map(|name| name.to_string()) {
+            if let Some(name) = struct_name(s).map(|name| name.to_string()) {
                 if !props.iter().any(|p| p.export_name.name == name) {
                     failures.push(SourceError::from_node(
                         decl.type_node().as_ref().unwrap_or(&exported_name.name_ident),

@@ -1,7 +1,32 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AppHeader, BasePage, ContentSection, HeadingMd, HLine, Icon, IconButton, ItemTextPreview, MenuActionItem, MenuItemLayout, MenuSection, MenuSectionLayout, NavHeader, OverlayMenu, PageBody, PopupMenuItem, QrCodeCard, Qrcode, ScrollBody, TextSm, TitledInput, ButtonSection, Button, ConfirmationModal } from "@ui/widgets.slint";
+import {
+    AppHeader,
+    BasePage,
+    ContentSection,
+    HeadingMd,
+    HLine,
+    Icon,
+    IconButton,
+    ItemTextPreview,
+    MenuActionItem,
+    MenuItemLayout,
+    MenuSection,
+    MenuSectionLayout,
+    NavHeader,
+    OverlayMenu,
+    PageBody,
+    PopupMenuItem,
+    QrCodeCard,
+    Qrcode,
+    ScrollBody,
+    TextSm,
+    TitledInput,
+    ButtonSection,
+    Button,
+    ConfirmationModal,
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
 import { Palette, Size, Importance } from "@ui/theme.slint";
@@ -9,7 +34,13 @@ import { DarkPalette } from "@ui/palettes/dark-palette.slint";
 
 import { Navigate } from "../../gen/navigate.slint";
 import { AccountProps } from "./props.slint";
-import { Callbacks, AccountView, SingleSigView, MultiSigView, Network } from "../../callbacks.slint";
+import {
+    Callbacks,
+    AccountView,
+    SingleSigView,
+    MultiSigView,
+    Network,
+} from "../../callbacks.slint";
 import { ViewMultiSig } from "../../widgets/multisig.slint";
 import { CreateAccount } from "../../create-account.slint";
 import { SignMessage } from "../../sign-message.slint";

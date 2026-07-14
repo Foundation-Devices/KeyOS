@@ -67,7 +67,7 @@ workspace = true
 [dependencies.tiny-skia]
 default-features = false
 features = ["no-std-float", "simd"]
-version = "0.11.4"
+version = "0.12.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

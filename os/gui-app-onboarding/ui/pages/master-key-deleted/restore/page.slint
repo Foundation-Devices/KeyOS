@@ -2,12 +2,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Palette, Size, UISize, Importance } from "@ui/theme.slint";
-import { PageBody, HeadingMd, TextLg, TextMd, Shield, Button, NavHeader, ContentSection, WrappedIcon, ButtonSection, ErrorModal } from "@ui/widgets.slint";
+import {
+    PageBody,
+    HeadingMd,
+    TextLg,
+    TextMd,
+    Shield,
+    Button,
+    NavHeader,
+    ContentSection,
+    WrappedIcon,
+    ButtonSection,
+    ErrorModal,
+} from "@ui/widgets.slint";
 
 import { Navigate } from "../../../gen/navigate.slint";
 import { OnboardingBasePage } from "../../../widgets/base-page.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
-import { OnboardingCallbacks, SeedGlobal } from "../../../onboarding-callbacks.slint";
+import {
+    OnboardingCallbacks,
+    SeedGlobal,
+} from "../../../onboarding-callbacks.slint";
 import { MasterKeyDeletedRestoreProps } from "props.slint";
 import { OnboardingFullShieldPage } from "../../../widgets/shield-page.slint";
 

@@ -2,10 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
-import { HeadingLg, HeadingMd, TextLg, TextMd, BasePage, TimerLoader, Button, IconButton, SwitchControlled } from "@ui/widgets.slint";
+import {
+    HeadingLg,
+    HeadingMd,
+    TextLg,
+    TextMd,
+    BasePage,
+    TimerLoader,
+    Button,
+    IconButton,
+    SwitchControlled,
+} from "@ui/widgets.slint";
 import { Slider } from "std-widgets.slint";
 import { TimerCircularProgress } from "@ui/widgets/circular-progress.slint";
-import { CurrentTheme, Palette, Palettes, Images, Size, UISize, Utils } from "@ui/theme.slint";
+import {
+    CurrentTheme,
+    Palette,
+    Palettes,
+    Images,
+    Size,
+    UISize,
+    Utils,
+} from "@ui/theme.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
 
 component ChangeButton inherits Button {

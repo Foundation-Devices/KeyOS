@@ -4,23 +4,13 @@
 import { CurrentTheme } from "@ui/theme.slint";
 import { StepModel } from "@ui/widgets/step-list.slint";
 import { FwUpdateState, FwUpdateError } from "@ui/pages/fw-update-page.slint";
-import { KeycardBackupError } from "@ui/pages/keycard-backup/keycard-backup-error.slint";
+import {
+    KeycardBackupError,
+} from "@ui/pages/keycard-backup/keycard-backup-error.slint";
 
-export enum SecurityCheckState {
-    Idle,
-    Loading,
-    Passed,
-    Failed,
-    Error
-}
+export enum SecurityCheckState { Idle, Loading, Passed, Failed, Error }
 
-export enum FirmwareCheckState {
-    Idle,
-    Loading,
-    NoUpdateAvailable,
-    UpdateAvailable,
-    Failed
-}
+export enum FirmwareCheckState { Idle, Loading, NoUpdateAvailable, UpdateAvailable, Failed }
 
 export global OnboardingCallbacks {
     // ========== Bluetooth/Connection State ==========
@@ -77,22 +67,9 @@ export global OnboardingCallbacks {
     callback set-magic-backup-enabled(bool);
 }
 
-export enum MasterSeedState {
-    Idle,
-    SavingToSE,
-    EncryptingFs,
-    Success,
-    Failed
-}
+export enum MasterSeedState { Idle, SavingToSE, EncryptingFs, Success, Failed }
 
-export enum RestoreBackupState {
-    Idle,
-    NotFound,
-    Downloading,
-    Restoring,
-    Restored,
-    Error
-}
+export enum RestoreBackupState { Idle, NotFound, Downloading, Restoring, Restored, Error }
 
 export struct SeedWordChallenge {
     mnemonic-index: int,       // Which word position we're verifying (0-based)

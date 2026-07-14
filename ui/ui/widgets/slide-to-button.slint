@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-import {Icon} from "./icon.slint";
-import {TextMd} from "./txt.slint";
-import {DarkPalette} from "@ui/palettes/dark-palette.slint";
-import {LightPalette} from "@ui/palettes/light-palette.slint";
-import {Button} from "./button.slint";
-import {TimerLoader} from "./loader.slint";
-import {CurrentTheme, Size, Palette, Images} from "@ui/theme.slint";
+import { Icon } from "./icon.slint";
+import { TextMd } from "./txt.slint";
+import { DarkPalette } from "@ui/palettes/dark-palette.slint";
+import { LightPalette } from "@ui/palettes/light-palette.slint";
+import { Button } from "./button.slint";
+import { TimerLoader } from "./loader.slint";
+import { CurrentTheme, Size, Palette, Images } from "@ui/theme.slint";
 
 export component SlideToButton inherits Rectangle {
     border-radius: Size.sz6;
@@ -66,7 +66,7 @@ export component SlideToButton inherits Rectangle {
             }
         }
     }
-    
+
     // Target outline
     target := Image {
         x: parent.width - self.width - Size.sz1;

@@ -85,6 +85,7 @@ pub fn frame(
             GradientDirection::Radial => {
                 paint.shader = RadialGradient::new(
                     Point::from_xy(width / 2.0, height / 2.0),
+                    0.0,
                     Point::from_xy(width / 2.0, height / 2.0),
                     f32::max(width, height),
                     stops,

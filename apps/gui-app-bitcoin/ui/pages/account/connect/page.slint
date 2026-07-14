@@ -2,11 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Size, CurrentTheme, Palette } from "@ui/theme.slint";
-import { BasePage, AppHeader, PageBody, TextMd, Icon, NavHeader, HLine } from "@ui/widgets.slint";
+import {
+    BasePage,
+    AppHeader,
+    PageBody,
+    TextMd,
+    Icon,
+    NavHeader,
+    HLine,
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
 import { Navigate } from "../../../gen/navigate.slint";
-import { ExportAccount, ExportCapabilities } from "../../../export-account.slint";
+import {
+    ExportAccount,
+    ExportCapabilities,
+} from "../../../export-account.slint";
 
 import { AccountProps } from "../props.slint";
 
@@ -17,8 +28,6 @@ component OptionItem inherits Rectangle {
     callback clicked();
 
     height: Size.sz14;
-    padding-left: Size.sz4;
-    padding-right: Size.sz4;
     HorizontalLayout {
         alignment: space-between;
 

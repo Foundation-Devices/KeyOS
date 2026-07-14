@@ -22,84 +22,150 @@ export enum FwUpdateState {
     Installing,
     Restarting,
     Completed,
-    Failed
-}
+    Failed }
 
-export enum FwUpdateError {
-    DownloadFailed,
-    ReceivingFailed,
-    VerifyFailed,
-    InstallFailed
-}
+export enum FwUpdateError { DownloadFailed, ReceivingFailed, VerifyFailed, InstallFailed }
 
 
 component UpdateBody inherits VerticalLayout {
-    spacing: Size.sz4;
-    padding-left: Size.sz16;
-    padding-right: Size.sz16;
-}
+        spacing: Size.sz4;
+        padding-left: Size.sz16;
+        padding-right: Size.sz16;
+    }
 
 component ContentSection inherits VerticalLayout {
-    alignment: start;
-    spacing: Size.sz10;
-}
+        alignment: start;
+        spacing: Size.sz10;
+    }
 
 component DownloadView inherits JumboIconPageBody {
-    ContentSection {
-        HorizontalLayout {
-            alignment: center;
-            JumboIcon {
-                name: "jumbo-download";
-            }
-        }
-
-        HeadingMd {
-            vertical-stretch: 0;
-            text: TR.lookup("common.updateDownload.header");
-            horizontal-alignment: center;
-        }
-
-        TextSm {
-            text: TR.lookup("common.updateDownload.subheader");
-            color: Palette.content-tertiary;
-            horizontal-alignment: center;
-        }
-
-        UpdateBody {
-            StepLine {
-                loading: true;
-                text: TR.lookup("common.updateDownload.downloading");
+        ContentSection {
+            HorizontalLayout {
+                alignment: center;
+                JumboIcon {
+                    name: "jumbo-download";
+                }
             }
 
-            StepLine {
-                text: TR.lookup("common.updateDownload.receive");
+            HeadingMd {
+                vertical-stretch: 0;
+                text: TR.lookup("common.updateDownload.header");
+                horizontal-alignment: center;
+            }
+
+            TextSm {
+                text: TR.lookup("common.updateDownload.subheader");
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+            }
+
+            UpdateBody {
+                StepLine {
+                    loading: true;
+                    text: TR.lookup("common.updateDownload.downloading");
+                }
+
+                StepLine {
+                    text: TR.lookup("common.updateDownload.receive");
+                }
             }
         }
     }
-}
 
 component ReceiveView inherits JumboIconPageBody {
-    in property <float> percent: 0;
+        in property <float> percent: 0;
 
-    ContentSection {
-        HorizontalLayout {
-            alignment: center;
-            JumboIcon {
-                name: "jumbo-download";
+        ContentSection {
+            HorizontalLayout {
+                alignment: center;
+                JumboIcon {
+                    name: "jumbo-download";
+                }
+            }
+
+            HeadingMd {
+                vertical-stretch: 0;
+                text: TR.lookup("common.updateReceive.header");
+                horizontal-alignment: center;
+            }
+
+            TextSm {
+                text: TR.lookup("common.updateReceive.subheader");
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+            }
+
+            UpdateBody {
+                StepLine {
+                    done: true;
+                    text: TR.lookup("common.updateProgress.verified");
+                }
+
+                StepLine {
+                    loading: true;
+                    done: false;
+                    text: TR.lookup("common.updateReceive.receiving") + " (" + percent + "%)";
+                }
             }
         }
+    }
 
-        HeadingMd {
-            vertical-stretch: 0;
-            text: TR.lookup("common.updateReceive.header");
-            horizontal-alignment: center;
-        }
+component ProgressBody inherits JumboIconPageBody {
+        in property <bool> indeterminate: true;
+        in property <float> percent: 0;
 
-        TextSm {
-            text: TR.lookup("common.updateReceive.subheader");
-            color: Palette.content-tertiary;
-            horizontal-alignment: center;
+        ContentSection {
+            HorizontalLayout {
+                alignment: center;
+                TimerCircularProgress {
+                    indeterminate: root.indeterminate;
+                    percent: root.percent / 100.0;
+                    if !root.indeterminate: HeadingXl {
+                        text: "\{percent}%";
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        wrap: no-wrap;
+                    }
+                }
+            }
+
+            HeadingMd {
+                vertical-stretch: 0;
+                text: TR.lookup("common.updateProgress.header");
+                horizontal-alignment: center;
+            }
+
+            TextSm {
+                text: TR.lookup("common.updateProgress.subheader");
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+            }
+
+            @children
         }
+    }
+
+component VerifyView inherits ProgressBody {
+        UpdateBody {
+            StepLine {
+                loading: true;
+                text: TR.lookup("common.updateProgress.verifying");
+            }
+
+            StepLine {
+                text: TR.lookup("common.updateProgress.install");
+            }
+
+            StepLine {
+                text: TR.lookup("common.updateProgress.restart");
+            }
+        }
+    }
+
+component InstallView inherits ProgressBody {
+        in property <string> eta;
+
+        indeterminate: false;
 
         UpdateBody {
             StepLine {
@@ -109,253 +175,181 @@ component ReceiveView inherits JumboIconPageBody {
 
             StepLine {
                 loading: true;
-                done: false;
-                text: TR.lookup("common.updateReceive.receiving") + " (" + percent + "%)";
+                text: TR.lookup("common.updateProgress.installing");
             }
-        }
-    }
-}
 
-component ProgressBody inherits JumboIconPageBody {
-    in property <bool> indeterminate: true;
-    in property <float> percent: 0;
-
-    ContentSection {
-        HorizontalLayout {
-            alignment: center;
-            TimerCircularProgress {
-                indeterminate: root.indeterminate;
-                percent: root.percent / 100.0;
-                if !root.indeterminate: HeadingXl {
-                    text: "\{percent}%";
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    wrap: no-wrap;
-                }
+            StepLine {
+                text: TR.lookup("common.updateProgress.restart");
             }
         }
 
-        HeadingMd {
-            vertical-stretch: 0;
-            text: TR.lookup("common.updateProgress.header");
+        TextMd {
+            text: TR.format("common.updateProgress.eta", [eta]);
+            color: Palette.content-primary;
             horizontal-alignment: center;
-        }
-
-        TextSm {
-            text: TR.lookup("common.updateProgress.subheader");
-            color: Palette.content-tertiary;
-            horizontal-alignment: center;
-        }
-
-        @children
-    }
-}
-
-component VerifyView inherits ProgressBody {
-    UpdateBody {
-        StepLine {
-            loading: true;
-            text: TR.lookup("common.updateProgress.verifying");
-        }
-
-        StepLine {
-            text: TR.lookup("common.updateProgress.install");
-        }
-
-        StepLine {
-            text: TR.lookup("common.updateProgress.restart");
+            vertical-alignment: center;
         }
     }
-}
-
-component InstallView inherits ProgressBody {
-    in property <string> eta;
-
-    indeterminate: false;
-
-    UpdateBody {
-        StepLine {
-            done: true;
-            text: TR.lookup("common.updateProgress.verified");
-        }
-
-        StepLine {
-            loading: true;
-            text: TR.lookup("common.updateProgress.installing");
-        }
-
-        StepLine {
-            text: TR.lookup("common.updateProgress.restart");
-        }
-    }
-
-    TextMd {
-        text: TR.format("common.updateProgress.eta", [eta]);
-        color: Palette.content-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
 
 component RestartView inherits ProgressBody {
-    UpdateBody {
-        StepLine {
-            done: true;
-            text: TR.lookup("common.updateProgress.verified");
-        }
+        UpdateBody {
+            StepLine {
+                done: true;
+                text: TR.lookup("common.updateProgress.verified");
+            }
 
-        StepLine {
-            done: true;
-            text: TR.lookup("common.updateProgress.installed");
-        }
+            StepLine {
+                done: true;
+                text: TR.lookup("common.updateProgress.installed");
+            }
 
-        StepLine {
-            loading: true;
-            text: TR.lookup("common.updateProgress.restarting");
+            StepLine {
+                loading: true;
+                text: TR.lookup("common.updateProgress.restarting");
+            }
         }
     }
-}
 
 component SuccessView inherits JumboIconPageBody {
-    in property <string> keyos-version: "";
-    callback complete();
+        in property <string> keyos-version: "";
+        callback complete();
 
-    ContentSection {
-        HorizontalLayout {
-            alignment: center;
-            JumboIcon {
-                name: "jumbo-circle";
+        ContentSection {
+            HorizontalLayout {
+                alignment: center;
+                JumboIcon {
+                    name: "jumbo-circle";
 
-                Icon {
-                    name: "check";
-                    size: 96px;
-                    color: Palette.content-brand;
+                    Icon {
+                        name: "check";
+                        size: 96px;
+                        color: Palette.content-brand;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Size.sz3;
+                HeadingMd {
+                    vertical-stretch: 0;
+                    text: TR.lookup("common.updateSuccess.header");
+                    horizontal-alignment: center;
+                }
+
+                TextSm {
+                // use current because we should already be rebooted by this point
+                text: TR.format("common.updateSuccess.subheader", [keyos-version]);
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
                 }
             }
         }
 
-        VerticalLayout {
-            spacing: Size.sz3;
-            HeadingMd {
-                vertical-stretch: 0;
-                text: TR.lookup("common.updateSuccess.header");
-                horizontal-alignment: center;
-            }
-
-            TextSm {
-                // use current because we should already be rebooted by this point
-                text: TR.format("common.updateSuccess.subheader", [keyos-version]);
-                color: Palette.content-tertiary;
-                horizontal-alignment: center;
+        ButtonSection {
+            Button {
+                label: TR.lookup("common.button.done");
+                importance: primary;
+                clicked => {
+                    complete();
+                }
             }
         }
     }
-
-    ButtonSection {
-        Button {
-            label: TR.lookup("common.button.done");
-            importance: primary;
-            clicked => {
-                complete();
-            }
-        }
-    }
-}
 
 component FailedView inherits JumboIconPageBody {
-    in property <FwUpdateError> error;
+        in property <FwUpdateError> error;
 
-    callback retry();
+        callback retry();
 
-    function error-message() -> string {
-        if error == FwUpdateError.DownloadFailed {
-            return TR.lookup("common.updateError.download");
-        } else if error == FwUpdateError.ReceivingFailed {
-            return TR.lookup("common.updateError.transfer");
-        } else if error == FwUpdateError.VerifyFailed {
-            return TR.lookup("common.updateError.verify");
-        } else if error == FwUpdateError.InstallFailed {
-            return TR.lookup("common.updateError.install");
-        } else {
-            return "Update failed";
-        }
-    }
-
-    ContentSection {
-        HorizontalLayout {
-            alignment: center;
-            WrappedIcon {
-                outer-icon: "jumbo-circle";
-                inner-icon: "close";
+        function error-message() -> string {
+            if error == FwUpdateError.DownloadFailed {
+                return TR.lookup("common.updateError.download");
+            } else if error == FwUpdateError.ReceivingFailed {
+                return TR.lookup("common.updateError.transfer");
+            } else if error == FwUpdateError.VerifyFailed {
+                return TR.lookup("common.updateError.verify");
+            } else if error == FwUpdateError.InstallFailed {
+                return TR.lookup("common.updateError.install");
+            } else {
+                return "Update failed";
             }
         }
 
-        HeadingMd {
-            vertical-stretch: 0;
-            text: TR.lookup("common.updateError.header");
-            horizontal-alignment: center;
-        }
-
-        HorizontalLayout {
-            alignment: center;
-            spacing: Size.sz4;
-
-            Icon {
-                color: Palette.content-copper-brand;
-                name: "alert";
+        ContentSection {
+            HorizontalLayout {
+                alignment: center;
+                WrappedIcon {
+                    outer-icon: "jumbo-circle";
+                    inner-icon: "close";
+                }
             }
 
-            TextMd {
-                text: error-message();
-                color: Palette.content-copper-brand;
+            HeadingMd {
+                vertical-stretch: 0;
+                text: TR.lookup("common.updateError.header");
                 horizontal-alignment: center;
-                vertical-alignment: center;
             }
-        }
-    }
 
-    ButtonSection {
-        Button {
-            label: TR.lookup("common.button.retry");
-            importance: primary;
-            clicked => {
-                root.retry();
+            HorizontalLayout {
+                alignment: center;
+                spacing: Size.sz4;
+
+                Icon {
+                    color: Palette.content-copper-brand;
+                    name: "alert";
+                }
+
+                TextMd {
+                    text: error-message();
+                    color: Palette.content-copper-brand;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        ButtonSection {
+            Button {
+                label: TR.lookup("common.button.retry");
+                importance: primary;
+                clicked => {
+                    root.retry();
+                }
             }
         }
     }
-}
 
 export component FwUpdatePage inherits Rectangle {
-    in property <FwUpdateState> state;
-    in property <FwUpdateError> error;
+        in property <FwUpdateState> state;
+        in property <FwUpdateError> error;
 
-    in property <float> progress-percent;
-    in property <string> eta;
-    in property <string> keyos-version: "";
+        in property <float> progress-percent;
+        in property <string> eta;
+        in property <string> keyos-version: "";
 
-    callback complete-fw-update();
-    callback retry-fw-update();
+        callback complete-fw-update();
+        callback retry-fw-update();
 
-    if state == FwUpdateState.Idle || state == FwUpdateState.Downloading:  DownloadView { }
-    if state == FwUpdateState.Receiving: ReceiveView {
-        percent: progress-percent;
-    }
-    if state == FwUpdateState.Verifying: VerifyView { }
-    if state == FwUpdateState.Installing: InstallView {
-        percent: progress-percent;
-        eta: eta;
-    }
-    if state == FwUpdateState.Restarting: RestartView { }
-    if state == FwUpdateState.Completed: SuccessView {
-        keyos-version: keyos-version;
-        complete => {
-            complete-fw-update();
+        if state == FwUpdateState.Idle || state == FwUpdateState.Downloading:  DownloadView { }
+        if state == FwUpdateState.Receiving: ReceiveView {
+            percent: progress-percent;
+        }
+        if state == FwUpdateState.Verifying: VerifyView { }
+        if state == FwUpdateState.Installing: InstallView {
+            percent: progress-percent;
+            eta: eta;
+        }
+        if state == FwUpdateState.Restarting: RestartView { }
+        if state == FwUpdateState.Completed: SuccessView {
+            keyos-version: keyos-version;
+            complete => {
+                complete-fw-update();
+            }
+        }
+        if state == FwUpdateState.Failed: FailedView {
+            error: error;
+            retry => {
+                retry-fw-update()
+            }
         }
     }
-    if state == FwUpdateState.Failed: FailedView {
-        error: error;
-        retry => {
-            retry-fw-update()
-        }
-    }
-}

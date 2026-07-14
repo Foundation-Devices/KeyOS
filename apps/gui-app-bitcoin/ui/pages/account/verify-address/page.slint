@@ -1,7 +1,22 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
  
-import { BasePage, ButtonSection, ContentSection, TextLg, TextSm, Button, HeadingMd, TextMd, WrappedIcon, HeadingSm, BtcAddress, TimerCircularProgress, PageBody, JumboIconPageBody } from "@ui/widgets.slint";
+import {
+    BasePage,
+    ButtonSection,
+    ContentSection,
+    TextLg,
+    TextSm,
+    Button,
+    HeadingMd,
+    TextMd,
+    WrappedIcon,
+    HeadingSm,
+    BtcAddress,
+    TimerCircularProgress,
+    PageBody,
+    JumboIconPageBody,
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import { Size, Importance, Palette } from "@ui/theme.slint";
 
@@ -9,7 +24,10 @@ import { Navigate, Animate } from "../../../gen/navigate.slint";
 
 import { AccountProps } from "../../account/props.slint";
 import { VerifyAddressProps } from "./props.slint";
-import { VerifyAddress, VerifyAddressState } from "../../../verify-address.slint";
+import {
+    VerifyAddress,
+    VerifyAddressState,
+} from "../../../verify-address.slint";
 
 component LabeledText inherits HorizontalLayout {
     in property <string> label;

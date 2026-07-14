@@ -8,13 +8,10 @@ use std::{
 };
 
 use gui_server_api::{GuiApi, KeyboardKind};
-use i_slint_core::{
-    software_renderer::LineBufferProvider,
-    window::{InputMethodRequest, WindowAdapter, WindowAdapterInternal, WindowInner},
-};
+use i_slint_core::window::{InputMethodRequest, WindowAdapter, WindowAdapterInternal, WindowInner};
 use slint::{
     platform::{
-        software_renderer::{RepaintBufferType, SoftwareRenderer},
+        software_renderer::{LineBufferProvider, RepaintBufferType, SoftwareRenderer},
         Renderer,
     },
     PhysicalSize, Window,
