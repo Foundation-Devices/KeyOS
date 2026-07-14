@@ -254,27 +254,30 @@ Shipped templates should use `sdk_keyos_root` for KeyOS source dependencies; the
 Signature:
 
 ```text
-foundation new [name] [--template TEMPLATE] [--no-git]
+foundation new <name> [--template TEMPLATE] [--theme THEME_ID]
+                      [--friendly-name NAME] [--launcher-name NAME]
+                      [--description TEXT] [--publisher-name NAME]
+                      [--contact-email EMAIL] [--support-url URL]
+                      [--app-id ID] [--app-version VERSION]
+                      [--min-keyos-version VERSION] [--no-git]
 ```
 
 Behavior:
 
-- Uses interactive prompts when `name` or `--template` is omitted
-- Always prompts for:
-  - friendly app name
-  - launcher app name
-  - description
-  - publisher name
-  - contact email
-  - support website URL
-  - icon path
-  - app ID
-  - version
-  - minimum KeyOS version
-- If the app ID prompt is left blank, generates a random 16-byte hex ID with `0x` prefix
+- `name` is required; it becomes the project directory and Cargo package name, so it must contain only ASCII letters, digits, hyphens, and underscores and begin with a letter or underscore
+- Every configurable field has a flag; a supplied flag is used as-is and its prompt is skipped
+- For a field that was not supplied:
+  - when stdin is a terminal, prompts for it (pre-filled with the default) and re-asks on invalid input
+  - when stdin is not a terminal, uses the default without prompting, so `new` runs unattended
+- Defaults: `--template` is `default-app`, `--theme` is `default_theme`; per-field defaults come from the selected template's `[variables]` in `template.toml`, falling back to built-in values
+- Prompt-backed fields: friendly app name, launcher app name, description, publisher name, contact email, support website URL, app ID, version, minimum KeyOS version
+- The icon path is not configurable; it is always the template default (`resources/icon.svg`)
+- `--app-id` generates a random 16-byte hex ID with `0x` prefix only when omitted; an explicitly empty value stays empty
+- Description, version, and minimum KeyOS version reject empty values; publisher name, contact email, and support URL may be empty
+- `--theme` must name an installed theme id
+- Rejects friendly and launcher app names containing characters outside ASCII letters, numbers, spaces, and hyphens
 - Creates the project directory from the selected template
 - Writes `app-config.toml`, `permission_templates.toml`, template source files, and resources
-- Rejects friendly and launcher app names containing characters outside ASCII letters, numbers, spaces, and hyphens
 - Initializes a Git repository by default with initial branch `main`
 - Does not create an initial commit
 - `--no-git` skips repository initialization
@@ -688,7 +691,7 @@ Behavior:
 
 ### External plugin dispatch
 
-If the first non-global argument is not a built-in command, `foundation` attempts to resolve an external `foundation-<name>` plugin.
+Before argument parsing, `foundation` resolves its first argument against external `foundation-<name>` plugins. Resolution is unconditional, so an installed plugin can shadow a built-in command or a global flag (`-h`, `--help`, `-V`, `--version`).
 
 Resolution sources:
 
@@ -696,7 +699,7 @@ Resolution sources:
 - `~/.foundation/plugins`
 - `PATH`
 
-When resolved, `foundation <name> ...` execs the external plugin binary directly.
+When resolved, `foundation <name> ...` execs the external plugin binary directly; otherwise argument parsing proceeds normally. Resolution runs on every invocation, so a built-in command also triggers a plugin-cache lookup (and a `PATH` rescan on a cache miss).
 
 ## Deferred / Planned Features
 

@@ -9,33 +9,78 @@ mod template;
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use clap::Args;
 use dialoguer::{Input, Select};
-use foundation_core::{validate_display_app_name, SdkRoot};
+use foundation_core::{validate_display_app_name, AppId, SdkRoot};
 use template::TemplateProcessor;
+
+/// Template scaffolded when `--template` is omitted.
+const DEFAULT_TEMPLATE: &str = "default-app";
+/// Theme id selected when `--theme` is omitted.
+const DEFAULT_THEME_ID: &str = "default_theme";
+
+#[derive(Args)]
+pub struct NewArgs {
+    /// Name of the application
+    pub name: String,
+
+    /// Project template to use
+    #[arg(short, long, value_name = "TEMPLATE")]
+    pub template: Option<String>,
+
+    /// Starting theme id
+    #[arg(long, value_name = "THEME_ID")]
+    pub theme: Option<String>,
+
+    /// Friendly app name shown to users
+    #[arg(long, value_name = "NAME")]
+    pub friendly_name: Option<String>,
+
+    /// Launcher app name
+    #[arg(long, value_name = "NAME")]
+    pub launcher_name: Option<String>,
+
+    /// App description
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+
+    /// Publisher or company name
+    #[arg(long, value_name = "NAME")]
+    pub publisher_name: Option<String>,
+
+    /// Contact email address
+    #[arg(long, value_name = "EMAIL")]
+    pub contact_email: Option<String>,
+
+    /// Support website URL
+    #[arg(long, value_name = "URL")]
+    pub support_url: Option<String>,
+
+    /// App ID; a random one is generated when omitted
+    #[arg(long, value_name = "ID")]
+    pub app_id: Option<String>,
+
+    /// App version
+    #[arg(long, value_name = "VERSION")]
+    pub app_version: Option<String>,
+
+    /// Minimum required KeyOS version
+    #[arg(long, value_name = "VERSION")]
+    pub min_keyos_version: Option<String>,
+
+    /// Don't initialize a git repository
+    #[arg(long)]
+    pub no_git: bool,
+}
 
 use crate::sdk_mapping::{
     ensure_project_sdk_mapping, project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path,
 };
-
-/// Application configuration from user prompts
-struct PromptConfig {
-    name: String,
-    friendly_app_name: String,
-    launcher_app_name: String,
-    description: String,
-    publisher_name: String,
-    contact_email: String,
-    support_url: String,
-    icon: String,
-    app_id: String,
-    version: String,
-    min_keyos_version: String,
-    selected_theme_id: String,
-}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 struct ThemeFileEntry {
@@ -61,208 +106,38 @@ enum GitInitStatus {
 }
 
 /// Execute the new command to create a new project
-pub fn execute(name: Option<&str>, template: Option<&str>, no_git: bool) -> Result<()> {
+pub fn execute(args: &NewArgs) -> Result<()> {
+    let sdk = SdkRoot::discover()
+        .context("Could not locate the Foundation SDK root. Run this command from the SDK checkout or unpacked bundle.")?;
+    let parent = std::env::current_dir().context("Could not determine the current directory")?;
+    create_project(args, &sdk, &parent)
+}
+
+/// Scaffold a new project under `parent` using `sdk`. Prompt-backed fields fall
+/// back to interactive input only when unsupplied and stdin is a terminal.
+fn create_project(args: &NewArgs, sdk: &SdkRoot, parent: &Path) -> Result<()> {
     println!("Let's create a new KeyOS application!");
     println!();
 
-    let sdk = SdkRoot::discover()
-        .context("Could not locate the Foundation SDK root. Run this command from the SDK checkout or unpacked bundle.")?;
+    let template = select_template(args, sdk)?;
+    let theme_id = select_theme(args, sdk)?;
 
-    // Select template if not provided
-    let selected_template = match template {
-        Some(t) => t.to_string(),
-        None => {
-            let available_templates = template::list_available_templates(Some(&sdk));
+    let project_name = args.name.trim().to_string();
+    validate_project_name(&project_name)?;
 
-            if available_templates.is_empty() {
-                eprintln!("Error: No templates found");
-                eprintln!();
-                eprintln!("Templates should be installed to:");
-                if let Some(home) = dirs::home_dir() {
-                    eprintln!("  - {}", home.join(".foundation").join("templates").display());
-                }
-                eprintln!();
-                eprintln!("For development, templates can also be in:");
-                eprintln!("  - ./templates (current directory)");
-                eprintln!();
-                eprintln!("Copy the templates from the foundation-cli source to one of these locations.");
-                anyhow::bail!("No templates available");
-            }
-
-            let items: Vec<String> =
-                available_templates.iter().map(|(name, desc)| format!("{} - {}", name, desc)).collect();
-
-            let selection =
-                Select::new().with_prompt("Select a template").items(&items).default(0).interact()?;
-
-            available_templates[selection].0.clone()
-        }
-    };
-
-    let available_themes = load_available_themes(&sdk)?;
-    let theme_items: Vec<&str> = available_themes.iter().map(|theme| theme.display_name.as_str()).collect();
-    let selected_theme_index =
-        Select::new().with_prompt("Select a starting theme:").items(&theme_items).default(0).interact()?;
-    let selected_theme =
-        available_themes.get(selected_theme_index).cloned().context("selected theme index out of range")?;
-
-    // Get the project name - prompt if not provided
-    let project_name = match name {
-        Some(n) => n.trim().to_string(),
-        None => Input::<String>::new().with_prompt("Enter the app name").interact_text()?.trim().to_string(),
-    };
-
-    if project_name.is_empty() {
-        anyhow::bail!("Error: Project name cannot be empty");
-    }
-
-    // Project name becomes a directory and a Cargo package name; reject anything
-    // that could escape the working directory or break Cargo's identifier rules.
-    if project_name.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-        || project_name.contains("..")
-    {
-        anyhow::bail!(
-            "Error: Project name '{}' contains invalid characters; use only letters, digits, hyphens, and underscores",
-            project_name
-        );
-    }
-
-    // Cargo package names must begin with a letter or underscore (`cargo build`
-    // would otherwise fail on the scaffolded project), so reject a leading digit,
-    // hyphen, or any other non-identifier-start character at `foundation new` time.
-    if !project_name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-        anyhow::bail!("Error: Project name '{}' must begin with a letter or underscore", project_name);
-    }
-
-    // Prompt for all app configuration fields. Per-template defaults come from
-    // the selected template's [variables] in template.toml — no template-specific
-    // text baked into this command.
-    let template_vars = template::read_template_variables(&selected_template, Some(&sdk));
-    let template_default = |key: &str, fallback: &str| -> String {
-        template_vars
-            .get(key)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| fallback.to_string())
-    };
-
-    let friendly_fallback = project_name.replace('_', " ");
-    let friendly_default = template_default("friendly_app_name", &friendly_fallback);
-    let friendly_app_name = Input::<String>::new()
-        .with_prompt("Enter the app's friendly name")
-        .with_initial_text(&friendly_default)
-        .interact_text()?
-        .trim()
-        .to_string();
-    validate_display_app_name("friendly-app-name", &friendly_app_name)?;
-
-    let launcher_default = template_default("launcher_app_name", &friendly_app_name);
-    let launcher_app_name = Input::<String>::new()
-        .with_prompt("Enter the app's launcher name")
-        .with_initial_text(&launcher_default)
-        .interact_text()?
-        .trim()
-        .to_string();
-    validate_display_app_name("launcher-app-name", &launcher_app_name)?;
-
-    let description_default = template_default("description", "A new KeyOS application");
-    let description = Input::<String>::new()
-        .with_prompt("Enter the app description")
-        .with_initial_text(&description_default)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let publisher_name = Input::<String>::new()
-        .with_prompt("Publisher name")
-        .allow_empty(true)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let contact_email = Input::<String>::new()
-        .with_prompt("Contact email")
-        .allow_empty(true)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let support_url = Input::<String>::new()
-        .with_prompt("Support website URL")
-        .allow_empty(true)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let icon_default = template_default("icon", "resources/icon.svg");
-    let icon = Input::<String>::new()
-        .with_prompt("Enter the icon path")
-        .with_initial_text(&icon_default)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let app_id = Input::<String>::new()
-        .with_prompt("Enter app ID (or press ENTER to generate a random ID)")
-        .allow_empty(true)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let app_id = if app_id.is_empty() { generate_random_app_id() } else { app_id };
-
-    let version_default = template_default("version", "0.1.0");
-    let version = Input::<String>::new()
-        .with_prompt("Enter the app version")
-        .with_initial_text(&version_default)
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let min_keyos_version = Input::<String>::new()
-        .with_prompt("Enter the minimum KeyOS version")
-        .with_initial_text("1.0.0")
-        .interact_text()?
-        .trim()
-        .to_string();
-
-    let config = PromptConfig {
-        name: project_name.clone(),
-        friendly_app_name,
-        launcher_app_name,
-        description,
-        publisher_name,
-        contact_email,
-        support_url,
-        icon,
-        app_id,
-        version,
-        min_keyos_version,
-        selected_theme_id: selected_theme.id,
-    };
+    let variables = collect_variables(args, sdk, &template, &project_name, &theme_id)?;
 
     println!();
     println!("Creating new KeyOS application: {}", project_name);
 
-    // Create project directory
-    let project_path = PathBuf::from(&project_name);
-
-    if project_path.exists() {
-        anyhow::bail!("Error: Directory '{}' already exists", project_name);
-    }
-
-    fs::create_dir_all(&project_path)
-        .with_context(|| format!("Error: Failed to create directory '{}'", project_name))?;
-
-    // Process template to create project structure
-    apply_template(&project_path, &selected_template, &config, &sdk)?;
+    let project_path = parent.join(&project_name);
+    write_project_files(&project_path, &template, &theme_id, variables, sdk)?;
 
     println!("✓ Created {}/", project_name);
     println!("✓ Created project structure from template");
     println!("✓ Created app-config.toml");
 
-    if !no_git {
+    if !args.no_git {
         match initialize_git_repo(&project_path) {
             GitInitStatus::Initialized => println!("✓ Initialized Git repository"),
             GitInitStatus::Unavailable => {
@@ -281,26 +156,220 @@ pub fn execute(name: Option<&str>, template: Option<&str>, no_git: bool) -> Resu
     Ok(())
 }
 
-/// Apply a template to create the project structure
-fn apply_template(
-    project_path: &PathBuf,
-    template_name: &str,
-    config: &PromptConfig,
+/// Pick the template: the `--template` value, an interactive menu, or
+/// `default-app` when there is no terminal.
+fn select_template(args: &NewArgs, sdk: &SdkRoot) -> Result<String> {
+    if let Some(template) = args.template.as_deref() {
+        return Ok(template.to_string());
+    }
+
+    let available = template::list_available_templates(Some(sdk));
+    if available.is_empty() {
+        eprintln!("Error: No templates found");
+        eprintln!();
+        eprintln!("Templates should be installed to:");
+        if let Some(home) = dirs::home_dir() {
+            eprintln!("  - {}", home.join(".foundation").join("templates").display());
+        }
+        eprintln!();
+        eprintln!("For development, templates can also be in:");
+        eprintln!("  - ./templates (current directory)");
+        eprintln!();
+        eprintln!("Copy the templates from the foundation-cli source to one of these locations.");
+        anyhow::bail!("No templates available");
+    }
+
+    let default_index = available.iter().position(|(name, _)| name == DEFAULT_TEMPLATE).unwrap_or(0);
+
+    if interactive() {
+        let items: Vec<String> =
+            available.iter().map(|(name, desc)| format!("{} - {}", name, desc)).collect();
+        let selection =
+            Select::new().with_prompt("Select a template").items(&items).default(default_index).interact()?;
+        Ok(available[selection].0.clone())
+    } else {
+        Ok(available[default_index].0.clone())
+    }
+}
+
+/// Pick the starting theme id: the `--theme` value (validated against the
+/// installed themes), an interactive menu, or `default_theme` when there is no
+/// terminal.
+fn select_theme(args: &NewArgs, sdk: &SdkRoot) -> Result<String> {
+    let available = load_available_themes(sdk)?;
+    let default_index = available.iter().position(|theme| theme.id == DEFAULT_THEME_ID).unwrap_or(0);
+
+    match args.theme.as_deref() {
+        Some(id) => available
+            .iter()
+            .find(|theme| theme.id == id)
+            .map(|theme| theme.id.clone())
+            .with_context(|| format!("Theme '{id}' not found")),
+        None if interactive() => {
+            let items: Vec<&str> = available.iter().map(|theme| theme.display_name.as_str()).collect();
+            let index = Select::new()
+                .with_prompt("Select a starting theme:")
+                .items(&items)
+                .default(default_index)
+                .interact()?;
+            available.get(index).map(|theme| theme.id.clone()).context("selected theme index out of range")
+        }
+        None => available.get(default_index).map(|theme| theme.id.clone()).context("No themes available"),
+    }
+}
+
+/// Reject a project name that cannot double as a directory and a Cargo package
+/// name.
+fn validate_project_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Error: Project name cannot be empty");
+    }
+
+    // Reject anything that could escape the working directory or break Cargo's identifier rules.
+    if name.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')) || name.contains("..") {
+        anyhow::bail!(
+            "Error: Project name '{}' contains invalid characters; use only letters, digits, hyphens, and underscores",
+            name
+        );
+    }
+
+    // Cargo package names must begin with a letter or underscore, or `cargo build`
+    // fails on the scaffolded project.
+    if !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        anyhow::bail!("Error: Project name '{}' must begin with a letter or underscore", name);
+    }
+
+    Ok(())
+}
+
+/// Gather every template variable, prompting for the app fields that were not
+/// passed as flags. Per-template defaults come from the template's [variables]
+/// in template.toml.
+fn collect_variables(
+    args: &NewArgs,
+    sdk: &SdkRoot,
+    template: &str,
+    project_name: &str,
+    theme_id: &str,
+) -> Result<HashMap<String, String>> {
+    let template_vars = template::read_template_variables(template, Some(sdk));
+    let template_default = |key: &str, fallback: &str| -> String {
+        template_vars
+            .get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
+    // Fields without a prompt; the prompted ones follow in question order.
+    let mut variables = HashMap::new();
+    variables.insert("app_name".to_string(), project_name.to_string());
+    variables.insert("icon".to_string(), template_default("icon", "resources/icon.svg"));
+    variables.insert("selected_theme_id".to_string(), theme_id.to_string());
+
+    prompt_field(
+        &mut variables,
+        "friendly_app_name",
+        "Enter the app's friendly name",
+        args.friendly_name.as_deref(),
+        &template_default("friendly_app_name", &project_name.replace('_', " ")),
+        |value| {
+            validate_display_app_name("friendly-app-name", value)?;
+            Ok(())
+        },
+    )?;
+
+    // launcher's default derives from the just-resolved friendly name.
+    let launcher_default = template_default("launcher_app_name", &variables["friendly_app_name"]);
+    prompt_field(
+        &mut variables,
+        "launcher_app_name",
+        "Enter the app's launcher name",
+        args.launcher_name.as_deref(),
+        &launcher_default,
+        |value| {
+            validate_display_app_name("launcher-app-name", value)?;
+            Ok(())
+        },
+    )?;
+
+    prompt_field(
+        &mut variables,
+        "description",
+        "Enter the app description",
+        args.description.as_deref(),
+        &template_default("description", "A new KeyOS application"),
+        non_empty,
+    )?;
+    prompt_field(
+        &mut variables,
+        "publisher_name",
+        "Publisher name",
+        args.publisher_name.as_deref(),
+        "",
+        no_validation,
+    )?;
+    prompt_field(
+        &mut variables,
+        "contact_email",
+        "Contact email",
+        args.contact_email.as_deref(),
+        "",
+        no_validation,
+    )?;
+    prompt_field(
+        &mut variables,
+        "support_url",
+        "Support website URL",
+        args.support_url.as_deref(),
+        "",
+        no_validation,
+    )?;
+
+    prompt_field(
+        &mut variables,
+        "app_id",
+        "Enter app ID (or press ENTER to generate a random ID)",
+        args.app_id.as_deref(),
+        &generate_random_app_id(),
+        valid_app_id,
+    )?;
+
+    prompt_field(
+        &mut variables,
+        "version",
+        "Enter the app version",
+        args.app_version.as_deref(),
+        &template_default("version", "0.1.0"),
+        |value| valid_version("version", value),
+    )?;
+    prompt_field(
+        &mut variables,
+        "min_keyos_version",
+        "Enter the minimum KeyOS version",
+        args.min_keyos_version.as_deref(),
+        &template_default("min_keyos_version", "1.0.0"),
+        |value| valid_version("min-keyos-version", value),
+    )?;
+
+    Ok(variables)
+}
+
+/// Create the project directory and populate it from the template. `variables`
+/// must already hold `friendly_app_name`, used as the app theme's display name.
+fn write_project_files(
+    project_path: &Path,
+    template: &str,
+    theme_id: &str,
+    mut variables: HashMap<String, String>,
     sdk: &SdkRoot,
 ) -> Result<()> {
-    // Build template variables map
-    let mut variables = HashMap::new();
-    variables.insert("app_name".to_string(), config.name.clone());
-    variables.insert("friendly_app_name".to_string(), config.friendly_app_name.clone());
-    variables.insert("launcher_app_name".to_string(), config.launcher_app_name.clone());
-    variables.insert("description".to_string(), config.description.clone());
-    variables.insert("publisher_name".to_string(), config.publisher_name.clone());
-    variables.insert("contact_email".to_string(), config.contact_email.clone());
-    variables.insert("support_url".to_string(), config.support_url.clone());
-    variables.insert("icon".to_string(), config.icon.clone());
-    variables.insert("app_id".to_string(), config.app_id.clone());
-    variables.insert("version".to_string(), config.version.clone());
-    variables.insert("min_keyos_version".to_string(), config.min_keyos_version.clone());
+    if project_path.exists() {
+        anyhow::bail!("Error: Directory '{}' already exists", project_path.display());
+    }
+    fs::create_dir_all(project_path)
+        .with_context(|| format!("Error: Failed to create directory '{}'", project_path.display()))?;
 
     // `sdk_keyos_root` is the preferred variable for bundled templates. The
     // other SDK path variables remain part of the template API for external
@@ -309,61 +378,145 @@ fn apply_template(
     variables.insert("sdk_keyos_root".to_string(), project_sdk_keyos_root_path().to_string());
     variables.insert("sdk_ui_root".to_string(), project_sdk_ui_root_path().to_string());
     variables.insert("sdk_path".to_string(), project_sdk_keyos_root_path().to_string());
-    variables.insert("selected_theme_id".to_string(), config.selected_theme_id.clone());
 
-    // Get template path
-    let template_path = template::get_template_path(template_name, Some(sdk));
+    let template_path = template::get_template_path(template, Some(sdk));
     let template_files_path = template_path.join("files");
-
     if !template_files_path.exists() {
-        anyhow::bail!("Error: Template '{}' not found at {}", template_name, template_path.display());
+        anyhow::bail!("Error: Template '{}' not found at {}", template, template_path.display());
     }
 
-    // Process template
+    // friendly_app_name is read back before the processor consumes the map; it
+    // feeds the app-theme scaffolding.
+    let friendly_app_name = variables["friendly_app_name"].clone();
+
     let processor = TemplateProcessor::new(variables);
     processor
         .process_directory(&template_files_path, project_path)
-        .with_context(|| format!("Failed to apply template '{}'", template_name))?;
+        .with_context(|| format!("Failed to apply template '{}'", template))?;
     ensure_project_sdk_mapping(project_path, sdk)?;
     crate::commands::themes::write_editable_app_theme(
-        &config.selected_theme_id,
+        theme_id,
         sdk,
         project_path,
         &project_path.join("resources").join("theme.json"),
-        &config.friendly_app_name,
+        &friendly_app_name,
     )?;
 
     Ok(())
 }
 
+/// Prompt for a field and record it in `variables[key]`. A supplied value, or
+/// the `default` used when there is no terminal, skips the prompt and is
+/// validated once; the interactive prompt (pre-filled with `default`) re-asks
+/// until `validate` accepts. `validate` also decides whether empty is allowed.
+fn prompt_field(
+    variables: &mut HashMap<String, String>,
+    key: &str,
+    prompt: &str,
+    provided: Option<&str>,
+    default: &str,
+    validate: impl Fn(&str) -> Result<()>,
+) -> Result<()> {
+    let value = match provided {
+        Some(value) => {
+            let value = value.trim().to_string();
+            validate(&value)?;
+            value
+        }
+        None if !interactive() => {
+            let value = default.trim().to_string();
+            validate(&value)?;
+            value
+        }
+        None => {
+            let mut initial = default.to_string();
+            loop {
+                let value = Input::<String>::new()
+                    .with_prompt(prompt)
+                    .with_initial_text(&initial)
+                    .allow_empty(true)
+                    .interact_text()?
+                    .trim()
+                    .to_string();
+                match validate(&value) {
+                    Ok(()) => break value,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        initial = value;
+                    }
+                }
+            }
+        }
+    };
+    variables.insert(key.to_string(), value);
+    Ok(())
+}
+
+/// True when stdin is a terminal we can prompt on.
+fn interactive() -> bool { std::io::stdin().is_terminal() }
+
+fn no_validation(_: &str) -> Result<()> { Ok(()) }
+
+fn non_empty(value: &str) -> Result<()> {
+    if value.is_empty() {
+        anyhow::bail!("must not be empty");
+    }
+    Ok(())
+}
+
+// AppConfig types app-id and the versions, so a value that doesn't parse
+// scaffolds a project that no later command can load.
+fn valid_app_id(value: &str) -> Result<()> {
+    AppId::from_hex(value)?;
+    Ok(())
+}
+
+fn valid_version(field: &str, value: &str) -> Result<()> {
+    semver::Version::parse(value).map_err(|error| anyhow::anyhow!("{field}: {error}"))?;
+    Ok(())
+}
+
 fn load_available_themes(sdk: &SdkRoot) -> Result<Vec<ThemeEntry>> {
-    let theme_dir = sdk.keyos_root().join("sdk").join("crates").join("foundation-themes").join("themes");
-    let mut entries = fs::read_dir(&theme_dir)
-        .with_context(|| format!("Failed to read built-in themes at {}", theme_dir.display()))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
+    // User themes in ~/.foundation/themes/json shadow the SDK built-ins by id, so
+    // `foundation new --theme <id>` accepts anything `foundation themes list`
+    // shows, not just the bundled themes.
+    let dirs = crate::commands::themes::theme_source_dirs(sdk);
 
     let mut themes = Vec::new();
-    for entry in entries {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
+    let mut seen = std::collections::HashSet::new();
+    for dir in &dirs {
+        // The user theme dir may not exist yet; only the SDK dir is guaranteed.
+        let mut entries = match fs::read_dir(dir) {
+            Ok(entries) => entries.collect::<std::result::Result<Vec<_>, _>>()?,
+            Err(_) => continue,
+        };
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+
+            let contents = fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read theme file {}", path.display()))?;
+            let parsed: ThemeFileEntry = serde_json::from_str(&contents)
+                .with_context(|| format!("Failed to parse theme file {}", path.display()))?;
+            let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("theme");
+            let id = parsed.id.unwrap_or_else(|| normalize_identifier(stem));
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+
+            themes.push(ThemeEntry {
+                id,
+                display_name: parsed.name.unwrap_or_else(|| prettify_identifier(stem)),
+                // Convention: themes with no explicit sort_order land at the end of the
+                // built-in block (sort_order <= 999 reserved) but before any future
+                // out-of-tree additions.
+                sort_order: parsed.sort_order.unwrap_or(1000),
+            });
         }
-
-        let contents = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read theme file {}", path.display()))?;
-        let parsed: ThemeFileEntry = serde_json::from_str(&contents)
-            .with_context(|| format!("Failed to parse theme file {}", path.display()))?;
-        let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("theme");
-
-        themes.push(ThemeEntry {
-            id: parsed.id.unwrap_or_else(|| normalize_identifier(stem)),
-            display_name: parsed.name.unwrap_or_else(|| prettify_identifier(stem)),
-            // Convention: themes with no explicit sort_order land at the end of the
-            // built-in block (sort_order <= 999 reserved) but before any future
-            // out-of-tree additions.
-            sort_order: parsed.sort_order.unwrap_or(1000),
-        });
     }
 
     themes.sort_by(|a, b| {
@@ -374,7 +527,7 @@ fn load_available_themes(sdk: &SdkRoot) -> Result<Vec<ThemeEntry>> {
     });
 
     if themes.is_empty() {
-        anyhow::bail!("No themes found in {}", theme_dir.display());
+        anyhow::bail!("No themes found in {}", crate::commands::themes::sdk_themes_dir(sdk).display());
     }
 
     Ok(themes)
@@ -447,39 +600,22 @@ mod tests {
     use foundation_core::SdkRoot;
 
     use super::{
-        apply_template, initialize_git_repo, is_git_available, GitInitStatus, PromptConfig,
-        DEFAULT_GIT_BRANCH,
+        create_project, initialize_git_repo, is_git_available, GitInitStatus, NewArgs, DEFAULT_GIT_BRANCH,
     };
     use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
     use crate::test_support::make_temp_dir;
 
     #[test]
-    fn apply_template_uses_project_sdk_keyos_root_variable() {
+    fn create_project_scaffolds_default_app() {
         let (_sdk_dir, sdk_root) = make_sdk_root("template-sdk");
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
-        let project_root_dir = make_temp_dir("scaffold-project");
-        let project_root = project_root_dir.path();
-        let project_path = project_root.join("demo-app");
+        let parent_dir = make_temp_dir("scaffold-project");
+        let parent = parent_dir.path();
 
-        fs::create_dir_all(&project_path).unwrap();
-        let config = PromptConfig {
-            name: "demo-app".to_string(),
-            friendly_app_name: "Demo App".to_string(),
-            launcher_app_name: "Demo".to_string(),
-            description: "Demo app".to_string(),
-            publisher_name: "Demo Publisher".to_string(),
-            contact_email: "support@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            icon: "resources/icon.svg".to_string(),
-            app_id: "0x00112233445566778899aabbccddeeff".to_string(),
-            version: "0.1.0".to_string(),
-            min_keyos_version: "1.0.0".to_string(),
-            selected_theme_id: "default_theme".to_string(),
-        };
+        create_project(&sample_args("demo-app"), &sdk, parent).unwrap();
 
-        apply_template(&project_path, "default-app", &config, &sdk).unwrap();
-
+        let project_path = parent.join("demo-app");
         let cargo_toml = fs::read_to_string(project_path.join("Cargo.toml")).unwrap();
         assert!(cargo_toml.contains(project_sdk_keyos_root_path()));
         assert!(!cargo_toml.contains(&sdk.keyos_root().display().to_string()));
@@ -506,13 +642,49 @@ mod tests {
         assert!(agents.contains("# Demo App Agent Guide"));
         assert!(agents.contains("sdk/docs/foundation-cli.md"));
         assert!(!agents.contains("{{friendly_app_name}}"));
-        assert!(project_path.join("app-config.toml").exists());
         assert!(project_path.join("permission_templates.toml").exists());
         assert!(project_path.join("resources").join("icon.svg").exists());
+
+        // Supplied args flow all the way into the generated config.
+        let config = fs::read_to_string(project_path.join("app-config.toml")).unwrap();
+        assert!(config.contains(r#"app-name = "demo-app""#));
+        assert!(config.contains(r#"friendly-app-name = "Demo App""#));
+        assert!(config.contains(r#"description = "Demo app""#));
+        assert!(config.contains(r#"version = "0.1.0""#));
+        assert!(config.contains("0x00112233445566778899aabbccddeeff"));
     }
 
     #[test]
-    fn apply_template_keeps_sdk_path_variables_for_external_templates() {
+    fn create_project_rejects_invalid_app_ids_and_versions_from_flags() {
+        let (_sdk_dir, sdk_root) = make_sdk_root("reject-flags-sdk");
+        let sdk = SdkRoot::from_root(sdk_root).unwrap();
+
+        let cases = [
+            ("empty-app-id", NewArgs { app_id: Some(String::new()), ..sample_args("demo-app") }),
+            ("non-hex-app-id", NewArgs { app_id: Some("hello".to_string()), ..sample_args("demo-app") }),
+            ("short-app-id", NewArgs { app_id: Some("0xdeadbeef".to_string()), ..sample_args("demo-app") }),
+            (
+                "bad-version",
+                NewArgs { app_version: Some("not-a-version".to_string()), ..sample_args("demo-app") },
+            ),
+            (
+                "bad-min-keyos-version",
+                NewArgs { min_keyos_version: Some("banana".to_string()), ..sample_args("demo-app") },
+            ),
+        ];
+
+        for (label, args) in cases {
+            let parent_dir = make_temp_dir(label);
+            let parent = parent_dir.path();
+
+            assert!(create_project(&args, &sdk, parent).is_err(), "{label} was accepted");
+            // Validation runs before scaffolding, so a rejected run leaves nothing behind.
+            assert!(!parent.join("demo-app").exists(), "{label} left a project directory");
+        }
+    }
+
+    #[test]
+    fn create_project_keeps_sdk_path_variables_for_external_templates() {
         let (_sdk_dir, sdk_root) = make_sdk_root("compat-template-sdk");
         let template_dir =
             sdk_root.join("crates").join("cli").join("templates").join("compat-vars").join("files");
@@ -526,26 +698,12 @@ mod tests {
         let sdk = SdkRoot::from_root(sdk_root.clone()).unwrap();
         let project_root_dir = make_temp_dir("compat-scaffold-project");
         let project_root = project_root_dir.path();
+
+        let mut args = sample_args("demo-app");
+        args.template = Some("compat-vars".to_string());
+        create_project(&args, &sdk, project_root).unwrap();
+
         let project_path = project_root.join("demo-app");
-
-        fs::create_dir_all(&project_path).unwrap();
-        let config = PromptConfig {
-            name: "demo-app".to_string(),
-            friendly_app_name: "Demo App".to_string(),
-            launcher_app_name: "Demo".to_string(),
-            description: "Demo app".to_string(),
-            publisher_name: "Demo Publisher".to_string(),
-            contact_email: "support@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            icon: "resources/icon.svg".to_string(),
-            app_id: "0x00112233445566778899aabbccddeeff".to_string(),
-            version: "0.1.0".to_string(),
-            min_keyos_version: "1.0.0".to_string(),
-            selected_theme_id: "default_theme".to_string(),
-        };
-
-        apply_template(&project_path, "compat-vars", &config, &sdk).unwrap();
-
         let paths = fs::read_to_string(project_path.join("paths.txt")).unwrap();
         assert_eq!(
             paths,
@@ -562,7 +720,7 @@ mod tests {
 
     // Heavy integration test: scaffolds an app and `cargo check`s it against the
     // real SDK. Requires (1) generated base themes in ~/.foundation/themes/rust
-    // - `foundation themes build` or the helper below provides these - and (2) a
+    // (`foundation themes build` or the helper below provides these) and (2) a
     // nightly cargo (the SDK workspace uses the `trim-paths` feature). Ignored by
     // default because a nested `cargo test` under nix can't reliably self-provision
     // either precondition; run explicitly with `--ignored` in a provisioned env.
@@ -572,26 +730,10 @@ mod tests {
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         let project_root_dir = make_temp_dir("scaffold-compile");
         let project_root = project_root_dir.path();
-        let project_path = project_root.join("demo-app");
         let home = project_root.join("home");
 
-        fs::create_dir_all(&project_path).unwrap();
-        let config = PromptConfig {
-            name: "demo-app".to_string(),
-            friendly_app_name: "Demo App".to_string(),
-            launcher_app_name: "Demo".to_string(),
-            description: "Demo app".to_string(),
-            publisher_name: "Demo Publisher".to_string(),
-            contact_email: "support@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            icon: "resources/icon.svg".to_string(),
-            app_id: "0x00112233445566778899aabbccddeeff".to_string(),
-            version: "0.1.0".to_string(),
-            min_keyos_version: "1.0.0".to_string(),
-            selected_theme_id: "default_theme".to_string(),
-        };
-
-        apply_template(&project_path, "default-app", &config, &sdk).unwrap();
+        create_project(&sample_args("demo-app"), &sdk, project_root).unwrap();
+        let project_path = project_root.join("demo-app");
         prepare_project_for_build(&project_path, &sdk).unwrap();
 
         // The scaffolded app's build.rs resolves FOUNDATION_THEMES_RUST_DIR,
@@ -663,26 +805,12 @@ mod tests {
         let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         let project_root_dir = make_temp_dir("scaffold-multi-page-compile");
         let project_root = project_root_dir.path();
-        let project_path = project_root.join("demo-app");
         let home = project_root.join("home");
 
-        fs::create_dir_all(&project_path).unwrap();
-        let config = PromptConfig {
-            name: "demo-app".to_string(),
-            friendly_app_name: "Demo App".to_string(),
-            launcher_app_name: "Demo".to_string(),
-            description: "Demo app".to_string(),
-            publisher_name: "Demo Publisher".to_string(),
-            contact_email: "support@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            icon: "resources/icon.svg".to_string(),
-            app_id: "0x00112233445566778899aabbccddeeff".to_string(),
-            version: "0.1.0".to_string(),
-            min_keyos_version: "1.0.0".to_string(),
-            selected_theme_id: "default_theme".to_string(),
-        };
-
-        apply_template(&project_path, "multi-page-app", &config, &sdk).unwrap();
+        let mut args = sample_args("demo-app");
+        args.template = Some("multi-page-app".to_string());
+        create_project(&args, &sdk, project_root).unwrap();
+        let project_path = project_root.join("demo-app");
         prepare_project_for_build(&project_path, &sdk).unwrap();
 
         let theme_rs = fs::read_to_string(project_path.join("src").join("theme.rs")).unwrap();
@@ -740,6 +868,24 @@ mod tests {
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
+    fn sample_args(name: &str) -> NewArgs {
+        NewArgs {
+            name: name.to_string(),
+            template: Some("default-app".to_string()),
+            theme: Some("default_theme".to_string()),
+            friendly_name: Some("Demo App".to_string()),
+            launcher_name: Some("Demo".to_string()),
+            description: Some("Demo app".to_string()),
+            publisher_name: Some("Demo Publisher".to_string()),
+            contact_email: Some("support@example.com".to_string()),
+            support_url: Some("https://example.com".to_string()),
+            app_id: Some("0x00112233445566778899aabbccddeeff".to_string()),
+            app_version: Some("0.1.0".to_string()),
+            min_keyos_version: Some("1.0.0".to_string()),
+            no_git: true,
+        }
+    }
+
     fn make_sdk_root(label: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = make_temp_dir(label);
         let repo_root = dir.path();
@@ -756,6 +902,20 @@ mod tests {
                 &root.join("crates").join("cli").join("templates").join(template),
             );
         }
+
+        // create_project reads the built-in themes; seed the default one so
+        // theme lookup by id resolves.
+        let themes_dir = root.join("crates").join("foundation-themes").join("themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("foundation-themes")
+                .join("themes")
+                .join("default_theme.json"),
+            themes_dir.join("default_theme.json"),
+        )
+        .unwrap();
 
         (dir, root)
     }
@@ -775,25 +935,21 @@ mod tests {
     }
 }
 
-/// Generate a random 16-byte app ID in hex format
+/// Generate a 16-byte app ID as a `0x`-prefixed hex string. Derived from the
+/// nanosecond timestamp, not cryptographically random.
 fn generate_random_app_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // Use current time and a simple random approach to generate 16 bytes
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
 
-    // Generate 16 bytes using the timestamp and some simple manipulation
     let mut bytes = [0u8; 16];
     let now_bytes = now.to_le_bytes();
-
-    // Fill the first 8 bytes with timestamp
     bytes[..8].copy_from_slice(&now_bytes[..8]);
 
-    // Fill the remaining 8 bytes with a different transformation of timestamp
+    // Second half is a mix of the same timestamp, not fresh entropy.
     let now2 = now.wrapping_mul(0x123456789ABCDEF);
     let now2_bytes = now2.to_le_bytes();
     bytes[8..].copy_from_slice(&now2_bytes[..8]);
 
-    // Convert to hex string
     format!("0x{}", bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>())
 }

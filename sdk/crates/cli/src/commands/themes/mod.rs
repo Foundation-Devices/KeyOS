@@ -20,9 +20,53 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use clap::{Args, Subcommand};
 use foundation_core::{AppConfig, SdkRoot};
 
 const APP_THEME_ID: &str = "app_theme";
+
+#[derive(Args)]
+pub struct ThemesArgs {
+    #[command(subcommand)]
+    pub command: ThemesCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ThemesCommands {
+    /// Generate theme Rust from JSON
+    #[command(
+        long_about = "Seed base themes and compile every theme JSON in ~/.foundation/themes/json into Rust under ~/.foundation/themes/rust"
+    )]
+    Build,
+
+    /// List available themes
+    #[command(long_about = "List the theme JSON files in ~/.foundation/themes/json")]
+    List,
+
+    /// Create a new theme from a base
+    #[command(
+        long_about = "Copy a base theme to a new editable JSON in ~/.foundation/themes/json and regenerate Rust"
+    )]
+    New(ThemesNewArgs),
+}
+
+#[derive(Args)]
+pub struct ThemesNewArgs {
+    /// Name of the new theme
+    pub name: String,
+
+    /// Base theme to inherit from (default: default_theme)
+    #[arg(long, value_name = "BASE", default_value = "default_theme")]
+    pub from: String,
+}
+
+pub fn execute(args: &ThemesArgs) -> Result<()> {
+    match &args.command {
+        ThemesCommands::Build => execute_build(),
+        ThemesCommands::List => execute_list(),
+        ThemesCommands::New(args) => execute_new(&args.name, &args.from),
+    }
+}
 
 /// `~/.foundation/themes`
 fn themes_dir() -> Result<PathBuf> {
@@ -36,6 +80,17 @@ fn rust_dir() -> Result<PathBuf> { Ok(themes_dir()?.join("rust")) }
 /// Directory of the SDK's bundled base theme JSON.
 pub(crate) fn sdk_themes_dir(sdk: &SdkRoot) -> PathBuf {
     sdk.keyos_root().join("sdk").join("crates").join("foundation-themes").join("themes")
+}
+
+/// Theme JSON source directories in precedence order: the user cache (where
+/// `themes new` writes) then the SDK built-ins. The user dir may not exist yet.
+pub fn theme_source_dirs(sdk: &SdkRoot) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = json_dir() {
+        dirs.push(dir);
+    }
+    dirs.push(sdk_themes_dir(sdk));
+    dirs
 }
 
 /// Copy any base theme JSON the user doesn't already have into `~/.foundation/themes/json`.

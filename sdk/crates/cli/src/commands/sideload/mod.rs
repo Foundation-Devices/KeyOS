@@ -7,16 +7,30 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use clap::Args;
 use foundation_core::ProjectContext;
 use foundation_mcp::PassportDriveMcpClient;
 use foundation_ui::TerminalUI;
 
 use crate::assets::BUNDLED_ICON_FILE;
-use crate::commands::build;
+use crate::commands::build::{self, BuildArgs};
 
-pub fn execute(release: bool, no_run: bool) -> Result<()> {
+#[derive(Args)]
+pub struct SideloadArgs {
+    /// Build in release mode with optimizations before sideloading
+    #[arg(short, long)]
+    pub release: bool,
+
+    /// Upload the app bundle to the device but do not launch it afterward
+    #[arg(long)]
+    pub no_run: bool,
+}
+
+pub fn execute(args: &SideloadArgs) -> Result<()> {
+    let no_run = args.no_run;
+
     println!("Building and sideloading the application...");
-    build::execute(release)?;
+    build::execute(&BuildArgs { release: args.release })?;
 
     let project = ProjectContext::discover()?;
     let config = &project.config;

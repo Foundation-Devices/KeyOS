@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use clap::ArgMatches;
+use clap::Args;
 use foundation_core::SdkRoot;
 
 use crate::slint_codegen::{find_project_root, prepare_slint_file_for_view, project_sdk_ui_root};
@@ -15,10 +15,57 @@ use crate::slint_codegen::{find_project_root, prepare_slint_file_for_view, proje
 /// Default Slint file to preview
 const DEFAULT_SLINT_FILE: &str = "ui/app.slint";
 
+/// Arguments forwarded to foundation-slint-viewer, mirroring its own flags.
+#[derive(Args)]
+pub struct PreviewArgs {
+    /// Slint file to preview (defaults to ui/app.slint)
+    pub file: Option<String>,
+
+    /// Include path for other .slint files or images
+    #[arg(short = 'I')]
+    pub include_path: Vec<String>,
+
+    /// The style name ('native' or 'fluent')
+    #[arg(long)]
+    pub style: Option<String>,
+
+    /// The name of the component to view
+    #[arg(long)]
+    pub component: Option<String>,
+
+    /// The rendering backend
+    #[arg(long)]
+    pub backend: Option<String>,
+
+    /// Automatically watch the file system, and reload when it changes
+    #[arg(long)]
+    pub auto_reload: bool,
+
+    /// Load properties from a JSON file ('-' for stdin)
+    #[arg(long)]
+    pub load_data: Option<String>,
+
+    /// Store property values in a JSON file at exit ('-' for stdout)
+    #[arg(long)]
+    pub save_data: Option<String>,
+
+    /// Specify callback handler: <callback> <handler>
+    #[arg(long, num_args = 2, value_names = ["CALLBACK", "HANDLER"])]
+    pub on: Vec<String>,
+
+    /// Path to the i18n directory containing JSON translation files
+    #[arg(long)]
+    pub i18n_dir: Option<String>,
+
+    /// Set the locale for custom translations (e.g., 'en', 'es')
+    #[arg(long)]
+    pub locale: Option<String>,
+}
+
 /// Execute the preview command
-pub fn execute(matches: &ArgMatches) -> Result<()> {
+pub fn execute(args: &PreviewArgs) -> Result<()> {
     // Determine the file to preview
-    let slint_file = match matches.get_one::<String>("file").map(|s| s.as_str()) {
+    let slint_file = match args.file.as_deref() {
         Some(f) => PathBuf::from(f),
         None => {
             println!("Using default file: ui/app.slint");
@@ -71,39 +118,34 @@ pub fn execute(matches: &ArgMatches) -> Result<()> {
         }
     }
 
-    if let Some(values) = matches.get_many::<String>("include-path") {
-        for val in values {
-            cmd.arg("-I").arg(val);
-        }
+    for val in &args.include_path {
+        cmd.arg("-I").arg(val);
     }
-    if let Some(val) = matches.get_one::<String>("style") {
+    if let Some(val) = &args.style {
         cmd.arg("--style").arg(val);
     }
-    if let Some(val) = matches.get_one::<String>("component") {
+    if let Some(val) = &args.component {
         cmd.arg("--component").arg(val);
     }
-    if let Some(val) = matches.get_one::<String>("backend") {
+    if let Some(val) = &args.backend {
         cmd.arg("--backend").arg(val);
     }
-    if matches.get_flag("auto-reload") {
+    if args.auto_reload {
         cmd.arg("--auto-reload");
     }
-    if let Some(val) = matches.get_one::<String>("load-data") {
+    if let Some(val) = &args.load_data {
         cmd.arg("--load-data").arg(val);
     }
-    if let Some(val) = matches.get_one::<String>("save-data") {
+    if let Some(val) = &args.save_data {
         cmd.arg("--save-data").arg(val);
     }
-    if let Some(values) = matches.get_many::<String>("on") {
-        let vals: Vec<&String> = values.collect();
-        for pair in vals.chunks(2) {
-            cmd.arg("--on").arg(pair[0]).arg(pair[1]);
-        }
+    for pair in args.on.chunks(2) {
+        cmd.arg("--on").arg(&pair[0]).arg(&pair[1]);
     }
-    if let Some(val) = matches.get_one::<String>("i18n-dir") {
+    if let Some(val) = &args.i18n_dir {
         cmd.arg("--i18n-dir").arg(val);
     }
-    if let Some(val) = matches.get_one::<String>("locale") {
+    if let Some(val) = &args.locale {
         cmd.arg("--locale").arg(val);
     }
 

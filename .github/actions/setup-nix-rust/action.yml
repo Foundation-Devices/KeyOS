@@ -33,7 +33,10 @@ runs:
     - name: Setup nix
       uses: ./.github/actions/setup-nix
 
+    # The toolchain comes from fenix, so rustc's version -- which is what rust-cache
+    # keys on -- doesn't move when nixpkgs does. Without the lock hashes, a nixpkgs
+    # bump restores artifacts linked against store paths that no longer exist.
     - name: Setup rust cache
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ inputs.rust-cache-key }}
+        key: ${{ inputs.rust-cache-key }}-${{ hashFiles('flake.lock', 'sdk/flake.lock') }}

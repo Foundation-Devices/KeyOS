@@ -7,12 +7,19 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use clap::ArgMatches;
+use clap::Args;
 use foundation_core::SdkRoot;
 
 const LOG_VIEWER_NAMES: &[&str] = &["foundation-keyos-log-viewer", "keyos-log-viewer"];
 
-pub fn execute(matches: &ArgMatches) -> Result<()> {
+#[derive(Args)]
+pub struct LogsArgs {
+    /// Reconnect timeout in seconds before retrying USB discovery (default: 3)
+    #[arg(short, long, value_name = "SECONDS", default_value_t = 3)]
+    pub timeout: u64,
+}
+
+pub fn execute(args: &LogsArgs) -> Result<()> {
     let sdk = SdkRoot::discover().ok();
     let viewer = sdk
         .as_ref()
@@ -21,9 +28,7 @@ pub fn execute(matches: &ArgMatches) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("foundation-keyos-log-viewer not found. Make sure you're in the Foundation development environment or using an installed SDK bundle."))?;
 
     let mut cmd = Command::new(viewer);
-    if let Some(timeout) = matches.get_one::<u64>("timeout") {
-        cmd.arg("--timeout").arg(timeout.to_string());
-    }
+    cmd.arg("--timeout").arg(args.timeout.to_string());
 
     let status = cmd.status().context("Failed to start foundation-keyos-log-viewer")?;
     if !status.success() {

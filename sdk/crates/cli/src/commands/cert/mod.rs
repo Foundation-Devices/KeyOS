@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
+use clap::{Args, Subcommand};
 use foundation_core::{
     is_valid_identity_name, list_signing_identities, signing_identity_paths, signing_root_dir,
     ProjectContext, PublisherConfig, SigningIdentityPaths,
@@ -20,6 +21,70 @@ use serde::Serialize;
 use crate::signing_permissions::{
     ensure_signing_directory, repair_private_key_permissions, SigningDirectoryStatus,
 };
+#[derive(Args)]
+pub struct CertArgs {
+    #[command(subcommand)]
+    pub command: CertCommands,
+}
+
+#[derive(Subcommand)]
+pub enum CertCommands {
+    /// Generate signing keys and an X.509 publisher certificate
+    #[command(
+        long_about = "Generates a secp256k1 keypair, a self-signed X.509 code-signing certificate, and cosign2 configuration for Foundation app signing"
+    )]
+    Gen(CertGenArgs),
+
+    /// Print an X.509 publisher certificate
+    #[command(
+        long_about = "Uses OpenSSL to print the contents of a stored publisher certificate for inspection"
+    )]
+    Print(CertPrintArgs),
+
+    /// Install a publisher certificate on hardware
+    #[command(
+        long_about = "Installs a stored publisher certificate as a trusted publisher on a connected Passport Prime over usb-debug"
+    )]
+    Install(CertInstallArgs),
+}
+
+#[derive(Args)]
+pub struct CertGenArgs {
+    /// Name for the signing certificate and key files
+    pub name: Option<String>,
+
+    /// Publisher or company name to embed in the certificate
+    #[arg(long)]
+    pub publisher_name: Option<String>,
+
+    /// Contact email address to embed in the certificate
+    #[arg(long)]
+    pub contact_email: Option<String>,
+
+    /// Support website URL to embed in the certificate
+    #[arg(long)]
+    pub support_url: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CertPrintArgs {
+    /// Publisher identity name to print (defaults to the current app publisher when available)
+    pub name: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CertInstallArgs {
+    /// Publisher identity name to install (defaults to the current app publisher when available)
+    pub name: Option<String>,
+}
+
+pub fn execute(args: &CertArgs) -> Result<()> {
+    match &args.command {
+        CertCommands::Gen(args) => execute_gen(args),
+        CertCommands::Print(args) => execute_print(args),
+        CertCommands::Install(args) => execute_install(args),
+    }
+}
 
 /// Default certificate name when no project context is available.
 const DEFAULT_CERT_NAME: &str = "developer";
@@ -40,12 +105,12 @@ struct CertificateIdentity {
 }
 
 /// Execute `foundation cert gen`.
-pub fn execute_gen(
-    cert_name: Option<&str>,
-    publisher_name: Option<&str>,
-    contact_email: Option<&str>,
-    support_url: Option<&str>,
-) -> Result<()> {
+pub fn execute_gen(args: &CertGenArgs) -> Result<()> {
+    let cert_name = args.name.as_deref();
+    let publisher_name = args.publisher_name.as_deref();
+    let contact_email = args.contact_email.as_deref();
+    let support_url = args.support_url.as_deref();
+
     println!("Generating signing certificate...");
     println!();
 
@@ -142,7 +207,9 @@ pub fn execute_gen(
 }
 
 /// Execute `foundation cert print`.
-pub fn execute_print(cert_name: Option<&str>) -> Result<()> {
+pub fn execute_print(args: &CertPrintArgs) -> Result<()> {
+    let cert_name = args.name.as_deref();
+
     println!("Printing signing certificate...");
     println!();
 
@@ -170,7 +237,9 @@ pub fn execute_print(cert_name: Option<&str>) -> Result<()> {
 }
 
 /// Execute `foundation cert install`.
-pub fn execute_install(cert_name: Option<&str>) -> Result<()> {
+pub fn execute_install(args: &CertInstallArgs) -> Result<()> {
+    let cert_name = args.name.as_deref();
+
     println!("Installing signing certificate...");
     println!();
 

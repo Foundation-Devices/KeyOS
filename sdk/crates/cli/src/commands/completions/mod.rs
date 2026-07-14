@@ -8,16 +8,28 @@ use std::io;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::Command;
+use clap::{Args, Command, CommandFactory};
 use clap_complete::{generate, Shell};
 use foundation_plugins::install::PluginInstaller;
 
-/// Execute the completions command
-pub fn execute(shell: &str, install: bool) -> Result<()> {
-    // Parse shell type
-    let shell_type = parse_shell(shell)?;
+use crate::cli::Cli;
 
-    if install {
+#[derive(Args)]
+pub struct CompletionsArgs {
+    /// Shell type (bash, zsh, fish, powershell)
+    #[arg(value_parser = clap::builder::PossibleValuesParser::new(["bash", "zsh", "fish", "powershell"]))]
+    pub shell: String,
+
+    /// Install completions to the standard location for the shell
+    #[arg(long)]
+    pub install: bool,
+}
+
+/// Execute the completions command
+pub fn execute(args: &CompletionsArgs) -> Result<()> {
+    let shell_type = parse_shell(&args.shell)?;
+
+    if args.install {
         install_completions(shell_type)?;
     } else {
         generate_completions(shell_type)?;
@@ -42,7 +54,7 @@ fn generate_completions(shell: Shell) -> Result<()> {
     let shell_name = format!("{:?}", shell).to_lowercase();
     eprintln!("Generating shell completions for {}...", shell_name);
 
-    let mut cmd = crate::cli::build_cli();
+    let mut cmd = Cli::command();
     add_installed_plugin_subcommands(&mut cmd);
     generate(shell, &mut cmd, "foundation", &mut io::stdout());
 
@@ -69,7 +81,7 @@ fn install_completions(shell: Shell) -> Result<()> {
 
     // Generate completions to a string
     let mut buffer = Vec::new();
-    let mut cmd = crate::cli::build_cli();
+    let mut cmd = Cli::command();
     add_installed_plugin_subcommands(&mut cmd);
     generate(shell, &mut cmd, "foundation", &mut buffer);
 

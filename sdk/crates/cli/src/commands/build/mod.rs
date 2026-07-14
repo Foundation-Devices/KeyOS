@@ -10,11 +10,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use clap::Args;
 use foundation_core::{
     app_manifest_from_config, configured_signing_identities, is_valid_identity_name, signing_identity_paths,
     AppConfig, ProjectContext, SdkRoot, SigningIdentityPaths,
 };
 use foundation_ui::Prompts;
+
+#[derive(Args)]
+pub struct BuildArgs {
+    /// Build in release mode with optimizations
+    #[arg(short, long)]
+    pub release: bool,
+}
 
 use crate::assets::stage_hardware_assets;
 use crate::cargo_support::{emit_cargo_messages, emit_stderr_if_present, ensure_development_environment};
@@ -33,7 +41,9 @@ const TARGET_TRIPLE: &str = "armv7a-unknown-xous-elf";
 const RUSTFLAGS_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie -Zunstable-options";
 
 /// Execute the build command
-pub fn execute(release: bool) -> Result<()> {
+pub fn execute(args: &BuildArgs) -> Result<()> {
+    let release = args.release;
+
     println!("Building KeyOS application...");
 
     // Check nix environment

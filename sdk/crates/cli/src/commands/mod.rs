@@ -13,6 +13,7 @@ pub mod exit;
 pub mod install;
 pub mod logs;
 pub mod new;
+pub mod plugin;
 pub mod preview;
 pub mod search;
 pub mod sideload;
