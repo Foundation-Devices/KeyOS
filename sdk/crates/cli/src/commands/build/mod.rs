@@ -11,13 +11,16 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use foundation_core::{
-    app_manifest_from_config, configured_signing_identities, resolve_identity_cosign2_config, AppConfig,
-    ProjectContext, SdkRoot,
+    app_manifest_from_config, configured_signing_identities, is_valid_identity_name, signing_identity_paths,
+    AppConfig, ProjectContext, SdkRoot, SigningIdentityPaths,
 };
 use foundation_ui::Prompts;
 
 use crate::assets::stage_hardware_assets;
 use crate::cargo_support::{emit_cargo_messages, emit_stderr_if_present, ensure_development_environment};
+use crate::signing_permissions::{
+    ensure_signing_directory, repair_private_key_permissions, SigningDirectoryStatus,
+};
 use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
 
 /// Target triple for KeyOS hardware builds
@@ -111,9 +114,12 @@ pub fn execute(release: bool) -> Result<()> {
 fn get_cosign2_config(config: &AppConfig, project_root: &Path) -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not determine home directory")?;
 
-    let config_path = match &config.cosign2_config {
-        Some(path) => resolve_explicit_cosign2_config(path, project_root, &home),
-        None => resolve_signing_identity_config(config)?,
+    let (config_path, managed_identity) = match &config.cosign2_config {
+        Some(path) => (resolve_explicit_cosign2_config(path, project_root, &home), None),
+        None => {
+            let identity = resolve_signing_identity(config)?;
+            (identity.cosign2_config.clone(), Some(identity))
+        }
     };
 
     if !config_path.exists() {
@@ -121,6 +127,10 @@ fn get_cosign2_config(config: &AppConfig, project_root: &Path) -> Result<PathBuf
             "cosign2 config not found: {}. Run 'foundation cert gen' first.",
             config_path.display()
         );
+    }
+
+    if let Some(identity) = managed_identity {
+        harden_managed_signing_identity(&identity)?;
     }
 
     Ok(config_path)
@@ -139,18 +149,24 @@ fn resolve_explicit_cosign2_config(path: &str, project_root: &Path, home: &Path)
     }
 }
 
-fn resolve_signing_identity_config(config: &AppConfig) -> Result<PathBuf> {
+fn resolve_signing_identity(config: &AppConfig) -> Result<SigningIdentityPaths> {
     if let Some(identity_name) =
         config.signing_identity.as_deref().map(str::trim).filter(|value| !value.is_empty())
     {
-        return Ok(resolve_identity_cosign2_config(identity_name)?);
+        if !is_valid_identity_name(identity_name) {
+            anyhow::bail!(
+                "Invalid signing identity name '{}'. It cannot be empty or contain path separators.",
+                identity_name
+            );
+        }
+        return Ok(signing_identity_paths(identity_name)?);
     }
 
     let identities = configured_signing_identities()?;
 
     if let Some(publisher_name) = config.publisher.name_value() {
         if let Some(identity) = identities.iter().find(|identity| identity.identity_name == publisher_name) {
-            return Ok(identity.cosign2_config.clone());
+            return Ok(identity.clone());
         }
     }
 
@@ -158,12 +174,12 @@ fn resolve_signing_identity_config(config: &AppConfig) -> Result<PathBuf> {
         [] => anyhow::bail!(
             "No signing identity is configured. Run 'foundation cert gen' first, set 'signing-identity' in app-config.toml, or set 'cosign2-config' explicitly."
         ),
-        [identity] => Ok(identity.cosign2_config.clone()),
+        [identity] => Ok(identity.clone()),
         _ => prompt_for_signing_identity(&identities),
     }
 }
 
-fn prompt_for_signing_identity(identities: &[foundation_core::SigningIdentityPaths]) -> Result<PathBuf> {
+fn prompt_for_signing_identity(identities: &[SigningIdentityPaths]) -> Result<SigningIdentityPaths> {
     if !std::io::stderr().is_terminal() {
         anyhow::bail!(
             "Multiple signing identities are configured ({}), but this build is not running in an interactive terminal. Set 'signing-identity' or 'cosign2-config' in app-config.toml.",
@@ -179,7 +195,34 @@ fn prompt_for_signing_identity(identities: &[foundation_core::SigningIdentityPat
     let selection = Prompts::new()
         .select("Select a publisher signing identity", &options)
         .context("Failed to choose a signing identity")?;
-    Ok(identities[selection].cosign2_config.clone())
+    Ok(identities[selection].clone())
+}
+
+fn harden_managed_signing_identity(identity: &SigningIdentityPaths) -> Result<()> {
+    for directory in [identity.root.parent(), Some(identity.root.as_path())].into_iter().flatten() {
+        match ensure_signing_directory(directory)
+            .with_context(|| format!("Failed to secure signing directory: {}", directory.display()))?
+        {
+            SigningDirectoryStatus::Repaired => {
+                eprintln!(
+                    "Warning: removed group/world permissions from signing directory: {}",
+                    directory.display()
+                );
+            }
+            SigningDirectoryStatus::Created | SigningDirectoryStatus::Unchanged => {}
+        }
+    }
+
+    if repair_private_key_permissions(&identity.private_key).with_context(|| {
+        format!("Failed to secure private key permissions: {}", identity.private_key.display())
+    })? {
+        eprintln!(
+            "Warning: removed group/world permissions from private key: {}",
+            identity.private_key.display()
+        );
+    }
+
+    Ok(())
 }
 
 /// Run cargo build with appropriate flags
@@ -373,6 +416,31 @@ mod tests {
 
     use crate::cargo_support::{filter_cargo_stderr, rendered_compiler_message};
     use crate::test_support::make_temp_dir;
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_signing_identity_repairs_permissions_before_use() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root_dir = make_temp_dir("build-signing-permissions");
+        let root = root_dir.path();
+        let signing_root = root.join("signing");
+        let identity_root = signing_root.join("demo");
+        fs::create_dir_all(&identity_root).unwrap();
+        fs::set_permissions(&signing_root, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&identity_root, fs::Permissions::from_mode(0o775)).unwrap();
+
+        let identity = foundation_core::SigningIdentityPaths::new("demo", identity_root.clone());
+        fs::write(&identity.private_key, b"private key").unwrap();
+        fs::set_permissions(&identity.private_key, fs::Permissions::from_mode(0o644)).unwrap();
+
+        super::harden_managed_signing_identity(&identity).unwrap();
+
+        assert_eq!(fs::metadata(&signing_root).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&identity_root).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&identity.private_key).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn suppresses_sdk_dependency_warnings() {

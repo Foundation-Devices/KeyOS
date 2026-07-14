@@ -50,7 +50,18 @@ pub fn foundation_dir() -> Result<PathBuf, SigningError> {
 pub fn signing_root_dir() -> Result<PathBuf, SigningError> { Ok(foundation_dir()?.join(SIGNING_DIR_NAME)) }
 
 pub fn signing_identity_paths(identity_name: &str) -> Result<SigningIdentityPaths, SigningError> {
+    if !is_valid_identity_name(identity_name) {
+        return Err(SigningError::InvalidIdentityName(identity_name.to_string()));
+    }
     Ok(signing_identity_paths_in_root(identity_name, &signing_root_dir()?))
+}
+
+pub fn is_valid_identity_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    !trimmed.is_empty()
+        && trimmed != "."
+        && trimmed != ".."
+        && !trimmed.chars().any(|c| c == '/' || c == '\\' || c.is_control())
 }
 
 pub fn list_signing_identities() -> Result<Vec<SigningIdentityPaths>, SigningError> {
@@ -60,10 +71,6 @@ pub fn list_signing_identities() -> Result<Vec<SigningIdentityPaths>, SigningErr
 
 pub fn configured_signing_identities() -> Result<Vec<SigningIdentityPaths>, SigningError> {
     configured_signing_identities_in_root(&signing_root_dir()?)
-}
-
-pub fn resolve_identity_cosign2_config(identity_name: &str) -> Result<PathBuf, SigningError> {
-    resolve_identity_cosign2_config_in_root(identity_name, &signing_root_dir()?)
 }
 
 fn signing_identity_paths_in_root(identity_name: &str, signing_root: &Path) -> SigningIdentityPaths {
@@ -102,21 +109,6 @@ fn configured_signing_identities_in_root(root: &Path) -> Result<Vec<SigningIdent
         .collect())
 }
 
-fn resolve_identity_cosign2_config_in_root(
-    identity_name: &str,
-    signing_root: &Path,
-) -> Result<PathBuf, SigningError> {
-    let identity = signing_identity_paths_in_root(identity_name, signing_root);
-    if identity.cosign2_config.exists() {
-        Ok(identity.cosign2_config)
-    } else {
-        Err(SigningError::IdentityConfigMissing {
-            identity_name: identity_name.to_string(),
-            path: identity.cosign2_config,
-        })
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
     #[error("Could not determine home directory")]
@@ -125,8 +117,8 @@ pub enum SigningError {
     #[error("Failed to list signing identities under {path}: {source}")]
     ListFailed { path: PathBuf, source: std::io::Error },
 
-    #[error("No cosign2 configuration was found for signing identity '{identity_name}' at {path}")]
-    IdentityConfigMissing { identity_name: String, path: PathBuf },
+    #[error("Invalid signing identity name '{0}': names cannot be empty or contain path separators")]
+    InvalidIdentityName(String),
 }
 
 #[cfg(test)]
@@ -134,24 +126,16 @@ mod tests {
     use std::fs;
 
     use super::{
-        configured_signing_identities_in_root, resolve_identity_cosign2_config_in_root,
-        signing_identity_paths_in_root, COSIGN2_CONFIG_FILE, SIGNING_DIR_NAME,
+        configured_signing_identities_in_root, is_valid_identity_name, signing_identity_paths_in_root,
+        COSIGN2_CONFIG_FILE, SIGNING_DIR_NAME,
     };
 
     #[test]
-    fn resolves_named_identity_config() {
-        let root_dir = tempfile::tempdir().unwrap();
-        let root = root_dir.path();
-        let signing_root = root.join(SIGNING_DIR_NAME);
-        fs::create_dir_all(signing_root.join("demo-app")).unwrap();
-        fs::write(
-            signing_root.join("demo-app").join(COSIGN2_CONFIG_FILE),
-            "pubkey = \"abc\"\nsecret = \"/tmp/key\"\n",
-        )
-        .unwrap();
-
-        let resolved = resolve_identity_cosign2_config_in_root("demo-app", &signing_root).unwrap();
-        assert_eq!(resolved, signing_root.join("demo-app").join(COSIGN2_CONFIG_FILE));
+    fn validates_identity_names() {
+        assert!(is_valid_identity_name("demo-app"));
+        for invalid in ["", " ", ".", "..", "../outside", "/tmp/outside", r"..\outside", "bad\nname"] {
+            assert!(!is_valid_identity_name(invalid), "accepted invalid identity name: {invalid:?}");
+        }
     }
 
     #[test]

@@ -10,11 +10,16 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use foundation_core::{
-    list_signing_identities, signing_identity_paths, ProjectContext, PublisherConfig, SigningIdentityPaths,
+    is_valid_identity_name, list_signing_identities, signing_identity_paths, signing_root_dir,
+    ProjectContext, PublisherConfig, SigningIdentityPaths,
 };
 use foundation_mcp::PassportDriveMcpClient;
 use foundation_ui::Prompts;
 use serde::Serialize;
+
+use crate::signing_permissions::{
+    ensure_signing_directory, repair_private_key_permissions, SigningDirectoryStatus,
+};
 
 /// Default certificate name when no project context is available.
 const DEFAULT_CERT_NAME: &str = "developer";
@@ -69,8 +74,18 @@ pub fn execute_gen(
         support_url,
     )?;
 
+    let signing_root = signing_root_dir()?;
+    ensure_directory(&signing_root)?;
     let identity_paths = signing_identity_paths(&cert_name)?;
     ensure_directory(&identity_paths.root)?;
+    if repair_private_key_permissions(&identity_paths.private_key).with_context(|| {
+        format!("Failed to secure private key permissions: {}", identity_paths.private_key.display())
+    })? {
+        println!(
+            "  {STATUS_WARN} Removed group/world permissions from private key: {}",
+            identity_paths.private_key.display()
+        );
+    }
 
     if [
         identity_paths.private_key.as_path(),
@@ -321,12 +336,18 @@ fn certificate_len_for_install(certificate_path: &Path) -> Result<u64> {
 }
 
 fn ensure_directory(path: &Path) -> Result<()> {
-    if !path.exists() {
-        fs::create_dir_all(path)
-            .with_context(|| format!("Failed to create directory: {}", path.display()))?;
-        println!("  {STATUS_OK} {}", format!("Created {}", path.display()));
-    } else {
-        println!("  {STATUS_OK} {}", "Signing directory exists");
+    match ensure_signing_directory(path)
+        .with_context(|| format!("Failed to secure signing directory: {}", path.display()))?
+    {
+        SigningDirectoryStatus::Created => {
+            println!("  {STATUS_OK} Created {}", path.display());
+        }
+        SigningDirectoryStatus::Repaired => {
+            println!("  {STATUS_WARN} Removed group/world permissions from directory: {}", path.display());
+        }
+        SigningDirectoryStatus::Unchanged => {
+            println!("  {STATUS_OK} Signing directory exists");
+        }
     }
     Ok(())
 }
@@ -387,14 +408,6 @@ fn validate_email(value: &str) -> bool {
 fn validate_support_url(value: &str) -> bool {
     let trimmed = value.trim();
     trimmed.starts_with("https://") || trimmed.starts_with("http://")
-}
-
-fn is_valid_identity_name(name: &str) -> bool {
-    let trimmed = name.trim();
-    !trimmed.is_empty()
-        && trimmed != "."
-        && trimmed != ".."
-        && !trimmed.chars().any(|c| c == '/' || c == '\\' || c.is_control())
 }
 
 fn is_openssl_available() -> bool {
@@ -585,6 +598,23 @@ mod tests {
             error.to_string(),
             "Invalid publisher identity name 'invalid/name'. It cannot be empty or contain path separators."
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_private_key_uses_restrictive_permissions() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root_dir = make_temp_dir("cert-new-key-permissions");
+        let root = root_dir.path();
+        let key_path = root.join("private.pem");
+
+        super::write_private_key(&key_path, b"new key").unwrap();
+
+        let mode = fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(fs::read(&key_path).unwrap(), b"new key");
     }
 
     #[cfg(unix)]

@@ -21,6 +21,6 @@ pub use errors::{FoundationCoreError, FoundationCoreResult};
 pub use manifest::{app_manifest_from_config, AppManifest};
 pub use sdk::{SdkError, SdkLayout, SdkRoot};
 pub use signing::{
-    configured_signing_identities, foundation_dir, list_signing_identities, resolve_identity_cosign2_config,
+    configured_signing_identities, foundation_dir, is_valid_identity_name, list_signing_identities,
     signing_identity_paths, signing_root_dir, SigningError, SigningIdentityPaths, COSIGN2_CONFIG_FILE,
 };
