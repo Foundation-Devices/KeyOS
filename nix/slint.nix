@@ -45,12 +45,14 @@ in {
     ];
     buildInputs =
       builtins.filter (
-        drv: !(pkgs.lib.hasPrefix "qt" (drv.pname or drv.name))
+        # Nixpkgs' slint-viewer buildInputs carries a null entry on some platforms
+        # (e.g. aarch64-darwin); drop it before touching `.pname`/`.name`.
+        drv: drv != null && !(pkgs.lib.hasPrefix "qt" (drv.pname or drv.name))
       )
       old.buildInputs;
     nativeBuildInputs =
       builtins.filter (
-        drv: !(pkgs.lib.hasPrefix "wrap-qt" (drv.pname or drv.name))
+        drv: drv != null && !(pkgs.lib.hasPrefix "wrap-qt" (drv.pname or drv.name))
       )
       old.nativeBuildInputs;
 
