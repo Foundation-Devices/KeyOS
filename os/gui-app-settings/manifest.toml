@@ -74,6 +74,7 @@ template = ["gui-app", "fs-generic"]
     "SubscribeDeveloperMode",
     "GetLocale",
     "GetPrimeColor",
+    "GetBoardRevision",
     "GetOnboardingStatus",
     "SubscribeMagicBackupEnabled",
 ]

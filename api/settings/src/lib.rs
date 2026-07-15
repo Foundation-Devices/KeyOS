@@ -3,7 +3,9 @@
 
 //! Settings server API for reading, writing, and subscribing to settings.
 
-pub use types::inner as global;
+pub mod global {
+    pub use crate::types::{inner::*, BoardRevision};
+}
 
 mod macros;
 pub mod messages;
@@ -37,6 +39,14 @@ pub struct SettingsApi<P: CheckedPermissions> {
 }
 
 impl<P: CheckedPermissions> SettingsApi<P> {
+    /// Returns the device's hardware board revision.
+    pub fn get_board_revision(&self) -> global::BoardRevision
+    where
+        P: MessageAllowed<GetBoardRevision>,
+    {
+        self.conn.send_blocking_scalar(GetBoardRevision)
+    }
+
     pub fn get_prime_color(&self) -> global::SystemTheme
     where
         P: MessageAllowed<GetPrimeColor>,

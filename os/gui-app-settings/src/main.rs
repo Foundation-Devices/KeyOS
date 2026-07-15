@@ -31,7 +31,10 @@ use slint_keyos_platform::{
     },
     navigation::select_file,
     navigation::verify_pin,
-    settings::{self, global::SystemTheme},
+    settings::{
+        self,
+        global::{BoardRevision, SystemTheme},
+    },
     slint::{Image, ModelRc, SharedString, Timer, TimerMode, VecModel},
     spawn_local, spawn_worker, subscribe_archive, subscribe_scalar, timeout, StoredValue, TaskHandle,
 };
@@ -882,6 +885,12 @@ fn setup_about_global(state: StoredValue<AppState>) {
     let mut state = state.borrow_mut();
     let ui = state.ui();
     let globals = ui.global::<AboutGlobal>();
+
+    let board_revision = match state.settings.get_board_revision() {
+        BoardRevision::D1 => "D1",
+        BoardRevision::D6 => "D6",
+    };
+    globals.set_board_revision(board_revision.into());
 
     let Ok(version_info) = state.security.os_version_info() else {
         return;

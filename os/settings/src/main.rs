@@ -101,6 +101,17 @@ impl server::BlockingScalarHandler<GetPrimeColor> for Server {
     }
 }
 
+impl server::BlockingScalarHandler<GetBoardRevision> for Server {
+    fn handle(
+        &mut self,
+        _msg: GetBoardRevision,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) -> <GetBoardRevision as server::BlockingScalar>::Response {
+        crate::sys::load_board_revision()
+    }
+}
+
 impl server::ScalarEventHandler<fs::FileSystemEvent> for Server {
     fn handle(
         &mut self,

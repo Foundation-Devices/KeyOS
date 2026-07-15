@@ -66,3 +66,4 @@ SubscribeUsbEnabled = { id = 73, type = "scalarEvent", permissionGroup = "settin
 GetDeveloperMode = { id = 74, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
 SetDeveloperMode = { id = 75, type = "scalar", approval = "autoAllow" }
 SubscribeDeveloperMode = { id = 76, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetBoardRevision = { id = 77, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }

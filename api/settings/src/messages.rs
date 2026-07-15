@@ -5,6 +5,10 @@ use super::*;
 pub use crate::types::messages::*;
 
 #[derive(Debug, server::Message)]
+#[response(global::BoardRevision)]
+pub struct GetBoardRevision;
+
+#[derive(Debug, server::Message)]
 #[response(global::SystemTheme)]
 pub struct GetPrimeColor;
 

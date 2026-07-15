@@ -123,6 +123,38 @@ impl LoadDefault for settings::global::DeveloperMode {
     fn load_default() -> Self { Self(!cfg!(feature = "production")) }
 }
 
+pub(crate) fn load_board_revision() -> settings::global::BoardRevision {
+    use std::sync::OnceLock;
+    static REVISION: OnceLock<settings::global::BoardRevision> = OnceLock::new();
+
+    *REVISION.get_or_init(|| {
+        #[cfg(keyos)]
+        {
+            let Ok(sfc_mem) = xous::map_memory(
+                xous::MemoryAddress::new(utralib::HW_SFC_BASE),
+                None,
+                0x1000,
+                xous::MemoryFlags::W | xous::MemoryFlags::DEV,
+            ) else {
+                return settings::global::BoardRevision::D6;
+            };
+
+            let sfc = atsama5d27::sfc::Sfc::with_alt_base_addr(sfc_mem.as_ptr() as u32);
+            let revision = match fuse::get_board_revision(&sfc) {
+                fuse::BoardRevision::RevD1 => settings::global::BoardRevision::D1,
+                fuse::BoardRevision::RevD6 => settings::global::BoardRevision::D6,
+            };
+            xous::unmap_memory(sfc_mem).expect("unmap SFC memory");
+            revision
+        }
+
+        #[cfg(not(keyos))]
+        {
+            settings::global::BoardRevision::D6
+        }
+    })
+}
+
 pub(crate) fn load_prime_color() -> settings::global::SystemTheme {
     use std::sync::OnceLock;
     static COLOR: OnceLock<settings::global::SystemTheme> = OnceLock::new();

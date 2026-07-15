@@ -71,6 +71,15 @@ export component AboutPage inherits BasePage {
                             HLine { }
 
                             MenuItemLayout {
+                                label: TR2.lookup(TrId.AboutBoardRevision);
+                                ItemTextPreview {
+                                    text: AboutGlobal.board-revision;
+                                }
+                            }
+
+                            HLine { }
+
+                            MenuItemLayout {
                                 label: TR2.lookup(TrId.AboutMasterFingerprint);
                                 ItemTextPreview {
                                     text: AboutGlobal.master-fingerprint;

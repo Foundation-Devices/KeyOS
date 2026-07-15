@@ -14,6 +14,25 @@ use server::{AsScalar, FromScalar};
 
 use crate::macros::*;
 
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, FromPrimitive, ToPrimitive,
+)]
+pub enum BoardRevision {
+    /// Board revision D1.
+    D1,
+
+    /// Board revision D6.
+    D6,
+}
+
+impl FromScalar<1> for BoardRevision {
+    fn from_scalar(value: [u32; 1]) -> Self { Self::from_u32(value[0]).unwrap() }
+}
+
+impl AsScalar<1> for BoardRevision {
+    fn as_scalar(&self) -> [u32; 1] { [self.to_u32().unwrap()] }
+}
+
 create_modules! {
     SystemTheme,
     ScreenBrightness,

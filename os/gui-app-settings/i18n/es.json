@@ -1,6 +1,7 @@
 {
   "about.bleBootloader": "BLE Bootloader",
   "about.bleFirmware": "BLE Firmware",
+  "about.boardRevision": "Board Revision",
   "about.bootloader": "Bootloader",
   "about.device": "Device",
   "about.keyOs": "KeyOS",
