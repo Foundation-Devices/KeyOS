@@ -117,6 +117,33 @@ pub(crate) struct RunningAppInfo {
     pub(crate) launched_by: PID,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct AppRegistryDiff {
+    pub(crate) installed: Vec<AppId>,
+    pub(crate) removed: Vec<AppId>,
+}
+
+impl AppRegistryDiff {
+    /// Diff the previous and current scan results. Ids are sorted by their byte value so event
+    /// emission order is stable across runs instead of following `HashMap`'s iteration order.
+    fn new(before: &HashMap<AppId, AppInfo>, after: &HashMap<AppId, AppInfo>) -> Self {
+        let mut installed: Vec<AppId> = after
+            .iter()
+            .filter(|(id, info)| match before.get(id) {
+                None => true,
+                Some(previous) => previous.manifest_bytes != info.manifest_bytes,
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        let mut removed: Vec<AppId> = before.keys().filter(|id| !after.contains_key(id)).copied().collect();
+
+        installed.sort_by_key(|id| id.0);
+        removed.sort_by_key(|id| id.0);
+
+        Self { installed, removed }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct AppRegistry {
     installed_apps: HashMap<AppId, AppInfo>,
@@ -124,7 +151,7 @@ pub(crate) struct AppRegistry {
 }
 
 impl AppRegistry {
-    pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<ServerPermissionCache> {
+    pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<(ServerPermissionCache, AppRegistryDiff)> {
         let mut installed_apps = HashMap::new();
 
         // Build the per-server cache as we scan. Adding a manifest also detects server-name
@@ -149,10 +176,12 @@ impl AppRegistry {
             false,
         );
 
+        let diff = AppRegistryDiff::new(&self.installed_apps, &installed_apps);
+
         self.installed_apps = installed_apps;
         log::info!("scan_installed_apps: registry tracks {} installed apps", self.installed_apps.len());
 
-        Ok(cache)
+        Ok((cache, diff))
     }
 
     /// Read every app bundle under `apps_dir` (a `Location::System` path) through
@@ -1237,5 +1266,73 @@ mod tests {
         let mut rules = vec![make_rule("empty", BTreeMap::new())];
         prune_qr_match_rules(&mut rules, &qr_app_id());
         assert!(rules.is_empty(), "empty-sub-rules rule should be dropped");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // AppRegistryDiff tests.
+    // ---------------------------------------------------------------------------------------------
+
+    const OTHER_APP_ID: &str = "0x426974636f696e2057616c6c65740000";
+
+    fn as_map(apps: Vec<AppInfo>) -> HashMap<AppId, AppInfo> {
+        apps.into_iter().map(|app| (app.id, app)).collect()
+    }
+
+    #[test]
+    fn diff_reports_new_and_removed_apps() {
+        let before = as_map(vec![app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH))]);
+        let after = as_map(vec![built_in_app_info(OTHER_APP_ID, "Bitcoin Wallet", None)]);
+
+        let diff = AppRegistryDiff::new(&before, &after);
+
+        assert_eq!(diff.installed, vec![decode_app_id_str(OTHER_APP_ID).unwrap()]);
+        assert_eq!(diff.removed, vec![decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()]);
+    }
+
+    #[test]
+    fn diff_ignores_an_id_with_an_unchanged_manifest() {
+        let app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        let before = as_map(vec![app.clone()]);
+        let after = as_map(vec![app]);
+
+        let diff = AppRegistryDiff::new(&before, &after);
+
+        assert!(diff.installed.is_empty());
+        assert!(diff.removed.is_empty());
+    }
+
+    /// A sideload that overwrites an existing bundle in place (an app update) keeps the same app
+    /// id in both scans; only the manifest content changes. Subscribers still need to hear about
+    /// it, so it must surface as `installed`, not be treated as unchanged.
+    #[test]
+    fn diff_reports_a_same_id_manifest_change_as_installed() {
+        let mut before_app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        before_app.manifest_bytes = b"v1".to_vec();
+        let mut after_app = before_app.clone();
+        after_app.manifest_bytes = b"v2".to_vec();
+
+        let before = as_map(vec![before_app]);
+        let after = as_map(vec![after_app]);
+
+        let diff = AppRegistryDiff::new(&before, &after);
+
+        assert_eq!(diff.installed, vec![decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()]);
+        assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn diff_orders_ids_by_byte_value_regardless_of_hashmap_iteration_order() {
+        let before = HashMap::new();
+        let after = as_map(vec![
+            built_in_app_info(OTHER_APP_ID, "Bitcoin Wallet", None),
+            app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH)),
+        ]);
+
+        let diff = AppRegistryDiff::new(&before, &after);
+
+        let mut expected =
+            vec![decode_app_id_str(OTHER_APP_ID).unwrap(), decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()];
+        expected.sort_by_key(|id| id.0);
+        assert_eq!(diff.installed, expected);
     }
 }

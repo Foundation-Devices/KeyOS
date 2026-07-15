@@ -52,6 +52,19 @@ pub enum AppEvent {
         app_id: AppId,
         error: LaunchError,
     },
+
+    /// A rescan (triggered by `RefreshInstalledApps` or `RemoveInstalledApp`) added, removed, or
+    /// updated apps
+    ///
+    /// `installed`: covers both app ids that weren't in the registry before and app
+    /// ids that were already registered but whose manifest changed
+    /// `removed` covers app ids no longer found
+    AppSetChanged {
+        #[rkyv(with = rkyv::with::Map<WithAppId>)]
+        installed: Vec<AppId>,
+        #[rkyv(with = rkyv::with::Map<WithAppId>)]
+        removed: Vec<AppId>,
+    },
 }
 
 #[derive(Debug, server::Message)]

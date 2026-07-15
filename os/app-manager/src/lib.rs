@@ -337,11 +337,12 @@ impl Server for AppManagerServer {
 impl AppManagerServer {
     pub fn new() -> anyhow::Result<Self> { Ok(Self::default()) }
 
-    /// Rescan installed apps and install the per-server permission cache the scan built, so the
-    /// cache never lags the installed app set.
+    /// Rescan installed apps, install the per-server permission cache the scan built so it never
+    /// lags the installed app set, and notify subscribers of any app the scan added or dropped
     fn rescan_and_cache(&mut self) -> anyhow::Result<()> {
-        let cache = self.app_registry.scan_installed_apps()?;
+        let (cache, diff) = self.app_registry.scan_installed_apps()?;
         self.permission_grants.set_server_cache(cache);
+        self.notify_app_set_changed(diff);
         Ok(())
     }
 }
@@ -490,6 +491,19 @@ impl AppManagerServer {
     fn notify_app_launched(&mut self, app_id: AppId, pid: PID, sender: PID) {
         debug!("Notifying app launch for app ID: 0x{app_id}");
         let event = AppEvent::AppLaunched { app_id, pid, launched_by: sender };
+        self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
+    }
+
+    fn notify_app_set_changed(&mut self, diff: registry::AppRegistryDiff) {
+        if diff.installed.is_empty() && diff.removed.is_empty() {
+            return;
+        }
+        debug!(
+            "Notifying app set changed: {} installed, {} removed",
+            diff.installed.len(),
+            diff.removed.len()
+        );
+        let event = AppEvent::AppSetChanged { installed: diff.installed, removed: diff.removed };
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 
