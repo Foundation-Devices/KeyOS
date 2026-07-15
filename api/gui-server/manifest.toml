@@ -32,6 +32,7 @@ RunApp = { id = 57, type = "blockingArchive" }
 UpdateKioskPolicy = { id = 58, type = "scalar", approval = "autoAllow" }
 IsLocked = { id = 59, type = "blockingScalar" }
 InjectPowerButton = { id = 60, type = "scalar" }
+SetControlCenterColor = { id = 61, type = "scalar", permissionGroup = "ui-and-input.control-center-appearance", approval = "autoAllow" }
 
 # Privileged registrations
 ClaimAlertsRole = { id = 120, type = "blockingScalar", approval = "autoAllow" }

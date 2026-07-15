@@ -95,8 +95,11 @@ export component ControlCenter inherits VerticalLayout {
     in property <int> battery: 75;
     in property <bool> is-charging;
 
-    property <brush> content-color: Palette.content-primary;
-    property <brush> bg-color: Palette.background-primary;
+    in property <bool> use-custom-colors: false;
+    in property <color> custom-background-color: black;
+    in property <color> custom-content-color: white;
+    property <brush> content-color: use-custom-colors ? custom-content-color : Palette.content-primary;
+    property <brush> bg-color: use-custom-colors ? custom-background-color : Palette.background-primary;
 
     in property <string> time;
     in property <string> day-of-week;
@@ -188,6 +191,8 @@ export component ControlCenter inherits VerticalLayout {
                             is-charging: is-charging;
                             bg-color: bg-color;
                             fill-color: content-color;
+                            charging-color: use-custom-colors ? content-color : DarkPalette.content-brand;
+                            charging-icon-color: use-custom-colors ? bg-color : content-color;
                             percentage: battery;
                         }
                     }

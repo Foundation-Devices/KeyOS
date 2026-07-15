@@ -47,7 +47,7 @@ use {
     gui_server_api::{
         consts::{CONTROL_CENTER_HEIGHT_EXPANDED_PX, DEFAULT_KEYBOARD_HEIGHT, SCREEN_HEIGHT, SCREEN_WIDTH},
         msg::*,
-        AppName, GuiServerError, InputMessage, RegisterApp,
+        AppName, ControlCenterColor, GuiServerError, InputMessage, RegisterApp,
     },
     log::{debug, error, warn},
     server::{ArchiveRequest, MessageId as _, Server, ServerContext},
@@ -93,6 +93,7 @@ const REBOOTING_BITMAP: &[u8; REBOOTING_BITMAP_H * REBOOTING_BITMAP_W] =
 #[derive(Debug)]
 pub struct AppWindow {
     name: AppName,
+    control_center_color: Option<ControlCenterColor>,
     close_state: AppCloseState,
     last_active: Instant,
     input_cid: CID,
@@ -403,6 +404,7 @@ impl Gui {
             pid,
             AppWindow {
                 name: msg.name.clone(),
+                control_center_color: None,
                 close_state: AppCloseState::Running,
                 last_active: Instant::now(),
                 blur_state: BlurBufferState::default(),
@@ -447,6 +449,7 @@ impl Gui {
             return Err(GuiServerError::InternalError);
         }
         self.control_center_window = Some(ControlCenterWindow::new(cid, pid)?);
+        self.notify_control_center_color();
         Ok(())
     }
 
@@ -1098,6 +1101,7 @@ impl Gui {
         log::debug!("Changing state to: {new_state:?}");
 
         self.state = new_state;
+        self.notify_control_center_color();
         self.update_keyboard_window();
         #[cfg(not(feature = "recovery-os"))]
         self.update_camera_window();

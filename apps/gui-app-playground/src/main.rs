@@ -14,7 +14,10 @@ use quantum_link::messages::StartRestoreMagicBackup;
 use rgb_led::RgbColor;
 use slint_keyos_platform::{
     app, async_archive, fs,
-    gui_server_api::navigation::filepicker::{Location, SelectFileOptions},
+    gui_server_api::{
+        navigation::filepicker::{Location, SelectFileOptions},
+        ControlCenterColor,
+    },
     navigation::select_file,
     sleep, spawn_local, StoredValue,
 };
@@ -34,7 +37,7 @@ use quantum_link_permissions::QuantumLinkPermissions;
 
 use crate::bt_permissions::BluetoothPermissions;
 
-fn app_main(_cx: AppContext, ui: AppWindow) {
+fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
     log::info!("Starting Developer Playground");
@@ -78,6 +81,26 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         let color = RgbColor::new(r as u8, g as u8, b as u8);
         rgb_api.set_to(led as u32, color);
     });
+
+    ui.global::<Callbacks>().on_set_control_center_color({
+        let gui = cx.gui.clone();
+        move |r, g, b| {
+            let color = ControlCenterColor::new(r as u8, g as u8, b as u8);
+            if let Err(error) = gui.set_control_center_color(Some(color)) {
+                log::error!("Failed to set Control Center color: {error:?}");
+            }
+        }
+    });
+
+    ui.global::<Callbacks>().on_reset_control_center_color({
+        let gui = cx.gui.clone();
+        move || {
+            if let Err(error) = gui.set_control_center_color(None) {
+                log::error!("Failed to reset Control Center color: {error:?}");
+            }
+        }
+    });
+
     let weak_ui = ui.as_weak();
     ui.global::<Callbacks>().on_start_keycard_formatter(move || {
         log::info!("Starting Keycard Formatter");

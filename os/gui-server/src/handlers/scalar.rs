@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gui_server_api::msg::{
-    AnimateNextFrame, CloseApp, IsLocked, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher,
-    UpdateKioskPolicy,
+    AnimateNextFrame, CloseApp, IsLocked, RequestRedraw, SetControlCenterColor, Shutdown, SwitchTo,
+    SwitchToLauncher, UpdateKioskPolicy,
 };
 use log::{error, info, warn};
 use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
@@ -115,6 +115,23 @@ impl ScalarHandler<RequestRedraw> for Gui {
         } else {
             log::error!("RequestRedraw from unknown PID={sender}");
         }
+    }
+}
+
+impl ScalarHandler<SetControlCenterColor> for Gui {
+    fn handle(
+        &mut self,
+        SetControlCenterColor { color }: SetControlCenterColor,
+        sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        let Some(window) = self.windows.get_mut(&sender) else {
+            warn!("Ignoring Control Center color update from unknown PID={sender}");
+            return;
+        };
+
+        window.control_center_color = color;
+        self.notify_control_center_color();
     }
 }
 

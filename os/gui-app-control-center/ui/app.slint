@@ -21,6 +21,9 @@ export component AppWindow inherits Window {
     in property <int> control_center_battery <=> control_center.battery;
     in property <bool> control_center_is_charging <=> control_center.is-charging;
     in property <bool> control_center_is_expanded <=> control_center.is-expanded;
+    in property <bool> control_center_use_custom_colors <=> control_center.use-custom-colors;
+    in property <color> control_center_custom_background_color <=> control_center.custom-background-color;
+    in property <color> control_center_custom_content_color <=> control_center.custom-content-color;
 
     in property <string> control_center_time <=> control-center.time;
     in property <string> control_center_day_of_week <=> control-center.day-of-week;

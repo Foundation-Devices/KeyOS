@@ -7,6 +7,7 @@ import {
     HeadingLg,
     HeadingSm,
     BasePage,
+    Button,
     IconButton,
     TextMd,
 } from "@ui/widgets.slint";
@@ -161,7 +162,7 @@ export component LedPagePage inherits BasePage {
                 }
 
                 HeadingLg {
-                    text: "LED Control";
+                    text: "Color Control";
                     vertical-alignment: center;
                 }
             }
@@ -261,6 +262,26 @@ export component LedPagePage inherits BasePage {
             }
             released() => {
                 update-leds();
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Size.sz3;
+
+            Button {
+                label: "Apply to Control Center";
+                importance: primary;
+                clicked => {
+                    Callbacks.set-control-center-color(red, green, blue);
+                }
+            }
+
+            Button {
+                label: "Use system color";
+                importance: secondary;
+                clicked => {
+                    Callbacks.reset-control-center-color();
+                }
             }
         }
 

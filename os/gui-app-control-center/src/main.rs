@@ -9,7 +9,7 @@ use log::trace;
 use slint_keyos_platform::{
     app,
     gui_server_api::InputMessage,
-    slint::{ComponentHandle, Timer, TimerMode},
+    slint::{Color, ComponentHandle, Timer, TimerMode},
     spawn_local, subscribe_scalar, StoredValue,
 };
 use state::AppState;
@@ -50,7 +50,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     cx.set_input_handler(move |mut input| {
         let state = state.borrow();
         match input.msg {
-            InputMessage::Custom1 => {}
+            InputMessage::Custom1 => {
+                handle_control_center_color(&mut input.envelope, &state);
+            }
             InputMessage::Custom2 => {}
             InputMessage::Custom3 => {
                 handle_is_expanded(&mut input.envelope, &state);
@@ -305,6 +307,43 @@ fn handle_is_expanded(msg: &mut MessageEnvelope, state: &AppState) {
         }
 
         ui.set_control_center_is_expanded(is_expanded);
+    }
+}
+
+fn handle_control_center_color(msg: &mut MessageEnvelope, state: &AppState) {
+    if let Some(xous::ScalarMessage { arg1, arg2, arg3, arg4, .. }) = msg.body.scalar_message() {
+        let use_custom_colors = *arg1 != 0;
+        if use_custom_colors {
+            let background = Color::from_rgb_u8(*arg2 as u8, *arg3 as u8, *arg4 as u8);
+            state.ui.set_control_center_custom_background_color(background);
+            state.ui.set_control_center_custom_content_color(contrasting_content_color(background));
+        }
+        state.ui.set_control_center_use_custom_colors(use_custom_colors);
+    }
+}
+
+/// Chooses whichever of black or white has the higher contrast ratio
+/// against the requested background
+fn contrasting_content_color(background: Color) -> Color {
+    fn linear_component(component: u8) -> f64 {
+        let component = f64::from(component) / 255.0;
+        if component <= 0.04045 {
+            component / 12.92
+        } else {
+            ((component + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    let luminance = 0.2126 * linear_component(background.red())
+        + 0.7152 * linear_component(background.green())
+        + 0.0722 * linear_component(background.blue());
+    let contrast_with_black = (luminance + 0.05) / 0.05;
+    let contrast_with_white = 1.05 / (luminance + 0.05);
+
+    if contrast_with_white > contrast_with_black {
+        Color::from_rgb_u8(255, 255, 255)
+    } else {
+        Color::from_rgb_u8(0, 0, 0)
     }
 }
 

@@ -39,6 +39,19 @@ macro_rules! use_api {
 
 pub type AppName = String;
 
+/// An RGB background color requested by an app for the collapsed Control Center.
+/// The Control Center chooses the foreground color; apps cannot control it.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ControlCenterColor {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+}
+
+impl ControlCenterColor {
+    pub const fn new(red: u8, green: u8, blue: u8) -> Self { Self { red, green, blue } }
+}
+
 #[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct RegisterApp {
     pub cid: CID,
@@ -192,6 +205,18 @@ impl<P: CheckedPermissions> GuiApi<P> {
             height,
         }))?;
         Ok(api)
+    }
+
+    /// Requests a background color for the collapsed Control Center while this
+    /// app is visible.
+    ///
+    /// Passing `None` restores the system theme color
+    pub fn set_control_center_color(&self, color: Option<ControlCenterColor>) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::SetControlCenterColor>,
+    {
+        self.inner.conn.try_send_scalar(msg::SetControlCenterColor { color })?;
+        Ok(())
     }
 
     /// Registers as the control center, which gui-server tracks as a dedicated

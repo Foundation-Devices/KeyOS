@@ -13,6 +13,8 @@ export global Callbacks {
     // UI -> Rust
     callback play-haptic-pattern(string);
     callback set-led(int, int, int, int);
+    callback set-control-center-color(int, int, int);
+    callback reset-control-center-color();
 
     callback start-keycard-formatter();
     in property <bool> formatter-formatting; // true while writing

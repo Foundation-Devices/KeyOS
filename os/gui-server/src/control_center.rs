@@ -9,7 +9,7 @@ use {
             CONTROL_CENTER_HEIGHT_EXPANDED_PX, CONTROL_CENTER_MIN_HEIGHT_PX, SCREEN_WIDTH,
         },
         touch::{Touch, TouchKind},
-        InputMessage,
+        ControlCenterColor, InputMessage,
     },
     log::{debug, error},
     xous::{CID, PID},
@@ -53,6 +53,7 @@ pub(crate) struct ControlCenterWindow {
     pub(crate) state: ControlCenterWindowState,
     pub(crate) curr_height: usize,
     in_shutdown_mode: bool,
+    current_color: Option<ControlCenterColor>,
 }
 
 impl ControlCenterWindow {
@@ -69,6 +70,7 @@ impl ControlCenterWindow {
             state: ControlCenterWindowState::Collapsed,
             curr_height: CONTROL_CENTER_HEIGHT_COLLAPSED_PX,
             in_shutdown_mode: false,
+            current_color: None,
         })
     }
 
@@ -88,6 +90,20 @@ impl ControlCenterWindow {
             .map_err(|e| error!("Failed to notify control center of shutdown mode={shutdown_mode:?}: {e:?}"))
             .ok();
     }
+
+    pub(crate) fn notify_color(&mut self, color: Option<ControlCenterColor>) {
+        if color == self.current_color {
+            return;
+        }
+        let (has_custom_color, red, green, blue) = color
+            .map_or((0, 0, 0, 0), |color| (1, color.red as usize, color.green as usize, color.blue as usize));
+        let msg =
+            xous::Message::new_scalar(InputMessage::Custom1 as usize, has_custom_color, red, green, blue);
+        match xous::send_message(self.input_cid, msg) {
+            Ok(_) => self.current_color = color,
+            Err(e) => error!("Failed to notify Control Center of color: {e:?}"),
+        }
+    }
 }
 
 impl ControlCenterWindow {
@@ -101,6 +117,16 @@ impl ControlCenterWindow {
 }
 
 impl Gui {
+    pub(crate) fn notify_control_center_color(&mut self) {
+        let color = self
+            .active_app_pid()
+            .and_then(|pid| self.windows.get(&pid))
+            .and_then(|window| window.control_center_color);
+        if let Some(control_center) = &mut self.control_center_window {
+            control_center.notify_color(color);
+        }
+    }
+
     pub(crate) fn is_touch_within_control_center(&self, touch: Touch) -> bool {
         self.is_control_center_visible()
             && self

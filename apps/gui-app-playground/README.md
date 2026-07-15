@@ -20,8 +20,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 - Interactive pattern selection
 - Immediate haptic feedback
 
-### LED Control
+### LED & Status Bar Color Control
 - Control all 4 device LEDs
 - RGB color picker with sliders
 - Real-time color preview
 - Individual LED selection
+- Apply the selected RGB color to the collapsed Control Center
+- Restore the Control Center to its system theme color

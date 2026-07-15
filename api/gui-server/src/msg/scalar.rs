@@ -4,7 +4,7 @@
 use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar};
 
-use crate::{GuiServerError, NextFrameAnimationKind};
+use crate::{ControlCenterColor, GuiServerError, NextFrameAnimationKind};
 
 #[derive(Debug, server::Message)]
 pub struct SwitchTo {
@@ -25,6 +25,36 @@ impl FromScalar<3> for SwitchTo {
 
 #[derive(Debug, server::Message)]
 pub struct RequestRedraw;
+
+/// Sets the background color of the collapsed Control Center while the sending
+/// app is visible.
+/// `None` restores the system theme color.
+#[derive(Debug, Copy, Clone, server::Message)]
+pub struct SetControlCenterColor {
+    pub color: Option<ControlCenterColor>,
+}
+
+impl AsScalar<1> for SetControlCenterColor {
+    fn as_scalar(&self) -> [u32; 1] {
+        let packed = self.color.map_or(0, |color| {
+            (1 << 24) | ((color.red as u32) << 16) | ((color.green as u32) << 8) | color.blue as u32
+        });
+        [packed]
+    }
+}
+
+impl FromScalar<1> for SetControlCenterColor {
+    fn from_scalar([packed]: [u32; 1]) -> Self {
+        let color = (packed & (1 << 24) != 0).then(|| {
+            ControlCenterColor::new(
+                ((packed >> 16) & 0xff) as u8,
+                ((packed >> 8) & 0xff) as u8,
+                (packed & 0xff) as u8,
+            )
+        });
+        Self { color }
+    }
+}
 
 #[derive(
     Debug,

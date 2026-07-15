@@ -11,6 +11,7 @@ export component Battery inherits Rectangle {
     in property <brush> bg-color: DarkPalette.background-primary;
     in property <brush> fill-color: DarkPalette.content-primary;
     in property <brush> charging-color: DarkPalette.content-brand;
+    in property <brush> charging-icon-color: fill-color;
 
     width: 36px;
     height: 17px;
@@ -35,7 +36,7 @@ export component Battery inherits Rectangle {
     // Bolt
     if (is-charging): Image {
         source: Images.icon("charging", Size.sz3);
-        colorize: fill-color;
+        colorize: charging-icon-color;
         height: Size.sz3;
         x: 10px;
         y: 3px;

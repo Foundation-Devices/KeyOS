@@ -45,6 +45,7 @@ static SUBGROUP_LABELS: &[(&str, &str)] = &[
     ("settings.device-configuration", "Device configuration"),
     ("ui-and-input.app-surface", "Screen drawing"),
     ("ui-and-input.brokered-modal", "System dialogs"),
+    ("ui-and-input.control-center-appearance", "Control Center appearance"),
     ("ui-and-input.keyboard-request", "On-screen keyboard"),
     ("ui-and-input.navigation-response", "Navigation"),
 ];

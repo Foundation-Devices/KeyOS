@@ -13,6 +13,7 @@ template = ["gui-app", "fs-generic"]
 "os/keycard" = ["IdentifyKeycard", "FormatKeycard"]
 "os/backup" = ["CreateBackup", "RestoreBackup"]
 "os/quantum-link" = ["StartRestoreMagicBackup"]
+"os/gui-server" = ["SetControlCenterColor"]
 "os/fs" = [
     "GetUsbReadAccess",
     "GetAirlockReadAccess",
