@@ -6,9 +6,7 @@ import { DropdownModel } from "@ui/widgets.slint";
 export struct LauncherItemData {
     id: string,
     label: string,
-    icon-name: string,
-    // Key for fetching a bundled app icon via LauncherCallbacks.app-icon;
-    // empty for items that render a themed icon by name instead.
+    // Key for fetching a bundled app icon via LauncherCallbacks.app-icon.
     icon-key: string,
     enabled: bool,
     slot-index: int,
@@ -46,7 +44,6 @@ export global State {
     in-out property <LauncherItemData> drag-overlay-item: {
         id: "",
         label: "",
-        icon-name: "",
         icon-key: "",
         enabled: true,
         slot-index: 0,

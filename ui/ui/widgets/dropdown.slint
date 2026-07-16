@@ -21,11 +21,15 @@ export struct DropdownModel {
     label: string,
     value: string,
     icon: string,
+    // Bundled raster icon (e.g. an app's PNG). Rendered in preference to the
+    // themed `icon` when present; falls back to `icon` when empty.
+    icon-image: image,
 }
 
 export component DropdownMenuItem inherits Rectangle {
     in property <string> label;
     in property <string> icon;
+    in property <image> icon-image;
     in property <bool> first: false;
     in property <bool> last: false;
     in property <bool> divider: !last;
@@ -52,7 +56,17 @@ export component DropdownMenuItem inherits Rectangle {
             alignment: start;
             spacing: Size.sz2;
 
-            if icon != "": VerticalLayout {
+            if icon-image.width > 0: VerticalLayout {
+                alignment: center;
+                Image {
+                    width: Size.sz10;
+                    height: Size.sz10;
+                    source: icon-image;
+                    image-fit: contain;
+                }
+            }
+
+            if icon-image.width <= 0 && icon != "": VerticalLayout {
                 alignment: center;
                 Icon {
                     name: icon;
@@ -143,10 +157,31 @@ export component Dropdown inherits Rectangle {
                 padding-left: Size.sz4;
                 spacing: Size.sz2;
 
-                if (placeholder-icon != "" && selected-index == -1) || (selected-index != -1 && model[selected-index].icon != ""): VerticalLayout {
+                // Placeholder themed icon when nothing is selected.
+                if placeholder-icon != "" && selected-index == -1: VerticalLayout {
                     alignment: center;
                     Icon {
-                        name: selected-index == -1 ? placeholder-icon : model[selected-index].icon;
+                        name: placeholder-icon;
+                        color: fg-color;
+                    }
+                }
+
+                // Selected item's bundled raster icon.
+                if selected-index != -1 && model[selected-index].icon-image.width > 0: VerticalLayout {
+                    alignment: center;
+                    Image {
+                        width: Size.sz10;
+                        height: Size.sz10;
+                        source: model[selected-index].icon-image;
+                        image-fit: contain;
+                    }
+                }
+
+                // Selected item's themed icon.
+                if selected-index != -1 && model[selected-index].icon-image.width <= 0 && model[selected-index].icon != "": VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        name: model[selected-index].icon;
                         color: fg-color;
                     }
                 }
@@ -221,6 +256,7 @@ export component DropdownOverlay inherits Rectangle {
                 for entry[index] in model: DropdownMenuItem {
                     label: entry.label;
                     icon: entry.icon;
+                    icon-image: entry.icon-image;
                     first: index == 0;
                     last: index == model.length - 1;
                     selected: index == selected-index;

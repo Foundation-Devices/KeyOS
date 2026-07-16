@@ -20,13 +20,16 @@ use crate::{
     FileSystem,
 };
 
-const BUNDLED_ICON_FILE: &str = "icon.bin";
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
 pub const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
 // SDK-generated 256x256 RGBA icons are archived RawImage values: 256 KiB of
 // pixels plus rkyv header/alignment overhead. Leave margin for format drift.
 const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
 const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
+/// Filename of a sideloaded app's icon within its bundle, next to `app.elf`. The SDK writes it
+/// here, mirroring this name with its own constant (it can't depend on this crate). Built-in
+/// icons instead live in CommonAssets (`app-icons/<app-id>.bin`).
+const BUNDLED_ICON_FILE: &str = "icon.bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppSource {
@@ -233,7 +236,11 @@ impl AppRegistry {
     /// the registry, with no launch required. Returns `None` when a sideloaded bundle's dir name
     /// doesn't match its app id (already logged).
     fn load_app(app_dir: &str, source: AppSource, is_flux: bool) -> anyhow::Result<Option<AppInfo>> {
-        let manifest_raw = read_capped_file(&format!("{app_dir}/manifest.json"), MAX_MANIFEST_SIZE_BYTES)?;
+        let manifest_raw = read_capped_file(
+            &format!("{app_dir}/manifest.json"),
+            fs::Location::System,
+            MAX_MANIFEST_SIZE_BYTES,
+        )?;
         let (manifest_json, third_party_signer) = check_manifest_signature(&manifest_raw, source)?;
         let mut manifest = app_manifest::try_from_bytes(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
@@ -348,17 +355,14 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).and_then(AppInfo::elf_path)
     }
 
-    /// Blind-read the app's bundled icon, returning `None` when the app ships
-    /// no icon (the common case) or it can't be read.
+    /// Blind-read the app's icon, returning `None` when the app ships no icon (the common
+    /// case) or it can't be read. Built-in icons live in CommonAssets (keyed by app id);
+    /// sideloaded icons live in the app bundle.
     pub(crate) fn app_icon_bytes(&self, app_id: AppId) -> Option<Vec<u8>> {
-        let path = self.installed_apps.get(&app_id)?.bundled_icon_path()?;
-        match read_capped_file(&path, MAX_APP_ICON_SIZE_BYTES) {
-            Ok(data) => Some(data),
-            Err(e) => {
-                log::warn!("failed to read bundled app icon for app_id=0x{app_id}: {e:?}");
-                None
-            }
-        }
+        let (path, location) = self.installed_apps.get(&app_id)?.icon_path()?;
+        read_capped_file(&path, location, MAX_APP_ICON_SIZE_BYTES)
+            .map_err(|e| log::warn!("failed to read app icon for app_id=0x{app_id}: {e:?}"))
+            .ok()
     }
 
     pub(crate) fn app_resources_location(&self, app_id: AppId) -> Option<AppResourcesLocation> {
@@ -702,9 +706,14 @@ impl AppInfo {
 
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
 
-    fn bundled_icon_path(&self) -> Option<String> {
-        let app_dir = self.app_dir.as_deref()?;
-        Some(format!("{app_dir}/{BUNDLED_ICON_FILE}"))
+    fn icon_path(&self) -> Option<(String, fs::Location)> {
+        match self.source {
+            AppSource::BuiltIn => Some((format!("app-icons/{}.bin", self.id), fs::Location::CommonAssets)),
+            AppSource::ThirdParty => {
+                let app_dir = self.app_dir.as_deref()?;
+                Some((format!("{app_dir}/{BUNDLED_ICON_FILE}"), fs::Location::System))
+            }
+        }
     }
 
     fn app_resources_location(&self) -> Option<AppResourcesLocation> {
@@ -775,16 +784,16 @@ fn push_permission_subgroup(
 
 /// Read a bundle file through `fs`, refusing anything larger than `max_size_bytes` before
 /// allocating, so a malformed bundle can't make us read an unbounded amount into memory.
-fn read_capped_file(path: &str, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
+fn read_capped_file(path: &str, location: fs::Location, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
     use std::io::Read;
 
     let fs = FileSystem::default();
-    let metadata = fs.metadata(path, fs::Location::System)?;
+    let metadata = fs.metadata(path, location)?;
     if metadata.size > max_size_bytes {
         anyhow::bail!("{path} exceeds the {max_size_bytes}-byte cap: {} bytes", metadata.size);
     }
 
-    let mut file = fs.open_file(path, fs::Location::System, fs::OpenFlags::READ_ONLY)?;
+    let mut file = fs.open_file(path, location, fs::OpenFlags::READ_ONLY)?;
     let mut bytes = Vec::with_capacity(metadata.size as usize);
     file.read_to_end(&mut bytes)?;
     Ok(bytes)

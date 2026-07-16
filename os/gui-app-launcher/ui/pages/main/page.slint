@@ -300,6 +300,7 @@ component LauncherCollectionItem inherits Rectangle {
     width: 128px;
     height: show-label ? 160px : 128px;
     opacity: item.enabled ? 100% : 55%;
+    clip: false;
     private property <bool> ignore-release-click: false;
     private property <brush> icon-foreground-color: CurrentTheme.is-dark ? #e0e0e0 : #404040;
     private property <length> visual-offset-x: State.rearrange-mode && !is-dragging ? jiggle-x : 0px;
@@ -337,51 +338,50 @@ component LauncherCollectionItem inherits Rectangle {
         clip: false;
 
         Image {
-            width: parent.width;
-            height: parent.height;
+            x: -8px;
+            y: -8px;
+            width: 144px;
+            height: 144px;
             source: CurrentTheme.is-dark ? @image-url("../../assets/icon-bg-dark.png") : @image-url("../../assets/icon-bg-light.png");
             image-fit: fill;
         }
 
-        if !root.is-dragging && State.loading-item-id == root.item.id: TimerLoader {
+        Rectangle {
+            width: 110px;
+            height: 110px;
             x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2 - 1px;
-            size: 28px;
-            loader-color: CurrentTheme.is-dark ? #54cad8aa : #0ea6b3aa;
-            active-color: Palette.content-brand;
-        }
-
-        if State.loading-item-id != root.item.id || root.is-dragging: Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2 - 1px;
-            width: 64px;
-            height: 64px;
+            y: 9px;
             background: transparent;
 
-            if root.item.icon-key == "": Icon {
+            if !root.is-dragging && State.loading-item-id == root.item.id: TimerLoader {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                name: root.item.icon-name;
-                size: 64px;
-                color: root.icon-foreground-color;
+                size: 28px;
+                loader-color: CurrentTheme.is-dark ? #54cad8aa : #0ea6b3aa;
+                active-color: Palette.content-brand;
             }
 
-            if root.item.icon-key != "": Rectangle {
-                property <image> app-icon: CB.app-icon(root.item.icon-key);
-
+            if State.loading-item-id != root.item.id || root.is-dragging: Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
                 width: parent.width;
                 height: parent.height;
+                background: transparent;
+
+                property <image> app-icon: CB.app-icon(root.item.icon-key);
 
                 if self.app-icon.width > 0: Image {
-                    width: 64px;
-                    height: 64px;
+                    width: parent.width;
+                    height: parent.height;
                     source: parent.app-icon;
+                    image-fit: contain;
                 }
 
+                // Fallback glyph for apps that ship no bundled icon.
                 if self.app-icon.width <= 0: Icon {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    name: "shield";
+                    name: "grid-view";
                     size: 64px;
                     color: root.icon-foreground-color;
                 }
@@ -768,18 +768,22 @@ component Dock inherits Rectangle {
         column-gap: 24px,
     };
     private property <length> icon-inset-x: 24px;
-    private property <length> icon-inset-y: 10px;
+    private property <length> icon-inset-y: 12px;
+    private property <length> image-side-margin: 12px;
+    private property <length> image-bottom-margin: 12px;
 
     width: content-width;
-    height: 160px;
+    height: 164px;
     background: transparent;
     clip: false;
     z: State.drag-source-collection-id == "dock" ? 950 : 0;
 
     Image {
-        width: parent.width;
-        height: parent.height;
-        source: CurrentTheme.is-dark ? @image-url("../../assets/dock-bg-dark.png") : @image-url("../../assets/dock-bg-light.png");
+        x: root.image-side-margin;
+        y: parent.height - self.height - root.image-bottom-margin;
+        width: 456px;
+        height: 152px;
+        source: CurrentTheme.is-dark ? @image-url("../../assets/launcher-dock-dark.png") : @image-url("../../assets/launcher-dock-light.png");
         image-fit: fill;
     }
 
@@ -1007,7 +1011,8 @@ export component MainPage inherits BasePage {
     private property <length> paginator-top: 12px;
     private property <length> content-width: root.width - frame-side-padding * 2;
     private property <length> dock-left: 0px;
-    private property <length> dock-top: root.height - 160px;
+    private property <length> dock-height: 164px;
+    private property <length> dock-top: root.height - dock-height;
     private property <length> dock-width: root.width;
     private property <length> icon-row-height: 160px;
     private property <length> icon-row-gap: 24px;
@@ -1023,7 +1028,7 @@ export component MainPage inherits BasePage {
     private property <length> active-page-width: content-width - page-collection-inset * 2;
     private property <length> active-page-height: State.current-page == 0 ? graph-page-height : standard-page-height;
     private property <length> dock-icon-inset-x: 24px;
-    private property <length> dock-icon-inset-y: 10px;
+    private property <length> dock-icon-inset-y: 12px;
     private property <length> dock-collection-left: dock-left + dock-icon-inset-x;
     private property <length> dock-collection-top: dock-top + dock-icon-inset-y;
     private property <length> dock-collection-width: dock-width - dock-icon-inset-x * 2;

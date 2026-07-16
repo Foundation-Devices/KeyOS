@@ -166,6 +166,7 @@ impl AppState {
                 label: SharedString::from(&key.label),
                 value: key.index.to_string().into(),
                 icon: SharedString::from("key"),
+                icon_image: Default::default(),
             })
             .collect();
 
@@ -176,6 +177,7 @@ impl AppState {
             label: SharedString::from(tr::lookup_id(TrId::RegistrationUSBNewSecurityKey)),
             value: SharedString::new(),
             icon: SharedString::from("plus"),
+            icon_image: Default::default(),
         });
 
         ModelRc::new(VecModel::from(views))

@@ -14,7 +14,7 @@ use gui_server_api::{
     navigation::{
         alerts::{AlertResult, InvokeAlert},
         qrscanner::{MatchedQrResult, ScanQrMatchedRule, ScanQrOptions, ScanQrResult},
-        SETTINGS_APP_ID,
+        QR_SCANNER_APP_ID, SETTINGS_APP_ID,
     },
     InputMessage,
 };
@@ -54,27 +54,19 @@ const REDRAW_TIME_SECS: u64 = 60; // 1 minute
 const GRAPH_WIDTH: u32 = 432;
 const GRAPH_HEIGHT: u32 = 88;
 const GRAPH_MAX_HEIGHT: u32 = GRAPH_HEIGHT - 10;
-const APP_ICON_SIZE: u32 = 64;
+const APP_ICON_SIZE: u32 = 110;
+/// Pixel size for the per-app icons shown in the universal-QR match dropdown.
+const DROPDOWN_ICON_SIZE: u32 = 40;
 const GRAPH_WINDOW_SECS: u64 = 60 * GRAPH_WINDOW_MINUTES;
 const PERSISTENT_STATE_PATH: &str = "persistent-state.json";
 const FILES_APP_ID: &str = "0x46696c652042726f7773657200000000";
 const AUTHENTICATOR_APP_ID: &str = "0x41757468656e74696361746f72203246";
 const KEYS_APP_ID: &str = "0x5365637572697479204b657973000000";
 const VAULT_APP_ID: &str = "0x53656564205661756c74000000000000";
-/// Themed icon for apps that ship without a bundled icon.
-const FALLBACK_APP_ICON: &str = "grid-view";
 
-/// Built-in user-facing apps that should appear in the launcher. They ship
-/// without bundled icons, so map them to themed icon names. Sideloaded apps are
-/// returned by the app manager with their bundled metadata.
-const KNOWN_APP_ICONS: &[(&str, &str)] = &[
-    (FILES_APP_ID, "folder"),
-    (VAULT_APP_ID, "acorn"),
-    (KEYS_APP_ID, "key"),
-    (AUTHENTICATOR_APP_ID, "shield"),
-    (BITCOIN_APP_ID, "bitcoin"),
-    (SETTINGS_APP_ID_STR, "cog"),
-];
+/// Built-in user-facing apps that should appear in the launcher.
+const KNOWN_APP_IDS: &[&str] =
+    &[FILES_APP_ID, VAULT_APP_ID, KEYS_APP_ID, AUTHENTICATOR_APP_ID, BITCOIN_APP_ID, SETTINGS_APP_ID_STR];
 
 fn known_app_label(app_id: &str) -> Option<String> {
     let tr_id = match app_id {
@@ -234,24 +226,17 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
 
     let mut items: Vec<LauncherItem> = Vec::new();
     for entry in app_manager.list_apps(lang, app_manager::AppFilter::standard_only()) {
-        let known_icon = KNOWN_APP_ICONS.iter().find(|(id, _)| *id == entry.app_id).map(|(_, icon)| *icon);
+        let is_known = KNOWN_APP_IDS.contains(&entry.app_id.as_str());
         let is_sideloaded = entry.can_remove;
         // Registry entries that are neither known user apps nor sideloaded are
         // hidden support/dev apps, even in simulator builds.
-        if known_icon.is_none() && !is_sideloaded {
+        if !is_known && !is_sideloaded {
             continue;
         }
-        let icon_key = if is_sideloaded { entry.app_id.clone() } else { String::new() };
-        let icon_name = if icon_key.is_empty() {
-            known_icon.unwrap_or(FALLBACK_APP_ICON).to_string()
-        } else {
-            String::new()
-        };
         items.push(LauncherItem {
             id: entry.app_id.clone(),
             label: known_app_label(&entry.app_id).unwrap_or(entry.name),
-            icon_name,
-            icon_key,
+            icon_key: entry.app_id.clone(),
             target: LauncherTarget::App { app_id: entry.app_id },
             enabled: entry.can_launch,
             can_remove: entry.can_remove,
@@ -261,8 +246,7 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
     items.push(LauncherItem {
         id: SCAN_QR_ACTION_ID.to_string(),
         label: tr::lookup_id(TrId::MainScanQr).to_string(),
-        icon_name: "scan-qr".to_string(),
-        icon_key: String::new(),
+        icon_key: format!("0x{QR_SCANNER_APP_ID}"),
         target: LauncherTarget::Action { action: LauncherAction::ScanQr },
         enabled: true,
         can_remove: false,
@@ -278,10 +262,10 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
 /// Canonical placement order for fresh layouts; apps not listed here sort
 /// after the built-ins, alphabetically by label.
 fn default_rank(item_id: &str) -> usize {
-    if let Some(index) = KNOWN_APP_ICONS.iter().position(|(id, _)| *id == item_id) {
+    if let Some(index) = KNOWN_APP_IDS.iter().position(|id| *id == item_id) {
         index
     } else if item_id == SCAN_QR_ACTION_ID {
-        KNOWN_APP_ICONS.len()
+        KNOWN_APP_IDS.len()
     } else {
         usize::MAX
     }
@@ -307,7 +291,6 @@ fn build_item_model(items: &[LauncherItem]) -> ModelRc<LauncherItemData> {
             .map(|(slot, item)| LauncherItemData {
                 id: SharedString::from(item.id.as_str()),
                 label: SharedString::from(item.label.as_str()),
-                icon_name: SharedString::from(item.icon_name.as_str()),
                 icon_key: SharedString::from(item.icon_key.as_str()),
                 enabled: item.enabled,
                 slot_index: slot as i32,
@@ -324,7 +307,6 @@ fn build_page_item_model(items: &[LauncherPageItem]) -> ModelRc<LauncherItemData
             .map(|page_item| LauncherItemData {
                 id: SharedString::from(page_item.item.id.as_str()),
                 label: SharedString::from(page_item.item.label.as_str()),
-                icon_name: SharedString::from(page_item.item.icon_name.as_str()),
                 icon_key: SharedString::from(page_item.item.icon_key.as_str()),
                 enabled: page_item.item.enabled,
                 slot_index: page_item.slot as i32,
@@ -633,9 +615,10 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 APP_ICON_SIZE as f32,
                 true,
             );
-            if !icon_bytes.is_empty() {
-                app_icon_cache.borrow_mut().put(cache_key, image.clone());
-            }
+            // Cache the result even when the app ships no icon: the empty image is a
+            // valid answer, and caching it avoids re-issuing the blocking `get_app_icon`
+            // IPC + decode every time an icon-less tile subtree rebuilds.
+            app_icon_cache.borrow_mut().put(cache_key, image.clone());
             image
         });
     }
@@ -711,6 +694,16 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.run().expect("Platform error");
+}
+
+/// Load an app's bundled icon, scaled for the universal-QR match dropdown. Returns
+/// an empty image (falls back to no/themed icon) when the app ships no icon.
+fn dropdown_app_icon(app_manager: &AppManagerApi, app_id_hex: &str) -> Image {
+    let icon_bytes = app_manager.get_app_icon(app_id_hex).unwrap_or_default();
+    if icon_bytes.is_empty() {
+        return Image::default();
+    }
+    scale_image(raw_image_from_bytes(&icon_bytes), DROPDOWN_ICON_SIZE as f32, DROPDOWN_ICON_SIZE as f32, true)
 }
 
 /// Open the universal QR scanner and route the result: auto-forward when a single
@@ -792,10 +785,14 @@ async fn open_universal_qr_scan(state: StoredValue<AppState>) {
                 return None;
             };
             let app_id_hex = format!("0x{app_id}");
-            let icon =
-                KNOWN_APP_ICONS.iter().find(|(id, _)| *id == app_id_hex).map(|(_, icon)| *icon).unwrap_or("");
+            let icon_image = dropdown_app_icon(&app_manager, &app_id_hex);
             Some((
-                DropdownModel { label: app_name.clone().into(), value: app_id_hex.into(), icon: icon.into() },
+                DropdownModel {
+                    label: app_name.clone().into(),
+                    value: app_id_hex.into(),
+                    icon: "".into(),
+                    icon_image,
+                },
                 UniversalQrMatch { app_id, matched_rules: app.matched_rules.clone() },
             ))
         })
@@ -1576,7 +1573,12 @@ mod tests {
             })
             .collect();
         (
-            DropdownModel { label: name.into(), value: "".into(), icon: "".into() },
+            DropdownModel {
+                label: name.into(),
+                value: "".into(),
+                icon: "".into(),
+                icon_image: Default::default(),
+            },
             UniversalQrMatch { app_id: AppId([0u8; 16]), matched_rules: rules },
         )
     }

@@ -33,10 +33,13 @@ Files:
   apps/gui-app-*/assets/*.png
   apps/gui-app-*/icons/*.rgba
   os/gui-app-*/assets/*.png
+  os/gui-app-*/ui/assets/*.png
   apps/gui-app-*/ui/*.png
   os/gui-app-*/ui/*.png
   apps/gui-app-*/ui/images/*.svg
   os/gui-app-*/ui/images/*.svg
+  apps/gui-app-*/resources/icon.png
+  os/gui-app-*/resources/icon.png
   os/gui-server/assets/*.png
   os/gui-server/assets/*.raw
   api/settings/assets/*.tzif

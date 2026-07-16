@@ -41,7 +41,6 @@ pub(crate) struct LauncherPageItem {
 pub(crate) struct LauncherItem {
     pub(crate) id: String,
     pub(crate) label: String,
-    pub(crate) icon_name: String,
     pub(crate) icon_key: String,
     pub(crate) target: LauncherTarget,
     pub(crate) enabled: bool,
@@ -388,7 +387,6 @@ mod tests {
         LauncherItem {
             id: id.to_string(),
             label: id.to_string(),
-            icon_name: String::new(),
             icon_key: String::new(),
             target: LauncherTarget::App { app_id: id.to_string() },
             enabled: true,

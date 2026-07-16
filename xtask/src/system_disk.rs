@@ -74,6 +74,9 @@ pub struct SystemVolume<'a> {
     /// Host directory to render `keyos/common` into before copying it onto the
     /// volume.
     pub common_out: &'a Path,
+    /// Host directory of the per-app-id built-in icons (staged by the builder),
+    /// copied into `keyos/common/app-icons`.
+    pub app_icons_src: &'a Path,
 }
 
 /// Refresh `keyos/apps` and `keyos/common` on `fs` from the host sources in `vol`.
@@ -85,6 +88,7 @@ pub fn stage_system_volume<T: ReadWriteSeek>(fs: &FileSystem<T>, vol: &SystemVol
         read_dir(ui_dir.join("images")),
         vec![(UI_ICON_SET, ui_icons(&ui_dir.join("icons"))), (UI2_ICON_SET, ui2_icons(&ui2_icons_dir))],
     )?;
+    stage_app_icons(vol.app_icons_src, vol.common_out)?;
 
     println!("Bundling FS apps");
     fatfs_image::remove_tree(fs, "keyos/apps").context("clear keyos/apps")?;
@@ -175,6 +179,28 @@ fn render_image_entry(
         if last_print.elapsed() > Duration::from_millis(500) {
             println!("  - Converted {count} files");
             *last_print = Instant::now();
+        }
+    }
+    Ok(())
+}
+
+/// Copy the per-app-id built-in icons staged by the builder into `common/app-icons/`, where
+/// the app manager reads a built-in app's icon (keyed by app id). Built-in icons live in
+/// CommonAssets rather than in each app bundle so they survive an OTA/recovery restore on
+/// recovery images that copy `keyos/common` but skip app `resources/`. Must run after
+/// [`render_common_assets`], which wipes `common_out`.
+fn stage_app_icons(app_icons_src: &Path, common_out: &Path) -> Result<()> {
+    if !app_icons_src.is_dir() {
+        return Ok(());
+    }
+    let icons_out = common_out.join("app-icons");
+    fs::create_dir_all(&icons_out).context("create app-icons dir")?;
+    for entry in fs::read_dir(app_icons_src).context("read app-icons dir")? {
+        let entry = entry.context("read app-icons entry")?;
+        let src = entry.path();
+        if src.is_file() {
+            fs::copy(&src, icons_out.join(entry.file_name()))
+                .with_context(|| format!("copy {}", src.display()))?;
         }
     }
     Ok(())

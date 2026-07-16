@@ -17,7 +17,7 @@ use sha2::Digest;
 use slint_keyos_platform_build::UI_ICON_SET;
 
 use crate::bootloader::{build_at91bootstrap, encrypt_bootloader, BootloaderBuildArgs, SambaCryptArgs};
-use crate::builder::{project_root, Builder, KEYOS_APPS_DIR};
+use crate::builder::{project_root, Builder, APP_ICONS_DIR, KEYOS_APPS_DIR};
 use crate::system_disk::{render_common_assets, stage_system_volume, SystemVolume};
 use crate::{
     APP_IMAGE, BOOTLOADER_IMAGE, BOOTLOADER_IMAGE_CIPHER, BOOT_ASSETS_DIR, RECOVERY_IMAGE,
@@ -197,6 +197,7 @@ fn create_system_partition(file: &mut File) -> anyhow::Result<()> {
             apps_src: &target_root.join(KEYOS_APPS_DIR),
             exclude_app_elf: false,
             common_out: &target_root.join("common"),
+            app_icons_src: &target_root.join(APP_ICONS_DIR),
         },
     )?;
 
@@ -296,6 +297,7 @@ pub fn build_hosted_disk_images() {
             apps_src: &hosted.join("keyos").join("apps"),
             exclude_app_elf: true,
             common_out: &hosted.join("sim-seed").join("keyos").join("common"),
+            app_icons_src: &hosted.join(APP_ICONS_DIR),
         },
     )
     .expect("stage system volume");
