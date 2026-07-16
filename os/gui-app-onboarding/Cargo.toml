@@ -32,15 +32,13 @@ oneshot = { workspace = true }
 power-manager = { workspace = true }
 ql-utils = { workspace = true }
 quantum-link = { workspace = true }
+rand = { workspace = true }
 security = { workspace = true }
 serde = { workspace = true }
 server = { workspace = true }
 slint-keyos-platform = { workspace = true }
 thiserror = { workspace = true }
 update = { workspace = true }
-
-[target.'cfg(keyos)'.dependencies]
-usb = { workspace = true }
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

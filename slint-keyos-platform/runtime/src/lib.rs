@@ -4,7 +4,7 @@
 #![feature(must_not_suspend)]
 
 pub use {
-    file_backed, fs, futures_lite, gui_server_api, i18n, log, log_server, phf,
+    fiat_symbols, file_backed, fs, futures_lite, gui_server_api, i18n, log, log_server, phf,
     server::{self, FromScalar},
     slint,
     slint_keyos_platform_macros::*,
@@ -50,10 +50,10 @@ macro_rules! app {
             const HEIGHT: usize = $height;
             const NAME: &str = $name;
 
-            let (gui_api, framebuffer) = GuiApi::register(
+            let gui_api = GuiApi::register(
                 $crate::gui_server_api::AppKind::$kind,
                 NAME,
-                WIDTH * HEIGHT * 4,
+                HEIGHT,
             )
             .expect("can't register app UI");
             let gui_api = std::sync::Arc::new(gui_api);
@@ -61,14 +61,13 @@ macro_rules! app {
             $crate::Runtime::unsafe_init({
                 let gui_api = gui_api.clone();
                 move || {
-                    let _ = gui_api.request_redraw();
+                    gui_api.wake_event_loop()
                 }
             });
 
             let fs = Default::default();
-            let app_context = $crate::AppContext::new(gui_api, fs);
-            let bufs = framebuffer.into_bufs().expect("init app framebuffer");
-            let platform = $crate::KeyOsPlatform::<WIDTH, HEIGHT, _>::new(NAME, bufs, app_context.clone());
+            let app_context = $crate::AppContext::new(gui_api.clone(), fs);
+            let platform = $crate::KeyOsPlatform::<WIDTH, HEIGHT, _>::new(NAME, app_context.clone());
             $crate::_internal_not_recovery!(platform.subscribe_to_theme_changes::<settings_permissions::SettingsPermissions>());
             $crate::slint::platform::set_platform(Box::new(platform)).expect("set platform");
 
@@ -114,6 +113,8 @@ macro_rules! _internal_init_ui_utils {
         $app.global::<$utils>().on_string_to_percent($crate::utilites::string_to_percent);
         $app.global::<$utils>().on_index_of($crate::utilites::index_of);
         $app.global::<$utils>().on_string_length(|s| s.len() as i32);
+        $app.global::<$utils>()
+            .on_currency_symbol(|code| $crate::fiat_symbols::symbol_for_code(&code).into());
         $app.global::<$utils>().on_join($crate::utilites::join);
         $app.global::<$utils>().on_split($crate::utilites::split);
         $app.global::<$utils>().on_split_by_length($crate::utilites::split_by_length);

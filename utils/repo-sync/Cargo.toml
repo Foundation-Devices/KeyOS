@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "repo-sync"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.40", features = ["derive"] }
+ignore = "0.4.23"
+serde = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = "3.12.0"
+toml = "0.8.20"
+walkdir = "2.5.0"

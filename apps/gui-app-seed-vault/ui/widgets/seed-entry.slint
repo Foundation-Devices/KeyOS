@@ -22,13 +22,13 @@ export component SeedEntry inherits Rectangle {
     callback clicked();
 
     function get-description() -> string {
-        if (seed.seed-type == SeedViewType.bitcoin-12) {
+        if (seed.seed-type == SeedViewType.bitcoin-12 || seed.seed-type == SeedViewType.bitcoin-import-12) {
             return TR2.lookup(TrId.CreateItem12WordSeed);
-        } else if (seed.seed-type == SeedViewType.bitcoin-24) {
+        } else if (seed.seed-type == SeedViewType.bitcoin-24 || seed.seed-type == SeedViewType.bitcoin-import-24) {
             return TR2.lookup(TrId.CreateItem24WordSeed);
-        } else if (seed.seed-type == SeedViewType.password) {
+        } else if (CB.is-password(seed.seed-type)) {
             return TR2.lookup(TrId.CreateItemPassword);
-        } else if (seed.seed-type == SeedViewType.nostr-key) {
+        } else if (CB.is-nostr(seed.seed-type)) {
             return TR2.lookup(TrId.CreateItemNostrKey);
         }
         return "";

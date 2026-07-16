@@ -1,73 +1,82 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::any::type_name;
-
 use whence::WhenceExt;
-use xous_ipc::XousValidator;
 
-use crate::{Error, Owned, Server, ServerContext};
+use crate::{Server, ServerContext, SimpleMemoryMessage};
 
 /// A [`Move`] message handler.
-pub trait MoveHandler<M>
+pub trait MoveHandler<M: Move>
 where
-    M: Move,
     Self: Server,
 {
-    fn handle(&mut self, msg: Owned<M>, sender: xous::PID, context: &mut ServerContext<Self>);
+    const LEAK_MESSAGE: bool;
+    fn handle(&mut self, msg: M, sender: xous::PID, context: &mut ServerContext<Self>);
 }
 
-/// A message which can be serialized and deserialized using rkyv, with no response.
-pub trait Move: crate::ArchiveCodec + crate::MessageId + 'static {}
+/// A message which is simply a to-be-sent memory range
+pub trait Move: crate::MessageId + From<SimpleMemoryMessage> + Into<SimpleMemoryMessage> {}
 
 /// Message handler, used by ServerMessages::messages()
-pub fn handle_move_message<M, S>(handler: &mut S, raw: xous::MessageEnvelope, context: &mut ServerContext<S>)
-where
-    M: Move,
-    S: MoveHandler<M>,
-    <M as rkyv::Archive>::Archived: for<'a> rkyv::bytecheck::CheckBytes<XousValidator<'a>>,
-{
-    let pid = raw.sender.pid().unwrap();
-    if let Err(e) = try_handle_move_message(pid, handler, raw, context) {
-        log::warn!("move handle error (PID {pid}) for {}: {e}", type_name::<M>());
-    }
-}
-
-fn try_handle_move_message<M, S>(
-    pid: xous::PID,
+pub fn handle_move<M: Move, S: MoveHandler<M>>(
     handler: &mut S,
     raw: xous::MessageEnvelope,
     context: &mut ServerContext<S>,
-) -> whence::Result<(), Error>
-where
-    M: Move,
-    S: MoveHandler<M>,
-    <M as rkyv::Archive>::Archived: for<'a> rkyv::bytecheck::CheckBytes<XousValidator<'a>>,
-{
-    let msg = Owned::new_move(raw).whence()?;
-    handler.handle(msg, pid, context);
+) {
+    let sender = raw.sender.pid().unwrap();
+    let msg = if S::LEAK_MESSAGE {
+        let message = raw.take_message();
+        let xous::Message::Move(mem) = message else {
+            log::warn!("invalid message: {message:?}");
+            return;
+        };
+        M::from(SimpleMemoryMessage::from(&mem))
+    } else {
+        let xous::Message::Move(mem) = &raw.body else {
+            log::warn!("invalid message: {raw:?}");
+            return;
+        };
+        M::from(SimpleMemoryMessage::from(mem))
+    };
+
+    handler.handle(msg, sender, context);
+}
+
+/// Send a [`Move`] message (panics on failure)
+pub fn send_move<M: Move>(cid: xous::CID, msg: M) { try_send_move(cid, msg).unwrap(); }
+
+/// Send a [`Move`] message (fallible)
+pub fn try_send_move<M: Move>(cid: xous::CID, msg: M) -> whence::Result<(), xous::Error> {
+    let msg: SimpleMemoryMessage = msg.into();
+    xous::send_message(
+        cid,
+        xous::Message::Move(xous::MemoryMessage {
+            id: M::ID,
+            buf: msg.buf,
+            offset: xous::MemoryAddress::new(msg.arg1),
+            valid: xous::MemoryAddress::new(msg.arg2),
+        }),
+    )
+    .whence()?;
     Ok(())
 }
 
-/// Send a [`Move`] message.
-/// Blocks if the queue is full.
-/// Cannot be used from an IRQ context.
-pub fn send_move<M>(cid: xous::CID, msg: M) -> Result<(), xous::Error>
+/// Try sending a [`Move`] message. Does not block if the message queue is full.
+/// Can be used in an IRQ handler.
+pub fn send_move_nowait<M>(cid: xous::CID, msg: M) -> whence::Result<(), xous::Error>
 where
     M: Move,
 {
-    xous_ipc::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?.send(cid, M::ID as u32)?;
-    Ok(())
-}
-
-/// Try to send a [`Move`] message.
-/// Returns an error if the queue is full
-/// Can be used from an IRQ context.
-pub fn send_move_nowait<M>(cid: xous::CID, msg: M) -> Result<(), xous::Error>
-where
-    M: Move,
-{
-    let buf = xous_ipc::Buffer::into_buf(&msg).map_err(|_| xous::Error::InternalError)?;
-    buf.send_nowait(cid, M::ID as u32)?;
+    let msg: SimpleMemoryMessage = msg.into();
+    xous::try_send_message(
+        cid,
+        xous::Message::Move(xous::MemoryMessage {
+            id: M::ID,
+            buf: msg.buf,
+            offset: xous::MemoryAddress::new(msg.arg1),
+            valid: xous::MemoryAddress::new(msg.arg2),
+        }),
+    )
+    .whence()?;
     Ok(())
 }

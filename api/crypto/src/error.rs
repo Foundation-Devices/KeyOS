@@ -39,8 +39,14 @@ pub enum CryptoError {
     #[error("The supplied key was a supported size")]
     InvalidKeyLength,
 
-    #[error("The process allocated more SHA contexts than available")]
-    TooManyShaContexts,
+    #[error("The buffer length was not divisible by block length")]
+    UnalignedDataLength,
+
+    #[error("The AES context is in invalid operation mode for the method")]
+    InvalidMode,
+
+    #[error("The AES context is in a state that does not allow this operation")]
+    InvalidState,
 }
 
 impl From<xous::Error> for CryptoError {
@@ -65,7 +71,9 @@ impl From<CryptoError> for usize {
             CryptoError::TooManyAesContexts => 0x80000007,
             CryptoError::TooManySecuramKeys => 0x80000008,
             CryptoError::InvalidKeyLength => 0x80000009,
-            CryptoError::TooManyShaContexts => 0x8000000a,
+            CryptoError::UnalignedDataLength => 0x8000000b,
+            CryptoError::InvalidMode => 0x8000000c,
+            CryptoError::InvalidState => 0x8000000d,
         }
     }
 }
@@ -83,7 +91,9 @@ impl From<usize> for CryptoError {
             0x80000007 => CryptoError::TooManyAesContexts,
             0x80000008 => CryptoError::TooManySecuramKeys,
             0x80000009 => CryptoError::InvalidKeyLength,
-            0x8000000a => CryptoError::TooManyShaContexts,
+            0x8000000b => CryptoError::UnalignedDataLength,
+            0x8000000c => CryptoError::InvalidMode,
+            0x8000000d => CryptoError::InvalidState,
             _ => CryptoError::XousError(value),
         }
     }

@@ -1,45 +1,46 @@
+manifestVersion = "0"
 [servers."os/fs"]
-OpenFileMessage = { id = 0, type = "archive" }
+OpenFileMessage = { id = 0, type = "blockingArchive" }
 ReadFile = { id = 1, type = "lendMut" }
 WriteFile = { id = 2, type = "lendMut" }
-SeekFile = { id = 3, type = "archive" }
+SeekFile = { id = 3, type = "blockingArchive" }
 CloseFile = { id = 4, type = "blockingScalar" }
-Remove = { id = 5, type = "archive" }
-AtomicCopy = { id = 6, type = "archive" }
-OpenDirMessage = { id = 7, type = "archive" }
-CreateDirMessage = { id = 8, type = "archive" }
-NextEntry = { id = 9, type = "archive" }
-GetMetadata = { id = 10, type = "archive" }
-Rename = { id = 11, type = "archive" }
-TruncateFile = { id = 12, type = "archive" }
+Remove = { id = 5, type = "blockingArchive" }
+AtomicCopy = { id = 6, type = "blockingArchive" }
+OpenDirMessage = { id = 7, type = "blockingArchive" }
+CreateDirMessage = { id = 8, type = "blockingArchive" }
+NextEntry = { id = 9, type = "blockingArchive" }
+GetMetadata = { id = 10, type = "blockingArchive" }
+Rename = { id = 11, type = "blockingArchive" }
+TruncateFile = { id = 12, type = "blockingArchive" }
 CloseDir = { id = 13, type = "blockingScalar" }
 Flush = { id = 14, type = "blockingScalar" }
-MapFileMessage = { id = 15, type = "archive" }
+MapFileMessage = { id = 15, type = "blockingArchive" }
 SubscribeFilesystemEvent = { id = 16, type = "scalarEvent" }
 ReadBlocks = { id = 17, type = "lendMut" }
 WriteBlocks = { id = 18, type = "lendMut" }
 BlockCount = { id = 19, type = "blockingScalar" }
 FlushFs = { id = 20, type = "blockingScalar" }
-SetLen = { id = 21, type = "archive" }
-DiskEncryptionKeysReady = { id = 22, type = "scalar", cfg = "not(feature = \"recovery-os\")" }
+SetLen = { id = 21, type = "blockingArchive" }
 FormatEncryptedVolume = { id = 23, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
-SetMtime = { id = 24, type = "archive" }
-AsyncRead = { id = 25, type = "archive" }
-AsyncWrite = { id = 26, type = "archive" }
+SetMtime = { id = 24, type = "blockingArchive" }
+AsyncRead = { id = 25, type = "blockingArchive" }
+AsyncWrite = { id = 26, type = "blockingArchive" }
 AsyncCopyBlock = { id = 27, type = "blockingScalar" }
 MountAirlock = { id = 28, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
 FormatAirlock = { id = 29, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")" }
-GetUsbReadAccess = { id = 30, type = "blockingScalar" }
-GetUsbWriteAccess = { id = 31, type = "blockingScalar" }
-GetBootReadAccess = { id = 32, type = "blockingScalar" }
-GetBootWriteAccess = { id = 41, type = "blockingScalar" }
-GetUserReadAccess = { id = 33, type = "blockingScalar" }
-GetUserWriteAccess = { id = 34, type = "blockingScalar" }
-GetSystemReadAccess = { id = 35, type = "blockingScalar" }
-GetSystemWriteAccess = { id = 36, type = "blockingScalar" }
-GetAirlockReadAccess = { id = 37, type = "blockingScalar" }
-GetAirlockWriteAccess = { id = 38, type = "blockingScalar" }
-GetEncryptedRootReadAccess = { id = 39, type = "blockingScalar" }
-GetEncryptedRootWriteAccess = { id = 40, type = "blockingScalar" }
-GetSystemAppDataReadAccess = { id = 42, type = "blockingScalar" }
-GetSystemAppDataWriteAccess = { id = 43, type = "blockingScalar" }
+FormatUsb = { id = 30, type = "blockingScalar" }
+GetUsbReadAccess = { id = 100, type = "blockingScalar" }
+GetUsbWriteAccess = { id = 101, type = "blockingScalar" }
+GetUserReadAccess = { id = 102, type = "blockingScalar" }
+GetUserWriteAccess = { id = 103, type = "blockingScalar" }
+GetAirlockReadAccess = { id = 104, type = "blockingScalar" }
+GetAirlockWriteAccess = { id = 105, type = "blockingScalar" }
+GetBootReadAccess = { id = 106, type = "blockingScalar" }
+GetBootWriteAccess = { id = 107, type = "blockingScalar" }
+GetEncryptedRootReadAccess = { id = 108, type = "blockingScalar" }
+GetEncryptedRootWriteAccess = { id = 109, type = "blockingScalar" }
+GetSystemReadAccess = { id = 110, type = "blockingScalar" }
+GetSystemWriteAccess = { id = 111, type = "blockingScalar" }
+GetSystemAppDataReadAccess = { id = 112, type = "blockingScalar" }
+GetSystemAppDataWriteAccess = { id = 113, type = "blockingScalar" }

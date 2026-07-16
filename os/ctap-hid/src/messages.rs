@@ -27,6 +27,6 @@ impl server::MessageId for SimuUsbReceiveCallback {
 }
 
 #[cfg(feature = "test-app")]
-impl server::Archive for SimuUsbReceiveCallback {
+impl server::BlockingArchive for SimuUsbReceiveCallback {
     type Response = ();
 }

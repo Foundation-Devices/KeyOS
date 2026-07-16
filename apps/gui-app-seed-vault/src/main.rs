@@ -3,7 +3,14 @@
 
 use {
     crate::state::AppState,
-    slint_keyos_platform::{app, StoredValue},
+    slint_keyos_platform::{
+        app,
+        gui_server_api::{
+            navigation::qrscanner::{MatchedQrResult, ScanQrResult},
+            InputMessage,
+        },
+        StoredValue,
+    },
 };
 
 mod callbacks;
@@ -32,8 +39,39 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     let app_state = StoredValue::new(app_state);
 
-    // TODO: add callbacks
     callbacks::init_callbacks(app_state);
+
+    cx.set_input_handler({
+        let gui_api = cx.gui.clone();
+        let ui = ui.clone_strong();
+        move |input| {
+            if input.msg != InputMessage::NavigationFocused {
+                return;
+            }
+
+            let Ok(Some(nav_bytes)) = gui_api.navigate_pending() else {
+                log::error!("Navigation focused but no pending nav request");
+                return;
+            };
+
+            let Some(MatchedQrResult { scan_result, matched_rules }) =
+                MatchedQrResult::from_slice(&nav_bytes)
+            else {
+                return;
+            };
+
+            let ScanQrResult::Qr { data, .. } = scan_result else {
+                log::warn!(
+                    "Unexpected scan result type for universal QR: matched_rules={:?}",
+                    matched_rules.iter().map(|r| r.rule_id.as_str()).collect::<Vec<_>>()
+                );
+                return;
+            };
+
+            ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
+            app_state.borrow_mut().handle_qr_input(data);
+        }
+    });
 
     ui.run().expect("UI running");
 }

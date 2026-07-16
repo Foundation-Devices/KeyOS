@@ -12,7 +12,8 @@ use std::{
 use anyhow::Context;
 use clap::Args;
 use colored::Colorize;
-use sambuca::VerificationStats;
+use sambuca::flash::FlashProgress;
+use usb_debug_protocol::UsbDebugClient;
 
 use crate::{
     bootimage::{BOOT_IMAGE, SECTOR_SIZE, SYSTEM_PARTITION_START_SECTOR},
@@ -60,6 +61,39 @@ pub struct DumpFlashArgs {
 
 const SPINNERS: &[char] = &['|', '/', '-', '\\'];
 
+fn enter_samba_mode(use_script: bool) -> anyhow::Result<()> {
+    if sambuca::Sambuca::new().is_ok() {
+        return Ok(());
+    }
+
+    if use_script {
+        println!("Running scripts/reboot-in-samba-mode.sh");
+        if !Command::new("scripts/reboot-in-samba-mode.sh")
+            .current_dir(project_root())
+            .status()
+            .context("running scripts/reboot-in-samba-mode.sh failed")?
+            .success()
+        {
+            panic!("Switching to sam-ba mode failed");
+        }
+        println!("Waiting a bit to let sam-ba mode boot");
+        std::thread::sleep(Duration::from_millis(1000));
+        return Ok(());
+    }
+
+    let client = match UsbDebugClient::open() {
+        Ok(c) => c,
+        Err(_) => return Ok(()),
+    };
+    print!("{} usb-debug interface detected, requesting SAM-BA reboot... ", "ⓘ".blue());
+    stdout().flush().ok();
+    match client.send(usb_debug_protocol::Command::RebootSamba, Duration::from_secs(5)) {
+        Ok(_) => println!("{}", "✓".green()),
+        Err(e) => println!("{} ({e})", "⚠".yellow()),
+    }
+    Ok(())
+}
+
 pub fn flash_firmware(args: FlashArgs) -> anyhow::Result<()> {
     if std::fs::metadata(BOOT_IMAGE).is_err() {
         panic!("The {BOOT_IMAGE} file is missing, have you run cargo xtask build-firmware (or build-all)?");
@@ -94,102 +128,55 @@ pub fn flash_firmware(args: FlashArgs) -> anyhow::Result<()> {
         (data, 0)
     };
 
-    if args.switch {
-        println!("Running scripts/reboot-in-samba-mode.sh");
-        if !Command::new("scripts/reboot-in-samba-mode.sh")
-            .current_dir(project_root())
-            .status()
-            .context("running scripts/reboot-in-samba-mode.sh failed")?
-            .success()
-        {
-            panic!("Switching to sam-ba mode failed");
-        }
-        println!("Waiting a bit to let sam-ba mode boot");
-        std::thread::sleep(Duration::from_millis(1000));
-    }
+    enter_samba_mode(args.switch)?;
 
-    let mut spinner_char = SPINNERS.iter().cycle();
-    let mut sambuca = loop {
-        let progress = spinner_char.next().unwrap(); // note(unwrap): guaranteed by `cycle()`
-        print!("\r{progress} Waiting for sam-ba USB device");
-        stdout().flush().context("flushing stdout")?;
-
-        if let Ok(sambuca) = sambuca::Sambuca::new() {
-            break sambuca;
-        }
-
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    print!("Waiting for sam-ba USB device...");
+    stdout().flush().context("flushing stdout")?;
+    let mut sambuca =
+        sambuca::flash::wait_for_device(Duration::from_secs(60)).context("waiting for SAM-BA device")?;
     println!("\r{} Connected to the SAM-BA device", "✓".green());
     println!(
         "{} SAM-BA monitor version: {}",
         "ⓘ".blue(),
         sambuca.version().context("reading SAM-BA version")?
     );
-    // Let sam-ba get itself together if it recently booted.
-    std::thread::sleep(Duration::from_millis(500));
-
-    let mut flash_app =
-        sambuca.initialize_flash_applet(0, 1, 0, 8, 3).context("initializing flash applet")?;
-    let mut last_progress = Instant::now();
     let start_time = Instant::now();
-
+    let mut last_progress = Instant::now();
     let mut counter = 0;
-    loop {
-        if flash_app
-            .write_flash(offset as _, data, |written| {
-                let pct = written * 100 / data.len();
-                if last_progress.elapsed() > Duration::from_millis(100) || pct == 100 {
-                    print_progress_bar("Flashing", pct, counter);
+
+    sambuca
+        .flash_image(data, offset as u64, !args.no_verify, |p| match p {
+            FlashProgress::Writing { percent } => {
+                if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
+                    print_progress_bar("Flashing", percent, counter);
                     last_progress = Instant::now();
                     counter += 1;
                 }
-            })
-            .is_ok()
-        {
-            break;
-        }
-    }
-
-    if !args.no_verify {
-        counter = 0;
-
-        loop {
-            if let Ok(VerificationStats { num_chunks_patched, num_attempts }) = flash_app.verify_flash(
-                offset as _,
-                data,
-                |read| {
-                    let pct = read * 100 / data.len();
-                    if last_progress.elapsed() > Duration::from_millis(100) || pct == 100 {
-                        print_progress_bar("Verifying", pct, counter);
-                        last_progress = Instant::now();
-                        counter += 1;
-                    }
-                },
-                true,
-            ) {
-                if num_chunks_patched != 0 {
-                    println!();
-                    println!(
-                        "{} Fixed {} chunk(s) during verification in {} attempt(s)",
-                        "⚠".yellow(),
-                        num_chunks_patched,
-                        num_attempts + 1
-                    );
-                }
-
-                break;
             }
-        }
-    }
+            FlashProgress::Verifying { percent } => {
+                if last_progress.elapsed() > Duration::from_millis(100) || percent == 100 {
+                    print_progress_bar("Verifying", percent, counter);
+                    last_progress = Instant::now();
+                    counter += 1;
+                }
+            }
+            FlashProgress::Patched { chunks, attempts } => {
+                println!();
+                println!(
+                    "{} Fixed {} chunk(s) during verification in {} attempt(s)",
+                    "⚠".yellow(),
+                    chunks,
+                    attempts + 1
+                );
+            }
+        })
+        .context("flashing image")?;
+
     println!();
-    println!("{} Done in {:.02}s", "✓".green(), start_time.elapsed().as_secs_f32(),);
+    println!("{} Done in {:.02}s", "✓".green(), start_time.elapsed().as_secs_f32());
     println!("Rebooting in normal mode");
 
-    // Reset boot bits
-    sambuca.write_u32(0xF8048054, 0x66830000).context("reset boot bits")?;
-    // Kick reset controller
-    sambuca.write_u32(0xF8048000, 0xA5000001).context("kick reset controller")?;
+    sambuca::flash::reboot_to_normal(&mut sambuca).context("rebooting to normal mode")?;
 
     Ok(())
 }
@@ -230,19 +217,7 @@ pub fn dump_flash(args: DumpFlashArgs) -> anyhow::Result<()> {
         args.output
     );
 
-    if args.switch {
-        println!("Running scripts/reboot-in-samba-mode.sh");
-        if !Command::new("scripts/reboot-in-samba-mode.sh")
-            .current_dir(project_root())
-            .status()
-            .context("running scripts/reboot-in-samba-mode.sh failed")?
-            .success()
-        {
-            panic!("Switching to sam-ba mode failed");
-        }
-        println!("Waiting a bit to let sam-ba mode boot");
-        std::thread::sleep(Duration::from_millis(1000));
-    }
+    enter_samba_mode(args.switch)?;
 
     let start_time = Instant::now();
     let mut attempt = 0;
@@ -266,18 +241,10 @@ pub fn dump_flash(args: DumpFlashArgs) -> anyhow::Result<()> {
 }
 
 fn dump_flash_attempt(output: &PathBuf, offset: usize, total_bytes: usize) -> anyhow::Result<()> {
-    let mut spinner_char = SPINNERS.iter().cycle();
-    let mut sambuca = loop {
-        let progress = spinner_char.next().unwrap(); // note(unwrap): guaranteed by `cycle()`
-        print!("\r{progress} Waiting for sam-ba USB device");
-        stdout().flush().context("flushing stdout")?;
-
-        if let Ok(sambuca) = sambuca::Sambuca::new() {
-            break sambuca;
-        }
-
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    print!("Waiting for sam-ba USB device...");
+    stdout().flush().context("flushing stdout")?;
+    let mut sambuca =
+        sambuca::flash::wait_for_device(Duration::from_secs(60)).context("waiting for SAM-BA device")?;
     println!("\r{} Connected to the SAM-BA device", "✓".green());
     println!(
         "{} SAM-BA monitor version: {}",

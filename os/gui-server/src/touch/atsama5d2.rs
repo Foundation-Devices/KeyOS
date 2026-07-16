@@ -99,7 +99,7 @@ impl Gui {
 
                 let touch = Touch { kind, id: touch.id as usize, x: touch.x as usize, y: y as usize };
 
-                self.touch_dispatch(touch);
+                self.touch_dispatch(touch, false);
             }
         }
     }

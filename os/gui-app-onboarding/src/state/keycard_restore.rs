@@ -137,13 +137,15 @@ async fn get_seed_from_cards(
     async_scalar::<KeycardPermissions, _>(keycard::messages::ResetShards).await?;
 
     let first_card = scan_card(&global, &haptics, &mut restore_state, &mut cards_loaded).await?;
+    let scheme = first_card.scheme;
+    restore_state.scheme = Some(scheme);
 
     if first_card.has_magic_backup {
         restore_state.remote_shard_state = RemoteShardState::Loading;
         restore_state.kind = Some(KeycardRestoreKind::Magic);
         update_slint_state(&global, &restore_state);
 
-        match restore_remote_shard(first_card.seed_fingerprint).await {
+        match restore_remote_shard(first_card.seed_fingerprint, first_card.timestamp).await {
             Ok(Some(seed)) => {
                 restore_state.remote_shard_state = RemoteShardState::Restored;
                 restore_state.cards_scanned = 2;
@@ -168,7 +170,11 @@ async fn get_seed_from_cards(
         update_slint_state(&global, &restore_state);
     }
 
-    let _ = scan_card(&global, &haptics, &mut restore_state, &mut cards_loaded).await?;
+    // Scan additional cards until we have enough shards to restore (threshold)
+    // We already have 1 shard from the first card
+    while cards_loaded.len() < scheme.threshold {
+        let _ = scan_card(&global, &haptics, &mut restore_state, &mut cards_loaded).await?;
+    }
 
     let seed = async_archive::<KeycardPermissions, _>(keycard::messages::RestoreMasterSeed).await?;
     haptics.vibrate(HapticPattern::PulsingStrongOne100);
@@ -179,8 +185,9 @@ async fn get_seed_from_cards(
 
 pub async fn restore_remote_shard(
     seed_fingerprint: [u8; 32],
+    timestamp: u32,
 ) -> anyhow::Result<Option<keycard::messages::MasterSeedRestored>> {
-    let Some(shard) = get_remote_shard::<QuantumLinkPermissions>(seed_fingerprint, |e| match e {
+    let Some(shard) = get_remote_shard::<QuantumLinkPermissions>(seed_fingerprint, timestamp, |e| match e {
         quantum_link::SendMessageError::NoDevicePaired => false,
         _ => true,
     })
@@ -203,6 +210,7 @@ struct RestoreState {
     reading_keycard: bool,
     remote_shard_state: RemoteShardState,
     kind: Option<KeycardRestoreKind>,
+    scheme: Option<keycard::messages::ShamirScheme>,
 }
 
 #[derive(Default)]

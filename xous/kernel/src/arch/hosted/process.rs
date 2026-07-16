@@ -67,11 +67,6 @@ pub fn set_current_pid(pid: PID) {
         let pid_idx = (pid.get() - 1) as usize;
         let mut pt = pt.borrow_mut();
 
-        // // If the PID doesn't exist, only allow it if the table is
-        // // currently empty.
-        // for (idx, i) in pt.table.iter().enumerate() {
-        //     println!("pt.table[{}]: {:?}", idx, i);
-        // }
         match pt.table.get_mut(pid_idx) {
             None | Some(None) => {
                 // if pid.get() != 1 || pt.total > 0 {
@@ -147,12 +142,6 @@ impl Process {
     }
 
     pub fn setup_thread(&mut self, thread: TID, _setup: ThreadInit) -> Result<(), xous::Error> {
-        // println!(
-        //     "KERNEL({}): Setting up thread {} @ {:?}",
-        //     self.pid,
-        //     thread,
-        //     std::thread::current()
-        // );
         assert!(thread > 0);
         PROCESS_TABLE.with(|pt| {
             let process_table = &mut *pt.borrow_mut();
@@ -312,7 +301,6 @@ impl Process {
     }
 
     pub fn send(&mut self, bytes: &[u8]) -> Result<(), xous::Error> {
-        // eprintln!("KERNEL: Sending syscall response: {:?}", bytes);
         PROCESS_TABLE.with(|pt| {
             let mut process_table = pt.borrow_mut();
             let current_pid_idx = process_table.current.get() as usize - 1;

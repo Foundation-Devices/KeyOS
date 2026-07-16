@@ -10,8 +10,8 @@ use constant_time_eq::constant_time_eq;
 use fs::Location;
 use serde::{Deserialize, Serialize};
 use server::{
-    Archive, ArchiveAsyncHandler, ArchiveHandler, ArchiveRequest, ScalarEventSubscriber,
-    ScalarEventSubscriptionHandler, ScalarHandler, ServerContext,
+    ArchiveRequest, BlockingArchive, BlockingArchiveAsyncHandler, BlockingArchiveHandler,
+    ScalarEventSubscriber, ScalarEventSubscriptionHandler, ScalarHandler, ServerContext,
 };
 use xous::{DropDeallocate, PID};
 
@@ -95,12 +95,12 @@ pub(crate) enum RecoveryState {
     Invalid(String),
 }
 
-impl ArchiveAsyncHandler<ReadArchive> for RecoveryWorkerServer {
+impl BlockingArchiveAsyncHandler<ReadArchive> for RecoveryWorkerServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<ReadArchive>,
         _context: &mut ServerContext<Self>,
-    ) -> <ReadArchive as Archive>::Response {
+    ) -> <ReadArchive as BlockingArchive>::Response {
         let ArchiveRequest { message, response } = request;
         let ReadArchive { path, location } = message;
         response.respond(()).ok(); // Respond immediately to unblock the caller
@@ -137,16 +137,16 @@ impl ArchiveAsyncHandler<ReadArchive> for RecoveryWorkerServer {
         };
     }
 
-    fn default_response() -> <ReadArchive as server::Archive>::Response {}
+    fn default_response() -> <ReadArchive as server::BlockingArchive>::Response {}
 }
 
-impl ArchiveHandler<GetArchiveState> for RecoveryWorkerServer {
+impl BlockingArchiveHandler<GetArchiveState> for RecoveryWorkerServer {
     fn handle(
         &mut self,
         _msg: GetArchiveState,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <GetArchiveState as Archive>::Response {
+    ) -> <GetArchiveState as BlockingArchive>::Response {
         log::debug!("GetArchiveState request received, returning current archive state");
         self.archive_state.clone().into()
     }
@@ -293,23 +293,23 @@ impl ScalarHandler<StartRecovery> for RecoveryWorkerServer {
             }
 
             std::thread::sleep(REBOOT_DELAY);
-            PowerManagerApi::default().reboot().ok();
+            PowerManagerApi::default().reboot();
         }
     }
 }
 
-impl ArchiveHandler<GetAppBinVerificationState> for RecoveryWorkerServer {
+impl BlockingArchiveHandler<GetAppBinVerificationState> for RecoveryWorkerServer {
     fn handle(
         &mut self,
         _msg: GetAppBinVerificationState,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <GetAppBinVerificationState as Archive>::Response {
+    ) -> <GetAppBinVerificationState as BlockingArchive>::Response {
         (&self.os_binary_state).into()
     }
 }
 
-impl ArchiveHandler<GetLastError> for RecoveryWorkerServer {
+impl BlockingArchiveHandler<GetLastError> for RecoveryWorkerServer {
     fn handle(
         &mut self,
         _msg: GetLastError,
@@ -972,8 +972,7 @@ impl RecoveryWorkerServer {
 
             let header = fw_utils::hash::verify_cosign2_mem(
                 &self.crypto,
-                &file_mem,
-                file_size,
+                &file_mem.as_slice::<u8>()[..file_size],
                 cfg!(feature = "production"),
             );
             let (hash, _, _, _, _, is_valid) = convert_cosign2_header(header);
@@ -1004,8 +1003,7 @@ impl RecoveryWorkerServer {
                     .context("couldn't read the app ELF file back")?;
             let header = fw_utils::hash::verify_cosign2_mem(
                 &self.crypto,
-                &file_mem,
-                file_size,
+                &file_mem.as_slice::<u8>()[..file_size],
                 cfg!(feature = "production"),
             );
             let (hash, _, _, _, _, is_valid) = convert_cosign2_header(header);
@@ -1014,13 +1012,20 @@ impl RecoveryWorkerServer {
                 bail!("App readback from {fs_elf_path} failed");
             }
 
-            // Read and copy the manifest file
+            // Read the manifest from the archive and verify its hash before writing to the final path
             let tar_manifest_path = format!("{tar_app_path}/manifest.json");
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, &tar_manifest_path, |_| ())?;
 
-            let fs_manifest_path = &format!("{fs_app_dir}/manifest.json");
+            let manifest_hash = self
+                .crypto
+                .sha256(&file_mem.as_slice::<u8>()[..file_size])
+                .context("couldn't calculate manifest file hash")?;
+            if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
+                bail!("App manifest {tar_manifest_path} hash mismatch");
+            }
 
+            let fs_manifest_path = &format!("{fs_app_dir}/manifest.json");
             self.fs.remove(fs_manifest_path, Location::System).ok();
             fw_utils::hash::write_file_progress(
                 &self.fs,
@@ -1030,16 +1035,6 @@ impl RecoveryWorkerServer {
                 file_size,
                 |_| (),
             )?;
-
-            // Read and verify the app manifest file
-            let (mem, size) =
-                fw_utils::hash::read_file_progress(&self.fs, fs_manifest_path, Location::System, |_| ())
-                    .context("couldn't read the manifest file back")?;
-            let manifest_hash =
-                self.crypto.sha256(*mem, 0, size).context("couldn't calculate manifest file hash")?;
-            if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
-                bail!("App manifest {fs_manifest_path} hash mismatch");
-            }
 
             progress_fn(((i + 1) as f32) / (apps.len() as f32));
         }
@@ -1067,6 +1062,15 @@ impl RecoveryWorkerServer {
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, tar_asset_path, |_| ())?;
 
+            // Verify the asset hash before writing to the final path
+            let asset_hash = self
+                .crypto
+                .sha256(&file_mem.as_slice::<u8>()[..file_size])
+                .context("couldn't calculate asset file hash")?;
+            if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
+                bail!("Asset {tar_asset_path} hash mismatch");
+            }
+
             // Remove the version from the path and apply location-specific fixes
             let fs_asset_path = asset_tar_path_to_fs_path(tar_asset_path, *asset_location);
             let mut asset_path_parts = fs_asset_path.split('/').collect::<Vec<_>>();
@@ -1086,16 +1090,6 @@ impl RecoveryWorkerServer {
                 file_size,
                 |_| (),
             )?;
-
-            // Read and verify the asset file
-            let (mem, size) =
-                fw_utils::hash::read_file_progress(&self.fs, fs_asset_path, *asset_location, |_| ())
-                    .context("couldn't read the asset file back")?;
-            let asset_hash =
-                self.crypto.sha256(*mem, 0, size).context("couldn't calculate asset file hash")?;
-            if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
-                bail!("Asset {tar_asset_path} hash mismatch");
-            }
 
             progress_fn(((i + 1) as f32) / (assets.len() as f32));
         }
@@ -1222,7 +1216,9 @@ impl RecoveryWorkerServer {
         let manifest_bytes_without_cosign2 = &mem.as_slice::<u8>()[cosign2::Header::DEFAULT_SIZE..].to_vec();
         let json = std::ffi::CStr::from_bytes_until_nul(manifest_bytes_without_cosign2)?.to_bytes();
 
-        let Ok(header) = fw_utils::hash::verify_cosign2_mem(&self.crypto, &mem, size, false) else {
+        let Ok(header) =
+            fw_utils::hash::verify_cosign2_mem(&self.crypto, &mem.as_slice::<u8>()[..size], false)
+        else {
             bail!("Manifest header is invalid")
         };
         // The recovery archive manifest is allowed to be single-signed for simplicity of the release process,

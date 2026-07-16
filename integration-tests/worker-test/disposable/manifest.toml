@@ -1,0 +1,10 @@
+manifestVersion = "0"
+appId = "0xb5e4544f34b2a1b5eaa31c4d32d7ef01"
+
+[appName]
+en = "async worker disposable test server"
+
+[servers."test/disposable"]
+ScalarEcho = { id = 1, type = "blockingScalar" }
+ShutdownDisposable = { id = 3, type = "scalar" }
+HoldDisposableScalar = { id = 4, type = "blockingScalar" }

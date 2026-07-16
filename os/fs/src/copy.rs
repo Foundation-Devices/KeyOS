@@ -7,7 +7,7 @@ use std::{
 };
 
 use fs::messages::{AsyncCopyBlock, AtomicCopy};
-use server::{ArchiveHandler, BlockingScalarHandler};
+use server::{BlockingArchiveHandler, BlockingScalarHandler};
 use xous::{DropDeallocate, MemoryFlags};
 use {
     crate::{Error, Location, Server},
@@ -15,7 +15,6 @@ use {
 };
 
 use crate::disk::DynamicDisk;
-use crate::OpenFile;
 
 impl Server {
     /// Copy a file or directory (recursively if it's a directory) to the destination directory,
@@ -33,7 +32,7 @@ impl Server {
 
         log::debug!("Copying '{src}' to '{dest_dir}/{target_name}'");
 
-        let root_dir = self.root_dir(location)?;
+        let root_dir = self.mount(location).ok_or(Error::NoMedia)?.root_dir();
 
         let dest_dir = if dest_dir.is_empty() {
             root_dir.clone()
@@ -47,9 +46,11 @@ impl Server {
 
         for entry in dest_dir.iter() {
             let entry = entry.map_err(|_| Error::Io)?;
-            if entry.file_name() == target_name {
-                return Err(Error::FileAlreadyExists);
+            let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
             }
+            return Err(Error::FileAlreadyExists);
         }
 
         match root_dir.open_dir(src) {
@@ -93,24 +94,19 @@ fn recursively_copy(src: &fatfs::Dir<'_, DynamicDisk>, dst: &fatfs::Dir<'_, Dyna
     Ok(())
 }
 
-impl ArchiveHandler<AtomicCopy> for Server {
+impl BlockingArchiveHandler<AtomicCopy> for Server {
     fn handle(
         &mut self,
         msg: AtomicCopy,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <AtomicCopy as server::Archive>::Response {
+    ) -> <AtomicCopy as server::BlockingArchive>::Response {
         self.check_read_access(sender, msg.location)?;
         self.check_write_access(sender, msg.location)?;
         let src = crate::path_of(msg.location, &msg.src, sender);
         let dest_dir = crate::path_of(msg.location, &msg.dest_dir, sender);
 
-        let mut open_paths = self
-            .files
-            .iter()
-            .flat_map(|(_, files)| files.open.values().map(|open| &open.path))
-            .chain(self.dirs.iter().flat_map(|(_, dirs)| dirs.open.values().map(|open| &open.path)));
-        if open_paths.any(|p| p == &src) {
+        if self.mount(msg.location).ok_or(Error::NoMedia)?.path_in_use(&src)? {
             return Err(Error::FileInUse);
         }
 
@@ -130,30 +126,49 @@ impl BlockingScalarHandler<AsyncCopyBlock> for Server {
         if msg.to == msg.from {
             return Err(Error::FileAlreadyExists);
         }
-        let process_files = &mut self.files.get_mut(&sender).ok_or(Error::FileNotOpen)?;
-        let [Some(OpenFile { file: file_from, flags: flags_from, .. }), Some(OpenFile { file: file_to, flags: flags_to, .. })] =
-            process_files.open.get_disjoint_mut([&msg.from, &msg.to])
-        else {
-            return Err(Error::FileNotOpen);
-        };
-        if !flags_from.read {
-            return Err(Error::InvalidOperation);
-        }
-        if !flags_to.write {
-            return Err(Error::InvalidOperation);
-        }
         let aligned_len = core::cmp::max(msg.len.next_multiple_of(0x1000), 0x1000);
         let mut buffer = DropDeallocate::new(xous::map_memory(None, None, aligned_len, MemoryFlags::W)?);
-        let mut offset = 0;
-        loop {
-            let read_size =
-                file_from.read(&mut buffer.as_slice_mut()[offset..msg.len]).map_err(|_| Error::Io)?;
-            offset += read_size;
-            if read_size == 0 || offset >= msg.len {
-                break;
+
+        let from_location = msg.from.location()?;
+        let to_location = msg.to.location()?;
+
+        // Read phase: borrow the from-mount only for the duration of reads.
+        let offset = {
+            let open = self
+                .mount_mut(from_location)
+                .ok_or(Error::NoMedia)?
+                .file_mut(sender, msg.from)
+                .ok_or(Error::FileNotOpen)?;
+            if !open.flags.read {
+                return Err(Error::InvalidOperation);
             }
+            let mut offset = 0;
+            loop {
+                let read_size = open
+                    .file
+                    .read(&mut buffer.as_slice_mut()[offset..msg.len])
+                    .map_err(|_| Error::Io)?;
+                offset += read_size;
+                if read_size == 0 || offset >= msg.len {
+                    break;
+                }
+            }
+            offset
+        };
+
+        // Write phase: borrow the to-mount separately. Works whether to-mount equals from-mount or not.
+        {
+            let open = self
+                .mount_mut(to_location)
+                .ok_or(Error::NoMedia)?
+                .file_mut(sender, msg.to)
+                .ok_or(Error::FileNotOpen)?;
+            if !open.flags.write {
+                return Err(Error::InvalidOperation);
+            }
+            open.file.write_all(&buffer.as_slice_mut()[..offset])?;
         }
-        file_to.write_all(&buffer.as_slice_mut()[..offset])?;
+
         Ok(offset)
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::sync::atomic::AtomicBool;
+
 pub use atsama5d27::lcdc::ColorMode;
 use atsama5d27::lcdc::{
     BurstLength, LcdDmaDesc, Lcdc, LcdcInterruptStatus, LcdcLayerId, LcdcLayerInterruptStatus,
@@ -22,6 +24,8 @@ spi::use_api!();
 pub(crate) const DEFAULT_BACKLIGHT_LEVEL_PERCENT: u8 = 80;
 
 pub const MAX_LAYERS: usize = 4;
+
+static VSYNC_HAPPENED: AtomicBool = AtomicBool::new(false);
 
 pub struct PlatformDisplay {
     lcdc_addr: MemoryRange,
@@ -97,6 +101,7 @@ impl PlatformDisplay {
             dma.ctrl = 1;
             dma.next = dma_phys;
             result.lcdc.set_dma_head_pointer(layer, dma_phys);
+            result.lcdc.set_add_to_queue_enable(layer, true);
         }
         // Make sure both master interfaces are used on the LCDC, and that
         // Base and Heo are on different interfaces
@@ -186,10 +191,22 @@ impl PlatformDisplay {
             self.lcdc.set_rgb_mode_input(layer, rgb_mode);
 
             match layer_conf.src() {
-                crate::layers::SourceType::Dma(mut src) => {
+                crate::layers::SourceType::Dma { phys: mut src, range } => {
                     self.lcdc.set_use_dma_path_enable(layer, true);
-                    let (src_w, _src_h) = layer_conf.src_dimensions();
+                    let (src_w, src_h) = layer_conf.src_dimensions();
                     let bpp = layer_conf.pixel_format().bytes_per_pixel();
+                    let Some(src_len) = src_w.checked_mul(src_h).and_then(|px| px.checked_mul(bpp)) else {
+                        log::error!("Skipping layer with overflowing dimensions: {layer_conf:?}");
+                        self.lcdc.set_channel_enable(layer, false);
+                        self.lcdc.update_attribute(layer);
+                        continue;
+                    };
+                    if range.len() < src_len {
+                        log::error!("Skipping layer with invalid framebuffer span: {layer_conf:?}");
+                        self.lcdc.set_channel_enable(layer, false);
+                        self.lcdc.update_attribute(layer);
+                        continue;
+                    }
                     let (crop_x, crop_y) = layer_conf.crop_pos();
 
                     src += (crop_x + crop_y * src_w) * bpp;
@@ -202,7 +219,6 @@ impl PlatformDisplay {
                     let stride = (src_w - crop_w) * bpp;
                     self.dma_desc_for_layer(layer).addr = src as u32;
                     self.lcdc.set_horiz_stride(layer, stride as i32);
-                    self.lcdc.set_add_to_queue_enable(layer, true);
                 }
                 crate::layers::SourceType::Color { r, g, b } => {
                     self.lcdc.set_use_dma_path_enable(layer, false);
@@ -275,6 +291,8 @@ impl PlatformDisplay {
 
     #[cfg(not(feature = "recovery-os"))]
     pub(crate) fn dim(&mut self) { self.dimmed = true; }
+
+    pub fn vsync_happened() -> bool { VSYNC_HAPPENED.swap(false, std::sync::atomic::Ordering::Relaxed) }
 }
 
 fn lcdc_irq_handler(_irq_no: usize, arg: *mut usize) {
@@ -283,6 +301,7 @@ fn lcdc_irq_handler(_irq_no: usize, arg: *mut usize) {
     if ctx.lcdc.interrupt_status().contains(LcdcInterruptStatus::BASE)
         && ctx.lcdc.layer_interrupt_status(LcdcLayerId::Base).contains(LcdcLayerInterruptStatus::DSCR)
     {
+        VSYNC_HAPPENED.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = xous::try_send_message(
             ctx.cid,
             xous::Message::Scalar(ScalarMessage { id: OnVsyncMessage::ID, ..Default::default() }),

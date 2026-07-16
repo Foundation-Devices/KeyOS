@@ -1,7 +1,21 @@
+manifestVersion = "0"
 appId = "0x6f732f69326300000000000000000000"
 memory = ["TWIHS0"]
-syscall = ["SetThreadPriority"]
+syscall = ["ClaimInterrupt", "SetThreadPriority"]
 extends = "../../api/i2c"
 
 [appName]
 en = "I2C Server"
+
+[servers."os/i2c"]
+TransferCompleteMsg = { id = 31, type = "scalar" }
+
+[permissions]
+"os/dma" = [
+    "PeripheralTransferMsg",
+    "ExecuteTransferMsg",
+    "WaitTransferMsg",
+    "StopTransferMsg",
+    "DropTransferMsg",
+]
+"os/gpio" = ["GetPin"]

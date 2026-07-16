@@ -71,6 +71,7 @@ impl Gui {
             {
                 let request = core::mem::take(navigation_request).unwrap();
                 let _ = request.response.respond(response);
+                self.notified_nav_request = None;
             }
             _ => {
                 warn!("Response got while no navigation present");
@@ -81,7 +82,9 @@ impl Gui {
 
     pub(crate) fn get_pending_nav_request(&self) -> Option<Vec<u8>> {
         match &self.state {
-            GuiState::Modal(modal_state) => modal_state.get_navigation_request().map(|a| a.to_owned()),
+            GuiState::Modal(modal_state) if self.windows.contains_key(&modal_state.modal_pid()) => {
+                modal_state.get_navigation_request().map(|a| a.to_owned())
+            }
             GuiState::Switching { navigation_request, .. }
             | GuiState::SingleWindow { navigation_request, .. } => {
                 navigation_request.as_ref().map(|r| r.message.args.clone())
@@ -109,6 +112,32 @@ impl Gui {
                 .ok();
         } else {
             error!("Can't notify navigation cancel, no app window with PID={pid} is known");
+        }
+    }
+
+    pub(crate) fn update_navigation_request_state(&mut self) {
+        let previous_pid = self.notified_nav_request.as_ref().map(|n| n.0);
+        let previous_nav_request = self.notified_nav_request.as_ref().map(|n| &n.1);
+        let current_pid = self.active_app_pid();
+        let current_nav_request = self.get_pending_nav_request();
+        if previous_pid != current_pid || previous_nav_request != current_nav_request.as_ref() {
+            if let Some(previous_active_pid) = previous_pid {
+                if previous_nav_request.is_some() {
+                    self.send_navigation_cancelled_event(previous_active_pid);
+                }
+            }
+            if let Some(active_pid) = current_pid {
+                if current_nav_request.is_some() {
+                    self.send_navigation_focused_event(active_pid);
+                }
+            }
+        }
+        if let Some(pid) = current_pid
+            && let Some(nav_request) = current_nav_request
+        {
+            self.notified_nav_request = Some((pid, nav_request))
+        } else {
+            self.notified_nav_request = None;
         }
     }
 }

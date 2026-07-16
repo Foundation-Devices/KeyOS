@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6f732f656d6d63000000000000000000"
 memory = ["SDMMC0"]
 syscall = ["ClaimInterrupt", "VirtToPhys", "SetThreadPriority"]
@@ -6,13 +7,15 @@ syscall = ["ClaimInterrupt", "VirtToPhys", "SetThreadPriority"]
 en = "eMMC Server"
 
 [servers."os/emmc"]
-ReadBlocks = { id = 0, type = "lendMut" }
-WriteBlocks = { id = 1, type = "lendMut" }
-ReadEncryptedBlocks = { id = 4, type = "lendMut" }
-WriteEncryptedBlocks = { id = 5, type = "lendMut" }
+ReadBlocks = { id = 0, type = "deferredLendMut" }
+WriteBlocks = { id = 1, type = "deferredLendMut" }
+ReadEncryptedBlocks = { id = 4, type = "deferredLendMut" }
+WriteEncryptedBlocks = { id = 5, type = "deferredLendMut" }
+SdmmcDone = { id = 8, type = "scalar" }
 BlockCount = { id = 2, type = "blockingScalar" }
 Suspend = { id = 3, type = "scalar" }
+Flush = { id = 7, type = "blockingScalar" }
 
 [permissions]
-"os/crypto" = ["DiskEncryptUnsafe"]
+"os/crypto" = ["DiskEncryptUnsafe", "SubscribeDiskEncryptComplete"]
 "os/power-manager" = ["SetPeripheralEnabled"]

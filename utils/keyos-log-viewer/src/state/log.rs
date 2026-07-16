@@ -32,6 +32,14 @@ pub struct LogViewState {
     pub search_input: String,
     pub render_cache: LogRenderCache,
     pub render_cache_generation: u64,
+    pub scroll_anchor: ScrollAnchor,
+    pub count_prefix: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+pub enum ScrollAnchor {
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +153,8 @@ impl LogViewState {
             search_input: String::new(),
             render_cache: LogRenderCache::default(),
             render_cache_generation: 0,
+            scroll_anchor: ScrollAnchor::Up,
+            count_prefix: None,
         }
     }
 
@@ -182,9 +192,24 @@ impl LogViewState {
             return;
         }
 
-        let center_offset = self.viewport_line_count / 2;
-        let target_top = self.cursor_line.saturating_sub(center_offset);
-        self.viewport_start = target_top.min(self.max_viewport_start(total_lines));
+        let min_visible_start = self.cursor_line.saturating_add(1).saturating_sub(self.viewport_line_count);
+        let max_visible_start = self.cursor_line;
+
+        let (min_start, max_start) = match self.scroll_anchor {
+            ScrollAnchor::Up => {
+                let top_anchor = self.viewport_line_count / 4;
+                let anchored_start = self.cursor_line.saturating_sub(top_anchor);
+                (min_visible_start, anchored_start)
+            }
+            ScrollAnchor::Down => {
+                let bottom_anchor = self.viewport_line_count.saturating_mul(3) / 4;
+                let anchored_start = self.cursor_line.saturating_sub(bottom_anchor);
+                (anchored_start.max(min_visible_start), max_visible_start)
+            }
+        };
+
+        self.viewport_start = self.viewport_start.clamp(min_start, max_start);
+        self.viewport_start = self.viewport_start.min(self.max_viewport_start(total_lines));
     }
 
     pub fn selected_entry_idx(&self) -> Option<usize> {
@@ -198,8 +223,10 @@ impl LogViewState {
 
         if delta_lines < 0 {
             self.cursor_line = self.cursor_line.saturating_sub((-delta_lines) as usize);
+            self.scroll_anchor = ScrollAnchor::Up;
         } else {
             self.cursor_line = self.cursor_line.saturating_add(delta_lines as usize);
+            self.scroll_anchor = ScrollAnchor::Down;
         }
 
         let total_lines = self.render_cache.lines.len();
@@ -278,6 +305,20 @@ impl LogViewState {
             return KeyResult::consumed();
         }
 
+        // Save count before resetting on non-digit keys.
+        let count = self.count_prefix.unwrap_or(1);
+
+        if let KeyCode::Char(c @ '0'..='9') = code {
+            let digit = (c as u8 - b'0') as usize;
+            self.count_prefix = Some(match self.count_prefix {
+                Some(n) => n * 10 + digit,
+                None => digit,
+            });
+            return KeyResult::consumed();
+        }
+
+        self.count_prefix = None;
+
         match code {
             KeyCode::Down | KeyCode::Char('j') => self.scroll_lines(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll_lines(-1),
@@ -291,18 +332,35 @@ impl LogViewState {
                 self.search_input = self.search_query.clone();
             }
             KeyCode::Char('y') => {
-                let Some(text) = build_selected_row_text(self) else {
-                    return KeyResult::consumed()
-                        .set_notify(Notification::error("Selected log not found", Duration::from_secs(3)));
+                let (text, msg) = if count > 1 {
+                    let Some(text) = build_selected_rows_text(self, count) else {
+                        return KeyResult::consumed().set_notify(Notification::error(
+                            "Selected log not found",
+                            Duration::from_secs(3),
+                        ));
+                    };
+                    (text, format!("Copied {} logs to clipboard", count))
+                } else {
+                    let Some(text) = build_selected_row_text(self) else {
+                        return KeyResult::consumed().set_notify(Notification::error(
+                            "Selected log not found",
+                            Duration::from_secs(3),
+                        ));
+                    };
+                    (text, "Copied selected log to clipboard".to_string())
                 };
 
-                return KeyResult::consumed()
-                    .set_notify(copy_to_clipboard(&text, "Copied selected log to clipboard"));
+                return KeyResult::consumed().set_notify(copy_to_clipboard(&text, &msg));
             }
             KeyCode::Char('Y') => {
                 let text = build_filtered_text(self);
                 return KeyResult::consumed()
                     .set_notify(copy_to_clipboard(&text, "Copied all logs to clipboard"));
+            }
+            KeyCode::Char('c') => {
+                self.clear_logs();
+                return KeyResult::consumed()
+                    .set_notify(Notification::success("Cleared all logs", Duration::from_secs(2)));
             }
             KeyCode::Char('g') | KeyCode::Char('t') | KeyCode::Home => self.scroll_logs_to_start(),
             KeyCode::Char('G') | KeyCode::Char('b') | KeyCode::End => self.scroll_logs_to_end(),
@@ -522,6 +580,19 @@ impl LogViewState {
         }
     }
 
+    fn clear_logs(&mut self) {
+        self.entries.clear();
+        self.levels.clear();
+        self.pid_servers.clear();
+        self.level_filters.clear();
+        self.pid_server_filters.clear();
+        self.levels_state = Default::default();
+        self.servers_state = Default::default();
+        self.cursor_line = 0;
+        self.viewport_start = 0;
+        self.invalidate_render_cache();
+    }
+
     fn scroll_logs_to_start(&mut self) {
         self.cursor_line = 0;
         self.viewport_start = 0;
@@ -549,7 +620,7 @@ fn level_sort_key(level: &LogLevel) -> u8 {
 fn format_entry_plain(entry: &LogItem) -> String {
     match entry {
         LogItem::Log(log) => format!(
-            "[{:.3}] {} {} {}{}: {}",
+            "[{:.3}] {} {} {}::{}: {}",
             log.timestamp,
             LogLevel::Standard(log.level).as_str(),
             log.pid,
@@ -578,6 +649,19 @@ fn build_filtered_text(state: &LogViewState) -> String {
 fn build_selected_row_text(state: &LogViewState) -> Option<String> {
     let entry_idx = state.selected_entry_idx()?;
     state.entries.get(entry_idx).map(format_entry_plain)
+}
+
+fn build_selected_rows_text(state: &LogViewState, count: usize) -> Option<String> {
+    let start_idx = state.selected_entry_idx()?;
+
+    let lines = state.entries[start_idx..]
+        .iter()
+        .filter(|entry| state.entry_visible(entry))
+        .take(count)
+        .map(format_entry_plain)
+        .collect::<Vec<_>>();
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn entry_matches_query(entry: &LogItem, query: &str) -> bool {

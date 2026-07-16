@@ -91,7 +91,7 @@ component SuccessPage inherits JumboIconPageBody {
             importance: Importance.primary;
             label: TR2.lookup(TrId.CommonButtonDone);
             clicked => {
-                Navigate.home({ animate: Animate.None });
+                Navigate.return-home();
             }
         }
     }
@@ -146,7 +146,7 @@ component ErrorPage inherits JumboIconPageBody {
             importance: Importance.secondary;
             label: TR2.lookup(TrId.CommonButtonSkipVerification);
             clicked => {
-                Navigate.home({ animate: Animate.None });
+                Navigate.return-home();
             }
         }
 
@@ -228,7 +228,7 @@ component SkipPage inherits JumboIconPageBody {
             label: TR2.lookup(TrId.CommonButtonSkipVerification);
             importance: Importance.secondary;
             clicked => {
-                Navigate.home({ animate: Animate.None });
+                Navigate.return-home();
             }
         }
 

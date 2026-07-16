@@ -37,8 +37,6 @@ xous-ticktimer = { workspace = true }
 
 [dev-dependencies]
 fs = { workspace = true, features = ["test"] }
-aes = "0.8"
-cbc = "0.1"
 simple_logger = { version = "5" }
 
 [lints.rust]

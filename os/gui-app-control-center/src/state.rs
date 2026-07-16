@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 #[cfg(not(feature = "recovery-os"))]
 use i18n::replace_placeholders;
+#[cfg(not(feature = "recovery-os"))]
 use jiff::fmt::strtime;
 #[cfg(not(feature = "recovery-os"))]
 use slint_keyos_platform::settings::global;
@@ -16,6 +17,7 @@ use crate::AppWindow;
 use crate::{tr, TrId};
 
 // 2025.01.01 01:00:00 UTC
+#[cfg(not(feature = "recovery-os"))]
 const MINIMUM_TIME: jiff::Timestamp = jiff::Timestamp::constant(1735693200, 0);
 
 pub struct AppState {
@@ -71,6 +73,7 @@ impl AppState {
         }
     }
 
+    #[cfg(not(feature = "recovery-os"))]
     pub fn update_time(&self) {
         let ui = &self.ui;
         let timestamp = jiff::Timestamp::now();
@@ -82,16 +85,10 @@ impl AppState {
             return;
         }
 
-        #[cfg(not(feature = "recovery-os"))]
         let tz = self.timezone.timezone();
-        #[cfg(feature = "recovery-os")]
-        let tz = jiff::tz::TimeZone::UTC;
         let zoned = timestamp.to_zoned(tz);
 
-        #[cfg(not(feature = "recovery-os"))]
         let standard_time = self.use_standard_time_format.0;
-        #[cfg(feature = "recovery-os")]
-        let standard_time = false;
         if standard_time {
             ui.set_control_center_time(strtime::format("%H:%M", &zoned).unwrap().into());
         } else {

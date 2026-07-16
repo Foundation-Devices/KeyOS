@@ -3,7 +3,7 @@
 use core::{fmt::Write, num::NonZeroUsize};
 
 use num_traits::FromPrimitive;
-use xous::MessageId;
+use xous::{MemoryFlags, MemoryRange};
 use xous_api_log::api;
 
 const RINGBUFFER_SIZE: usize = 16 * 1024;
@@ -18,7 +18,7 @@ macro_rules! log {
 struct LogServer {
     ring: RingStore,
     readers: [LogReader; 4],
-    last_panic_message: PanicMessage,
+    panic_buffer: MemoryRange,
 }
 
 struct RingStore {
@@ -27,74 +27,16 @@ struct RingStore {
     buffer_filled: bool,
 }
 
+#[derive(Default)]
 struct LogReader {
     pid: Option<xous::PID>,
     read_offset: usize,
     read_msg: Option<xous::MessageEnvelope>,
 }
 
-struct PanicMessage {
-    pid: Option<xous::PID>,
-    buf: [u8; api::PANIC_MESSAGE_SIZE],
-    len: usize,
-    in_progress: bool,
+impl Default for RingStore {
+    fn default() -> Self { Self { ringbuffer: [0; RINGBUFFER_SIZE], write_offset: 0, buffer_filled: false } }
 }
-
-impl PanicMessage {
-    const fn new() -> Self {
-        PanicMessage { pid: None, buf: [0; api::PANIC_MESSAGE_SIZE], len: 0, in_progress: false }
-    }
-
-    fn read(&self, out: &mut [u8]) -> usize {
-        let Some(pid) = self.pid else {
-            return 0;
-        };
-
-        // Write PID followed by the panic message bytes
-        if out.is_empty() {
-            return 0;
-        }
-
-        let len = self.len.min(out.len() - 1);
-        out[0] = pid.get();
-        out[1..len + 1].copy_from_slice(&self.buf[..len]);
-
-        len + 1
-    }
-
-    fn write(&mut self, b: &[u8]) {
-        let len = b.len().min(self.buf.len() - self.len);
-        self.buf[self.len..self.len + len].copy_from_slice(&b[..len]);
-        self.len = self.len.saturating_add(len);
-    }
-
-    fn begin(&mut self, pid: xous::PID) {
-        self.clear();
-        self.pid = Some(pid);
-        self.in_progress = true;
-    }
-
-    fn finish(&mut self) { self.in_progress = false; }
-
-    fn body(&self) -> &[u8] { &self.buf[..self.len] }
-
-    fn pid(&self) -> Option<xous::PID> { self.pid }
-
-    fn clear(&mut self) {
-        self.pid = None;
-        self.len = 0;
-        self.in_progress = false;
-        self.buf.fill(0);
-    }
-}
-
-const EMPTY_LOG_READER: LogReader = LogReader { pid: None, read_offset: 0, read_msg: None };
-
-static mut SERVER: LogServer = LogServer {
-    ring: RingStore { ringbuffer: [0; RINGBUFFER_SIZE], write_offset: 0, buffer_filled: false },
-    readers: [EMPTY_LOG_READER, EMPTY_LOG_READER, EMPTY_LOG_READER, EMPTY_LOG_READER],
-    last_panic_message: PanicMessage::new(),
-};
 
 impl RingStore {
     fn write_bytes(&mut self, b: &[u8]) {
@@ -139,16 +81,21 @@ impl Write for RingStore {
     }
 }
 
+impl Default for LogServer {
+    fn default() -> Self {
+        Self {
+            ring: Default::default(),
+            readers: Default::default(),
+            panic_buffer: xous::map_memory(None, None, 0x1000, MemoryFlags::W | MemoryFlags::POPULATE)
+                .unwrap(),
+        }
+    }
+}
 impl LogServer {
-    fn handle_message(&mut self, opcode: api::Opcode, mut envelope: xous::MessageEnvelope) {
+    fn handle_message(&mut self, opcode: api::Opcode, envelope: xous::MessageEnvelope) {
         use api::Opcode::*;
         match opcode {
             StandardOutput | StandardError => {
-                // temp fix: flush pending panic output when the first regular log
-                // message arrives. The intended behavior is to flush only on PanicFinished,
-                // but our std panic writer currently does not emit that reliably.
-                // https://github.com/Foundation-Devices/rust-keyos/blob/1.91.1-xous-arm/library/std/src/sys/stdio/xous.rs#L116C1-L125C2
-                self.flush_pending_panic(false);
                 let Some(mem) = envelope.body.memory_message() else {
                     return;
                 };
@@ -156,52 +103,17 @@ impl LogServer {
                 self.ring.write_terminated(&mem.buf.as_slice()[..len]);
             }
             ProgramName => {}
-            PanicStarted => {
-                self.flush_pending_panic(false);
 
-                let pid = envelope.sender.pid().unwrap();
-                self.last_panic_message.begin(pid);
-            }
-            PanicMessage0 => {}
-            PanicMessage1 | PanicMessage2 | PanicMessage3 | PanicMessage4 | PanicMessage5 | PanicMessage6
-            | PanicMessage7 | PanicMessage8 | PanicMessage9 | PanicMessage10 | PanicMessage11
-            | PanicMessage12 | PanicMessage13 | PanicMessage14 | PanicMessage15 | PanicMessage16
-            | PanicMessage17 | PanicMessage18 | PanicMessage19 | PanicMessage20 | PanicMessage21
-            | PanicMessage22 | PanicMessage23 | PanicMessage24 | PanicMessage25 | PanicMessage26
-            | PanicMessage27 | PanicMessage28 | PanicMessage29 | PanicMessage30 | PanicMessage31
-            | PanicMessage32 => {
-                if !self.last_panic_message.in_progress {
-                    return;
-                }
+            // Deprecated panic messages that are still sent by the stdlib.
+            // These are discarded and we rely only on kernel functionality to get and print panics.
+            PanicStarted | PanicMessage0 | PanicMessage1 | PanicMessage2 | PanicMessage3 | PanicMessage4
+            | PanicMessage5 | PanicMessage6 | PanicMessage7 | PanicMessage8 | PanicMessage9
+            | PanicMessage10 | PanicMessage11 | PanicMessage12 | PanicMessage13 | PanicMessage14
+            | PanicMessage15 | PanicMessage16 | PanicMessage17 | PanicMessage18 | PanicMessage19
+            | PanicMessage20 | PanicMessage21 | PanicMessage22 | PanicMessage23 | PanicMessage24
+            | PanicMessage25 | PanicMessage26 | PanicMessage27 | PanicMessage28 | PanicMessage29
+            | PanicMessage30 | PanicMessage31 | PanicMessage32 | PanicFinished => {}
 
-                let Some(scalar) = envelope.body.scalar_message() else {
-                    return;
-                };
-                let mut output_bfr = [0u8; core::mem::size_of::<usize>() * 4];
-                let output_iter = output_bfr.iter_mut();
-
-                // Combine the four arguments to form a single
-                // contiguous buffer. Note: The buffer size will change
-                // depending on the platform's `usize` length.
-                let arg1_bytes = scalar.arg1.to_le_bytes();
-                let arg2_bytes = scalar.arg2.to_le_bytes();
-                let arg3_bytes = scalar.arg3.to_le_bytes();
-                let arg4_bytes = scalar.arg4.to_le_bytes();
-                let input_iter = arg1_bytes
-                    .iter()
-                    .chain(arg2_bytes.iter())
-                    .chain(arg3_bytes.iter())
-                    .chain(arg4_bytes.iter());
-                for (dest, src) in output_iter.zip(input_iter) {
-                    *dest = *src;
-                }
-                let total_chars = opcode as usize - PanicMessage0 as usize;
-                let buf = &output_bfr[..total_chars];
-                self.last_panic_message.write(buf);
-            }
-            PanicFinished => {
-                self.flush_pending_panic(true);
-            }
             ReadLogs => {
                 let Some(pid) = envelope.sender.pid() else {
                     return;
@@ -228,77 +140,16 @@ impl LogServer {
                     }
                 }
             }
-
-            ReadLastPanicMessage => {
-                let Some(mem) = envelope.body.memory_message_mut() else {
-                    return;
-                };
-
-                let mut len = self.last_panic_message.read(mem.buf.as_slice_mut());
-                let panic_pid = self.last_panic_message.pid();
-                self.last_panic_message.clear();
-
-                // Append backtrace from kernel's panic message (if present and PID matches)
-                if len < mem.buf.len() {
-                    let mut panic_from_kernel_buf = [0u8; 512];
-                    let kernel_range = unsafe {
-                        xous::MemoryRange::new(
-                            panic_from_kernel_buf.as_mut_ptr() as usize,
-                            panic_from_kernel_buf.len(),
-                        )
-                    };
-                    if let Ok(range) = kernel_range {
-                        if let Ok((panic_pid_from_kernel, panic_from_kernel_len)) =
-                            xous::get_panic_message(range)
-                        {
-                            // Only append if the kernel panic message is for the same process
-                            if Some(panic_pid_from_kernel) == panic_pid.map(|p| p.get()) {
-                                // Find "\nBacktrace:" marker to extract only the backtrace
-                                let kernel_msg = &panic_from_kernel_buf[..panic_from_kernel_len];
-                                let backtrace_start = kernel_msg
-                                    .windows(11)
-                                    .position(|w| w == b"\nBacktrace:")
-                                    .unwrap_or(panic_from_kernel_len);
-                                let backtrace = &kernel_msg[backtrace_start..];
-                                let copy_len = backtrace.len().min(mem.buf.len() - len);
-                                mem.buf.as_slice_mut::<u8>()[len..len + copy_len]
-                                    .copy_from_slice(&backtrace[..copy_len]);
-                                len += copy_len;
-                            }
-                        }
+            ProcessDisconnected => {
+                if let Ok((panic_pid, panic_size)) = xous::get_panic_message(self.panic_buffer) {
+                    if xous::PID::new(panic_pid) == envelope.sender.pid() {
+                        write!(self.ring, "[LOG] PANIC in PID {panic_pid}: ").ok();
+                        self.ring.write_bytes(&self.panic_buffer.as_slice()[..panic_size]);
+                        self.ring.write_bytes(&[b'\n', LOG_RECORD_TERMINATOR]);
                     }
                 }
-
-                mem.valid = if len > 0 { Some(NonZeroUsize::new(len).unwrap()) } else { None };
-                mem.offset = None;
             }
         };
-    }
-
-    fn emit_panic_frame(&mut self) {
-        let Some(pid) = self.last_panic_message.pid() else {
-            return;
-        };
-        let body = self.last_panic_message.body();
-        core::fmt::write(&mut self.ring, format_args!("PANIC in PID {}: ", pid.get())).ok();
-        self.ring.write_bytes(body);
-        self.ring.write_bytes(&[LOG_RECORD_TERMINATOR]);
-    }
-
-    fn flush_pending_panic(&mut self, force_finish: bool) {
-        if !self.last_panic_message.in_progress {
-            return;
-        }
-
-        if self.last_panic_message.body().is_empty() {
-            if force_finish {
-                self.last_panic_message.finish();
-            }
-            return;
-        }
-
-        self.emit_panic_frame();
-        self.last_panic_message.finish();
     }
 
     fn send_logs(&mut self) {
@@ -348,12 +199,17 @@ impl LogServer {
     fn run(&mut self) -> ! {
         xous::set_thread_priority(xous::ThreadPriority::System8).unwrap();
         log!(self, "[LOG] Starting with PID {}", xous::process::id());
-        // TODO: Only allow privileged clients to read logs (SFT-5025)
         let server_addr = xous::create_server_with_sid(
             xous::SID::from_bytes(b"xous-log-server ").unwrap(),
-            0..MessageId::MAX,
+            0..api::Opcode::ReadLogs as _,
         )
         .expect("create server");
+        xous::register_server_event_handler(
+            xous::ServerEvent::Disconnected,
+            server_addr,
+            api::Opcode::ProcessDisconnected as usize,
+        )
+        .expect("register_system_event_handler");
         log!(self, "[LOG] Server listening on address {:?}", server_addr);
 
         let mut counter: usize = 0;
@@ -378,4 +234,4 @@ impl LogServer {
     }
 }
 
-fn main() -> ! { unsafe { (&mut *core::ptr::addr_of_mut!(SERVER)).run() } }
+fn main() -> ! { LogServer::default().run() }

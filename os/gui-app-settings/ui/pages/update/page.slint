@@ -31,6 +31,8 @@ component NoUpdateAvailable {
 
     PageBody {
         ContentSection {
+            spacing: Size.sz10;
+
             HorizontalLayout {
                 alignment: center;
                 WrappedIcon {
@@ -43,6 +45,13 @@ component NoUpdateAvailable {
                 text: TR2.format(TrId.UpdateDeviceCurrentVersion, [current-version]);
                 color: Palette.content-primary;
                 horizontal-alignment: center;
+            }
+
+            TextSm {
+                text: TR2.lookup(TrId.UpdateUpToDateNoUpdate);
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+                visible: last-checked-on != "";
             }
 
             TextSm {
@@ -60,7 +69,7 @@ component NoUpdateAvailable {
                 importance: Importance.primary;
                 label: TR2.lookup(TrId.UpdateEnvoyCheck);
                 loading: UpdateGlobal.checking-fw-update;
-                enabled: !self.loading;
+                enabled: !self.loading && QlGlobal.ql-live;
                 clicked => {
                     UpdateGlobal.check-fw-update()
                 }
@@ -72,6 +81,7 @@ component NoUpdateAvailable {
 component UpdateAvailable {
     in property <string> current-version;
     in property <string> new-version;
+    in property <bool> can-install: QlGlobal.ql-live && UpdateGlobal.update-sufficient-battery;
 
     PageBody {
         ContentSection {
@@ -109,6 +119,13 @@ component UpdateAvailable {
                     color: Palette.content-primary;
                     horizontal-alignment: center;
                 }
+
+                TextSm {
+                    text: TR2.lookup(TrId.CommonUpdateChargeBattery);
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                    visible: QlGlobal.ql-live && !UpdateGlobal.update-sufficient-battery;
+                }
             }
         }
 
@@ -118,7 +135,7 @@ component UpdateAvailable {
             Button {
                 importance: Importance.primary;
                 label: TR2.lookup(TrId.UpdateEnvoyUpdate);
-                enabled: QlGlobal.ql-live;
+                enabled: root.can-install;
                 clicked => {
                     Navigate.update-progress({ replace: true })
                 }

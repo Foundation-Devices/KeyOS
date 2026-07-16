@@ -66,7 +66,7 @@ fn parse_backtrace(text: &str) -> Vec<u32> {
     let hex_re = Regex::new(r"\b([0-9a-fA-F]{5,8})\b").unwrap();
 
     for line in text.lines() {
-        if line.contains("Backtrace") && line.contains(':') {
+        if !line.contains("Backtrace") && !line.contains(':') {
             continue;
         }
 

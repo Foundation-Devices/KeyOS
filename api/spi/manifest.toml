@@ -1,3 +1,4 @@
+manifestVersion = "0"
 [servers."os/spi"]
 ClaimPeripheral = { id = 0, type = "blockingScalar" }
 SpiXfer = { id = 1, type = "lendMut" }

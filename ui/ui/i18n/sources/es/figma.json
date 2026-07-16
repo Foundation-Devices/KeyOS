@@ -3,7 +3,7 @@
   "Registration": "Registration",
   "Time": "15",
   "Value": "m/48’/0’/0’/2’",
-  "_": "Note to devs: Note the different titles\nplural and singular in this flow and the\none below, these are different\ntextIDs as well",
+  "_": "6:15",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -35,7 +35,8 @@
       "title": "Label is already in use"
     },
     "main": {
-      "import": "[Import]",
+      "import": "Import",
+      "importNoName": "No Name",
       "searchTextFiller": "Search...",
       "title": "Códigos 2FA"
     },
@@ -143,6 +144,10 @@
       "content": "The camera is disabled.",
       "enableCamera": "Enable Camera"
     },
+    "qrModalUnknown": {
+      "content": "The information in the scanned QR code is not compatible with Passport Prime.\n\nPlease try again or contact support.",
+      "title": "Incompatible QR Code"
+    },
     "scan": {
       "title": "Scan QR"
     }
@@ -173,6 +178,8 @@
       "learnMore": "Learn more",
       "next": "Next",
       "recover": "Recover",
+      "restartNow": "Restart Now",
+      "restartOnboarding": "Restart Setup",
       "restore": "Restore",
       "retry": "Retry",
       "return": "Back",
@@ -206,6 +213,12 @@
     "fillerText": {
       "search": "Search..."
     },
+    "keyboard": {
+      "add": "Add",
+      "done": "Done",
+      "next": "Next",
+      "unlock": "Unlock"
+    },
     "month": {
       "aprilFull": "April",
       "aprilShort": "Apr",
@@ -235,11 +248,18 @@
     "recoverRestoreCardKeycard": {
       "readingKeycard": "Reading Keycard"
     },
+    "recoverWords": {
+      "expandTo24Word": "Expand to 24 Word Seed",
+      "incorrectTryAgain": "One or more of your seed words are incorrect. Please review and try again."
+    },
     "slideToSign": {
       "helper": "Slide to sign",
       "sign": "Sign",
       "signed": "Signed",
       "signing": "Signing"
+    },
+    "supportModalDocumentation": {
+      "header": "Visit by scanning with your phone camera "
     },
     "time": {
       "dayFull": "day",
@@ -352,6 +372,26 @@
     }
   },
   "files": {
+    "airlockDisabled": {
+      "content": "Cannot move files to Airlock when Passport Prime is connected to another device via USB."
+    },
+    "airlockFormatStorage": {
+      "content": "The Airlock filesystem is corrupted and needs to be formatted.\n\nAdvanced users may wish to attempt a repair via USB.",
+      "formatAirlock": "Format Airlock",
+      "header": "Format Airlock"
+    },
+    "airlockFormatStorageFailed": {
+      "content": "Try again.",
+      "header": "Formatting Failed"
+    },
+    "airlockFormatStorageFormatting": {
+      "content": "Do not turn off the device.",
+      "header": "Formatting Airlock"
+    },
+    "airlockFormatStorageSuccess": {
+      "content": "Airlock is now ready for use with Passport.",
+      "header": "Airlock Formatted Successfully"
+    },
     "airlockMenu": {
       "airlockReadOnly": "Airlock Read Only",
       "airlockReadWrite": "Airlock Read & Write",
@@ -367,6 +407,7 @@
     "empty": {
       "filesFiltered": " {0} files were filtered.",
       "folderEmpty": "Folder is empty.",
+      "noMatchingFiles": "No matching files.",
       "oneFileFiltered": " 1 file was filtered."
     },
     "error": {
@@ -374,6 +415,37 @@
     },
     "external": {
       "header": "Connect USB Device"
+    },
+    "externalFormatStorage": {
+      "content": "The connected storage needs formatting before Passport can use it. ",
+      "contentWarning": "Formatting will permanently erase all data on this storage device. Back up important data before proceeding.",
+      "formatStorage": "Format Storage",
+      "header": "Format External Storage"
+    },
+    "externalFormatStorageFailed": {
+      "content": "Try again or use a different device.",
+      "header": "Formatting Failed"
+    },
+    "externalFormatStorageFormatting": {
+      "content": "Do not disconnect the storage.",
+      "formatting": "Formatting",
+      "header": "Formatting External Storage"
+    },
+    "externalFormatStorageModalAreYouSure": {
+      "content": "Formatting will permanently erase all data on the storage device.\n\nEnsure you have a backup of any important data before continuing. ",
+      "formatStorage": "Format Storage",
+      "title": "Are you sure?"
+    },
+    "externalFormatStorageSuccess": {
+      "content": "The storage is now ready for use with Passport.",
+      "header": "Storage Formatted Successfully"
+    },
+    "filteredSingle": {
+      "oneFileFiltered": " 1 file was filtered."
+    },
+    "formatAirlockModal": {
+      "content": "Formatting will permanently erase all data inside Airlock.",
+      "title": "Are you sure?"
     },
     "main": {
       "airlock": "Esclusa",
@@ -490,14 +562,17 @@
     "main": {
       "2FaCodes": "Códigos\n2FA",
       "appsAreComing": "Las aplicaciones llegarán pronto.",
+      "developers": "Developers",
       "developersWelcome": "Desarrolladores Bienvenidos",
       "disconnected": "Disconnected",
       "fileBrowser": "Explorar\nArchivos",
       "lastUpdate": "Last Update",
+      "legacy": "Legacy",
       "loadingData": "Loading Data…",
       "securityKeys": "Keys",
       "seedVault": "Vault",
       "wallet": "Wallet",
+      "welcome": "Welcome!",
       "xAgo": "{0} ago"
     },
     "mainDevs": {
@@ -511,6 +586,53 @@
     },
     "mainTemp": {
       "temporarySeed": "Temporary Seed"
+    },
+    "scan": {
+      "content": "Scan any QR code,\nPassport will take care of it.",
+      "title": "Scan QR"
+    },
+    "selectApp": {
+      "2fa": "2FA",
+      "content": "This QR code can be used by multiple apps. Select the app you'd like to continue with.",
+      "files": "Files",
+      "header": "Select an App",
+      "keys": "Keys",
+      "selectAnApp": "Select an app",
+      "vault": "Vault",
+      "wallet": "Wallet"
+    }
+  },
+  "legacy": {
+    "coin": {
+      "emulatedSecureContainer": "Emulated App in Secure Container"
+    },
+    "createSeed": {
+      "content": "This seed was derived from your Passport Prime Master Key, so it's automatically protected by your existing backup. Manual backup is optional.\n\nThe new seed can be retrieved at any time in the Legacy Mode settings. ",
+      "header": "New Seed Created"
+    },
+    "intro": {
+      "content": "Legacy Mode lets you manage assets beyond Bitcoin, directly on Passport Prime. Create a new seed or import one from an existing wallet to get started.",
+      "createNewSeed": "Create new Seed",
+      "enter24Words": "Enter 24 words",
+      "header": "Welcome to Legacy Mode",
+      "loadFromVault": "Load from Vault"
+    },
+    "main": {
+      "addApp": "Add App",
+      "title": "Legacy Mode"
+    },
+    "recoverWords": {
+      "title": "Seed Words"
+    },
+    "settings": {
+      "appSelection": "App Selection",
+      "removeSeed": "Remove current Seed",
+      "seedManagement": "Seed Management",
+      "title": "Legacy Settings",
+      "viewSeed": "View current Seed"
+    },
+    "settingsDeleteSuccess": {
+      "header": "Seed Deleted Successfully"
     }
   },
   "lock": {
@@ -534,8 +656,8 @@
     },
     "backupManualMain": {
       "header": "Create Backup",
-      "manualSeedBackup": "View Seed Words",
       "subheader": "Create a {0} out of {1} backup with the three Keycards or save your seed words by writing them down.\n\nAdditional backups can be created later in Settings.",
+      "viewSeedWords": "View Seed Words",
       "xOfYKeycardBackup": "{0} of {1} Keycard Backup"
     },
     "backupManualSeedQr": {
@@ -549,8 +671,7 @@
     "backupManualVerify": {
       "chooseWord": "Tap on the correct word",
       "correct": "Correct",
-      "incorrectRestart": "Incorrect selection. Restart verification.",
-      "restartVerification": "Restart Verification",
+      "incorrectRestart": "Incorrect selection. Please retry.",
       "subheader": "#5",
       "tapOnWord": "Tap on Word",
       "title": "Verify Seed Words"
@@ -643,7 +764,7 @@
       "provideMasterKey": "Provide Master Key"
     },
     "masterKeyDeletedErase": {
-      "content": "Are you sure you want to delete all data on this device?",
+      "content": "Are you sure you want to delete all data on this device?\n\nAll files will be permanently lost.",
       "header": "Erase Device",
       "iHaveMasterKey": "I have the Master Key",
       "proceedFactoryReset": "Erase All Data"
@@ -741,7 +862,7 @@
       "header": "Restoring from Magic Backups"
     },
     "recoverSuccess": {
-      "header": "Master Key Restored Successfully"
+      "header": "Seed Words Restored Successfully"
     },
     "recoverSuccessEnvoy": {
       "secondRestoredEnvoy": "Part 2 restored from Envoy"
@@ -765,17 +886,25 @@
       "tilte": "Seed Words",
       "title": "Seed Words"
     },
+    "restartOnboardingModal": {
+      "content": "Home button pressed. Restarting will reset your setup progress, and you'll start the process from the beginning.",
+      "header": "Restart Setup?"
+    },
+    "restartOnboardingModalAreYouSure": {
+      "content": "You are about to reset all setup progress. Are you sure you want to continue?",
+      "header": "Are you sure?"
+    },
     "savingMasterKey": {
       "header": "Saving Master Key"
     },
     "scanModalEnvoyCanceled": {
-      "content": "Onboarding canceled by Envoy. Tap below to start again.",
-      "header": "Onboarding Canceled"
+      "content": "Setup canceled by Envoy. Tap below to start again.",
+      "header": "Setup Canceled"
     },
     "scanModalPassportDisconnected": {
       "content": "Move Passport and your phone closer to each other to attempt  reconnection from Envoy. If that fails, tap below to start over.",
       "header": "Passport Disconnected",
-      "restartOnboarding": "Restart Onboarding"
+      "restartOnboarding": "Restart Setup"
     },
     "scanToContinue": {
       "header": "Scan to establish \nQuantumLink connection",
@@ -801,6 +930,10 @@
     },
     "seedQr": {
       "title": "Scan Seed QR"
+    },
+    "seedQrError": {
+      "content": "The scanned QR code does not contain compatible seed format. \n\nEnsure the QR code being scanned is a valid SeedQR or Compact SeedQR and try again.",
+      "header": "QR Code Not Recognized"
     },
     "seedRecoverModal": {
       "content1": "Are you sure you want to restore an existing backup or seed?\nPassport will create a secure Master Key to safeguard your entire digital life.",
@@ -1146,6 +1279,10 @@
     "backupManualSuccess": {
       "header": "Backup Created Successfully"
     },
+    "backupModalBackupFailed": {
+      "content": "Your backup could not be created. Check your connection and try again. If the issue persists, contact support.",
+      "header": "Backup Failed"
+    },
     "backupModalDisableMagic": {
       "createNewBackup": "Create New Backup",
       "header": "Disable Magic Backups",
@@ -1440,6 +1577,7 @@
       "updatedTo": "will be updated to"
     },
     "updateUpToDate": {
+      "noUpdate": "Passport Prime is up to date.",
       "subheader": "Última comprobación el {0}"
     },
     "verifyBackupFileSuccess": {
@@ -1561,12 +1699,20 @@
       "account": "Account (optional)",
       "accountFillerText": "Enter associated Username",
       "advancedOptions": "Advanced Options",
+      "content": "Each new item is uniquely generated from your Master Key, and can always be recovered from it.",
+      "fingeprint": "Fingerprint",
+      "fingerprint": "Fingerprint",
+      "generatedFromMasterKey": "Generated from Master Key",
+      "importItem": "Import Item",
+      "imported": "Imported",
       "index": "Index",
       "itemLabel": "Label",
-      "itemLabelFillerText": "Wallet",
+      "itemLabelFillerText": "Item Name",
+      "length": "Length",
       "nostrKey": "Nostr Key",
       "password": "Password",
       "passwordFillerText": "Enter password",
+      "source": "Source",
       "title": "Create New Item",
       "type": "Type",
       "typeTextFiller": "Select Type"
@@ -1579,12 +1725,22 @@
     "createSeed": {
       "12WordSeed": "12 Word Seed"
     },
+    "importItem": {
+      "content": "Scan a QR code to import a new item to Passport Prime.",
+      "importItem": "Import Item",
+      "manualImport": "Manual Import",
+      "title": "Import Item"
+    },
+    "importItemFailed": {
+      "content": "The scanned QR code does not contain data that is compatible with Passport Prime at this time.\n\nPlease try again or contact support.",
+      "header": "QR Code Not Recognized"
+    },
     "itemDetails": {
       "archive": "Archive",
       "color": "Color",
       "icon": "Icon",
       "information": "Information",
-      "title": "Item Details"
+      "title": "Details"
     },
     "itemDetailsIcon": {
       "searchTextFiller": "Search..."
@@ -1602,9 +1758,15 @@
       "header": "Delete Key"
     },
     "main": {
-      "header": "Create New Item",
+      "header": "New Item",
       "newItem": "New Item",
-      "subheader": "Create and store your seeds, passwords, and more."
+      "subheader": "Add a seed, password, or Nostr key. Generate a new item from your Master Key, or import one you already have."
+    },
+    "manualImport": {
+      "header": "Import Existing Item",
+      "importPassword": "Import Password",
+      "importSeedWords": "Import Seed Words",
+      "subheader": "Add an existing seed or password for secure storage inside your Vault."
     },
     "passwordDeleteModal": {
       "content1": "Are you sure you want to delete the password for “{0}”?",
@@ -1666,6 +1828,7 @@
     },
     "accounts": {
       "accountDetails": "Account Details",
+      "connectWallet": "Connect Wallet",
       "exportConfig": "Export Config",
       "signMessage": "Sign Message",
       "signet": "Signet",
@@ -1687,6 +1850,10 @@
     "addressTypeNotSupported": {
       "content1": "The address provided does not match this account. \n\nPlease check the details and try again.",
       "header": "Unable to Sign"
+    },
+    "archiveAccountModal": {
+      "content": "This will move your account to the archive. Your account will not be deleted and can be restored at any time.",
+      "header": "Archive Account"
     },
     "archivedAccount": {
       "deleteAccount": "Delete Account",
@@ -1804,7 +1971,8 @@
     "detailsSinglesigMenu": {
       "archiveAccount": "Archive Account",
       "connedctWallet": "Connect Wallet",
-      "showPublicKey": "Show Public Key"
+      "showPublicKey": "Show Public Key",
+      "signMessage": "Sign Message"
     },
     "detailsSinglesigPublicKey": {
       "title": "Public Key"
@@ -1924,6 +2092,16 @@
       "suggest": "Suggest",
       "title": "Seed Words"
     },
+    "selectApp": {
+      "2fa": "2FA",
+      "content": "This QR code can be used by multiple apps. Select the app you'd like to continue with.",
+      "files": "Files",
+      "header": "Select an App",
+      "keys": "Keys",
+      "selectAnApp": "Select an app",
+      "vault": "Vault",
+      "wallet": "Wallet"
+    },
     "settings": {
       "displayAmountDisplay": "Amount Display",
       "displayAmountDisplayAuto": "Auto",
@@ -2005,8 +2183,8 @@
       "title": "Temporary Seed"
     },
     "tempSeedImport": {
-      "content": "Select the seed you want to load.",
-      "loadSeed": "Load Seed",
+      "content": "Select the seed you want to import.",
+      "loadSeed": "Import Seed",
       "title": "Select Seed"
     },
     "tempSeedQr": {
@@ -2037,10 +2215,22 @@
       "title": "Skip Address Verification?"
     },
     "verifyAddressSuccess": {
+      "addressBelongsTo": "This address belongs to account “{0}”.",
+      "changeAddress": "Change Address",
       "changeAddresses": "Change addresses",
       "receiveAddress": "Receive Address",
       "receiveAddresses": "Receive addresses",
       "title": "Address Verified"
+    },
+    "verifyAddressUnfinished": {
+      "content": "Passport could not verify the scanned address with account {0}.\nContinue searching?",
+      "selectAccount": "Select different Account",
+      "title": "Verification Unfinished"
+    },
+    "verifyAddressUnified": {
+      "chooseAccount": "Choose Account",
+      "content": "Select the account that Passport Prime should use to verify this address.",
+      "title": "Verify Address"
     },
     "wallet": {
       "settingsDisplayAmount": {

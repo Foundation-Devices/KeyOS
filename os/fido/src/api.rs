@@ -5,13 +5,11 @@ use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 
 #[cfg(feature = "test-app")]
 use crate::messages::ResetState;
-use crate::{
-    error::FidoError,
-    messages::{
-        CreateSecurityKey, CtapProcessCbor, EnsureSecurityKeys, GetSelectedSecurityKey, IsLive,
-        NextSecurityKeyIndex, SelectSecurityKey, SetLive, Transport, U2fProcessApdu,
-    },
+use crate::messages::{
+    CreateSecurityKey, CtapProcessCbor, EditSecurityKey, GetSelectedSecurityKey, ListSecurityKeys,
+    SelectSecurityKey, SetArchived, Transport, U2fProcessApdu,
 };
+use crate::SecurityKeyView;
 
 #[macro_export]
 macro_rules! use_api {
@@ -31,25 +29,62 @@ pub struct FidoApi<P: CheckedPermissions>(CheckedConn<P>);
 
 impl<P: CheckedPermissions> FidoApi<P> {
     /* API for gui-app-security-keys application */
+    // Note: To subscribe to key changes, use:
+    //   slint_keyos_platform::subscribe_archive::<FidoPermissions, _>(SubscribeKeyChanges)
+    // This returns an async stream of KeysChangedEvent.
 
-    // Get the Liveness of a given Security Key
-    pub fn is_live(&self, index: usize) -> Result<bool, FidoError>
+    /// Create a new Security Key with metadata. Returns the new key index, or an error if
+    /// creation failed.
+    pub fn create_security_key(
+        &self,
+        label: String,
+        color: u8,
+        icon: String,
+    ) -> Result<usize, crate::error::FidoError>
     where
-        P: MessageAllowed<IsLive>,
+        P: MessageAllowed<CreateSecurityKey>,
     {
-        self.0.try_send_blocking_scalar(IsLive(index))?
+        self.0.send_blocking_archive(CreateSecurityKey { label, color, icon })
     }
 
-    // Get the next Security Key index (without creating it)
-    pub fn next_security_key_index(&self) -> Result<usize, FidoError>
+    /// Edit a Security Key's metadata. Blocks until the server returns the validation
+    /// outcome (`EmptyLabel` / `DuplicateLabel` are surfaced here so callers don't need a
+    /// separate `validate_label` round-trip). Pass `date: 0` to leave the date unchanged.
+    pub fn edit_security_key(
+        &self,
+        index: usize,
+        label: String,
+        color: u8,
+        icon: String,
+        date: u64,
+    ) -> Result<(), crate::error::FidoError>
     where
-        P: MessageAllowed<NextSecurityKeyIndex>,
+        P: MessageAllowed<EditSecurityKey>,
     {
-        Ok(self.0.try_send_blocking_scalar(NextSecurityKeyIndex)?)
+        self.0.send_blocking_archive(EditSecurityKey { index, label, color, icon, date })
     }
 
-    // Get the index of the selected Security Key if any
-    pub fn selected_security_key_index(&self) -> Result<Option<usize>, FidoError>
+    /// Set the archived state of a Security Key. Blocks until the server confirms; returns
+    /// `FidoError::InvalidIndex` if the slot doesn't exist. Archived keys are automatically
+    /// set to live=false.
+    pub fn set_archived(&self, index: usize, archived: bool) -> Result<(), crate::error::FidoError>
+    where
+        P: MessageAllowed<SetArchived>,
+    {
+        self.0.try_send_blocking_scalar(SetArchived { index, archived })?
+    }
+
+    /// Synchronous snapshot of all security keys. Use at startup to populate local state
+    /// before the async `SubscribeKeyChanges` stream has delivered its initial event.
+    pub fn list_security_keys(&self) -> Vec<SecurityKeyView>
+    where
+        P: MessageAllowed<ListSecurityKeys>,
+    {
+        self.0.send_blocking_archive(ListSecurityKeys)
+    }
+
+    /// Get the index of the selected Security Key if any.
+    pub fn selected_security_key_index(&self) -> Result<Option<usize>, crate::error::FidoError>
     where
         P: MessageAllowed<GetSelectedSecurityKey>,
     {
@@ -64,50 +99,26 @@ impl<P: CheckedPermissions> FidoApi<P> {
         self.0.try_send_scalar(SelectSecurityKey(index)).ok();
     }
 
-    /// Create a new Security Key (fire-and-forget).
-    pub fn create_security_key(&self)
-    where
-        P: MessageAllowed<CreateSecurityKey>,
-    {
-        self.0.try_send_scalar(CreateSecurityKey).ok();
-    }
-
-    /// Set the Liveness of a given Security Key (fire-and-forget).
-    pub fn set_live(&self, index: usize, live: bool)
-    where
-        P: MessageAllowed<SetLive>,
-    {
-        self.0.try_send_scalar(SetLive { index, live }).ok();
-    }
-
-    /// Ensure the FIDO server has at least `count` security keys (fire-and-forget).
-    pub fn ensure_security_keys(&self, count: usize)
-    where
-        P: MessageAllowed<EnsureSecurityKeys>,
-    {
-        self.0.try_send_scalar(EnsureSecurityKeys(count)).ok();
-    }
-
     /* API for ctap-hid/nfc server */
 
     pub fn u2f_process_apdu(&self, msg: Vec<u8>, transport: Transport) -> Vec<u8>
     where
         P: MessageAllowed<U2fProcessApdu>,
     {
-        self.0.send_archive(U2fProcessApdu { msg, transport })
+        self.0.send_blocking_archive(U2fProcessApdu { msg, transport })
     }
 
     pub fn ctap_process_cbor(&self, cmd: u8, raw: Vec<u8>) -> Vec<u8>
     where
         P: MessageAllowed<CtapProcessCbor>,
     {
-        self.0.send_archive(CtapProcessCbor { cmd, raw })
+        self.0.send_blocking_archive(CtapProcessCbor { cmd, raw })
     }
 
     /* API for Test Apps only */
 
     #[cfg(feature = "test-app")]
-    pub fn reset_state(&mut self) -> Result<(), FidoError>
+    pub fn reset_state(&mut self) -> Result<(), crate::error::FidoError>
     where
         P: MessageAllowed<ResetState>,
     {

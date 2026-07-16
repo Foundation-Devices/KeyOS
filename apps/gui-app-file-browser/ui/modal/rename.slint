@@ -21,7 +21,7 @@ export component RenameModal inherits TextInputModal {
             alignment: center;
             Icon {
                 name: "info";
-                size: Size.sz12;
+                size: Size.sz16;
                 color: Palette.content-brand;
             }
         }
@@ -43,6 +43,7 @@ export component RenameModal inherits TextInputModal {
         input := Input {
             show-clear-btn: true;
             text: ModalGlobal.rename-text;
+            accept-button-enabled: self.text != "";
             accepted => {
                 ModalGlobal.rename-confirmed(input.text);
             }
@@ -50,7 +51,7 @@ export component RenameModal inherits TextInputModal {
 
         ButtonSection {
             Button {
-                label: TR2.lookup(TrId.MainRename);
+                label: TR2.lookup(TrId.CommonButtonContinue);
                 importance: Importance.primary;
                 enabled: !root.loading && root.name-valid;
                 loading: root.loading;

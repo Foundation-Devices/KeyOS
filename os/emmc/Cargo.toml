@@ -6,11 +6,6 @@ name = "emmc"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-aes-dma = []                # Use DMA + AES
-aes-busy-wait = []          # Busy-waiting AES
-default = ["aes-busy-wait"]
-
 [dependencies]
 crypto = { workspace = true }
 log = "0.4.14"

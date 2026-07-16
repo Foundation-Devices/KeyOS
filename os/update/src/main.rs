@@ -24,7 +24,7 @@ struct DownloadStallTick;
 crypto::use_api!();
 fs::use_api!();
 gui_server_api::use_api!();
-power_manager::use_api!();
+power_manager::use_ext_api!();
 quantum_link::use_api!();
 security::use_api!();
 

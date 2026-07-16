@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { AppHeader, IconButton } from "@ui/widgets.slint";
+import { Importance, Size, Palette } from "@ui/theme.slint";
+
+export component Overlay inherits Rectangle {
+    in property <bool> open: false;
+    in property <string> title;
+    in property <length> spacing: Size.sz8;
+
+    callback closed;
+
+    opacity: open ? 1 : 0;
+    background: open ? Palette.background-primary : transparent;
+
+    animate background, opacity {
+        duration: 300ms;
+        easing: ease-in-out;
+    }
+
+    // disable touches through the overlay
+    TouchArea {
+        enabled: open;
+    }
+
+    Rectangle {
+        // needed to prevent any touches from registering
+        visible: open;
+
+        VerticalLayout {
+            alignment: start;
+            spacing: spacing;
+
+            AppHeader {
+                title: title;
+                title-color: Palette.content-primary;
+                alignment: end;
+
+                IconButton {
+                    icon: "close";
+                    background: transparent;
+                    icon-color: Palette.content-primary;
+                    clicked => {
+                        closed();
+                    }
+                }
+            }
+
+            @children
+        }
+    }
+}

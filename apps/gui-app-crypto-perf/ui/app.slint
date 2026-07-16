@@ -1,0 +1,301 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { BaseWindow, BasePage, ScrollBody, NavHeader, Button, HeadingLg, HeadingMd, TextMd, Switch } from "@ui/widgets.slint";
+import { Palette, Size, Images, CurrentTheme, Palettes, Utils } from "@ui/theme.slint";
+
+export global Callbacks {
+    callback start-benchmark(int, bool);
+    callback stop-benchmark();
+    pure callback test-title(int) -> string;
+    pure callback test-description(int) -> string;
+    pure callback hardware-supported(int) -> bool;
+}
+
+export global State {
+    in-out property <int> selected-test: -1;
+    in-out property <bool> running: false;
+    in property <string> status-text: "Idle";
+    in property <string> performance-text: "Not started";
+
+    in-out property <bool> sha256-hardware: true;
+    in-out property <bool> p256-hardware: true;
+    in-out property <bool> secp256k1-hardware: false;
+    in-out property <bool> taproot-hardware: false;
+    in-out property <bool> tls-hardware: true;
+    in-out property <bool> jwt-hardware: true;
+}
+
+component TestCard inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <string> mode-label;
+    callback pressed();
+
+    width: 100%;
+    border-width: 1px;
+    border-radius: Size.sz5;
+    border-color: Palette.border-primary;
+    background: Palette.background-primary;
+
+    VerticalLayout {
+        padding: Size.sz5;
+        spacing: Size.sz2;
+
+        HeadingMd {
+            text: title;
+            color: Palette.content-primary;
+        }
+
+        TextMd {
+            text: description;
+            color: Palette.content-secondary;
+            wrap: word-wrap;
+        }
+
+        TextMd {
+            text: mode-label;
+            color: Palette.content-brand;
+            wrap: word-wrap;
+        }
+
+        Button {
+            label: "Open Test";
+            importance: primary;
+            clicked => {
+                root.pressed();
+            }
+        }
+    }
+}
+
+component MetricPanel inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+
+    width: 100%;
+    border-width: 1px;
+    border-radius: Size.sz5;
+    border-color: Palette.border-primary;
+    background: Palette.background-primary;
+
+    VerticalLayout {
+        padding: Size.sz5;
+        spacing: Size.sz2;
+
+        TextMd {
+            text: title;
+            color: Palette.content-secondary;
+        }
+
+        HeadingMd {
+            text: value;
+            color: Palette.content-primary;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component TestListPage inherits BasePage {
+    ScrollBody {
+        VerticalLayout {
+            spacing: Size.sz5;
+
+            HeadingLg {
+                text: "Crypto Performance";
+                horizontal-alignment: center;
+            }
+
+            TextMd {
+                text: "Choose a benchmark to measure raw primitive speed and higher-level signing paths.";
+                color: Palette.content-secondary;
+                wrap: word-wrap;
+            }
+
+            TestCard {
+                title: Callbacks.test-title(0);
+                description: Callbacks.test-description(0);
+                mode-label: State.sha256-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 0;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+
+            TestCard {
+                title: Callbacks.test-title(1);
+                description: Callbacks.test-description(1);
+                mode-label: State.p256-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 1;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+
+            TestCard {
+                title: Callbacks.test-title(2);
+                description: Callbacks.test-description(2);
+                mode-label: State.secp256k1-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 2;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+
+            TestCard {
+                title: Callbacks.test-title(3);
+                description: Callbacks.test-description(3);
+                mode-label: State.taproot-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 3;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+
+            TestCard {
+                title: Callbacks.test-title(4);
+                description: Callbacks.test-description(4);
+                mode-label: State.tls-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 4;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+
+            TestCard {
+                title: Callbacks.test-title(5);
+                description: Callbacks.test-description(5);
+                mode-label: State.jwt-hardware ? "Hardware acceleration enabled" : "Software only";
+                pressed => {
+                    State.selected-test = 5;
+                    State.status-text = "Idle";
+                    State.performance-text = "Not started";
+                }
+            }
+        }
+    }
+}
+
+component TestDetailPage inherits BasePage {
+    in property <int> test-id;
+
+    private property <bool> supports-hardware: Callbacks.hardware-supported(test-id);
+    private property <bool> hardware-enabled: test-id == 0 ? State.sha256-hardware : test-id == 1 ? State.p256-hardware : test-id == 2 ? State.secp256k1-hardware : test-id == 3 ? State.taproot-hardware : test-id == 4 ? State.tls-hardware : test-id == 5 ? State.jwt-hardware : false;
+    private property <bool> can-start: supports-hardware || !hardware-enabled;
+
+    VerticalLayout {
+        NavHeader {
+            title: Callbacks.test-title(test-id);
+            clicked => {
+                if State.running {
+                    Callbacks.stop-benchmark();
+                }
+                State.selected-test = -1;
+            }
+        }
+
+        ScrollBody {
+            VerticalLayout {
+                spacing: Size.sz6;
+
+                TextMd {
+                    text: Callbacks.test-description(test-id);
+                    color: Palette.content-secondary;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    width: 100%;
+                    border-width: 1px;
+                    border-radius: Size.sz5;
+                    border-color: Palette.border-primary;
+                    background: Palette.background-primary;
+
+                    VerticalLayout {
+                        padding: Size.sz5;
+                        spacing: Size.sz3;
+
+                        TextMd {
+                            text: supports-hardware ? "Hardware acceleration" : "Hardware acceleration unavailable for this test";
+                            color: supports-hardware ? Palette.content-primary : Palette.content-secondary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            alignment: space-between;
+
+                            TextMd {
+                                text: hardware-enabled ? "Use hardware implementation" : "Use software only";
+                                color: Palette.content-secondary;
+                                wrap: word-wrap;
+                            }
+
+                            Switch {
+                                enabled: supports-hardware && !State.running;
+                                checked: hardware-enabled;
+                                changed => {
+                                    if test-id == 0 {
+                                        State.sha256-hardware = !State.sha256-hardware;
+                                    } else if test-id == 1 {
+                                        State.p256-hardware = !State.p256-hardware;
+                                    } else if test-id == 2 {
+                                        State.secp256k1-hardware = !State.secp256k1-hardware;
+                                    } else if test-id == 3 {
+                                        State.taproot-hardware = !State.taproot-hardware;
+                                    } else if test-id == 4 {
+                                        State.tls-hardware = !State.tls-hardware;
+                                    } else if test-id == 5 {
+                                        State.jwt-hardware = !State.jwt-hardware;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                MetricPanel {
+                    title: "Status";
+                    value: State.status-text;
+                }
+
+                MetricPanel {
+                    title: "Current performance";
+                    value: State.performance-text;
+                }
+
+                Button {
+                    label: State.running ? "Stop" : "Start";
+                    importance: primary;
+                    enabled: State.running || can-start;
+                    clicked => {
+                        if State.running {
+                            Callbacks.stop-benchmark();
+                        } else {
+                            Callbacks.start-benchmark(test-id, hardware-enabled);
+                        }
+                    }
+                }
+
+                if !can-start: TextMd {
+                    text: "This benchmark only has a software path on the current device.";
+                    color: Palette.content-secondary;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits BaseWindow {
+    if State.selected-test < 0: TestListPage { }
+    if State.selected-test >= 0: TestDetailPage {
+        test-id: State.selected-test;
+    }
+}
+
+export { CurrentTheme, Images, Palettes, Utils }

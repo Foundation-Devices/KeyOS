@@ -33,30 +33,27 @@ pub enum Opcode {
     /// *arg1*(lo) + *arg2*(hi) nanoseconds elapsed since the unix epoch
     GetSystemTime = 12,
 
+    /// Request a callback in a set amount of time
+    RequestCallback = 13,
+
+    // ------ Privileged calls ------
     /// Set the current system time
     ///
     /// # Arguments
     ///
     /// *arg1*(lo) + *arg2*(hi) nanoseconds elapsed since the unix epoch
-    SetSystemTime = 13,
-
-    /// Hosted mode only, reset current system time to host time
-    #[cfg(not(keyos))]
-    ResetSystemTime = 14,
-
-    /// Request a callback in a set amount of time
-    RequestCallback = 15,
+    SetSystemTime = 20,
 
     // ------ Internal-only calls -------
     /// System event telling us a client has disconnected
-    Disconnected = 16,
+    Disconnected = 30,
 
     /// The timer interrupt was called
-    TimerInterrupt = 17,
+    TimerInterrupt = 31,
 
     /// Periodic watchdog reset callback
     #[cfg(keyos)]
-    WatchdogReset = 18,
+    WatchdogReset = 32,
 
     /// Invalid call -- an error occurred decoding the opcode
     InvalidCall = u32::MAX as usize,

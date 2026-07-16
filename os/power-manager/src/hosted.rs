@@ -4,25 +4,34 @@
 use power_manager::messages::*;
 use power_manager::{AttachedState, ChargeStatus, PowerManagerError, Status};
 use server::{
-    ArchiveHandler, BlockingScalar, BlockingScalarHandler, ScalarEventSubscriber,
+    BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, ScalarEventSubscriber,
     ScalarEventSubscriptionHandler, ScalarHandler, ServerContext,
 };
 use xous::PID;
 
 #[derive(server::Server)]
 #[name = "os/power-manager"]
-pub struct PowerManagerServer {
+pub struct PowerManagerServer;
+impl server::Server for PowerManagerServer {}
+
+#[derive(server::Server)]
+#[name = "os/power-manager-ext"]
+pub struct PowerManagerServerExt {
     boosting: bool,
     battery_percent: u8,
     status_update_subscribers: Vec<ScalarEventSubscriber<Status>>,
     last_status: Option<Status>,
 }
-impl server::Server for PowerManagerServer {}
+impl server::Server for PowerManagerServerExt {}
 
 #[derive(Debug, server::Message)]
 pub struct SetBatteryPercent(pub(crate) u8);
 
 impl PowerManagerServer {
+    pub fn new() -> Result<Self, PowerManagerError> { Ok(Self) }
+}
+
+impl PowerManagerServerExt {
     pub fn new() -> Result<Self, PowerManagerError> {
         Ok(Self {
             boosting: false,
@@ -33,6 +42,13 @@ impl PowerManagerServer {
     }
 }
 
+impl BlockingScalarHandler<Shutdown> for PowerManagerServer {
+    fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        log::info!("[!] Shutting down");
+        xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
+    }
+}
+
 impl BlockingScalarHandler<Reboot> for PowerManagerServer {
     fn handle(&mut self, _msg: Reboot, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
         log::info!("[!] Reboot requested, shutting down instead");
@@ -40,7 +56,7 @@ impl BlockingScalarHandler<Reboot> for PowerManagerServer {
     }
 }
 
-impl BlockingScalarHandler<GetStatus> for PowerManagerServer {
+impl BlockingScalarHandler<GetStatus> for PowerManagerServerExt {
     fn handle(
         &mut self,
         _msg: GetStatus,
@@ -55,7 +71,7 @@ impl BlockingScalarHandler<GetStatus> for PowerManagerServer {
     }
 }
 
-impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServer {
+impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServerExt {
     fn handle(
         &mut self,
         msg: SetUsbBoost,
@@ -69,7 +85,7 @@ impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServer {
     }
 }
 
-impl ScalarHandler<SetBatteryPercent> for PowerManagerServer {
+impl ScalarHandler<SetBatteryPercent> for PowerManagerServerExt {
     fn handle(
         &mut self,
         msg: SetBatteryPercent,
@@ -85,18 +101,18 @@ impl ScalarHandler<SetBatteryPercent> for PowerManagerServer {
     }
 }
 
-impl ArchiveHandler<GetExtendedStatus> for PowerManagerServer {
+impl BlockingArchiveHandler<GetExtendedStatus> for PowerManagerServerExt {
     fn handle(
         &mut self,
         _msg: GetExtendedStatus,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <GetExtendedStatus as server::Archive>::Response {
+    ) -> <GetExtendedStatus as server::BlockingArchive>::Response {
         None
     }
 }
 
-impl ScalarHandler<ClearChargeFault> for PowerManagerServer {
+impl ScalarHandler<ClearChargeFault> for PowerManagerServerExt {
     fn handle(
         &mut self,
         _msg: ClearChargeFault,
@@ -107,7 +123,7 @@ impl ScalarHandler<ClearChargeFault> for PowerManagerServer {
     }
 }
 
-impl ScalarEventSubscriptionHandler<StatusSubscribe> for PowerManagerServer {
+impl ScalarEventSubscriptionHandler<StatusSubscribe> for PowerManagerServerExt {
     fn handle(
         &mut self,
         _msg: StatusSubscribe,

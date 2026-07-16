@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0xe19f16fcd9610bca7d026b4673f1cb06"
 memory = []
 syscall = ["SetThreadPriority"]
@@ -7,11 +8,11 @@ extends = "../../api/backup"
 en = "Magic Backup Server"
 
 [servers."os/backup"]
-BackupWorkerEvent = { id = 100, type = "move" }
+BackupWorkerEvent = { id = 100, type = "archive" }
 PeriodicBackup = { id = 101, type = "scalar" }
 
 [permissions]
-template = ["fs-generic"]
+template = ["fs-generic", "crypto-aes"]
 "os/fs" = [
     "GetEncryptedRootReadAccess",
     "GetEncryptedRootWriteAccess",
@@ -33,12 +34,7 @@ template = ["fs-generic"]
     "AwaitCreateMagicBackupResult",
     "SubscribeConnectionStatus",
 ]
-"os/crypto" = [
-    "AesSetup",
-    "AesExecute",
-    "AesClear",
-    "Hmac",
-]
+"os/crypto" = ["Hmac"]
 "os/security" = [
     "GetAppSeed",
     "GetSeedFingerprint",
@@ -46,4 +42,6 @@ template = ["fs-generic"]
 "os/settings" = [
     "SubscribeMagicBackupEnabled",
     "SubscribeOnboardingStatus",
+    "GetDeviceName",
+    "SetDeviceName",
 ]

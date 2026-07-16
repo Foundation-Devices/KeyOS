@@ -9,12 +9,11 @@ import { TR2, TrId } from "gen/tr.slint";
 export global State {
     in-out property <bool> show-login: false;
 
-    in-out property <string> hours: "01";
-    in-out property <string> minutes: "00";
+    in property <string> time: "01:01";
 
-    in-out property <string> date: "May 18, 2025";
+    in property <string> date: "May 18, 2025";
 
-    in-out property <string> title: "";
+    in property <string> title: "";
 
     // true - pin, false - passphrase
     in-out property <bool> is-pin-entry: true;
@@ -73,22 +72,13 @@ global AuthHelpers {
     }
 }
 
-component TimeText inherits Text {
-    color: Palette.content-primary;
-    font-size: 88px;
-    font-weight: 400;
-    vertical-alignment: center;
-}
-
 component LockShield inherits Rectangle {
-    in property <float> bg-opacity: self.opacity;
     in-out property <bool> locked;
 
     height: 300px;
     width: 320px;
 
     Image {
-        opacity: bg-opacity;
         source: CurrentTheme.is-dark ? @image-url("images/lock-shield-dark.png") : @image-url("images/lock-shield-light.png");
     }
 
@@ -108,22 +98,13 @@ component LockShield inherits Rectangle {
         HorizontalLayout {
             alignment: center;
 
-            TimeText {
-                width: 45%;
-                text: State.hours;
-                horizontal-alignment: right;
-            }
-
-            TimeText {
-                width: 20px;
+            Text {
+                text: State.time;
+                color: Palette.content-primary;
+                font-size: 88px;
+                font-weight: 400;
+                vertical-alignment: center;
                 horizontal-alignment: center;
-                text: ":";
-            }
-
-            TimeText {
-                width: 45%;
-                text: State.minutes;
-                horizontal-alignment: left;
             }
         }
 
@@ -207,6 +188,8 @@ component VerifyPin inherits Rectangle {
             pin-incorrect: pin-incorrect;
             is-check-ongoing: State.is-check-ongoing;
             locked-len: State.show-security-words-enabled ? State.locked-prefix.character-count : 0;
+            accept-button-text: TR2.lookup(TrId.CommonKeyboardUnlock);
+            accept-button-enabled: self.pin-length >= 6 && !State.is-check-ongoing;
             accepted => {
                 if (self.pin-length >= 6) {
                     State.verify-pin();
@@ -282,6 +265,8 @@ component VerifyPassword inherits Rectangle {
             password <=> State.input;
             is-check-ongoing: State.is-check-ongoing;
             locked-len: State.show-security-words-enabled ? State.locked-prefix.character-count : 0;
+            accept-button-text: TR2.lookup(TrId.CommonKeyboardUnlock);
+            accept-button-enabled: self.password.character-count >= 6 && !State.is-check-ongoing;
             accepted => {
                 if self.password.character-count >= 6 {
                     State.verify-pin();
@@ -423,21 +408,15 @@ component LockScreen inherits Rectangle {
             }
             show-login when !swipe.is-swiping && show-login: {
                 y: -root.height;
-                shield.bg-opacity: 0%;
                 in {
                     animate y {
                         duration: 500ms;
-                        easing: ease-out-quad;
-                    }
-                    animate shield.bg-opacity {
-                        duration: 250ms; // shield must fade out before reaching the top
                         easing: ease-out-quad;
                     }
                 }
             }
             show-lock-screen when !swipe.is-swiping && !show-login: {
                 y: 0px;
-                shield.bg-opacity: 100%;
                 in {
                     animate y {
                         duration: 400ms;

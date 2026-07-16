@@ -12,7 +12,7 @@ backup-shard = { workspace = true }
 haptics = { workspace = true }
 keycard = { workspace = true }
 log = { workspace = true }
-nfc = { path = "../../os/nfc" }
+nfc = { workspace = true }
 quantum-link = { workspace = true }
 slint-keyos-platform = { workspace = true }
 thiserror = { workspace = true }

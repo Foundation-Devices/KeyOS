@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6775692d6170702d7374617475736261"
 
 [appName]
@@ -11,7 +12,7 @@ template = ["gui-app"]
 "os/gui-server" = ["Shutdown"]
 "os/haptics" = ["Vibrate"]
 "os/nfc" = ["IsActive"]
-"os/power-manager" = ["GetStatus", "StatusSubscribe"]
+"os/power-manager-ext" = ["GetStatus", "StatusSubscribe"]
 "os/settings" = [
     "SetScreenBrightness",
     "SubscribeScreenBrightness",
@@ -26,6 +27,6 @@ template = ["gui-app"]
     "SetUsbEnabled",
     "SubscribeUsbEnabled",
 ]
-"os/usbdev" = ["IsDeviceEmulationEnabled", "IsDeviceEmulationConnected", "SetDeviceEmulationEnabled"]
-"os/usb" = ["IsEnabled", "IsConnected", "SetEnabled"]
+"os/usbdev" = ["IsDeviceEmulationConnected"]
+"os/usb" = ["IsEnabled", "IsConnected"]
 "os/security" = ["GetAppSeed", "GetMasterKeyState"]

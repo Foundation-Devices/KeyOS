@@ -1,3 +1,4 @@
+manifestVersion = "0"
 # SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -5,4 +6,5 @@
 LaunchAppBlocking = { id = 0, type = "blockingScalar" }
 SubscribeAppEvents = { id = 1, type = "archiveEvent" }
 LaunchApp = { id = 2, type = "scalar" }
-GetAppName = { id = 3, type = "archive" }
+GetAppName = { id = 3, type = "blockingArchive" }
+GetQrMatchRules = { id = 4, type = "blockingArchive" }

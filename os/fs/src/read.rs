@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use {
-    crate::{Error, FileHandle, OpenFile, Server},
+    crate::{Error, FileHandle, Server},
     fs::messages::{AsyncRead, ReadFile},
     server::xous,
     std::io::Read,
@@ -23,7 +23,7 @@ impl server::LendMutHandler<ReadFile> for Server {
     }
 }
 
-impl server::ArchiveHandler<AsyncRead> for Server {
+impl server::BlockingArchiveHandler<AsyncRead> for Server {
     fn handle(
         &mut self,
         msg: AsyncRead,
@@ -44,14 +44,17 @@ impl Server {
         buffer: &mut [u8],
         sender: xous::PID,
     ) -> Result<usize, Error> {
-        let files = self.files.get_mut(&sender).ok_or(Error::FileNotOpen)?;
-        let OpenFile { file, flags, .. } = files.open.get_mut(&handle).ok_or(Error::FileNotOpen)?;
-        if !flags.read {
+        let open = self
+            .mount_mut(handle.location()?)
+            .ok_or(Error::NoMedia)?
+            .file_mut(sender, handle)
+            .ok_or(Error::FileNotOpen)?;
+        if !open.flags.read {
             return Err(Error::InvalidOperation);
         }
         let mut offset = 0;
         loop {
-            let read_len = file.read(&mut buffer[offset..]).map_err(|_| Error::Io)?;
+            let read_len = open.file.read(&mut buffer[offset..]).map_err(|_| Error::Io)?;
             offset += read_len;
             if read_len == 0 || offset >= buffer.len() {
                 break;

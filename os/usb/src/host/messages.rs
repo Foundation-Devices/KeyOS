@@ -8,3 +8,6 @@ pub struct DoWork;
 
 #[derive(Debug, server::Message)]
 pub struct SubscriberDisconnected(pub xous::CID);
+
+#[derive(Debug, server::Message, Clone)]
+pub struct HostOtgMode(pub bool);

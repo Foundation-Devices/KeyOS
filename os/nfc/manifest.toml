@@ -1,15 +1,10 @@
+manifestVersion = "0"
 appId = "0x6f732f6E666300000000000000000000"
 syscall = ["SetThreadPriority"]
+extends = "../../api/nfc"
 
 [appName]
 en = "NFC Server"
-
-[servers."os/nfc"]
-ReadNdefRawMsg = { id = 0, type = "archive" }
-WriteNdefRawMsg = { id = 1, type = "archive" }
-SetEnabled = { id = 2, type = "blockingScalar" }
-IsEnabled = { id = 3, type = "blockingScalar" }
-IsActive = { id = 4, type = "blockingScalar" }
 
 [permissions]
 template = ["gpio"]

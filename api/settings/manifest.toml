@@ -1,14 +1,15 @@
+manifestVersion = "0"
 [servers."os/settings"]
-LookupTimeZone = { id = 5, type = "archive" }
-ListTimeZone = { id = 6, type = "archive" }
+LookupTimeZone = { id = 5, type = "blockingArchive" }
+ListTimeZone = { id = 6, type = "blockingArchive" }
 FlushAll = { id = 7, type = "scalar" }
 GetPrimeColor = { id = 9, type = "blockingScalar" }
 ResetSettings = { id = 10, type = "blockingScalar" }
 GetSystemTheme = { id = 20, type = "blockingScalar" }
 SetSystemTheme = { id = 21, type = "scalar" }
 SubscribeSystemTheme = { id = 22, type = "scalarEvent" }
-GetOnboardingStatus = { id = 23, type = "archive" }
-SetOnboardingStatus = { id = 24, type = "move" }
+GetOnboardingStatus = { id = 23, type = "blockingArchive" }
+SetOnboardingStatus = { id = 24, type = "archive" }
 SubscribeOnboardingStatus = { id = 25, type = "archiveEvent" }
 GetScreenBrightness = { id = 26, type = "blockingScalar" }
 SetScreenBrightness = { id = 27, type = "scalar" }
@@ -16,8 +17,8 @@ SubscribeScreenBrightness = { id = 28, type = "scalarEvent" }
 GetLocale = { id = 29, type = "blockingScalar" }
 SetLocale = { id = 30, type = "scalar" }
 SubscribeLocale = { id = 31, type = "scalarEvent" }
-GetDeviceName = { id = 32, type = "archive" }
-SetDeviceName = { id = 33, type = "move" }
+GetDeviceName = { id = 32, type = "blockingArchive" }
+SetDeviceName = { id = 33, type = "archive" }
 SubscribeDeviceName = { id = 34, type = "archiveEvent" }
 GetShowSecurityWords = { id = 35, type = "blockingScalar" }
 SetShowSecurityWords = { id = 36, type = "scalar" }
@@ -31,8 +32,8 @@ SubscribeEnvoyTimeSync = { id = 43, type = "scalarEvent" }
 GetUseStandardTimeFormat = { id = 44, type = "blockingScalar" }
 SetUseStandardTimeFormat = { id = 45, type = "scalar" }
 SubscribeUseStandardTimeFormat = { id = 46, type = "scalarEvent" }
-GetTimeZone = { id = 47, type = "archive" }
-SetTimeZone = { id = 48, type = "move" }
+GetTimeZone = { id = 47, type = "blockingArchive" }
+SetTimeZone = { id = 48, type = "archive" }
 SubscribeTimeZone = { id = 49, type = "archiveEvent" }
 GetDebugTouch = { id = 50, type = "blockingScalar" }
 SetDebugTouch = { id = 51, type = "scalar" }

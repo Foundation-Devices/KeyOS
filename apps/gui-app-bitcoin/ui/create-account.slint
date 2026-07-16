@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { CardColor } from "@ui/theme.slint";
 import { MultiSigView, Network } from "./callbacks.slint";
 
 export struct CreateSingleSigOptions {
     label: string,
     network: Network,
     index: string,
-    color: CardColor,
 }
 
 export struct CreateMultiSigOptions {
@@ -33,7 +31,7 @@ export global CreateAccount {
     in property <string> prefilled-index;
     in property <Network> prefilled-network;
 
-    callback import-multisig();
+    callback import-multisig(bool);
     callback create-single-sig(CreateSingleSigOptions);
     callback create-multi-sig(CreateMultiSigOptions);
 

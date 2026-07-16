@@ -97,6 +97,7 @@ struct VerifyState {
     shard_count: usize,
     reading_keycard: bool,
     kind: Option<BackupKind>,
+    scheme: Option<keycard::messages::ShamirScheme>,
 }
 
 async fn verify_backup(global: &VerifyKeycardBackupGlobal<'_>) -> whence::Result<(), VerifyKeycardError> {
@@ -115,25 +116,28 @@ async fn verify_backup(global: &VerifyKeycardBackupGlobal<'_>) -> whence::Result
     ensure_same_backup(&seed_fingerprint, &first_card.seed_fingerprint).whence()?;
 
     state.kind = Some(if first_card.has_magic_backup { BackupKind::Magic } else { BackupKind::Manual });
+    state.scheme = Some(first_card.scheme);
     update_slint_state(global, &state);
 
     if first_card.has_magic_backup {
-        let shard = get_remote_shard::<QuantumLinkPermissions>(first_card.seed_fingerprint, {
-            let mut retries_remaining: u8 = 2;
-            move |e| match e {
-                quantum_link::SendMessageError::NoDevicePaired
-                | quantum_link::SendMessageError::Cancelled => false,
-                quantum_link::SendMessageError::Bluetooth(_) | quantum_link::SendMessageError::Timeout => {
-                    let should_retry = retries_remaining > 0;
-                    retries_remaining = retries_remaining.saturating_sub(1);
-                    should_retry
+        let shard =
+            get_remote_shard::<QuantumLinkPermissions>(first_card.seed_fingerprint, first_card.timestamp, {
+                let mut retries_remaining: u8 = 2;
+                move |e| match e {
+                    quantum_link::SendMessageError::NoDevicePaired
+                    | quantum_link::SendMessageError::Cancelled => false,
+                    quantum_link::SendMessageError::Bluetooth(_)
+                    | quantum_link::SendMessageError::Timeout => {
+                        let should_retry = retries_remaining > 0;
+                        retries_remaining = retries_remaining.saturating_sub(1);
+                        should_retry
+                    }
                 }
-            }
-        })
-        .await
-        .whence()?
-        .ok_or(VerifyKeycardError::NoRemoteShardFound)
-        .whence()?;
+            })
+            .await
+            .whence()?
+            .ok_or(VerifyKeycardError::NoRemoteShardFound)
+            .whence()?;
 
         log::info!("found remote shard");
 
@@ -149,7 +153,9 @@ async fn verify_backup(global: &VerifyKeycardBackupGlobal<'_>) -> whence::Result
         update_slint_state(global, &state);
     }
 
-    let cards_needed = if first_card.has_magic_backup { 2 } else { 3 };
+    let scheme = first_card.scheme;
+    // For magic backup: one shard is from Envoy, rest from keycards
+    let cards_needed = if first_card.has_magic_backup { scheme.share_count - 1 } else { scheme.share_count };
     while cards_loaded.len() < cards_needed {
         let shard = scan_card(global, &haptics, &mut state, &mut cards_loaded).await.whence()?;
         ensure_same_backup(&seed_fingerprint, &shard.seed_fingerprint).whence()?;

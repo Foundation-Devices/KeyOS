@@ -2,20 +2,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PageBody, BasePage, NavHeader, HeadingMd, TextMd, ButtonSection, ContentSection, Button } from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
-import { Navigate } from "../../../gen/navigate.slint";
+import { Navigate, Animate } from "../../../gen/navigate.slint";
 import { KeyCardAnimation } from "@ui/widgets/key-card-animation.slint";
-import { Size } from "@ui/theme.slint";
+import { Palette, Size, UISize } from "@ui/theme.slint";
 
 export component KeycardTipPage inherits BasePage {
     VerticalLayout {
         NavHeader {
             title: TR2.lookup(TrId.KeycardBackupCreateIntroTitle);
             clicked => {
-                Navigate.backward()
+                Navigate.magic-backup({ replace: true, animate: Animate.Backward });
             }
         }
 
         PageBody {
+            p-x: Size.sz4;
+            p-y: Size.sz4;
+            padding-top: Size.sz16;
 
             ContentSection {
                 spacing: Size.sz10;
@@ -26,14 +29,15 @@ export component KeycardTipPage inherits BasePage {
                 }
 
                 HeadingMd {
+                    width: UISize.modal-width;
                     text: TR2.lookup(TrId.KeycardBackupCreateIntroHeader);
-                    vertical-alignment: center;
                     horizontal-alignment: center;
                 }
 
                 TextMd {
+                    width: UISize.modal-width;
                     text: TR2.lookup(TrId.KeycardBackupCreateIntroContent);
-                    vertical-alignment: center;
+                    color: Palette.content-secondary;
                     horizontal-alignment: center;
                 }
             }

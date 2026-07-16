@@ -227,14 +227,8 @@ fn read_next_syscall_result(
             crate::Message::Move(ref mut memory_message)
             | crate::Message::Borrow(ref mut memory_message)
             | crate::Message::MutableBorrow(ref mut memory_message) => {
-                memory_message.buf = mem::map_memory_post(
-                    None,
-                    None,
-                    memory_message.buf.len(),
-                    crate::MemoryFlags::W,
-                    memory_message.buf,
-                )
-                .expect("couldn't allocate range");
+                memory_message.buf =
+                    mem::alloc_message_buf(memory_message.buf.len()).expect("couldn't allocate range");
                 if let Err(e) = stream.read_exact(memory_message.buf.as_slice_mut()) {
                     eprintln!("Server shut down: {}", e);
                     std::process::exit(0);
@@ -287,12 +281,12 @@ fn read_next_syscall_result(
             // In a hosted environment, the message contents are leaked when
             // it gets converted into a MemoryMessage. Now that the call is
             // complete, free the memory.
-            mem::unmap_memory_post(mem).unwrap();
+            mem::free_message_buf(mem).unwrap();
         }
 
         // If we're returning memory to the Server, then free it here
         if kind == CallMemoryKind::ReturnMemory {
-            mem::unmap_memory_post(mem).unwrap();
+            mem::free_message_buf(mem).unwrap();
         }
     }
     (msg_thread_id, response)

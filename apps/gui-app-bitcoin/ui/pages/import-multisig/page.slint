@@ -85,6 +85,7 @@ export component ImportMultiSigPage inherits BasePage {
                     placeholder: TR2.lookup(TrId.ConnectMultiSigImportWalletFillerText);
                     show-clear-btn: false;
                     caps-mode: sentences;
+                    has-notice: true;
                     edited(text) => {
                         new-label = text;
                         self.message = CreateAccount.validate-new-label(text);
@@ -144,14 +145,17 @@ export component ImportMultiSigPage inherits BasePage {
                 label: TR2.lookup(TrId.CommonButtonSkipVerification);
                 importance: Importance.secondary;
                 clicked => {
-                    Navigate.backward();
+                    Navigate.return-home();
                 }
             }
 
             Button {
                 label: TR2.lookup(TrId.CommonButtonVerifyAddress);
                 clicked => {
-                    VerifyAddress.verify-address({ account-id: CreateAccount.new-account-id, show-skip-button: false });
+                    VerifyAddress.verify-address({
+                        account-id: CreateAccount.new-account-id,
+                        show-skip-button: false,
+                    });
                 }
             }
         }
@@ -161,7 +165,7 @@ export component ImportMultiSigPage inherits BasePage {
         NavHeader {
             clicked => {
                 SignPsbt.cancel-signing();
-                Navigate.backward()
+                Navigate.return-home();
             }
         }
 
@@ -195,7 +199,7 @@ export component ImportMultiSigPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonRetry);
                     importance: Importance.primary;
                     clicked => {
-                        CreateAccount.import-multisig();
+                        CreateAccount.import-multisig(false);
                     }
                 }
             }

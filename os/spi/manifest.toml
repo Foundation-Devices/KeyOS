@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6f732f73706900000000000000000000"
 memory = ["SPI0"]
 syscall = ["SetThreadPriority"]
@@ -14,3 +15,4 @@ en = "SPI Server"
     "DropTransferMsg",
 ]
 "os/power-manager" = ["SetPeripheralEnabled"]
+"os/gpio" = ["GetPin"]

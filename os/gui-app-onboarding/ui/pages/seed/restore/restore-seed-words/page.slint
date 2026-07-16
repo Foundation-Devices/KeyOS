@@ -276,7 +276,7 @@ component Restoring inherits Rectangle {
                 }
 
                 Button {
-                    label: TR2.lookup(TrId.RecoverWordsExpandTo24Word);
+                    label: TR2.lookup(TrId.CommonRecoverWordsExpandTo24Word);
                     importance: secondary;
                     visible: !SeedState.is-24-words;
                     clicked => {
@@ -285,7 +285,7 @@ component Restoring inherits Rectangle {
                 }
 
                 if (!SeedState.is-seed-valid): TextSm {
-                    text: TR2.lookup(TrId.RecoverWordsIncorrectTryAgain);
+                    text: TR2.lookup(TrId.CommonRecoverWordsIncorrectTryAgain);
                     color: Palette.content-lightcopper-brand;
                     horizontal-alignment: center;
                 }

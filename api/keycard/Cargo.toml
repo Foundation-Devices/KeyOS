@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "keycard"
+version = "0.1.0"
+edition = "2021"
+description = "Keycard server API crate"
+publish = false
+
+[dependencies]
+backup-shard = { workspace = true }
+crypto = { workspace = true }
+nfc = { workspace = true }
+rkyv = { workspace = true }
+security = { workspace = true }
+server = { workspace = true }
+thiserror = { workspace = true }
+xous = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

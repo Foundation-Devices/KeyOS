@@ -95,9 +95,27 @@ export component ControlCenter inherits VerticalLayout {
 
     in property <bool> is-expanded: false;
     in property <bool> is-shut-down-mode: false;
+    in property <bool> debug-show-corner-deadzone: false;
 
     if !is-expanded: Rectangle {
         background: bg-color;
+
+        // Debug: highlight the corner dead zones that fall through to the app.
+        // Corner width mirrors the Rust constant: side-padding (sz8) + button size (sz10).
+        if debug-show-corner-deadzone: Rectangle {
+            x: 0px;
+            y: 0px;
+            width: Size.sz8 + Size.sz10;
+            height: parent.height;
+            background: #ff000060;
+        }
+        if debug-show-corner-deadzone: Rectangle {
+            x: parent.width - Size.sz8 - Size.sz10;
+            y: 0px;
+            width: Size.sz8 + Size.sz10;
+            height: parent.height;
+            background: #ff000060;
+        }
 
         VerticalLayout {
             alignment: start;

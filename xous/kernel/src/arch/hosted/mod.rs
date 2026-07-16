@@ -15,7 +15,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, ToSocketAdd
 use std::thread_local;
 
 use crossbeam_channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender};
-use xous::{AppId, ProcessInit, Result, SysCall, SysCallNumber, PID, TID};
+use xous::{AppId, ProcessInit, Result, SysCall, PID, TID};
 
 use crate::arch::process::Process;
 use crate::services::SystemServices;
@@ -78,10 +78,13 @@ fn handle_connection(
 
             // Read bytes from the connection. This will fail when the connection closes,
             // so send a `Termination` message across the channel.
-            if let Err(_e) = conn.read_exact(&mut raw_data) {
+            if let Err(e) = conn.read_exact(&mut raw_data) {
                 #[cfg(not(test))]
-                eprintln!("KERNEL({}): client disconnected: {} -- shutting down virtual process", pid, _e);
-                // sender.send(ServerMessage::Exit).ok();
+                if e.kind() != std::io::ErrorKind::UnexpectedEof {
+                    eprintln!("KERNEL: PID {pid} client disconnected: {e} -- shutting down virtual process");
+                }
+                #[cfg(test)]
+                let _ = e;
                 return;
             }
 
@@ -104,7 +107,7 @@ fn handle_connection(
             ) {
                 Ok(call) => call,
                 Err(e) => {
-                    eprintln!("KERNEL({}): Received invalid syscall: {:?}", pid, e);
+                    eprintln!("KERNEL: Received invalid syscall from PID {pid}: {e:?}");
                     eprintln!(
                         "Raw packet: {:08x} {} {} {} {} {} {} {}",
                         packet_data[0],
@@ -156,22 +159,19 @@ fn handle_connection(
 
     std::thread::Builder::new()
         .name(format!("PID {}: client should_exit thread", pid))
-        .spawn(move || {
-            loop {
-                if should_exit.load(Ordering::Relaxed) {
-                    eprintln!("KERNEL: should_exit == 1");
-                    // sender.send(ServerMessage::Exit).ok();
-                    // WARNING: This functionality is unimplemented right now
-                    return;
-                }
-                std::thread::park_timeout(std::time::Duration::from_millis(100));
+        .spawn(move || loop {
+            if should_exit.load(Ordering::Relaxed) {
+                eprintln!("KERNEL: PID {pid} should_exit == 1");
+                // WARNING: This functionality is unimplemented right now
+                return;
             }
+            std::thread::park_timeout(std::time::Duration::from_millis(100));
         })
         .unwrap();
 
     conn_thread.join().unwrap();
     #[cfg(not(test))]
-    eprintln!("KERNEL({}): Finished the thread so sending TerminateProcess", pid);
+    eprintln!("KERNEL: PID {pid} exited");
     chn.send(ThreadMessage::SysCall(pid, 1, xous::SysCall::TerminateProcess(0))).unwrap();
 }
 
@@ -184,9 +184,8 @@ fn listen_thread(
 ) {
     let should_exit = std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));
 
-    // println!("KERNEL(1): Starting Xous server on {}...", listen_addr);
     let listener = TcpListener::bind(listen_addr).unwrap_or_else(|e| {
-        panic!("Unable to create server: {}", e);
+        panic!("Unable to create server: {e}");
     });
     // Notify the host what our kernel address is, if a listener exists.
     if let Some(las) = local_addr_sender.take() {
@@ -281,7 +280,7 @@ fn listen_thread(
                                 return;
                             }
                         }
-                        eprintln!("error accepting connections: {} ({:?}) ({:?})", e, e, e.kind());
+                        eprintln!("error accepting connections: {e} ({e:?}) ({:?})", e.kind());
                         return;
                     }
                 }
@@ -358,39 +357,39 @@ pub fn idle() -> bool {
     {
         let address = address_receiver.recv().unwrap();
         xous::arch::set_xous_address(address);
-        println!("KERNEL: Xous server listening on {}", address);
+        println!("KERNEL: Xous server listening on {address}");
         println!("KERNEL: Starting initial processes:");
+
         let mut args = std::env::args();
-        args.next();
+        let argv0 = args.next().unwrap_or_else(|| "keyos-kernel".to_owned());
+        let services_path = args.next().unwrap_or_else(|| {
+            eprintln!("Usage: {argv0} <services.json>");
+            std::process::exit(1);
+        });
+        let services: Vec<app_manifest::HostedService> = serde_json::from_reader(
+            std::fs::File::open(&services_path)
+                .unwrap_or_else(|e| panic!("couldn't open hosted-services manifest {services_path}: {e}")),
+        )
+        .unwrap_or_else(|e| panic!("couldn't parse hosted-services manifest {services_path}: {e}"));
 
         // Set the current PID to 1, which was created above. This ensures all init processes
         // are owned by PID1.
         crate::arch::process::set_current_pid(process_1.pid());
 
-        // Go through each arg and spawn it as a new process. Failures here will
-        // halt the entire system.
+        // Spawn each service. Failures here will halt the entire system.
         println!("  PID  |  App ID  |  Command");
         println!("-------+----------+-------");
-        while let Some(arg) = args.next() {
-            let app_id_arg = args.next().expect("missing app ID");
-            let app_id_bytes = hex::decode(&app_id_arg[2..]).unwrap().try_into().unwrap();
-            let app_id = AppId(app_id_bytes);
+        for service in services {
+            let app_id = AppId(service.app_id);
             let init = xous::ProcessInit { app_id };
             let new_process = SystemServices::with_mut(|ss| ss.create_process(init)).unwrap();
-            println!(" {:2} |  {}  |  {}", new_process, app_id, arg);
-            let process_args = xous::ProcessArgs::new(app_id, "program", &arg);
+            println!(" {new_process:2} |  {app_id}  |  {0}", service.path);
+            let process_args = xous::ProcessArgs::new(app_id, "program", &service.path);
             let (pid, _) =
                 xous::arch::create_process_post(process_args, init, new_process).expect("couldn't spawn");
-
-            // XXX: We are giving xous-names a specific privilege here.
-            //      This should not be hardcoded, but it would be a waste of time to implement a generic
-            //      solution through xtask just for this one syscall permission. Once we have more than this
-            //      one, a proper solution should be implemented.
-            if app_id_arg == "0x786f75732d6e616d6573000000000000" {
+            if service.syscalls != 0 {
                 SystemServices::with_mut(|ss| {
-                    ss.process_mut(pid)
-                        .unwrap()
-                        .set_syscall_permissions(1 << SysCallNumber::AllowMessagesCID as u64)
+                    ss.process_mut(pid).unwrap().set_syscall_permissions(service.syscalls)
                 });
             }
         }
@@ -409,10 +408,7 @@ pub fn idle() -> bool {
                     .expect("couldn't send new pid to new connection");
             }
             ThreadMessage::SysCall(pid, thread_id, call) => {
-                // let measurement_start = std::time::Instant::now();
-                // println!("KERNEL({}): Received syscall {:?}", pid, call);
                 crate::arch::process::set_current_pid(pid);
-                // println!("KERNEL({}): Now running as the new process", pid);
 
                 // If the call being made is to terminate the current process, we need to know
                 // because we won't be able to send a response.
@@ -433,19 +429,17 @@ pub fn idle() -> bool {
                 // This is because the "process" will be "terminated" (the network socket will be closed),
                 // and we won't be able to send the response after we're done.
                 if is_shutdown {
-                    // println!("KERNEL: Detected shutdown -- sending final \"Ok\" to the client");
                     let mut process = Process::current();
                     let mut response_vec = Vec::new();
                     response_vec.extend_from_slice(&thread_id.to_le_bytes());
                     for word in Result::Ok.to_args().iter_mut() {
                         response_vec.extend_from_slice(&word.to_le_bytes());
                     }
-                    process.send(&response_vec).unwrap_or_else(|_e| {
+                    process.send(&response_vec).unwrap_or_else(|e| {
                         // If we're unable to send data to the process, assume it's dead and terminate it.
-                        println!("Unable to send response to process: {:?} -- terminating", _e);
+                        println!("Unable to send response to process: {e:?} -- terminating");
                         crate::syscall::handle(thread_id, SysCall::TerminateProcess(0)).ok();
                     });
-                    // println!("KERNEL: Done sending");
                 }
 
                 {
@@ -477,9 +471,7 @@ pub fn idle() -> bool {
         }
     }
 
-    // println!("Exiting Xous because the listen thread channel has closed. Waiting for thread to finish...");
     listen_thread_handle.join().expect("error waiting for listen thread to return");
 
-    // println!("Thank you for using Xous!");
     false
 }

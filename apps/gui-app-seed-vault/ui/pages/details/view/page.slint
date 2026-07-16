@@ -3,7 +3,7 @@
 
 import { Callbacks as CB } from "../../../callbacks.slint";
 import { BasePage, AppHeader, IconButton, SeedWords, ButtonSection, Button, QrPages } from "@ui/widgets.slint";
-import { Importance, Size } from "@ui/theme.slint";
+import { Importance, Size, Utils, Palette } from "@ui/theme.slint";
 import { SeedView, SeedViewType } from "../../../types.slint";
 import { DetailsProps } from "../props.slint";
 import { ViewProps } from "./props.slint";
@@ -14,13 +14,27 @@ export component ViewPage inherits BasePage {
     in property <DetailsProps> details-props;
     in property <ViewProps> props;
 
-    property <SeedView> seed: details-props.seed;
+    property <SeedView> seed;
     property <bool> qr-view: false;
+    property <[string]> words;
+    property <image> standard-qr;
+    property <image> compact-qr;
+    property <string> npub;
+    property <string> nsec;
+
+    init => {
+        seed = CB.get-seed-details(details-props.index);
+        words = CB.get-words(seed.index);
+        standard-qr = CB.get-standard-seed-qr(seed.index);
+        compact-qr = CB.get-compact-seed-qr(seed.index);
+        npub = CB.get-npub(seed.index);
+        nsec = CB.get-nsec(seed.index);
+    }
 
     pure function get-view-title(seed-type: SeedViewType) -> string {
-        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24) {
+        if (CB.is-bitcoin(seed-type)) {
             return TR2.lookup(TrId.ViewSeedWordsTitle);
-        } else if (seed-type == SeedViewType.nostr-key) {
+        } else if (CB.is-nostr(seed-type)) {
             return TR2.lookup(TrId.ViewNostrKeyTitle);
         }
         return TR2.lookup(TrId.ViewSeedWordsTitle);
@@ -41,7 +55,7 @@ export component ViewPage inherits BasePage {
                 }
             }
 
-            if seed.seed-type != SeedViewType.nostr-key: IconButton {
+            if !CB.is-nostr(seed.seed-type): IconButton {
                 icon: qr-view ? "list" : "scan-qr";
                 size: Size.sz8;
                 importance: Importance.normal;
@@ -52,38 +66,38 @@ export component ViewPage inherits BasePage {
         }
 
         VerticalLayout {
-            padding-top: (seed.seed-type == SeedViewType.nostr-key || qr-view) ? Size.sz2 : Size.sz10;
+            padding-top: (CB.is-nostr(seed.seed-type) || qr-view) ? Size.sz2 : Size.sz16;
             padding-bottom: Size.sz4;
 
-            if (seed.seed-type != SeedViewType.nostr-key && !qr-view): SeedWords {
-                words: CB.get-words(seed.index);
+            if (!CB.is-nostr(seed.seed-type) && !qr-view): SeedWords {
+                words: words;
             }
 
-            if (seed.seed-type != SeedViewType.nostr-key && qr-view): QrPages {
+            if (!CB.is-nostr(seed.seed-type) && qr-view): QrPages {
                 model: [
                     {
-                        code: CB.get-standard-seed-qr(seed.index),
+                        code: standard-qr,
                         header: TR2.lookup(TrId.ViewSeedWordsStandardSeedQr),
                     },
                     {
-                        code: CB.get-compact-seed-qr(seed.index),
+                        code: compact-qr,
                         header: TR2.lookup(TrId.ViewSeedWordsCompactSeedQr),
                     },
                 ];
             }
 
-            if seed.seed-type == SeedViewType.nostr-key: QrPages {
+            if CB.is-nostr(seed.seed-type): QrPages {
                 model: [
                     {
-                        code: CB.get-npub-qr(seed.index),
+                        code: Utils.qrcode(npub, Palette.black, Palette.white),
                         header: TR2.lookup(TrId.ArchivedItemNostrKeyPublicKey),
-                        footer: CB.get-npub(seed.index),
+                        footer: npub,
                         footer-is-address: true,
                     },
                     {
-                        code: CB.get-nsec-qr(seed.index),
+                        code: Utils.qrcode(nsec, Palette.black, Palette.white),
                         header: TR2.lookup(TrId.ArchivedItemNostrKeyPrivateKey),
-                        footer: CB.get-nsec(seed.index),
+                        footer: nsec,
                         footer-is-address: true,
                     },
                 ];
@@ -91,6 +105,9 @@ export component ViewPage inherits BasePage {
 
             ButtonSection {
                 padding: Size.sz6;
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+
                 Button {
                     label: TR2.lookup(TrId.CommonButtonDone);
 

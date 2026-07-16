@@ -1,7 +1,6 @@
 use crate::definitions::SysCallResult;
 use crate::AppId;
 use crate::MemoryAddress;
-use crate::MemoryFlags;
 use crate::MemoryRange;
 use crate::TID;
 
@@ -355,29 +354,6 @@ where
 {
     Ok(WaitHandle { tid: thread_id, data: core::marker::PhantomData })
 }
-
-pub fn map_memory_pre(
-    _phys: &Option<MemoryAddress>,
-    _virt: &Option<MemoryAddress>,
-    _size: usize,
-    _flags: MemoryFlags,
-) -> core::result::Result<(), crate::Error> {
-    Ok(())
-}
-
-pub fn map_memory_post(
-    _phys: Option<MemoryAddress>,
-    _virt: Option<MemoryAddress>,
-    _size: usize,
-    _flags: MemoryFlags,
-    range: MemoryRange,
-) -> core::result::Result<MemoryRange, crate::Error> {
-    Ok(range)
-}
-
-pub fn unmap_memory_pre(_range: &MemoryRange) -> core::result::Result<(), crate::Error> { Ok(()) }
-
-pub fn unmap_memory_post(_range: MemoryRange) -> core::result::Result<(), crate::Error> { Ok(()) }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThreadInit {

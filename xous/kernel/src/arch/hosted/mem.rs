@@ -54,8 +54,8 @@ impl MemoryMapping {
         _src_addr: *mut usize,
         _dest_space: &mut MemoryMapping,
         _dest_addr: *mut usize,
-    ) -> Result<(), Error> {
-        Ok(())
+    ) -> Result<usize, Error> {
+        Ok(0)
     }
 
     pub fn lend_page(
@@ -65,8 +65,8 @@ impl MemoryMapping {
         _dest_space: &mut MemoryMapping,
         _dest_addr: *mut usize,
         _mutable: bool,
-    ) -> Result<(), Error> {
-        Ok(())
+    ) -> Result<usize, Error> {
+        Ok(0)
     }
 
     pub fn return_page(
@@ -74,8 +74,8 @@ impl MemoryMapping {
         _src_addr: *mut usize,
         _dest_space: &mut MemoryMapping,
         _dest_addr: *mut usize,
-    ) -> Result<(), Error> {
-        Ok(())
+    ) -> Result<usize, Error> {
+        Ok(0)
     }
 
     pub fn virt_to_phys(&self, virt: *const usize) -> Result<usize, Error> { Ok(virt as usize) }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Size, Palette, UISize, Importance, Utils, Images, ScanQrAction, Timings, CurrentTheme } from "@ui/theme.slint";
-import { TextSm, Button, IconButton, BasePage, Link } from "@ui/widgets.slint";
+import { TextSm, TextMd, HeadingMd, Button, IconButton, BasePage, ErrorModal, Link, Switch, SegmentedControl } from "@ui/widgets.slint";
 import { AppHeader } from "@ui/widgets/app-header.slint";
 import { TR2, TrId } from "./gen/tr.slint";
 import { TR } from "@ui/i18n/i18n.slint";
@@ -10,6 +10,17 @@ import { TR } from "@ui/i18n/i18n.slint";
 export global Callbacks {
     callback enable-camera-clicked() -> bool;
     callback button-clicked(ScanQrAction);
+    callback unknown-qr-modal-confirmed();
+    callback config-aec-toggled(bool);
+    callback config-agc-toggled(bool);
+    callback config-awb-toggled(bool);
+    callback config-agc-ceiling-changed(int);
+    callback config-brightness-changed(int);
+    callback config-contrast-changed(int);
+    callback config-saturation-changed(int);
+    callback config-reset-clicked();
+    callback config-close-clicked();
+    callback title-tapped();
 }
 
 export global Global {
@@ -22,8 +33,17 @@ export global Global {
     in-out property <string> message: "";
     in-out property <string> button-icon: "";
     in-out property <string> button-text: "";
-    in property <bool> camera-enabled: false;
+    in property <bool> camera-enabled: true;
     in property <percent> scan-progress: 0%;
+    in-out property <bool> show-config: false;
+    in-out property <bool> show-unknown-qr-modal: false;
+    in-out property <bool> config-aec-enabled: true;  // Auto Exposure Control
+    in-out property <bool> config-agc-enabled: true;  // Auto Gain Control
+    in-out property <bool> config-awb-enabled: true;  // Auto White Balance
+    in-out property <int> config-agc-ceiling: 1;      // AGC max gain: 0=2x, 1=4x, 2=8x, 3=16x
+    in-out property <int> config-brightness: 0;       // 0-255, default: 0
+    in-out property <int> config-contrast: 40;        // 0-255, default: 0x28 = 40
+    in-out property <int> config-saturation: 80;      // 0-255, default: 0x50 = 80
 }
 
 export component AppWindow inherits Window {
@@ -42,50 +62,66 @@ export component AppWindow inherits Window {
         // Overlay the app header and any text
         VerticalLayout {
             alignment: space-between;
-            AppHeader {
-                title: Global.header-title != "" ? Global.header-title : TR2.lookup(TrId.ScanTitle);
-                title-color: Palette.white;
+            Rectangle {
+                height: Size.sz16;
+                AppHeader {
+                    title: Global.header-title != "" ? Global.header-title : TR2.lookup(TrId.ScanTitle);
+                    title-color: Palette.white;
 
-                if Global.header-left-icon != "": IconButton {
-                    icon: Global.header-left-icon;
-                    importance: Importance.white;
-                    clicked => {
-                        Callbacks.button-clicked(ScanQrAction.left-clicked);
-                    }
-                }
-
-                if Global.header-left-text != "" && Global.header-left-icon == "": VerticalLayout {
-                    alignment: center;
-                    Link {
-                        label: Global.header-left-text;
+                    if Global.header-left-icon != "": IconButton {
+                        icon: Global.header-left-icon;
                         importance: Importance.white;
-                        height: Size.sz6;
                         clicked => {
                             Callbacks.button-clicked(ScanQrAction.left-clicked);
                         }
                     }
-                }
 
-                // If both left parameters are blank or filled, fill the space with an empty Rectangle so the right button is positioned correctly
-                if (Global.header-left-text == "" && Global.header-left-icon == "") || (Global.header-left-text != "" && Global.header-left-icon != ""): Rectangle { }
-
-                if Global.header-right-icon != "": IconButton {
-                    icon: Global.header-right-icon;
-                    importance: Importance.white;
-                    clicked => {
-                        Callbacks.button-clicked(ScanQrAction.right-clicked);
+                    if Global.header-left-text != "" && Global.header-left-icon == "": VerticalLayout {
+                        alignment: center;
+                        Link {
+                            label: Global.header-left-text;
+                            importance: Importance.white;
+                            height: Size.sz6;
+                            touch-factor: 6.0;
+                            clicked => {
+                                Callbacks.button-clicked(ScanQrAction.left-clicked);
+                            }
+                        }
                     }
-                }
 
-                if Global.header-right-text != "" && Global.header-right-icon == "": VerticalLayout {
-                    alignment: center;
-                    Link {
-                        label: Global.header-right-text;
+                    // If both left parameters are blank or filled, fill the space with an empty Rectangle so the right button is positioned correctly
+                    if (Global.header-left-text == "" && Global.header-left-icon == "") || (Global.header-left-text != "" && Global.header-left-icon != ""): Rectangle { }
+
+                    if Global.header-right-icon != "": IconButton {
+                        icon: Global.header-right-icon;
                         importance: Importance.white;
-                        height: Size.sz6;
                         clicked => {
                             Callbacks.button-clicked(ScanQrAction.right-clicked);
                         }
+                    }
+
+                    if Global.header-right-text != "" && Global.header-right-icon == "": VerticalLayout {
+                        alignment: center;
+                        Link {
+                            label: Global.header-right-text;
+                            importance: Importance.white;
+                            height: Size.sz6;
+                            touch-factor: 6.0;
+                            clicked => {
+                                Callbacks.button-clicked(ScanQrAction.right-clicked);
+                            }
+                        }
+                    }
+                }
+
+                // Secret touch area to open config - placed over the title
+                TouchArea {
+                    x: (parent.width - 150px) / 2;
+                    y: 0;
+                    width: 150px;
+                    height: Size.sz16;
+                    clicked => {
+                        Callbacks.title-tapped();
                     }
                 }
             }
@@ -143,6 +179,18 @@ export component AppWindow inherits Window {
                 }
             }
         }
+
+        if Global.show-unknown-qr-modal: ErrorModal {
+            icon: "alert";
+            icon-color: Palette.content-notice;
+            title: TR2.lookup(TrId.QrModalUnknownTitle);
+            text: TR2.lookup(TrId.QrModalUnknownContent);
+            confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+            confirm-clicked => {
+                Global.show-unknown-qr-modal = false;
+                Callbacks.unknown-qr-modal-confirmed();
+            }
+        }
     }
 
     Image {
@@ -152,6 +200,207 @@ export component AppWindow inherits Window {
         width: 128px;
         height: 128px;
         source: @image-url("./camera-big.svg");
+    }
+
+    // Camera Config Page (full screen, replaces scanner view when shown)
+    if Global.show-config: Rectangle {
+        width: UISize.screen-width;
+        height: UISize.screen-height;
+        background: Palette.background-primary;
+
+        VerticalLayout {
+            padding-top: Size.sz8;
+            padding: Size.sz4;
+            spacing: Size.sz2;
+
+            // Header
+            HorizontalLayout {
+                height: Size.sz12;
+                alignment: center;
+
+                HeadingMd {
+                    text: "Camera Tuning";
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                }
+            }
+
+            // AEC Toggle
+            HorizontalLayout {
+                height: Size.sz10;
+                TextMd {
+                    text: "Auto Exposure (AEC)";
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Switch {
+                    checked <=> Global.config-aec-enabled;
+                    changed => {
+                        Callbacks.config-aec-toggled(Global.config-aec-enabled);
+                    }
+                }
+            }
+
+            // AGC Toggle
+            HorizontalLayout {
+                height: Size.sz10;
+                TextMd {
+                    text: "Auto Gain (AGC)";
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Switch {
+                    checked <=> Global.config-agc-enabled;
+                    changed => {
+                        Callbacks.config-agc-toggled(Global.config-agc-enabled);
+                    }
+                }
+            }
+
+            // AWB Toggle
+            HorizontalLayout {
+                height: Size.sz10;
+                TextMd {
+                    text: "Auto White Balance (AWB)";
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Switch {
+                    checked <=> Global.config-awb-enabled;
+                    changed => {
+                        Callbacks.config-awb-toggled(Global.config-awb-enabled);
+                    }
+                }
+            }
+
+            // Divider
+            Rectangle {
+                height: 1px;
+                background: Palette.border-tertiary;
+            }
+
+            // Brightness control (0-255)
+            HorizontalLayout {
+                spacing: Size.sz2;
+                height: Size.sz14;
+                TextMd {
+                    text: "Brightness: " + Global.config-brightness;
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    label: "-";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-brightness > 0 {
+                            Global.config-brightness -= 1;
+                            Callbacks.config-brightness-changed(Global.config-brightness);
+                        }
+                    }
+                }
+
+                Button {
+                    label: "+";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-brightness < 255 {
+                            Global.config-brightness += 1;
+                            Callbacks.config-brightness-changed(Global.config-brightness);
+                        }
+                    }
+                }
+            }
+
+            // Contrast control (0-255)
+            HorizontalLayout {
+                spacing: Size.sz2;
+                height: Size.sz14;
+                TextMd {
+                    text: "Contrast: " + Global.config-contrast;
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    label: "-";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-contrast > 0 {
+                            Global.config-contrast -= 1;
+                            Callbacks.config-contrast-changed(Global.config-contrast);
+                        }
+                    }
+                }
+
+                Button {
+                    label: "+";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-contrast < 255 {
+                            Global.config-contrast += 1;
+                            Callbacks.config-contrast-changed(Global.config-contrast);
+                        }
+                    }
+                }
+            }
+
+            // Saturation control (0-255)
+            HorizontalLayout {
+                spacing: Size.sz2;
+                height: Size.sz14;
+                TextMd {
+                    text: "Saturation: " + Global.config-saturation;
+                    color: Palette.content-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    label: "-";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-saturation > 0 {
+                            Global.config-saturation -= 1;
+                            Callbacks.config-saturation-changed(Global.config-saturation);
+                        }
+                    }
+                }
+
+                Button {
+                    label: "+";
+                    importance: Importance.primary;
+                    clicked(id) => {
+                        if Global.config-saturation < 255 {
+                            Global.config-saturation += 1;
+                            Callbacks.config-saturation-changed(Global.config-saturation);
+                        }
+                    }
+                }
+            }
+
+            // Spacer
+            Rectangle {
+                vertical-stretch: 1;
+            }
+
+            // Close button
+            Button {
+                label: "Close";
+                importance: Importance.secondary;
+                clicked(id) => {
+                    Callbacks.config-close-clicked();
+                }
+            }
+        }
     }
 }
 

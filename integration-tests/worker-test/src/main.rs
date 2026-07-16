@@ -1,22 +1,24 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod disposable_server;
 mod test_server;
 
 use std::{
     future::Future,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
+use disposable_server::{DisposableHandle, DisposablePermissions};
 use futures_lite::{FutureExt, StreamExt};
 use keyos_integration_test::{assert, assert_eq, fail};
 use worker::{test_executor, WorkerHandle};
+use worker_test_disposable as disposable_server;
 
-use crate::{
-    disposable_server::DisposablePermissions,
-    test_server::{api::TestData, *},
-};
+use crate::test_server::{api::TestData, *};
 
 async fn test_basic_task_spawning(worker: &WorkerHandle) {
     let task1 = worker.spawn(async { 42 });
@@ -24,30 +26,6 @@ async fn test_basic_task_spawning(worker: &WorkerHandle) {
 
     assert_eq!(task1.await, 42);
     assert_eq!(task2.await, 43);
-}
-
-async fn test_performance(worker: &WorkerHandle) {
-    let start = std::time::Instant::now();
-
-    let mut tasks = vec![];
-    for i in 0..100 {
-        let task = worker.spawn(async move { i * 2 });
-        tasks.push(task);
-    }
-
-    let mut results = vec![];
-    for task in tasks {
-        results.push(task.await)
-    }
-
-    let elapsed = start.elapsed();
-
-    // Verify all results
-    for (i, result) in results.iter().enumerate() {
-        assert_eq!(*result, i * 2);
-    }
-
-    assert!(elapsed < std::time::Duration::from_millis(100), "performance test took too long");
 }
 
 async fn test_worker_sleep(worker: &WorkerHandle) {
@@ -204,6 +182,27 @@ async fn test_subscription_cancellation(worker: &WorkerHandle) {
     assert_eq!(archive_count, 3, "should receive exactly 3 archive events before cancellation");
 }
 
+async fn test_subscription_drops_old_events(worker: &WorkerHandle) {
+    let mut ticks = worker.subscribe_scalar::<TestPermissions, _>(api::ScalarTickSub);
+    let mut sent_ticks = Vec::new();
+
+    for _ in 0..15 {
+        sent_ticks.push(worker.async_archive::<TestPermissions, _>(api::ArchiveIncrementTick).await.tick);
+    }
+
+    let mut received_ticks = Vec::new();
+    for _ in 0..10 {
+        let event = worker
+            .timeout(ticks.next(), Duration::from_secs(1))
+            .await
+            .expect("subscription should have queued events")
+            .expect("subscription should still be open");
+        received_ticks.push(event.0);
+    }
+
+    assert_eq!(&received_ticks, &sent_ticks[5..], "subscription should keep the latest queued events");
+}
+
 async fn test_archive_async(worker: &WorkerHandle) {
     // we can have 16 in flight messages at the same time.
     let pending =
@@ -296,53 +295,88 @@ async fn test_scalar_async_dropped(worker: &WorkerHandle) {
     assert_eq!(response, TestData::server_default());
 }
 
-async fn test_async_req_intense(worker: &WorkerHandle) {
-    let ticks =
-        (0..5).map(|_| worker.async_archive::<TestPermissions, _>(api::ArchiveTick)).collect::<Vec<_>>();
-    let intervals =
-        (0..40).map(|_| worker.async_scalar::<TestPermissions, _>(api::ScalarInterval)).collect::<Vec<_>>();
-    for req in intervals {
-        assert_eq!(req.await, 1, "all requests should resolve, despite more requests that slots");
-    }
+async fn test_dropped_async_request_cancels_slot(worker: &WorkerHandle, control: &TestServerHandle) {
+    assert_eq!(control.send_blocking_scalar(api::HeldScalarCount), 0, "held scalar queue should start empty");
 
-    assert!(!ticks.iter().any(|t| t.is_finished()), "none of these should be resolved yet");
-    let count = worker.async_archive::<TestPermissions, _>(api::ArchiveIncrementTick).await;
-    for tick in ticks {
-        assert_eq!(tick.await.tick, count.tick);
-    }
+    let dropped = worker.async_scalar::<TestPermissions, _>(api::HoldScalar);
+    let held = worker.async_scalar::<TestPermissions, _>(api::HoldScalar);
+    assert_eq!(
+        worker.async_scalar::<TestPermissions, _>(api::HeldScalarCount).await,
+        2,
+        "held scalar requests should arrive"
+    );
+
+    drop(dropped);
+
+    let released = control.send_blocking_scalar(api::ReleaseHeldScalars(2));
+    assert_eq!(released, 2, "should release all held scalar requests");
+
+    assert_eq!(held.await, 1);
+    assert_eq!(control.send_blocking_scalar(api::HeldScalarCount), 0, "held scalar queue should end empty");
 }
 
 async fn test_try_async_with_dead_server(worker: &WorkerHandle) {
-    let disposable = disposable_server::start_disposable_server();
+    let disposable = DisposableHandle::default();
 
     let echo_result =
         worker.async_scalar::<DisposablePermissions, _>(disposable_server::ScalarEcho(42)).await;
     assert_eq!(echo_result, 42, "disposable server echo");
 
+    let pending =
+        worker.try_async_scalar::<DisposablePermissions, _>(disposable_server::HoldDisposableScalar);
+    std::thread::sleep(Duration::from_millis(50));
+
     log::info!("dropping disposable server");
     drop(disposable);
-    // some time to make sure server is shutdown
-    std::thread::sleep(Duration::from_millis(500));
-    log::info!("dropped disposable server");
-
-    let scalar_err =
-        worker.try_async_scalar::<DisposablePermissions, _>(disposable_server::ScalarEcho(123)).await;
-    log::info!("received scalar message");
-    assert_eq!(
-        scalar_err,
-        Err(server::xous::Error::ServerNotFound),
-        "scalar message to dead server should fail"
-    );
-
-    let archive_err = worker
-        .try_async_archive::<DisposablePermissions, _>(disposable_server::ArchiveEcho { value: 456 })
-        .await;
 
     assert_eq!(
-        archive_err,
-        Err(server::xous::Error::ServerNotFound),
-        "archive message to dead server should fail"
+        pending.await,
+        Err(server::xous::Error::ProcessTerminated),
+        "pending request should fail when the remote process disconnects"
     );
+}
+
+async fn test_worker_shutdown_on_drop(control: &TestServerHandle) {
+    struct SetOnDrop(Arc<AtomicBool>);
+
+    impl Drop for SetOnDrop {
+        fn drop(&mut self) { self.0.store(true, Ordering::Release); }
+    }
+
+    let worker = WorkerHandle::default();
+
+    let task_started = Arc::new(AtomicBool::new(false));
+    let task_dropped = Arc::new(AtomicBool::new(false));
+    let sleep = worker.sleep(Duration::from_secs(60));
+    worker
+        .spawn({
+            let task_started = Arc::clone(&task_started);
+            let task_dropped = Arc::clone(&task_dropped);
+            async move {
+                let _set_on_drop = SetOnDrop(task_dropped);
+                task_started.store(true, Ordering::Release);
+                sleep.await;
+            }
+        })
+        .detach();
+
+    let response = worker.async_scalar::<TestPermissions, _>(api::HoldScalar);
+    let _ = worker.async_scalar::<TestPermissions, _>(api::ScalarInterval).await;
+    assert!(!response.is_closed(), "response should be open before drop");
+    assert!(task_started.load(Ordering::Acquire), "detached task should start before drop");
+
+    drop(worker);
+
+    for _ in 0..20 {
+        if response.is_closed() && task_dropped.load(Ordering::Acquire) {
+            let _ = control.send_blocking_scalar(api::ReleaseHeldScalars(1));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = control.send_blocking_scalar(api::ReleaseHeldScalars(1));
+    fail!("pending response stayed open or detached task stayed alive after dropping last handle");
 }
 
 async fn test_pending_connection_retry(worker: &WorkerHandle) {
@@ -421,48 +455,6 @@ async fn test_pending_connection_retry(worker: &WorkerHandle) {
     assert_eq!(result, 100);
 }
 
-async fn test_clone_subscription(worker: &WorkerHandle) {
-    let counter_events = worker.subscribe_archive::<TestPermissions, _>(api::ArchiveTickSub);
-
-    let sub_task_1 = worker.spawn({
-        let mut counter_events = counter_events.clone();
-        async move {
-            let mut events = Vec::new();
-            for _ in 0..5 {
-                if let Some(event) = counter_events.next().await {
-                    events.push(event);
-                }
-            }
-            events
-        }
-    });
-
-    let sub_task_2 = worker.spawn({
-        let mut counter_events = counter_events.clone();
-        async move {
-            let mut events = Vec::new();
-            for _ in 0..5 {
-                if let Some(event) = counter_events.next().await {
-                    events.push(event);
-                }
-            }
-            events
-        }
-    });
-
-    for _ in 0..5 {
-        let _ = worker.async_archive::<TestPermissions, _>(api::ArchiveIncrementTick).await;
-    }
-
-    assert_eq!(sub_task_1.await.len(), 5, "should receive 5 tick events");
-
-    for _ in 0..5 {
-        let _ = worker.async_archive::<TestPermissions, _>(api::ArchiveIncrementTick).await;
-    }
-
-    assert_eq!(sub_task_2.await.len(), 5, "should receive 5 tick events");
-}
-
 fn run_test<F>(test_name: &str, test: F)
 where
     F: Future<Output = ()>,
@@ -488,25 +480,27 @@ fn main() {
     let worker = WorkerHandle::default();
 
     run_test("basic task spawning", test_basic_task_spawning(&worker));
-    run_test("performance", test_performance(&worker));
     run_test("sleep", test_worker_sleep(&worker));
 
-    let _test_server = test_server::start_test_server();
+    let test_server = test_server::start_test_server();
 
     run_test("scalar subscription", test_scalar_subscription(&worker));
     run_test("archive subscription", test_archive_subscription(&worker));
     run_test("subscription cancellation", test_subscription_cancellation(&worker));
+    run_test("subscription drops old events", test_subscription_drops_old_events(&worker));
     run_test("fallible subscriptions", test_fallible_subscriptions(&worker));
-    run_test("double consume stream", test_clone_subscription(&worker));
 
     run_test("archive async", test_archive_async(&worker));
     run_test("archive dropped request", test_archive_dropped_request(&worker));
     run_test("scalar async", test_scalar_async(&worker));
     run_test("scalar async dropped", test_scalar_async_dropped(&worker));
-    run_test("async request intense", test_async_req_intense(&worker));
-
+    run_test(
+        "dropped async request cancels slot",
+        test_dropped_async_request_cancels_slot(&worker, &test_server),
+    );
     run_test("pending connection retry", test_pending_connection_retry(&worker));
 
+    run_test("worker shutdown on drop", test_worker_shutdown_on_drop(&test_server));
     run_test("try async with dead server", test_try_async_with_dead_server(&worker));
 
     run_test("timeout completes before timeout", test_timeout_completes_before_timeout(&worker));

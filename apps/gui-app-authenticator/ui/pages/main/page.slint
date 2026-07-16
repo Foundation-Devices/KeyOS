@@ -5,7 +5,7 @@ import { AuthenticatorCallbacks as CB } from "../../authenticator-callbacks.slin
 import { ScanQrCaller } from "../../authenticator-types.slint";
 import { Palette, Size, Importance, CardColor, Utils, ResultLevel } from "@ui/theme.slint";
 import { CardPill, IconButton, LineCard, Arc, TextLg, TextSm,
-         AppHeader, OverlayMenu, PopupMenuItem, BasePage, Movable, Link } from "@ui/widgets.slint";
+         AppHeader, OverlayMenu, PopupMenuItem, BasePage, Movable, Link, ConfirmationModal } from "@ui/widgets.slint";
 import { MainProps } from "./props.slint";
 import { EditPageVersion, CardPageVersion, CardList } from "@ui/pages.slint";
 import { Navigate } from "../../gen/navigate.slint";
@@ -286,6 +286,26 @@ export component MainPage inherits BasePage {
 
         touched-off => {
             is-menu-open = false;
+        }
+    }
+
+    if CB.pending-import-count > 0: ConfirmationModal {
+        icon: "info";
+        icon-color: Palette.content-brand;
+        title: TR2.lookup(TrId.MainModalImportMultipleAccountsHeader);
+        text: TR2.format(TrId.MainModalImportMultipleAccountsContent, [
+            "\{CB.pending-import-count}",
+        ]);
+
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+
+        cancel-clicked => {
+            CB.cancel-import-multiple();
+        }
+
+        confirm-clicked => {
+            CB.import-multiple();
         }
     }
 }

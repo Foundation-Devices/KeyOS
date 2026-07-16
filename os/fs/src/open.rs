@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use {
-    crate::{DirHandle, Error, FileHandle, OpenDir, OpenFile, Server},
+    crate::{DirHandle, Error, FileHandle, Server},
     fs::messages::{CreateDirMessage, OpenDirMessage, OpenFileMessage},
     server::xous,
 };
 
-impl server::ArchiveHandler<OpenFileMessage> for Server {
+impl server::BlockingArchiveHandler<OpenFileMessage> for Server {
     fn handle(
         &mut self,
         msg: OpenFileMessage,
@@ -29,22 +29,16 @@ impl server::ArchiveHandler<OpenFileMessage> for Server {
         self.create_base_dir(msg.location, sender)?;
 
         let path = crate::path_of(msg.location, &msg.path, sender);
-        let file = if msg.flags.create {
-            self.root_dir(msg.location)?.create_file(&path)?
+        let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
+        if msg.flags.create {
+            mount.create_file(sender, msg.location, path, msg.flags)
         } else {
-            self.root_dir(msg.location)?.open_file(&path)?
-        };
-        let files = self.files.entry(sender).or_default();
-        let counter = files.counter;
-        files
-            .open
-            .insert(FileHandle(counter), OpenFile { file, path, flags: msg.flags, location: msg.location });
-        files.counter = counter.wrapping_add(1);
-        Ok(FileHandle(counter))
+            mount.open_file(sender, msg.location, path, msg.flags)
+        }
     }
 }
 
-impl server::ArchiveHandler<OpenDirMessage> for Server {
+impl server::BlockingArchiveHandler<OpenDirMessage> for Server {
     fn handle(
         &mut self,
         msg: OpenDirMessage,
@@ -54,19 +48,12 @@ impl server::ArchiveHandler<OpenDirMessage> for Server {
         self.check_read_access(sender, msg.location)?;
         self.create_base_dir(msg.location, sender)?;
         let path = crate::path_of(msg.location, &msg.path, sender);
-        let mut dir = self.root_dir(msg.location)?;
-        if !path.is_empty() {
-            dir = dir.open_dir(&path)?;
-        };
-        let dirs = self.dirs.entry(sender).or_default();
-        let counter = dirs.counter;
-        dirs.open.insert(DirHandle(counter), OpenDir { iter: dir.iter(), path, location: msg.location });
-        dirs.counter = counter.wrapping_add(1);
-        Ok(DirHandle(counter))
+        let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
+        mount.open_dir(sender, msg.location, path)
     }
 }
 
-impl server::ArchiveHandler<CreateDirMessage> for Server {
+impl server::BlockingArchiveHandler<CreateDirMessage> for Server {
     fn handle(
         &mut self,
         msg: CreateDirMessage,
@@ -76,11 +63,7 @@ impl server::ArchiveHandler<CreateDirMessage> for Server {
         self.check_write_access(sender, msg.location)?;
         self.create_base_dir(msg.location, sender)?;
         let path = crate::path_of(msg.location, &msg.path, sender);
-        let dir = self.root_dir(msg.location)?.create_dir(&path)?;
-        let dirs = self.dirs.entry(sender).or_default();
-        let counter = dirs.counter;
-        dirs.open.insert(DirHandle(dirs.counter), OpenDir { iter: dir.iter(), path, location: msg.location });
-        dirs.counter = counter.wrapping_add(1);
-        Ok(DirHandle(counter))
+        let mount = self.mount_mut(msg.location).ok_or(Error::NoMedia)?;
+        mount.create_dir(sender, msg.location, path)
     }
 }

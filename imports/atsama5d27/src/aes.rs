@@ -14,13 +14,13 @@ use {
 
 /// The AES peripheral.
 pub struct Aes {
-    base_addr: u32,
+    base_addr: usize,
 }
 
 impl Default for Aes {
     fn default() -> Self {
         Self {
-            base_addr: utralib::HW_AES_BASE as u32,
+            base_addr: utralib::HW_AES_BASE,
         }
     }
 }
@@ -69,7 +69,7 @@ impl Aes {
     };
     /// Create AES with a different base address. Useful with virtual memory.
     #[inline]
-    pub fn with_alt_base_addr(base_addr: u32) -> Self {
+    pub fn with_alt_base_addr(base_addr: usize) -> Self {
         Self { base_addr }
     }
 
@@ -92,9 +92,8 @@ impl Aes {
         let (opmod, key_len) = match &mode {
             AesMode::Ecb { key } => (OpModeValue::Ecb, key.0.len()),
             AesMode::Cbc { key, .. } => (OpModeValue::Cbc, key.0.len()),
-            AesMode::Counter { .. } => {
-                unimplemented!()
-            }
+            AesMode::Gcm { key, .. } => (OpModeValue::Gcm, key.0.len()),
+            AesMode::Counter { key, .. } => (OpModeValue::Ctr, key.0.len()),
             AesMode::Xts { key1, .. } => (OpModeValue::Xts, key1.0.len()),
         };
 
@@ -115,8 +114,22 @@ impl Aes {
                 self.set_key(&key);
                 self.set_iv(&iv);
             }
-            AesMode::Counter { nonce: _ } => {
-                unimplemented!()
+            AesMode::Gcm {
+                key,
+                iv,
+                ctr,
+                ghash,
+            } => {
+                self.set_key(&key);
+                // In GCM mode, setting the key will also set H and GHASH, but that's not instant.
+                while !self.is_data_ready() {}
+                self.set_iv(&Iv::from_gcm_params(iv, ctr));
+                self.set_ghash(&ghash);
+                self.set_gcm_aadlen(0);
+            }
+            AesMode::Counter { key, ctr_value } => {
+                self.set_key(&key);
+                self.set_iv(&ctr_value);
             }
             AesMode::Xts {
                 key1,
@@ -190,17 +203,34 @@ impl Aes {
     }
 
     #[inline]
+    pub fn process_aad(&self, input: &[u8]) {
+        self.set_auto_start();
+        self.set_gcm_aadlen(input.len() as u32);
+
+        for in_block in input.chunks(BLOCK_SIZE) {
+            if in_block.len() == BLOCK_SIZE {
+                self.set_input_data(in_block);
+            } else {
+                let mut block = [0; BLOCK_SIZE];
+                block[..in_block.len()].copy_from_slice(in_block);
+                self.set_input_data(&block);
+            }
+            while !self.is_data_ready() {}
+        }
+    }
+
+    #[inline]
     pub fn dma_tx_addr(&self) -> usize {
-        self.base_addr as usize + IDATAR_OFFSET as usize
+        self.base_addr + IDATAR_OFFSET as usize
     }
 
     #[inline]
     pub fn dma_rx_addr(&self) -> usize {
-        self.base_addr as usize + ODATAR_OFFSET as usize
+        self.base_addr + ODATAR_OFFSET as usize
     }
 
     fn set_input_data(&self, block: &[u8]) {
-        let idatar_base = self.base_addr as usize + IDATAR_OFFSET as usize;
+        let idatar_base = self.base_addr + IDATAR_OFFSET as usize;
 
         for (i, word) in block.chunks_exact(4).enumerate() {
             unsafe {
@@ -212,7 +242,7 @@ impl Aes {
     }
 
     fn read_output_data(&self, output: &mut [u8]) {
-        let odatar_base = self.base_addr as usize + ODATAR_OFFSET as usize;
+        let odatar_base = self.base_addr + ODATAR_OFFSET as usize;
         for (i, word) in output.chunks_exact_mut(4).enumerate() {
             unsafe {
                 let ptr = (odatar_base + i * 4) as *const u32;
@@ -224,19 +254,19 @@ impl Aes {
 
     fn set_key(&self, key: &Key) {
         const AES_KEYWR_OFFSET: usize = 0x20;
-        let keywr_base = self.base_addr as usize + AES_KEYWR_OFFSET;
+        let keywr_base = self.base_addr + AES_KEYWR_OFFSET;
 
         for (i, key) in key.0.chunks(4).enumerate() {
             unsafe {
                 let ptr = (keywr_base + i * 4) as *mut u32;
-                ptr.write_volatile(u32::from_be_bytes(key.try_into().unwrap()));
+                ptr.write_volatile(u32::from_le_bytes(key.try_into().unwrap()));
             }
         }
     }
 
     fn set_iv(&self, iv: &Iv) {
         const AES_IVR_OFFSET: usize = 0x60;
-        let ivr_base = self.base_addr as usize + AES_IVR_OFFSET;
+        let ivr_base = self.base_addr + AES_IVR_OFFSET;
 
         for (i, iv) in iv.0.iter().enumerate() {
             unsafe {
@@ -248,7 +278,7 @@ impl Aes {
 
     fn set_alpha(&self, alpha: &[u32; 4]) {
         const AES_ALPHAR_OFFSET: usize = 0xD0;
-        let alphar_offset = self.base_addr as usize + AES_ALPHAR_OFFSET;
+        let alphar_offset = self.base_addr + AES_ALPHAR_OFFSET;
 
         for (i, alpha) in alpha.iter().enumerate() {
             unsafe {
@@ -260,7 +290,7 @@ impl Aes {
 
     fn set_tweak(&self, tweak: &[u8; 16]) {
         const TWR_OFFSET: usize = 0xC0;
-        let twr_base = self.base_addr as usize + TWR_OFFSET;
+        let twr_base = self.base_addr + TWR_OFFSET;
 
         for (i, word) in tweak.chunks_exact(4).enumerate() {
             unsafe {
@@ -271,11 +301,43 @@ impl Aes {
         }
     }
 
+    fn set_gcm_aadlen(&self, len: u32) {
+        let mut csr = CSR::new(self.base_addr as *mut u32);
+        csr.wo(AADLENR, len);
+    }
+
+    pub fn get_ghash(&self) -> [u32; 4] {
+        const GHASH_OFFSET: usize = 0x78;
+        let mut result = [0; 4];
+        let ghash_base = self.base_addr + GHASH_OFFSET;
+
+        for (i, word) in result.iter_mut().enumerate() {
+            unsafe {
+                let ptr = (ghash_base + i * 4) as *mut u32;
+                *word = ptr.read_volatile();
+            }
+        }
+        result
+    }
+
+    fn set_ghash(&self, ghash: &[u32; 4]) {
+        const GHASH_OFFSET: usize = 0x78;
+        let ghash_base = self.base_addr + GHASH_OFFSET;
+
+        for (i, word) in ghash.iter().enumerate() {
+            unsafe {
+                let ptr = (ghash_base + i * 4) as *mut u32;
+                ptr.write_volatile(*word);
+            }
+        }
+    }
+
     #[inline]
-    pub fn setup_for_dma(&self) {
+    pub fn setup_for_dma(&self, len: usize) {
         let mut csr = CSR::new(self.base_addr as *mut u32);
         csr.rmwf(MR_SMOD, 2); // DMA auto-start
         csr.rmwf(MR_DUALBUFF, 1); // Dual-buffering to increase performance
+        csr.wo(CLENR, len as u32); // GCM Plaintext/Ciphertext length
     }
 
     fn set_auto_start(&self) {
@@ -308,8 +370,16 @@ pub enum AesMode<'a> {
         iv: Iv,
     },
 
+    Gcm {
+        key: Key<'a>,
+        iv: [u32; 3],
+        ctr: u32,
+        ghash: [u32; 4],
+    },
+
     Counter {
-        nonce: [u32; 4],
+        key: Key<'a>,
+        ctr_value: Iv,
     },
 
     Xts {
@@ -360,7 +430,7 @@ impl<'a> Key<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Iv([u32; 4]);
 
 impl Iv {
@@ -375,5 +445,34 @@ impl Iv {
             iv[i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
         Some(Self(iv))
+    }
+
+    #[inline]
+    pub fn from_gcm_params(iv: [u32; 3], ctr: u32) -> Self {
+        Self([iv[0], iv[1], iv[2], ctr.to_be()])
+    }
+
+    #[inline]
+    pub fn add(&mut self, aes_blocks: usize) {
+        let mut to_add = aes_blocks as u32;
+        for part in &mut self.0 {
+            let (new, overflow) = part.overflowing_add(to_add);
+            *part = new;
+            if overflow {
+                to_add = 1
+            } else {
+                break;
+            }
+        }
+    }
+
+    // See SAMA5D2 datasheet 60.4.2:
+    // "In CTR mode, the size of the block counter embedded in the module is 16 bits.
+    // Therefore, there is a rollover after processing 1 Mbyte of data. If the file to be
+    // processed is greater than 1 Mbyte, this file must be split into fragments of 1 Mbyte or
+    // less for the first fragment if the initial value of the counter is greater than 0."
+    #[inline]
+    pub fn is_ctr_rollover(&self, blocks: usize) -> bool {
+        (self.0[3].to_be() & 0xFFFF) + blocks as u32 >= 0x10000
     }
 }

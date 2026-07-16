@@ -5,34 +5,37 @@ use gui_server_api::{
     error::NavigationError,
     msg::{FinishResponse, GetPendingNavRequest, LoginSuccess, NavigateTo, NavigationCancel, ShowModal},
 };
-use server::{Archive, ArchiveAsyncHandler, ArchiveHandler, ArchiveRequest, ScalarHandler, ServerContext};
+use server::{
+    ArchiveRequest, BlockingArchive, BlockingArchiveAsyncHandler, BlockingArchiveHandler, ScalarHandler,
+    ServerContext,
+};
 use xous::PID;
 
 use crate::Gui;
 
-impl ArchiveAsyncHandler<ShowModal> for Gui {
-    fn default_response() -> <ShowModal as Archive>::Response { Err(NavigationError::InternalError) }
+impl BlockingArchiveAsyncHandler<ShowModal> for Gui {
+    fn default_response() -> <ShowModal as BlockingArchive>::Response { Err(NavigationError::InternalError) }
 
     fn handle(&mut self, request: ArchiveRequest<ShowModal>, _context: &mut ServerContext<Self>) {
         self.handle_show_modal_request(request);
     }
 }
 
-impl ArchiveAsyncHandler<NavigateTo> for Gui {
-    fn default_response() -> <NavigateTo as Archive>::Response { Err(NavigationError::InternalError) }
+impl BlockingArchiveAsyncHandler<NavigateTo> for Gui {
+    fn default_response() -> <NavigateTo as BlockingArchive>::Response { Err(NavigationError::InternalError) }
 
     fn handle(&mut self, request: ArchiveRequest<NavigateTo>, _context: &mut ServerContext<Self>) {
         self.handle_navigate_to_request(request);
     }
 }
 
-impl ArchiveHandler<FinishResponse> for Gui {
+impl BlockingArchiveHandler<FinishResponse> for Gui {
     fn handle(
         &mut self,
         msg: FinishResponse,
         sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <FinishResponse as Archive>::Response {
+    ) -> <FinishResponse as BlockingArchive>::Response {
         if Some(sender) == self.active_app_pid() {
             self.respond_to_nav_request(Ok(msg))
         } else {
@@ -51,13 +54,13 @@ impl ScalarHandler<NavigationCancel> for Gui {
     }
 }
 
-impl ArchiveHandler<GetPendingNavRequest> for Gui {
+impl BlockingArchiveHandler<GetPendingNavRequest> for Gui {
     fn handle(
         &mut self,
         _msg: GetPendingNavRequest,
         sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <GetPendingNavRequest as Archive>::Response {
+    ) -> <GetPendingNavRequest as BlockingArchive>::Response {
         if Some(sender) == self.active_app_pid() {
             self.get_pending_nav_request()
         } else {

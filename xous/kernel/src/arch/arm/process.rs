@@ -282,7 +282,7 @@ impl Process {
             use crate::debug::BufStr;
             crate::SystemServices::with(|ss| {
                 let name = ss.process(self.pid).expect("process").name().expect("process name");
-                let mut process_with_thread = BufStr::<MAX_THREAD_NAME_LEN>::new('\0');
+                let mut process_with_thread = BufStr::<[u8; MAX_THREAD_NAME_LEN]>::new();
                 write!(process_with_thread, "{} (thread {})", name, new_tid).ok();
                 let process_with_thread_str =
                     core::str::from_utf8(process_with_thread.as_slice()).unwrap_or(name);
@@ -405,8 +405,15 @@ impl Process {
     pub fn destroy(_pid: PID) -> Result<(), xous::Error> { Ok(()) }
 }
 
-/// Terminates the specified process due to a crash or violation.
-pub(crate) fn crash_current_process() {
+/// Implementation behind [`crash_current_process!`]; callers should use the macro.
+pub(crate) fn crash_current_process_fmt(args: core::fmt::Arguments<'_>) {
+    use core::fmt::Write;
+
+    let mut msg = crate::debug::BufStr::<[u8; 256]>::new();
+    let _ = msg.write_fmt(args);
+    println!("{}", msg);
+    crate::SystemServices::with_mut(|ss| ss.append_panic_message(msg.as_slice()).ok());
+
     crate::SystemServices::with_mut(|ss| {
         ss.terminate_current_process(255).expect("couldn't terminate the process");
     });
@@ -416,6 +423,17 @@ pub(crate) fn crash_current_process() {
         crate::arch::irq::resume(process.current_thread_mut())
     })
 }
+
+/// Logs a formatted message to serial and to the process's panic-message buffer
+/// (so it surfaces alongside a userspace `panic!()` in the log service), then
+/// terminates the current process. `terminate_current_process` captures the
+/// backtrace on the way out.
+macro_rules! crash_current_process {
+    ($($arg:tt)*) => {
+        $crate::arch::process::crash_current_process_fmt(::core::format_args!($($arg)*))
+    };
+}
+pub(crate) use crash_current_process;
 
 /// Everything required to keep track of a single thread of execution.
 #[derive(Clone, Copy)]

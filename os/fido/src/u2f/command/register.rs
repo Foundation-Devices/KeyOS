@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use xous::DropDeallocate;
-
 use super::{Error, KeyHandle};
 
 #[derive(Debug)]
@@ -63,14 +61,8 @@ impl RegisterResponse {
         signature_base.extend_from_slice(&self.key_handle.to_vec());
         signature_base.extend_from_slice(&self.user_public_key);
         log::debug!("Attestation Signature base: {:02x?}", signature_base);
-        let buf = &signature_base;
-        let mut page = DropDeallocate::new(
-            xous::map_memory(None, None, 4096, xous::MemoryFlags::W | xous::MemoryFlags::NO_CACHE)
-                .map_err(|_| Error::MemoryMapping)?,
-        );
-        page.as_slice_mut()[..buf.len()].copy_from_slice(buf);
         let signature_base_hash =
-            crate::CryptoApi::default().sha256(*page, 0, buf.len()).map_err(|_| Error::Hashing)?;
+            crate::CryptoApi::default().sha256(&signature_base).map_err(|_| Error::Hashing)?;
         // Always sign with the SE - the certificate was generated during init
         let sig =
             crate::Security::default().sign_with_fido_key(signature_base_hash).map_err(|_| Error::Signing)?;

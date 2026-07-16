@@ -9,7 +9,7 @@ use keyos::{
 use systemview_keyos::send_system_desc_interrupt;
 use systemview_keyos::{send_system_desc_core, send_system_desc_device, send_system_desc_os, SystemView};
 use utralib::{HW_PIT_BASE, HW_RSTC_BASE};
-use xous::{MemoryFlags, MemoryRange, MemoryType, PID};
+use xous::{MemoryFlags, MemoryRange, PID};
 
 use crate::mem::{MemoryManager, PAGE_SIZE};
 use crate::process::INITIAL_TID;
@@ -37,7 +37,6 @@ pub fn init() {
                 RTT_CONTROL_BLOCK_VIRT_ADDR as *mut usize,
                 CONTROL_BLOCK_SIZE,
                 MemoryFlags::W | MemoryFlags::POPULATE | MemoryFlags::NO_CACHE,
-                MemoryType::Default,
                 true,
             )
             .expect("unable to map RTT control block memory")
@@ -51,7 +50,6 @@ pub fn init() {
                 RTT_BUFFERS_START_VIRT_ADDR as *mut usize,
                 RTT_UP_BUF_SIZE,
                 MemoryFlags::W | MemoryFlags::POPULATE | MemoryFlags::NO_CACHE,
-                MemoryType::Default,
                 true,
             )
             .expect("couldn't allocate SystemView UP buffer")
@@ -65,7 +63,6 @@ pub fn init() {
                 (RTT_BUFFERS_START_VIRT_ADDR + RTT_UP_BUF_SIZE).next_multiple_of(PAGE_SIZE) as *mut usize,
                 RTT_DOWN_BUF_SIZE,
                 MemoryFlags::W | MemoryFlags::POPULATE | MemoryFlags::NO_CACHE,
-                MemoryType::Default,
                 true,
             )
             .expect("couldn't allocate SystemView DOWN buffer")

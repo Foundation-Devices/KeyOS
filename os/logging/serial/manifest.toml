@@ -1,6 +1,10 @@
+manifestVersion = "0"
 appId = "0x6c6f672d73657269616c000000000000"
 memory = [ "UART1",]
 syscall = [ "SetThreadPriority",]
 
 [appName]
 en = "Log over UART"
+
+[permissions]
+"os/log" = ["ReadLogs"]

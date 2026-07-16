@@ -14,7 +14,7 @@ use quantum_link::{
 use server::{CheckedPermissions, MessageAllowed};
 use settings::{
     global::SystemTheme,
-    messages::{GetPrimeColor, LookupTimeZone, SetTimeZone},
+    messages::{GetDeviceName, GetPrimeColor, LookupTimeZone, SetTimeZone},
     SettingsApi,
 };
 use slint_keyos_platform::{
@@ -49,7 +49,7 @@ where
 /// Generate static QR code data for initial pairing.
 pub fn static_qr<S>(settings: &SettingsApi<S>, ble_address: &BtAddr, onboarding_complete: bool) -> String
 where
-    S: CheckedPermissions + MessageAllowed<GetPrimeColor>,
+    S: CheckedPermissions + MessageAllowed<GetPrimeColor> + MessageAllowed<GetDeviceName>,
 {
     let ble_address_hex = ble_address.to_hex_string();
     let colorway = match settings.get_prime_color() {
@@ -57,7 +57,11 @@ where
         _ => 0,
     };
     let onboarding_status: u8 = onboarding_complete.into();
-    format!("https://qr.foundation.xyz/?p={ble_address_hex}&c={colorway}&o={onboarding_status}")
+    let device_name = settings.get_device_name().0;
+    let device_name = urlencoding::encode(&device_name);
+    format!(
+        "https://qr.foundation.xyz/?p={ble_address_hex}&c={colorway}&o={onboarding_status}&n={device_name}"
+    )
 }
 
 /// Generate animated QR code parts for XID document.

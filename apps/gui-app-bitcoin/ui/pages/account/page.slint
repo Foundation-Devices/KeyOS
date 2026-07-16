@@ -11,14 +11,15 @@ import { Navigate } from "../../gen/navigate.slint";
 import { AccountProps } from "./props.slint";
 import { Callbacks, AccountView, SingleSigView, MultiSigView, Network } from "../../callbacks.slint";
 import { ViewMultiSig } from "../../widgets/multisig.slint";
-import { DarkOverlay } from "../../widgets/dark-overlay.slint";
 import { CreateAccount } from "../../create-account.slint";
+import { SignMessage } from "../../sign-message.slint";
 
 component AccountButtons inherits ButtonSection {
     in property <string> account-id;
     in property <bool> archived;
     in property <bool> is-multisig;
 
+    callback archive-clicked();
     callback delete-clicked();
 
     if !archived: Button {
@@ -27,8 +28,7 @@ component AccountButtons inherits ButtonSection {
         importance: Importance.secondary;
 
         clicked => {
-            Callbacks.update-account-archived(account-id, true);
-            Navigate.backward();
+            root.archive-clicked();
         }
     }
 
@@ -53,6 +53,14 @@ component AccountButtons inherits ButtonSection {
     }
 }
 
+component ArchiveModal inherits ConfirmationModal {
+    icon: "info";
+    title: TR2.lookup(TrId.ArchiveAccountModalHeader);
+    text: TR2.lookup(TrId.ArchiveAccountModalContent);
+    confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+    cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+}
+
 component DeleteModal inherits ConfirmationModal {
     in property <string> account-name;
 
@@ -74,6 +82,7 @@ component SingleSigViewPage inherits BasePage {
     in property <Network> network;
 
     property <bool> menu-open: false;
+    property <bool> archive-modal-open: false;
     property <bool> delete-modal-open: false;
     property <bool> label-error: false;
 
@@ -147,6 +156,10 @@ component SingleSigViewPage inherits BasePage {
                 archived: archived;
                 is-multisig: false;
 
+                archive-clicked => {
+                    archive-modal-open = true;
+                }
+
                 // TODO: handle delete
                 delete-clicked => {
                     delete-modal-open = true;
@@ -157,11 +170,11 @@ component SingleSigViewPage inherits BasePage {
 
     if menu-open: OverlayMenu {
         PopupMenuItem {
-            label: TR2.lookup(TrId.DetailsSinglesigMenuConnedctWallet);
-            icon: "chain";
+            label: TR2.lookup(TrId.DetailsSinglesigMenuSignMessage);
+            icon: "envelope";
             first: true;
             clicked => {
-                Navigate.account-connect({ account-id: id }, { });
+                SignMessage.start-sign-message(id);
             }
         }
 
@@ -170,14 +183,25 @@ component SingleSigViewPage inherits BasePage {
             icon: "archive";
             last: true;
             clicked => {
-                Callbacks.update-account-archived(id, true);
                 menu-open = false;
-                Navigate.backward();
+                archive-modal-open = true;
             }
         }
 
         touched-off => {
             menu-open = false;
+        }
+    }
+
+    if archive-modal-open: ArchiveModal {
+        cancel-clicked => {
+            archive-modal-open = false;
+        }
+
+        confirm-clicked => {
+            Callbacks.update-account-archived(id, true);
+            archive-modal-open = false;
+            Navigate.backward();
         }
     }
 
@@ -203,6 +227,7 @@ export component MultiSigViewPage inherits BasePage {
     in property <MultiSigView> account;
 
     property <bool> menu-open: false;
+    property <bool> archive-modal-open: false;
     property <bool> delete-modal-open: false;
     property <bool> label-error: false;
 
@@ -258,6 +283,10 @@ export component MultiSigViewPage inherits BasePage {
                     archived: archived;
                     is-multisig: true;
 
+                    archive-clicked => {
+                        archive-modal-open = true;
+                    }
+
                     delete-clicked => {
                         delete-modal-open = true;
                     }
@@ -281,14 +310,25 @@ export component MultiSigViewPage inherits BasePage {
             icon: "archive";
             last: true;
             clicked => {
-                Callbacks.update-account-archived(id, true);
                 menu-open = false;
-                Navigate.backward();
+                archive-modal-open = true;
             }
         }
 
         touched-off => {
             menu-open = false;
+        }
+    }
+
+    if archive-modal-open: ArchiveModal {
+        cancel-clicked => {
+            archive-modal-open = false;
+        }
+
+        confirm-clicked => {
+            Callbacks.update-account-archived(id, true);
+            archive-modal-open = false;
+            Navigate.backward();
         }
     }
 

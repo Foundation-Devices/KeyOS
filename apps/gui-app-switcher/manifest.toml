@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x2c45ab5762feefeea6fcc2069535c002"
 syscall = ["VirtToPhys"]
 

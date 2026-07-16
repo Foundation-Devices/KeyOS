@@ -146,7 +146,7 @@ impl DescriptorSet {
         let header = DescriptorHeader::read_from_prefix(&bytes).map_err(|_| EhciError::DescriptorError)?.0;
         if header.descriptor_type != DescriptorType::Device as u8
             || header.length as usize > bytes.len()
-            || (header.length as usize) < size_of::<DeviceDescriptor>()
+            || (header.length as usize) < size_of::<DescriptorHeader>() + size_of::<DeviceDescriptor>()
         {
             Err(EhciError::DescriptorError)
         } else {

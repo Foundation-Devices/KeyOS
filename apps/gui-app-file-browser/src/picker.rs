@@ -63,7 +63,10 @@ impl PickerState {
         LocationKey::ALL.into_iter().filter(|key| self.locations.get(*key).allowed).collect::<Vec<_>>()
     }
 
-    pub fn listing_params(&self) -> ListingParams {
+    /// `user_show_hidden` is the persisted user preference. It is ANDed with
+    /// `options.allow_hidden` so a caller that hard-denies hidden files
+    /// (e.g. image viewer) always wins; otherwise the user toggle decides.
+    pub fn listing_params(&self, user_show_hidden: bool) -> ListingParams {
         let key = self.current;
         let location = key.to_fs();
         let path = self.locations.get(key).path.to_string();
@@ -74,7 +77,7 @@ impl PickerState {
             sort_mode: crate::SortMode::Alphabetical,
             sort_direction: crate::SortDirection::Descending,
             search_query: None,
-            show_hidden: self.options.allow_hidden,
+            show_hidden: self.options.allow_hidden && user_show_hidden,
             allow_dirs: self.options.allow_dirs,
         }
     }

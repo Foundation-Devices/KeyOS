@@ -382,10 +382,12 @@ impl Responder {
                 xous::return_scalar5(envelope.sender, arg1, arg2, arg3, arg4, 0).whence()
             }
             Responder::Async { cid, msg_id } => {
+                let _disconnect = defer::defer(|| {
+                    xous::disconnect(cid).ok();
+                });
                 let msg = utils::scalar_to_message(&response, msg_id);
-                let result = xous::try_send_message(cid, xous::Message::Scalar(msg)).whence().map(|_| ());
-                xous::disconnect(cid).ok();
-                result
+                xous::try_send_message(cid, xous::Message::Scalar(msg)).whence()?;
+                Ok(())
             }
         }
     }

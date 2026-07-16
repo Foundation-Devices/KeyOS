@@ -2,6 +2,8 @@
 
 pub mod api;
 
+use core::ops::Deref;
+
 use num_traits::ToPrimitive;
 use xous::{send_message, Error, CID};
 
@@ -10,12 +12,15 @@ pub struct Ticktimer {
     conn: CID,
 }
 
-impl Ticktimer {
-    pub fn new() -> Result<Self, Error> {
-        let conn = xous::connect(xous::SID::from_bytes(b"ticktimer-server").unwrap())?;
-        Ok(Ticktimer { conn })
+impl Default for Ticktimer {
+    fn default() -> Self {
+        let conn = xous::connect(xous::SID::from_bytes(b"ticktimer-server").unwrap())
+            .expect("Could not connect to ticktimer");
+        Ticktimer { conn }
     }
+}
 
+impl Ticktimer {
     /// Return the number of milliseconds that have elapsed since boot. The returned
     /// value is guaranteed to always be the same or greater than the previous value,
     /// even through suspend/resume cycles.
@@ -56,7 +61,26 @@ impl Ticktimer {
         )
         .map(|_| ())
     }
+}
 
+#[derive(Debug)]
+pub struct TicktimerPrivileged(Ticktimer);
+
+impl Default for TicktimerPrivileged {
+    fn default() -> Self {
+        let names = xous_api_names::XousNames::new().unwrap();
+        let conn = names.request_connection_blocking("os/ticktimer").unwrap();
+        Self(Ticktimer { conn })
+    }
+}
+
+impl Deref for TicktimerPrivileged {
+    type Target = Ticktimer;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl TicktimerPrivileged {
     /// Set the current system time with a timestamp in nanoseconds since the unix epoch
     pub fn set_system_time(&self, ns: u64) {
         send_message(
@@ -71,15 +95,6 @@ impl Ticktimer {
         )
         .expect("Couldn't set system time");
     }
-
-    #[cfg(not(keyos))]
-    pub fn reset_system_time(&self) {
-        send_message(
-            self.conn,
-            xous::Message::new_blocking_scalar(api::Opcode::ResetSystemTime.to_usize().unwrap(), 0, 0, 0, 0),
-        )
-        .expect("Couldn't reset system time");
-    }
 }
 
 pub struct TicktimerCallback {
@@ -90,7 +105,7 @@ pub struct TicktimerCallback {
 
 impl TicktimerCallback {
     pub fn new(receiving_server: xous::SID) -> Result<Self, Error> {
-        let ticktimer = Ticktimer::new()?;
+        let ticktimer = Ticktimer::default();
         let pid = xous::get_remote_pid(ticktimer.conn)?;
         let cid_ticktimer_side = xous::connect_for_process(pid, receiving_server)?;
         Ok(Self { ticktimer, cid_ticktimer_side, pid })

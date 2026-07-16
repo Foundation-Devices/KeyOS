@@ -87,7 +87,7 @@ pub fn round_rect_path(width: f32, height: f32, border_radius: f32, stroke_width
 
 // 2px semitransparent lines with 2px spacing rotated approximately 18deg
 // Rendered into a tiny tileable pixmap that can be used as a brush.
-const LINE_PATTERN: LazyLock<Pixmap> = LazyLock::new(|| {
+pub const LINE_PATTERN: LazyLock<Pixmap> = LazyLock::new(|| {
     // Approximately 18 degrees
     const WIDTH: u32 = 50;
     const HEIGHT: u32 = 17;

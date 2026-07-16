@@ -92,12 +92,16 @@ export component Dropdown inherits Rectangle {
     in property <string> id;
     in property <string> title;
     in property <string> placeholder;
+    in property <string> placeholder-icon: "";
     in property <[DropdownModel]> model: [];
     in-out property <int> selected-index: -1;
     in-out property <string> selected-value;
     in property <bool> enabled: true;
+    in property <bool> locked: false;
 
     in-out property <bool> showing: false;
+
+    property <brush> fg-color: enabled ? Palette.content-primary : Palette.content-disabled;
 
     callback changed(int, string);
 
@@ -128,15 +132,21 @@ export component Dropdown inherits Rectangle {
             border-width: Size.sz0_25;
             border-color: showing ? Palette.border-focus : Palette.background-hover;
             HorizontalLayout {
-                alignment: space-between;
                 padding-left: Size.sz4;
-                spacing: Size.sz4;
+                spacing: Size.sz2;
+
+                if (placeholder-icon != "" && selected-index == -1) || (selected-index != -1 && model[selected-index].icon != ""): VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        name: selected-index == -1 ? placeholder-icon : model[selected-index].icon;
+                        color: fg-color;
+                    }
+                }
 
                 TextSm {
-                    // width: text-input.width;
-                    // height: text-input.height;
+                    horizontal-stretch: 1;
                     text: selected-index == -1 ? placeholder : model[selected-index].label;
-                    color: !enabled ? Palette.content-disabled : (selected-index == -1 ? Palette.content-disabled : Palette.content-primary);
+                    color: fg-color;
                     horizontal-alignment: TextHorizontalAlignment.left;
                     vertical-alignment: TextVerticalAlignment.center;
                 }
@@ -147,15 +157,15 @@ export component Dropdown inherits Rectangle {
 
                     Icon {
                         size: Size.sz6;
-                        name: showing ? "chevron-up" : "chevron-down";
-                        colorize: transparent;
+                        name: locked ? "" : (showing ? "chevron-up" : "chevron-down");
+                        colorize: fg-color;
                     }
                 }
             }
 
             TouchArea {
                 clicked => {
-                    if (enabled) {
+                    if (enabled && !locked) {
                         showing = !showing;
                         debug("Clicked on dropdown");
                     }

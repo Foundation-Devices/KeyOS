@@ -1,6 +1,7 @@
+manifestVersion = "0"
 [servers."os/backup"]
 StatusSubscribe = { id = 1, type = "scalarEvent" }
-CreateBackup = { id = 2, type = "archive" }
-RestoreBackup = { id = 3, type = "archive" }
+CreateBackup = { id = 2, type = "blockingArchive" }
+RestoreBackup = { id = 3, type = "blockingArchive" }
 SubscribeRestoreProgress = { id = 4, type = "archiveEvent" }
-CreateBackupFile = { id = 5, type = "archive" }
+CreateBackupFile = { id = 5, type = "blockingArchive" }

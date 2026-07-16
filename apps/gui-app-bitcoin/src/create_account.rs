@@ -3,7 +3,11 @@
 
 use {
     anyhow::{bail, Context},
-    foundation_urtypes::value::Value as UrValue,
+    foundation_urtypes::{
+        registry::TerminalContext,
+        value::{decode_output_descriptor, Value as UrValue},
+    },
+    ngwallet::config::MultiSigDetails,
     slint_keyos_platform::{
         gui_server_api::navigation::qrscanner::{ScanQrOptions, ScanQrResult},
         navigation::open_qr_scanner,
@@ -19,15 +23,66 @@ use crate::{
     state::{AccountColor, AppState},
     store::{CreateMultiSigAccount, CreateSingleSigAccount},
     tr, Animate, CreateAccount, CreateAccountState, CreateMultiSigOptions, CreateSingleSigOptions,
-    MultiSigView, Navigate, NavigateOptions, RouteOption, RouteState, TrId,
+    ExportAccount, MultiSigView, Navigate, NavigateOptions, RouteOption, RouteState, TrId,
 };
+
+fn parse_multisig_str(text: &str) -> anyhow::Result<MultiSigDetails> {
+    let (details, _label) =
+        MultiSigDetails::from_config(text).or_else(|_| MultiSigDetails::from_descriptor(text))?;
+    Ok(details)
+}
+
+pub fn try_parse_multisig(scan: &ScanQrResult) -> anyhow::Result<MultiSigDetails> {
+    match scan {
+        ScanQrResult::Qr { data, .. } => {
+            let text = String::from_utf8(data.clone()).context("invalid qr utf8")?;
+            parse_multisig_str(&text)
+        }
+        ScanQrResult::Ur2 { ur_type, data, .. } => {
+            if UrValue::is_output_descriptor(ur_type) {
+                let arena: TerminalContext<32> = TerminalContext::new();
+                let terminal = decode_output_descriptor(ur_type, data.as_slice(), &arena)
+                    .context("failed to decode crypto-output UR payload")?;
+                let (details, _label) = MultiSigDetails::from_crypto_output(&terminal)
+                    .context("failed to build multisig from crypto-output")?;
+                Ok(details)
+            } else {
+                let ur_value = UrValue::from_ur(ur_type, data.as_slice()).context("invalid UR value")?;
+                match ur_value {
+                    UrValue::Bytes(bytes) => {
+                        let text = String::from_utf8(bytes.to_vec()).context("invalid UR2 multisig utf8")?;
+                        parse_multisig_str(&text)
+                    }
+                    _ => bail!("not a multisig UR type"),
+                }
+            }
+        }
+        _ => bail!("not a scan result that can carry multisig data"),
+    }
+}
+
+pub fn present_multisig(state: StoredValue<AppState>, details: MultiSigDetails) -> anyhow::Result<()> {
+    let view = MultiSigView::from(&details);
+    state.borrow_mut().set_pending_multisig(details)?;
+    let ui = state.borrow().ui();
+    let global = ui.global::<CreateAccount>();
+    global.set_state(CreateAccountState::Idle);
+    global.set_pending_multisig_account(view);
+
+    if ui.global::<RouteState>().get_active() != RouteOption::ImportMultiSig {
+        ui.global::<Navigate>()
+            .invoke_import_multi_sig(NavigateOptions { replace: false, animate: Animate::None });
+    }
+
+    Ok(())
+}
 
 pub fn init(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let global = ui.global::<CreateAccount>();
 
-    global.on_import_multisig(move || {
-        if let Err(e) = import_multisig(state) {
+    global.on_import_multisig(move |from_connect| {
+        if let Err(e) = import_multisig(state, from_connect) {
             let ui = state.borrow().ui();
             ui.global::<CreateAccount>().set_state(CreateAccountState::Error);
             ui.global::<Navigate>().invoke_import_multi_sig(Default::default());
@@ -130,7 +185,6 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
         label: options.label.to_string(),
         network: options.network.into(),
         index: options.index.trim().parse::<u32>().unwrap_or(0),
-        color: AccountColor::from(options.color),
     };
 
     global.set_prefilled_mode(false);
@@ -161,12 +215,16 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
     }
 }
 
-fn import_multisig(state: StoredValue<AppState>) -> anyhow::Result<()> {
+fn import_multisig(state: StoredValue<AppState>, from_connect: bool) -> anyhow::Result<()> {
     let opts = ScanQrOptions {
         header_title: tr::lookup_id(TrId::ImportConfigTitle).into(),
         message: String::new(),
-        header_left_icon: String::new(),
-        header_right_icon: String::from("close"),
+        header_left_icon: String::from("chevron-left"),
+        header_right_text: if from_connect {
+            tr::lookup_id(TrId::CommonButtonSkip).to_string()
+        } else {
+            String::new()
+        },
         button_icon: String::from("file"),
         button_text: tr::lookup_id(TrId::ImportConfigImportFile).into(),
         ..Default::default()
@@ -184,45 +242,29 @@ fn import_multisig(state: StoredValue<AppState>) -> anyhow::Result<()> {
         }
     };
 
-    let string = match scan {
-        ScanQrResult::Qr(data) => String::from_utf8(data).context("invalid qr utf8")?,
-        ScanQrResult::Ur2(ur_type, data) => {
-            let ur_value = UrValue::from_ur(&ur_type, data.as_slice()).context("invalid UR value")?;
-            let bytes = match ur_value {
-                UrValue::Bytes(bytes) => bytes,
-                other => {
-                    bail!("non-bytes UrValue {other:?}")
-                }
-            };
-            String::from_utf8(bytes.to_vec()).context("invalid UR2 multisig utf8")?
-        }
-        ScanQrResult::ButtonClicked => {
-            // sleep to avoid the OOM killer closing the bitcoin app
-            thread::sleep(Duration::from_millis(500));
-            let bytes = crate::callbacks::execute_file_picker(state)?;
-
-            match bytes {
-                Some(b) => String::from_utf8(b).context("invalid file utf8")?,
-                None => return Ok(()),
+    match scan {
+        ScanQrResult::LeftClicked => return Ok(()),
+        ScanQrResult::RightClicked => {
+            if from_connect {
+                let ui = state.borrow().ui();
+                ui.global::<ExportAccount>().set_skip_multisig_import(true);
             }
         }
-        ScanQrResult::RightClicked => return Ok(()),
-        action => {
-            bail!("unexpected scan result: {:?}", action);
+        ScanQrResult::ButtonClicked => {
+            // Sleep to avoid the OOM killer closing the bitcoin app while the
+            // file picker process starts.
+            thread::sleep(Duration::from_millis(500));
+
+            let Some(bytes) = crate::callbacks::execute_file_picker(state)? else {
+                return Ok(());
+            };
+
+            let text = String::from_utf8(bytes).context("invalid file utf8")?;
+            present_multisig(state, parse_multisig_str(&text)?)?;
         }
-    };
-
-    let ui = state.borrow().ui();
-
-    let multisig_view = state.borrow_mut().parse_multisig(&string).map(MultiSigView::from)?;
-
-    let global = ui.global::<CreateAccount>();
-    global.set_state(CreateAccountState::Idle);
-    global.set_pending_multisig_account(multisig_view);
-
-    if ui.global::<RouteState>().get_active() != RouteOption::ImportMultiSig {
-        ui.global::<Navigate>()
-            .invoke_import_multi_sig(NavigateOptions { replace: false, animate: Animate::None });
+        ScanQrResult::Qr { .. } | ScanQrResult::Ur2 { .. } => {
+            present_multisig(state, try_parse_multisig(&scan)?)?
+        }
     }
 
     Ok(())

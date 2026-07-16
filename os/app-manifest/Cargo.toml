@@ -8,8 +8,10 @@ edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
+rkyv = { workspace = true }
 serde = { version = "1.0.190", features = ["derive"] }
 serde_json = "1.0.108"
+thiserror = { workspace = true }
 
 [target.'cfg(not(keyos))'.dependencies]
 cargo_metadata = "0.18.1"

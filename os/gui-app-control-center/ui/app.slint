@@ -21,6 +21,7 @@ export component AppWindow inherits Window {
 
     in property <bool> is-shut-down-mode <=> control_center.is-shut-down-mode;
     in property <string> control_center_system_msg <=> control_center.system-msg;
+    in property <bool> debug_show_corner_deadzone <=> control_center.debug-show-corner-deadzone;
 
     background: Palette.transparent;
     width: UISize.screen-width;

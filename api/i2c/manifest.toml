@@ -1,3 +1,4 @@
+manifestVersion = "0"
 [servers."os/i2c"]
 ClaimPeripheral = { id = 0, type = "blockingScalar" }
-SingleTransfer = { id = 1, type = "archive" }
+SingleTransfer = { id = 1, type = "blockingArchive" }

@@ -16,4 +16,5 @@ pub enum BackupWorkerEvent {
         #[rkyv(with = WithUnixTimestamp)]
         published_at: SystemTime,
     },
+    BackupPublishFailed,
 }

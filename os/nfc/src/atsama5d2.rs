@@ -9,6 +9,7 @@ use std::{
 
 use fido::messages::Transport;
 use gpio::{GpioPin, PinSettings};
+use nfc::error::NfcError;
 use {
     iso7816::{
         command::class::{NO_SM_CLA, ZERO_CLA},
@@ -22,7 +23,7 @@ use {
     st25r95::St25r95Spi,
 };
 
-use crate::{error::NfcError, NfcImpl, NfcServer};
+use crate::{NfcImpl, NfcServer};
 
 fido::use_api!();
 gpio::use_api!();
@@ -33,6 +34,11 @@ pub struct Implementation {
     fido: Option<FidoApi>,
     consecutive_errors: u32,
     last_emulation_attempt: Option<Instant>,
+    /// Timestamp of the most recent `emulate_t4t` that returned `Ok(())`. The IRQ handler
+    /// suppresses back-to-back emulation attempts for `SUCCESS_COOLDOWN` after a success —
+    /// the reader's field typically re-triggers our IRQ right after the tap completes, and
+    /// we'd otherwise spin up a useless session that just times out on LinkLoss.
+    last_successful_emulation: Option<Instant>,
 }
 
 static START: LazyLock<Instant> = LazyLock::new(|| Instant::now());
@@ -63,6 +69,11 @@ const MIN_ERROR_COOLDOWN: Duration = Duration::from_millis(500);
 /// Maximum cooldown between NFC emulation attempts after consecutive errors
 const MAX_ERROR_COOLDOWN: Duration = Duration::from_secs(5);
 
+/// Minimum delay after a successful emulation before accepting another reader activation.
+/// The reader's field typically lingers after a successful tap; without this cooldown we'd
+/// immediately start a new emulation session that just times out on LinkLoss.
+const SUCCESS_COOLDOWN: Duration = Duration::from_secs(5);
+
 #[derive(Debug)]
 struct ApduResponse {
     status: Status,
@@ -85,39 +96,53 @@ impl Implementation {
         };
 
         if !pin_state {
-            log::info!("NFC external reader Field Detected");
+            // Log "Field Detected" at INF only for actionable detections. While we're in the
+            // post-success cooldown the reader's lingering field re-triggers our IRQ every
+            // few hundred ms; those are noise, not new taps.
+            let in_success_cooldown =
+                self.last_successful_emulation.map(|t| t.elapsed() < SUCCESS_COOLDOWN).unwrap_or(false);
+            if in_success_cooldown {
+                log::debug!("NFC external reader Field Detected (within success cooldown)");
+            } else {
+                log::info!("NFC external reader Field Detected");
+            }
             if let Err(e) = GPIO_API.set_irq(GpioPin::NfcIrqB, false) {
                 log::error!("Failed to disable NfcIrqB IRQ: {e:?}");
                 return;
             }
             let exited_sleep = self.exit_sleep_state().is_ok();
             if enabled && exited_sleep {
-                // Enforce cooldown after consecutive errors to prevent rapid rfal cycling
-                if self.consecutive_errors > 0 {
-                    let backoff = MIN_ERROR_COOLDOWN
-                        .saturating_mul(1 << (self.consecutive_errors - 1).min(10))
-                        .min(MAX_ERROR_COOLDOWN);
-                    if let Some(last) = self.last_emulation_attempt {
-                        let elapsed = last.elapsed();
-                        if elapsed < backoff {
-                            let remaining = backoff - elapsed;
-                            log::warn!(
-                                "NFC error backoff: sleeping {}ms ({} consecutive errors)",
-                                remaining.as_millis(),
-                                self.consecutive_errors
-                            );
-                            thread::sleep(remaining);
+                if in_success_cooldown {
+                    log::debug!("NFC success cooldown active, skipping emulation");
+                } else {
+                    // Enforce cooldown after consecutive errors to prevent rapid rfal cycling
+                    if self.consecutive_errors > 0 {
+                        let backoff = MIN_ERROR_COOLDOWN
+                            .saturating_mul(1 << (self.consecutive_errors - 1).min(10))
+                            .min(MAX_ERROR_COOLDOWN);
+                        if let Some(last) = self.last_emulation_attempt {
+                            let elapsed = last.elapsed();
+                            if elapsed < backoff {
+                                let remaining = backoff - elapsed;
+                                log::warn!(
+                                    "NFC error backoff: sleeping {}ms ({} consecutive errors)",
+                                    remaining.as_millis(),
+                                    self.consecutive_errors
+                                );
+                                thread::sleep(remaining);
+                            }
                         }
                     }
-                }
-                self.last_emulation_attempt = Some(Instant::now());
-                match self.emulate_t4t() {
-                    Ok(()) => {
-                        self.consecutive_errors = 0;
-                    }
-                    Err(e) => {
-                        self.consecutive_errors = self.consecutive_errors.saturating_add(1);
-                        log::error!("{e:?}");
+                    self.last_emulation_attempt = Some(Instant::now());
+                    match self.emulate_t4t() {
+                        Ok(()) => {
+                            self.consecutive_errors = 0;
+                            self.last_successful_emulation = Some(Instant::now());
+                        }
+                        Err(e) => {
+                            self.consecutive_errors = self.consecutive_errors.saturating_add(1);
+                            log::error!("{e:?}");
+                        }
                     }
                 }
             }
@@ -236,7 +261,21 @@ impl Implementation {
                     | rfal::rfalNfcState::RFAL_NFC_STATE_DATAEXCHANGE_DONE
             ) {
                 log::debug!("[>] state: {:?}", state);
-                let rx_data = self.rfal.nfc.data_exchange.rx_data();
+                let rx_data = match self.rfal.nfc.data_exchange.rx_data() {
+                    Ok(rx_data) => rx_data.to_vec(),
+                    Err(rfal::Error::Busy) => {
+                        thread::sleep(Duration::from_micros(100));
+                        continue;
+                    }
+                    Err(rfal::Error::SleepReq) => {
+                        log::debug!("Reader requested sleep, ending session");
+                        break;
+                    }
+                    Err(e) => {
+                        log::error!("[*] rfalNfcDataExchange rx_data error: {:?}", e);
+                        return Err(NfcError::Internal);
+                    }
+                };
                 log::debug!("[>] rx_data: {:x?}", rx_data);
                 if rx_data.is_empty() {
                     log::debug!("No more data from reader, ending session");
@@ -246,7 +285,7 @@ impl Implementation {
                 // Reset activity timer on received APDU
                 last_activity = Instant::now();
 
-                let mut resp = self.handle_apdu_cmd(rx_data, &mut remaining_data);
+                let mut resp = self.handle_apdu_cmd(&rx_data, &mut remaining_data);
                 transceive_done = resp.transceive_done;
                 log::debug!("[>] reply: {:02x?}", resp);
                 resp.data.extend_from_slice(&resp.status.to_u16().to_be_bytes());
@@ -601,7 +640,13 @@ impl NfcImpl for Implementation {
                         NfcError::Internal
                     })
                     .ok();
-                Ok(Self { rfal, fido: None, consecutive_errors: 0, last_emulation_attempt: None })
+                Ok(Self {
+                    rfal,
+                    fido: None,
+                    consecutive_errors: 0,
+                    last_emulation_attempt: None,
+                    last_successful_emulation: None,
+                })
             }
             Err(e) => {
                 log::error!("RFAL init failed: {:?}", e);
@@ -643,7 +688,7 @@ impl NfcImpl for Implementation {
                         Ok(_) => {
                             if let Ok(raw_msg) = self.rfal.ndef.poller.read_raw_message() {
                                 // read raw_msg
-                                break Ok((dev_id, raw_msg.to_owned()));
+                                break Ok((dev_id, raw_msg));
                             }
                         }
                         Err(e) => {

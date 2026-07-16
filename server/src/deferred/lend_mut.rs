@@ -25,17 +25,18 @@ pub struct DeferredLendMut<M: LendMut> {
 }
 
 impl<M: LendMut> DeferredLendMut<M> {
-    pub(crate) fn new(mut envelope: xous::MessageEnvelope, response: M::Response) -> Self {
+    pub(crate) fn new(mut envelope: xous::MessageEnvelope, response: M::Response) -> Option<Self> {
         let sender = envelope.sender;
         let body = if let xous::Message::MutableBorrow(mem) = &mut envelope.body {
             M::from(SimpleMemoryMessage::from(&*mem))
         } else {
-            panic!("invalid message: {envelope:?}")
+            log::warn!("invalid message: {envelope:?}");
+            return None;
         };
         // In some feature combinations envelope does not do anything when dropped.
         #[allow(clippy::forget_non_drop)]
         core::mem::forget(envelope);
-        Self { sender, body: Some(body), response: Some(response) }
+        Some(Self { sender, body: Some(body), response: Some(response) })
     }
 
     /// Returns the PID of the sender
@@ -74,6 +75,6 @@ pub fn handle_deferred_lend_mut<M, S>(
     M: LendMut + 'static,
     S: Server + DeferredLendMutHandler<M>,
 {
-    let deferred = DeferredLendMut::new(raw, S::default_response());
+    let Some(deferred) = DeferredLendMut::new(raw, S::default_response()) else { return };
     handler.handle(deferred, context);
 }

@@ -316,7 +316,8 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::GetThreadId
         | SysCall::GetProcessId
         | SysCall::JoinThread(..)
-        | SysCall::RegisterEventHandler(..)
+        | SysCall::ServerEventHandler(..)
+        | SysCall::SystemEventHandler(..)
         | SysCall::AppendPanicMessage(..)
         | SysCall::GetAppId(..)
         | SysCall::AppIdToPid(..) => Ok(()),
@@ -346,12 +347,6 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
 
         // Memory mapping has its own, more granular permission system
         SysCall::MapMemory(..) | SysCall::UnmapMemory(..) | SysCall::UpdateMemoryFlags(..) => Ok(()),
-
-        // XXX: This is somewhat sensitive, because it allows us to inject arbitrary contents (at a
-        // non-controllable position) into the address space of the target PID.
-        // Unfortunately this is a crucial step in the GUI framework, to allow the GUI server to see the
-        // buffers of GUI apps.
-        SysCall::MirrorMemoryToPid(..) => Ok(()),
 
         SysCall::AllowMessagesSID(sid, _messages) => {
             // If the current process owns the SID then allow the operation
@@ -388,6 +383,7 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::Shutdown(..)
         | SysCall::PowerManagement(..)
         | SysCall::TerminatePid(..)
+        | SysCall::MirrorMemoryToPid(..)
         | SysCall::GetSystemStats(..)
         | SysCall::GetPanicMessage(..) => is_permitted_by_mask(),
 
@@ -413,8 +409,11 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
                 let phys_ptr = phys.map(|x| x.get()).unwrap_or_default();
                 let virt_ptr = virt.map(|x| x.get() as *mut usize).unwrap_or(core::ptr::null_mut());
 
-                // Don't let the address exceed the user area (unless it's PID 1)
-                if current_pid().get() != 1 && virt.map(|x| x.get() >= keyos::USER_AREA_END).unwrap_or(false)
+                // Don't let the range exceed the user area (unless it's PID 1)
+                if current_pid().get() != 1
+                    && virt
+                        .map(|x| x.get().checked_add(size.get()).is_none_or(|end| end > keyos::USER_AREA_END))
+                        .unwrap_or(false)
                 {
                     klog!("Exceeded user area");
                     return Err(Error::BadAddress);
@@ -706,8 +705,13 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
                 Ok(Result::Scalar1(MemoryManager::with(|mm| mm.low_memory()) as usize))
             }
         },
-        SysCall::RegisterEventHandler(event, sid, id) => SystemServices::with_mut(|ss| {
-            ss.current_process_mut().set_event_handler(event, sid, id).and(Ok(Result::Ok))
+        SysCall::ServerEventHandler(event, sid, id) => SystemServices::with_mut(|ss| {
+            let sidx = ss.sidx_from_sid(sid, current_pid()).ok_or(Error::ServerNotFound)?;
+            let server = ss.server_from_sidx_mut(sidx).ok_or(Error::ServerNotFound)?;
+            server.set_event_handler(event, id).and(Ok(Result::Ok))
+        }),
+        SysCall::SystemEventHandler(event, sid, id) => SystemServices::with_mut(|ss| {
+            ss.current_process_mut().set_system_event_handler(event, sid, id).and(Ok(Result::Ok))
         }),
 
         SysCall::AppendPanicMessage(len, a1, a2, a3, a4, a5, a6) => {
@@ -732,7 +736,7 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             mm.check_range_accessible(buf)?;
 
             SystemServices::with_mut(|ss| {
-                let (pid, msg) = ss.take_panic_message();
+                let (pid, msg) = ss.get_panic_message();
                 let pid_val = pid.map(|p| p.get() as usize).unwrap_or(0);
 
                 let copy_len = msg.len().min(buf.len());

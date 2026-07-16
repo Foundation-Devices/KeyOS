@@ -177,6 +177,21 @@ pub struct GetPinEntryMode;
 #[response(MasterKeyState)]
 pub struct GetMasterKeyState;
 
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[event(DiskEncryptionKeysReady)]
+pub struct SubscribeDiskEncryptionKeysReady;
+
+#[derive(Debug, Clone, Copy)]
+pub struct DiskEncryptionKeysReady;
+
+impl AsScalar<1> for DiskEncryptionKeysReady {
+    fn as_scalar(&self) -> [u32; 1] { [0] }
+}
+
+impl FromScalar<1> for DiskEncryptionKeysReady {
+    fn from_scalar(_: [u32; 1]) -> Self { Self }
+}
+
 impl FromScalar<1> for MasterKeyState {
     fn from_scalar([value]: [u32; 1]) -> Self {
         match value {

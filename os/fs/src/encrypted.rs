@@ -1,24 +1,22 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use fs::{
-    messages::{DiskEncryptionKeysReady, FormatEncryptedVolume},
-    Error,
-};
+use fs::{messages::FormatEncryptedVolume, Error};
+use security::messages::DiskEncryptionKeysReady;
 
-use crate::{disk::DynamicDisk, format_fs, FileSystemEvent, FileSystemEventType, Location};
+use crate::{disk::DynamicDisk, format_fs, FileSystemEvent, FileSystemEventType, Location, Mount};
 
 const USER_VOLUME_LABEL: [u8; 11] = *b"ENCRYPTED  ";
 
-impl server::ScalarHandler<DiskEncryptionKeysReady> for crate::Server {
+impl server::ScalarEventHandler<DiskEncryptionKeysReady> for crate::Server {
     fn handle(
         &mut self,
         _msg: DiskEncryptionKeysReady,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
-        if !self.fs_user.is_null() {
-            log::error!("DiskEncryptionKeysReady called twice");
+        if self.fs_user.is_some() {
+            log::error!("DiskEncryptionKeysReady received twice");
             return;
         }
         if self.mount_encrypted_fs().is_ok() {
@@ -34,7 +32,7 @@ impl server::BlockingScalarHandler<FormatEncryptedVolume> for crate::Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
-        if !self.fs_user.is_null() {
+        if self.fs_user.is_some() {
             log::error!("FormatEncryptedVolume called for a valid fs");
             return;
         }
@@ -63,8 +61,8 @@ impl server::BlockingScalarHandler<FormatEncryptedVolume> for crate::Server {
 impl crate::Server {
     pub fn mount_encrypted_fs(&mut self) -> Result<(), std::io::Error> {
         let disk = new_encrypted_disk().expect("failed to find encrypted fs");
-        let fs_user = match fatfs::FileSystem::new(disk, fatfs::FsOptions::new()) {
-            Ok(fs) => Box::into_raw(Box::new(fs)),
+        let mount = match Mount::new(disk) {
+            Ok(mount) => mount,
             Err(e) => {
                 let event =
                     FileSystemEvent { location: Location::User, event_type: FileSystemEventType::Error };
@@ -84,7 +82,7 @@ impl crate::Server {
             }
         };
 
-        self.fs_user = fs_user;
+        self.fs_user = Some(mount);
 
         for location in [Location::User, Location::AppData, Location::EncryptedRoot] {
             self.send_filesystem_event(FileSystemEvent {

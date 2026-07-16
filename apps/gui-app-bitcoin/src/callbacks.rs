@@ -3,18 +3,19 @@
 
 use {
     crate::{
-        account_id::AccountId, gui_permissions::GuiPermissions, psbt_signing::PsbtOrigin, state::AppState,
-        tr, AddressType, Callbacks, KeychainKind, Navigate, PsbtOriginView, SignPsbt, SignPsbtState, TrId,
+        account_id::AccountId,
+        gui_permissions::GuiPermissions,
+        psbt_signing::{PendingPsbt, PsbtOrigin},
+        state::AppState,
+        tr, AddressType, Animate, Callbacks, CreateAccount, CreateAccountState, FileSaveState, KeychainKind,
+        MultiSigView, Navigate, Network, PsbtOriginView, PsbtView, SignPsbt, SignPsbtState, TrId,
     },
     anyhow::Context,
     foundation_urtypes::value::Value as UrValue,
     slint_keyos_platform::{
-        gui_server_api::{
-            navigation::{
-                filepicker::{self, SelectFileOptions},
-                qrscanner::{ScanQrOptions, ScanQrResult},
-            },
-            GuiApiLight,
+        gui_server_api::navigation::{
+            filepicker::{self, SelectFileOptions},
+            qrscanner::{ScanQrOptions, ScanQrResult},
         },
         navigation::{open_qr_scanner, select_file},
         slint::{ComponentHandle, ModelRc, SharedString},
@@ -55,12 +56,10 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
         }
     });
 
-    // TODO: for now, this will only do PSBT signing, but we
-    // could handle multisig configs here in the future
     callbacks.on_scan_clicked({
         move || {
             let state = state.clone();
-            if let Err(e) = execute_scan(state, false) {
+            if let Err(e) = execute_scan(state) {
                 log::error!("scan failed: {e:?}");
             }
         }
@@ -103,11 +102,77 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
     });
 }
 
-pub fn execute_scan(state: StoredValue<AppState>, return_to_launcher_on_cancel: bool) -> anyhow::Result<()> {
+pub fn reset_for_incoming_scan(state: StoredValue<AppState>) {
+    // Use a limited scope to drop globals after resetting state
+    {
+        let ui = state.borrow().ui();
+        let sign_global = ui.global::<SignPsbt>();
+        // TODO: find a more robust way to reset SignPsbt State
+        sign_global.set_state(SignPsbtState::Idle);
+        sign_global.set_origin(PsbtOriginView::Qr);
+        sign_global.set_pending_psbt(PsbtView::default());
+        sign_global.set_show_account_not_found_modal(false);
+        sign_global.set_is_multisig_account(false);
+        sign_global.set_account_index("".into());
+        sign_global.set_show_account_archived_modal(false);
+        sign_global.set_file_save_state(FileSaveState::Idle);
+        sign_global.set_saved_file_path("".into());
+        sign_global.set_show_cant_sign_modal(false);
+        sign_global.set_needed_fingerprint("".into());
+        sign_global.set_found_fingerprints("".into());
+
+        let account_global = ui.global::<CreateAccount>();
+        // TODO: find a more robust way to reset CreateAccount State
+        account_global.set_state(CreateAccountState::Idle);
+        account_global.set_pending_multisig_account(MultiSigView::default());
+        account_global.set_new_account_id("".into());
+        account_global.set_prefilled_mode(false);
+        account_global.set_prefilled_index("".into());
+        account_global.set_prefilled_network(Network::Bitcoin);
+
+        ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
+    }
+
+    // Reset AppState pending fields
+    {
+        let mut state_mut = state.borrow_mut();
+        state_mut.pending_multisig = None;
+        state_mut.pending_singlesig = None;
+        state_mut.pending_psbt = PendingPsbt::None;
+        state_mut.pending_archived_account_id = None;
+    }
+}
+
+pub fn handle_scan_result(state: StoredValue<AppState>, scan: ScanQrResult) -> anyhow::Result<()> {
+    if matches!(scan, ScanQrResult::RightClicked | ScanQrResult::LeftClicked) {
+        return Ok(());
+    }
+
+    if let Ok(details) = crate::create_account::try_parse_multisig(&scan) {
+        if crate::create_account::present_multisig(state, details).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if let Ok((bytes, origin)) = try_parse_psbt(&scan) {
+        spawn_local(crate::psbt_signing::verify::verify_psbt(state, bytes, origin, false)).detach();
+        return Ok(());
+    }
+
+    // A more general error UI can replace this in the future.
+    log::error!("universal scan failed: {:?}", scan);
+    let ui = state.borrow().ui();
+    let sign_psbt = ui.global::<SignPsbt>();
+    sign_psbt.set_origin(PsbtOriginView::Qr);
+    sign_psbt.set_state(SignPsbtState::Error);
+    ui.global::<Navigate>().invoke_sign_psbt(Default::default());
+
+    Ok(())
+}
+
+pub fn execute_scan(state: StoredValue<AppState>) -> anyhow::Result<()> {
     let opts = ScanQrOptions {
         header_title: tr::lookup_id(TrId::ScanTitle).into(),
-        message: String::new(),
-        header_left_icon: String::new(),
         header_right_icon: String::from("close"),
         ..ScanQrOptions::default()
     };
@@ -124,40 +189,7 @@ pub fn execute_scan(state: StoredValue<AppState>, return_to_launcher_on_cancel: 
         }
     };
 
-    match scan {
-        ScanQrResult::Ur2(ur_type, data) => {
-            let value = UrValue::from_ur(&ur_type, data.as_slice()).context("parse UrValue")?;
-            match value {
-                UrValue::Psbt(bytes) | UrValue::Bytes(bytes) => {
-                    let fut = crate::psbt_signing::verify::verify_psbt(
-                        state,
-                        bytes.to_vec(),
-                        PsbtOrigin::Qr { ur_type },
-                        false,
-                    );
-                    spawn_local(fut).detach();
-                }
-                _ => {}
-            }
-        }
-        ScanQrResult::RightClicked | ScanQrResult::LeftClicked => {
-            if return_to_launcher_on_cancel {
-                if let Err(e) = GuiApiLight::<GuiPermissions>::default().switch_to_launcher() {
-                    log::error!("Failed to switch to launcher: {e:?}");
-                }
-            }
-        }
-        action @ _ => {
-            log::error!("universal scan failed: {:?}", action);
-            let ui = state.borrow().ui();
-            let sign_psbt = ui.global::<SignPsbt>();
-            sign_psbt.set_origin(PsbtOriginView::Qr);
-            sign_psbt.set_state(SignPsbtState::Error);
-            ui.global::<Navigate>().invoke_sign_psbt(Default::default());
-        }
-    }
-
-    Ok(())
+    handle_scan_result(state, scan)
 }
 
 pub fn execute_file_picker(state: StoredValue<AppState>) -> anyhow::Result<Option<Vec<u8>>> {
@@ -214,6 +246,18 @@ pub fn execute_file_picker_psbt(state: StoredValue<AppState>) -> anyhow::Result<
     }
 
     Ok(())
+}
+
+fn try_parse_psbt(scan: &ScanQrResult) -> anyhow::Result<(Vec<u8>, PsbtOrigin)> {
+    if let ScanQrResult::Ur2 { ur_type, data, .. } = scan {
+        match UrValue::from_ur(ur_type, data.as_slice())? {
+            UrValue::Psbt(bytes) | UrValue::Bytes(bytes) => {
+                return Ok((bytes.to_vec(), PsbtOrigin::Qr { ur_type: ur_type.clone() }));
+            }
+            _ => {}
+        }
+    }
+    anyhow::bail!("not PSBT data")
 }
 
 struct AddressModel {

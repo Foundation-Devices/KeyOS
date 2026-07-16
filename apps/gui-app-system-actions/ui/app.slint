@@ -19,6 +19,8 @@ export global Callbacks {
 
     in-out property <int> touch-offset: 0;
     callback set-touch-offset(int);
+
+    pure callback is-sim() -> bool;
 }
 
 component App inherits BasePage {
@@ -98,6 +100,7 @@ component App inherits BasePage {
 
                 Button {
                     label: "-";
+                    enabled: !Callbacks.is-sim();
                     clicked => {
                         Callbacks.set-touch-offset(Callbacks.touch-offset - 1);
                     }
@@ -109,6 +112,7 @@ component App inherits BasePage {
 
                 Button {
                     label: "+";
+                    enabled: !Callbacks.is-sim();
                     clicked => {
                         Callbacks.set-touch-offset(Callbacks.touch-offset + 1);
                     }

@@ -79,6 +79,8 @@ export component PinEntry inherits VerticalLayout {
     out property <int> pin-length: Utils.string-length(pin);
     in property <int> locked-len: 0;
     out property <bool> has-focus: hidden-input.has-focus;
+    in property <string> accept-button-text;
+    in property <bool> accept-button-enabled: true;
 
     callback accepted();
 
@@ -112,6 +114,8 @@ export component PinEntry inherits VerticalLayout {
             height: 0px;
             single-line: true;
             input-type: number;
+            accept-button-text: root.accept-button-text;
+            accept-button-enabled: root.accept-button-enabled;
             accepted => {
                 root.accepted();
             }
@@ -177,6 +181,8 @@ export component PasswordEntry inherits VerticalLayout {
     in property <bool> is-check-ongoing;
     in property <int> locked-len: 0;
     out property <bool> has-focus: password-input.has-focus;
+    in property <string> accept-button-text;
+    in property <bool> accept-button-enabled: true;
 
     callback accepted(string);
 
@@ -215,6 +221,8 @@ export component PasswordEntry inherits VerticalLayout {
 
         password-input := PasswordInput {
             keep-focus-after-accept: true;
+            accept-button-text: root.accept-button-text;
+            accept-button-enabled: root.accept-button-enabled;
             accepted => {
                 root.accepted(self.text);
             }

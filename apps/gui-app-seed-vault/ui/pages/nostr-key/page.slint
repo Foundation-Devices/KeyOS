@@ -1,0 +1,150 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Callbacks as CB } from "../../callbacks.slint";
+import { SeedView, SeedViewType } from "../../types.slint";
+import { Palette, Size, Importance, CallbackResult, ResultLevel, Utils } from "@ui/theme.slint";
+import { IconButton, AppHeader, BasePage, PageBody,
+         ContentSection, ErrorModal, Dropdown,
+         TitledInput, ButtonSection, Button,
+         QrPages } from "@ui/widgets.slint";
+import { NostrKeyProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component NostrKeyPage inherits BasePage {
+    in property <NostrKeyProps> props;
+
+    property <string> nsec;
+
+    init => {
+        nsec = CB.get-pending-nostr-key();
+    }
+
+    property <SeedView> new-seed: {
+        seed-type: SeedViewType.nostr-key-import,
+    };
+
+    property <CallbackResult> result: { level: ResultLevel.info, success: true, text: "", title: "" };
+    property <bool> has-errors: label-error;
+    property <bool> label-error: true;
+    property <bool> done: false;
+
+    VerticalLayout {
+        AppHeader {
+            title: done ? TR2.lookup(TrId.CreateItemTitle) : TR2.lookup(TrId.ViewNostrKeyTitle);
+
+            IconButton {
+                icon: "chevron-left";
+                size: Size.sz8;
+                importance: Importance.normal;
+                clicked => {
+                    CB.clear-pending-import();
+                    Navigate.backward();
+                }
+            }
+        }
+
+        if !done: VerticalLayout {
+            padding-top: Size.sz2;
+            padding-bottom: Size.sz4;
+
+            property <string> npub: CB.nsec-to-npub(nsec);
+
+            QrPages {
+                model: [
+                    {
+                        code: Utils.qrcode(nsec, Palette.black, Palette.white),
+                        header: TR2.lookup(TrId.ArchivedItemNostrKeyPrivateKey),
+                        footer: nsec,
+                        footer-is-address: true,
+                    },
+                    {
+                        code: Utils.qrcode(npub, Palette.black, Palette.white),
+                        header: TR2.lookup(TrId.ArchivedItemNostrKeyPublicKey),
+                        footer: npub,
+                        footer-is-address: true,
+                    },
+                ];
+            }
+
+            ButtonSection {
+                padding: Size.sz6;
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonDone);
+                    clicked => {
+                        done = true;
+                    }
+                }
+            }
+        }
+
+        if done: PageBody {
+            p-x: Size.sz4;
+            p-y: Size.sz4;
+
+            ContentSection {
+                Dropdown {
+                    title: TR2.lookup(TrId.CreateItemType);
+                    placeholder: TR2.lookup(TrId.CreateItemTypeTextFiller);
+                    selected-index: 0;
+                    locked: true;
+                    model: [
+                        {
+                            label: CB.get-seed-name(SeedViewType.nostr-key-import),
+                            value: "nostr-key-import",
+                            icon: "nostr",
+                        },
+                    ];
+                }
+
+                TitledInput {
+                    title: TR2.lookup(TrId.CreateItemItemLabel);
+                    placeholder: TR2.lookup(TrId.CreateItemItemLabelFillerText);
+                    text: new-seed.label;
+                    message: TR2.lookup(TrId.CreateItemSeedErrorsMissingField);
+                    has-notice: self.message != "";
+                    caps-mode: sentences;
+
+                    edited(text) => {
+                        new-seed.label = text;
+                        self.message = CB.validate-new-label(text);
+                        self.has-notice = self.message != "";
+                        label-error = self.has-notice;
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding: Size.sz6;
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonSave);
+                    enabled: !has-errors;
+                    clicked => {
+                        // Navigation is handled by rust code
+                        new-seed.color = CB.get-default-color(new-seed.seed-type);
+                        result = CB.import-nsec(new-seed, nsec);
+                    }
+                }
+            }
+        }
+    }
+
+    if !result.success: ErrorModal {
+        icon: result.level == ResultLevel.info ? "info" : "alert";
+        icon-color: result.level == ResultLevel.info ? Palette.content-brand : Palette.content-notice;
+        title: result.title;
+        text: result.text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+
+        confirm-clicked => {
+            result.success = true;
+        }
+    }
+}

@@ -226,10 +226,6 @@ export component MainPage inherits Rectangle {
                     first: index == 0;
                     last: index + 1 == CB.entries.length;
 
-                    move-position(up) => {
-                        CB.move-position(entry.index, up);
-                    }
-
                     Editable {
                         edit-mode: edit-mode;
                         drag-and-drop: false;

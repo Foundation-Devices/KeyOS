@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::sync::{
-    atomic::{AtomicU8, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     Mutex,
 };
 
@@ -30,6 +30,8 @@ static SCALE_FACTOR: AtomicUsize = AtomicUsize::new(0x100);
 
 static VIRTUAL_VSYNC_EVENTS: Mutex<Vec<Box<dyn FnMut() + Send>>> = Mutex::new(Vec::new());
 
+static VSYNC_HAPPENED: AtomicBool = AtomicBool::new(false);
+
 pub(crate) struct PlatformDisplay {
     lcd_on: bool,
 }
@@ -54,6 +56,7 @@ impl PlatformDisplay {
 
         VIRTUAL_VSYNC_EVENTS.lock().unwrap().push(Box::new(move || {
             if LCD_BACKLIGHT_LEVEL.load(Ordering::SeqCst) != 0 {
+                VSYNC_HAPPENED.store(true, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = xous::try_send_message(
                     cid,
                     xous::Message::Scalar(xous::ScalarMessage {
@@ -95,4 +98,6 @@ impl PlatformDisplay {
     pub(crate) fn set_backlight_level_pct(&mut self, percent: u8) {
         LCD_BACKLIGHT_LEVEL.store((percent.clamp(0, 100) as u32 * 0xFF / 100) as u8, Ordering::SeqCst);
     }
+
+    pub fn vsync_happened() -> bool { VSYNC_HAPPENED.swap(false, std::sync::atomic::Ordering::Relaxed) }
 }

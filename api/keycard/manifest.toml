@@ -1,0 +1,14 @@
+manifestVersion = "0"
+[servers."os/keycard"]
+ResetShards = { id = 0, type = "blockingScalar" }
+GenerateShards = { id = 1, type = "blockingScalar" }
+PopShard = { id = 2, type = "blockingArchive" }
+PushShard = { id = 3, type = "blockingArchive" }
+FormatKeycard = { id = 4, type = "blockingArchive" }
+IdentifyKeycard = { id = 5, type = "blockingArchive" }
+StoreShardToKeycard = { id = 6, type = "blockingArchive" }
+LoadShardFromKeycard = { id = 7, type = "blockingArchive" }
+CheckBackup = { id = 8, type = "blockingScalar" }
+RestoreMasterSeed = { id = 9, type = "blockingArchive" }
+DetectKeycard = { id = 10, type = "blockingArchive" }
+SetShamirScheme = { id = 11, type = "blockingArchive" }

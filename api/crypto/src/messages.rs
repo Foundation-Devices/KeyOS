@@ -2,37 +2,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use server::{xous::MemoryRange, SimpleMemoryMessage};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{CryptoError, ShamirError};
 use crate::Direction;
 
-#[derive(Debug, server::Message)]
+#[derive(
+    Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Zeroize, ZeroizeOnDrop,
+)]
 #[response(Result<usize, CryptoError>)]
-pub enum AesSetup {
-    Ecb { key_buf: MemoryRange, key_len: usize },
-    Cbc { key_buf: MemoryRange, key_len: usize },
+pub struct AesSetup {
+    pub key: Vec<u8>,
+    pub mode: AesMode,
 }
 
-impl From<AesSetup> for SimpleMemoryMessage {
-    fn from(value: AesSetup) -> Self {
-        match value {
-            AesSetup::Ecb { key_buf, key_len } => {
-                SimpleMemoryMessage { buf: key_buf, arg1: key_len, arg2: 0 }
-            }
-            AesSetup::Cbc { key_buf, key_len } => {
-                SimpleMemoryMessage { buf: key_buf, arg1: key_len, arg2: 1 }
-            }
-        }
-    }
-}
-
-impl From<SimpleMemoryMessage> for AesSetup {
-    fn from(value: SimpleMemoryMessage) -> Self {
-        match value.arg2 {
-            0 => AesSetup::Ecb { key_buf: value.buf, key_len: value.arg1 },
-            _ => AesSetup::Cbc { key_buf: value.buf, key_len: value.arg1 },
-        }
-    }
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Zeroize, ZeroizeOnDrop)]
+pub enum AesMode {
+    Ecb,
+    Cbc { iv: [u8; 16] },
+    Ctr { iv: [u8; 16] },
+    Gcm { iv: [u8; 12] },
 }
 
 #[derive(Debug, server::Message)]
@@ -42,10 +31,10 @@ pub struct AesExecute {
     pub transfer_id: u8,
     pub direction: Direction,
     pub offset: usize,
-    pub blocks: usize,
+    pub len: usize,
 }
 
-const BLOCKS_OFFSET: usize = 9;
+const OFFSET_OFFSET: usize = 9;
 const TRANSFER_ID_OFFSET: usize = 1;
 const DECRYPT_FLAG: usize = 1;
 
@@ -53,8 +42,8 @@ impl From<AesExecute> for SimpleMemoryMessage {
     fn from(value: AesExecute) -> Self {
         Self {
             buf: value.buf,
-            arg1: value.offset,
-            arg2: (value.blocks << BLOCKS_OFFSET)
+            arg1: value.len,
+            arg2: (value.offset << OFFSET_OFFSET)
                 | ((value.transfer_id as usize) << TRANSFER_ID_OFFSET)
                 | match value.direction {
                     Direction::Encrypt => 0,
@@ -68,17 +57,30 @@ impl From<SimpleMemoryMessage> for AesExecute {
     fn from(value: SimpleMemoryMessage) -> Self {
         Self {
             buf: value.buf,
-            offset: value.arg1,
+            len: value.arg1,
             transfer_id: (value.arg2 >> TRANSFER_ID_OFFSET) as u8,
             direction: if value.arg2 & DECRYPT_FLAG != 0 { Direction::Decrypt } else { Direction::Encrypt },
-            blocks: (value.arg2 >> BLOCKS_OFFSET),
+            offset: (value.arg2 >> OFFSET_OFFSET),
         }
     }
 }
 
-#[cfg(keyos)]
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<usize, CryptoError>)]
+pub struct AesAad {
+    pub transfer_id: u8,
+    pub aad: Vec<u8>,
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<[u8;16], CryptoError>)]
+pub struct AesGcmTag {
+    pub transfer_id: u8,
+}
+
+#[cfg(keyos)]
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<(), CryptoError>)]
 pub struct DiskEncryptUnsafe {
     pub tweak: [u8; 16],
     pub j: usize,
@@ -88,96 +90,86 @@ pub struct DiskEncryptUnsafe {
     pub direction: Direction,
 }
 
+#[cfg(keyos)]
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[event(DiskEncryptComplete)]
+#[error(CryptoError)]
+pub struct SubscribeDiskEncryptComplete;
+
+/// Fired when a previously-accepted `DiskEncryptUnsafe` finishes.
+/// No strut body, because Pre-DMA failures are reported synchronously and
+/// DMA cannot fail without taking down the system.
+#[cfg(keyos)]
+#[derive(Debug, Clone, Copy)]
+pub struct DiskEncryptComplete;
+
+#[cfg(keyos)]
+impl server::AsScalar<1> for DiskEncryptComplete {
+    fn as_scalar(&self) -> [u32; 1] { [0] }
+}
+
+#[cfg(keyos)]
+impl server::FromScalar<1> for DiskEncryptComplete {
+    fn from_scalar(_: [u32; 1]) -> Self { Self }
+}
+
 #[derive(Debug, server::Message)]
 pub struct AesClear(pub u8);
 
-#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum ShaAlgo {
-    Sha224,
-    Sha256,
-    Sha384,
-    Sha512,
-}
+pub use crate::sha2::ShaAlgo;
 
-impl From<usize> for ShaAlgo {
-    fn from(value: usize) -> Self {
-        match value {
-            0 => ShaAlgo::Sha224,
-            1 => ShaAlgo::Sha256,
-            2 => ShaAlgo::Sha384,
-            3 => ShaAlgo::Sha512,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl From<ShaAlgo> for usize {
-    fn from(value: ShaAlgo) -> Self {
-        match value {
-            ShaAlgo::Sha224 => 0,
-            ShaAlgo::Sha256 => 1,
-            ShaAlgo::Sha384 => 2,
-            ShaAlgo::Sha512 => 3,
-        }
-    }
-}
-
-/// Initialize a streaming SHA hash context
-/// Returns a context ID that can be used with `ShaUpdate` and `ShaFinalize`
+/// Allocate a server-side SHA context slot (or overwrite an existing one) and seed it
+/// with the supplied hash state. `context_id = None` on first use; the server allocates
+/// a slot and returns its id. Subsequent calls with the returned id overwrite the state.
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<usize, CryptoError>)]
-pub struct ShaInit {
+pub struct ShaSetContext {
+    /// `None` → allocate a new slot; `Some(id)` → overwrite existing slot.
+    pub context_id: Option<usize>,
     pub algo: ShaAlgo,
-    /// Total message size in bytes
-    pub total_len: usize,
+    /// Intermediate hash state in standard digest byte order (BE per word).
+    /// SHA-224/256 use the first 32 bytes; SHA-384/512 use all 64.
+    pub hash_state: [u8; 64],
 }
 
-/// Update the SHA hash with more data via DMA
-/// The buffer must be page-aligned and the offset must be aligned to `SHA_DMA_ALIGNMENT`.
-/// Can be called multiple times with arbitrary block counts.
+/// Feed a block-aligned chunk of data into the hardware SHA engine via DMA.
+/// `buf` must be page-aligned; `length` must be a multiple of the algo's block size.
+/// Data always starts at offset 0 in `buf`.
 #[derive(Debug, server::Message)]
 #[response(Result<usize, CryptoError>)]
 pub struct ShaUpdate {
-    pub context_id: u8,
+    pub context_id: usize,
     pub buf: MemoryRange,
-    pub offset: usize,
     pub length: usize,
 }
 
-const CONTEXT_ID_OFFSET: usize = 2;
-
 impl From<ShaUpdate> for SimpleMemoryMessage {
-    fn from(value: ShaUpdate) -> Self {
-        Self {
-            buf: value.buf,
-            arg1: (value.offset << CONTEXT_ID_OFFSET) | (value.context_id as usize),
-            arg2: value.length,
-        }
-    }
+    fn from(value: ShaUpdate) -> Self { Self { buf: value.buf, arg1: value.context_id, arg2: value.length } }
 }
 
 impl From<SimpleMemoryMessage> for ShaUpdate {
     fn from(value: SimpleMemoryMessage) -> Self {
-        Self {
-            context_id: (value.arg1 & 0b11) as u8,
-            buf: value.buf,
-            offset: value.arg1 >> CONTEXT_ID_OFFSET,
-            length: value.arg2,
-        }
+        Self { context_id: value.arg1, buf: value.buf, length: value.arg2 }
     }
 }
 
-/// Finalize the SHA hash and retrieve the result
+/// Retrieve the current intermediate hash state for a context slot.
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(Result<Vec<u8>, CryptoError>)]
-pub struct ShaFinalize {
-    pub context_id: u8,
+#[response(Result<ShaContextSnapshot, CryptoError>)]
+pub struct ShaGetContext {
+    pub context_id: usize,
 }
 
-/// Abort/cleanup a streaming SHA context without finalizing
-/// Used when a context needs to be cleaned up on error paths or early exit
+/// Snapshot of a server-side SHA context (returned by `ShaGetContext`).
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ShaContextSnapshot {
+    pub algo: ShaAlgo,
+    pub hash_state: [u8; 64],
+}
+
+/// Release a server-side SHA context slot.
 #[derive(Debug, server::Message)]
-pub struct ShaAbort(pub u8);
+pub struct ShaDrop(pub usize);
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Vec<u8>, CryptoError>)]

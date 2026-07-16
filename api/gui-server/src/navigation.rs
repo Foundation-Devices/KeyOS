@@ -9,13 +9,10 @@ use crate::error::NavigationError;
 use crate::msg::{
     FinishResponse, GetPendingNavRequest, NavigateTo, NavigationCancel, NavigationResult, ShowModal,
 };
-use crate::navigation::securitykeys::{
-    OperationOutcomeOptions, SecurityKeysNavRequest, UserPresenceOptions, UserPresenceResult,
-};
+use crate::navigation::securitykeys::{SecurityKeysNavRequest, UserPresenceOptions, UserPresenceResult};
 use crate::{GuiApi, GuiApiLight, GuiServerError, ModalStyle};
 
 pub mod alerts;
-pub mod bitcoin;
 pub mod filepicker;
 pub mod lockscreen;
 pub mod qrscanner;
@@ -28,6 +25,7 @@ pub const LOCK_SCREEN_APP_ID: AppId = AppId(hex!("0a0000000000000000000000000000
 pub const ONBOARDING_APP_ID: AppId = AppId(hex!("dac5321775d449c11bc9c90f38067f8f"));
 pub const ALERTS_APP_ID: AppId = AppId(hex!("32defc0867555fe8002759667000b22a"));
 pub const BITCOIN_APP_ID: AppId = AppId(hex!("426974636f696e2057616c6c65740000"));
+pub const SETTINGS_APP_ID: AppId = AppId(hex!("c192b79230473875f159d4423d74d00f"));
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
     /// Shows a modal of the app, giving it a navigation object
@@ -41,7 +39,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         P: MessageAllowed<ShowModal>,
     {
         let nav_req = ShowModal { modal_style, app_id: app_id.0, args: args.to_vec() };
-        let response = self.conn.try_send_archive(nav_req)?;
+        let response = self.conn.try_send_blocking_archive(nav_req)?;
         Ok(response.or_else(|_| Err(NavigationError::RequestBufferTooSmall)))
     }
 
@@ -51,7 +49,7 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         P: MessageAllowed<NavigateTo>,
     {
         let nav_req = NavigateTo { app_id: app_id.0, args: args.to_vec() };
-        let response = self.conn.try_send_archive(nav_req)?;
+        let response = self.conn.try_send_blocking_archive(nav_req)?;
         Ok(response.or_else(|_| Err(NavigationError::RequestBufferTooSmall)))
     }
 
@@ -72,34 +70,6 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
             }
             Err(e) => Err(GuiServerError::Navigation(e)),
         }
-    }
-
-    /// Notifies the user about the outcome of a FIDO operation (registration or authentication).
-    ///
-    /// This is a "fire and forget" notification - the caller does not wait for user acknowledgment.
-    /// The UI may auto-dismiss the notification or require user interaction, but the FIDO server
-    /// continues processing immediately.
-    pub fn notify_operation_outcome(&self, options: OperationOutcomeOptions) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<NavigateTo>,
-    {
-        let request = SecurityKeysNavRequest::OperationOutcome(options.clone());
-        let _ = self.navigate_to(SECURITY_KEYS_APP_ID, &request.serialize())?;
-        log::debug!("Operation outcome notification: {:?}", options);
-        Ok(())
-    }
-
-    /// Notifies the user that no security keys are available for registration.
-    ///
-    /// This is a "fire and forget" notification - the caller does not wait for user acknowledgment.
-    pub fn notify_no_keys_warning(&self) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<NavigateTo>,
-    {
-        let request = SecurityKeysNavRequest::NoKeysWarning;
-        let _ = self.navigate_to(SECURITY_KEYS_APP_ID, &request.serialize())?;
-        log::debug!("No keys warning notification sent");
-        Ok(())
     }
 
     pub fn invoke_alert(&self, alert: alerts::InvokeAlert) -> Result<alerts::AlertResult, GuiServerError>
@@ -125,7 +95,7 @@ impl<P: CheckedPermissions> GuiApi<P> {
         P: MessageAllowed<FinishResponse>,
     {
         let response = FinishResponse { response };
-        Ok(self.conn.try_send_archive(response)?)
+        Ok(self.conn.try_send_blocking_archive(response)?)
     }
 
     pub fn navigate_cancel(&self) -> Result<(), GuiServerError>
@@ -140,6 +110,6 @@ impl<P: CheckedPermissions> GuiApi<P> {
     where
         P: MessageAllowed<GetPendingNavRequest>,
     {
-        Ok(self.conn.try_send_archive(GetPendingNavRequest)?)
+        Ok(self.conn.try_send_blocking_archive(GetPendingNavRequest)?)
     }
 }

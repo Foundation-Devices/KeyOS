@@ -7,7 +7,7 @@ fn main() -> ! {
     let log_buffer =
         xous::map_memory(None, None, 0x4000, xous::MemoryFlags::W).expect("Could not allocate buffer");
     println!("[LOG] Connecting to log server");
-    let log_reader = log_server::LogReader::default();
+    let log_reader = log_server::reader::LogReader::default();
     let mut stdout = std::io::stdout();
 
     loop {

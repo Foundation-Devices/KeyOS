@@ -182,6 +182,32 @@ impl<'a, T: ReadWriteSeek + 'a> Dir<'a, T> {
         }
     }
 
+    /// Resolves a '/'-separated path to the chain of directory-entry positions of
+    /// its components. A component's long name and 8.3 alias yield the same
+    /// position; an empty path yields an empty chain (the root has no entry).
+    #[cfg(feature = "alloc")]
+    pub fn resolve_entry_positions(&self, path: &str) -> io::Result<Vec<u64>> {
+        let (name, rest_opt) = split_path(path);
+        if name.is_empty() {
+            return Ok(Vec::new());
+        }
+        match rest_opt {
+            Some(rest) => {
+                let e = self.find_entry(name, Some(true), None)?;
+                let mut positions = Vec::new();
+                positions.push(e.entry_pos);
+                positions.extend(e.to_dir().resolve_entry_positions(rest)?);
+                Ok(positions)
+            }
+            None => {
+                let e = self.find_entry(name, None, None)?;
+                let mut positions = Vec::new();
+                positions.push(e.entry_pos);
+                Ok(positions)
+            }
+        }
+    }
+
     /// Opens existing file.
     ///
     /// `path` is a '/' separated file path relative to self directory.

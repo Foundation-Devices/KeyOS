@@ -36,7 +36,7 @@ export component LocationSwitcher inherits Rectangle {
         segments: root.locations;
         selected_index: root.selected_index;
         clicked(_, index) => {
-            root.location-changed(mod(index + 1, root.locations.length));
+            root.location-changed(index);
         }
     }
 

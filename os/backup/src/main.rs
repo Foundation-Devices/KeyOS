@@ -8,7 +8,7 @@ mod messages;
 mod publish;
 mod utils;
 
-use core::{BackupFile, BackupKey, BackupMetadata, CryptoLive};
+use core::{BackupFile, BackupKey, BackupMetadata};
 use std::time::{Duration, SystemTime};
 
 use backup::{messages::*, Status};
@@ -36,6 +36,7 @@ security::use_api!();
 settings::use_api!();
 
 const BACKUP_INTERVAL: Duration = Duration::from_secs(60 * 60 * 12);
+const BACKUP_NOW_QL_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const BACKUP_FILE: &str = "backup/backup.tar";
 const BACKUP_LOCATION: fs::Location = fs::Location::EncryptedRoot;
 
@@ -60,6 +61,7 @@ pub struct BackupServer {
     fs: FileSystem,
     ql: QuantumLinkApi,
     security: Security,
+    settings: SettingsApi,
 
     status_subscribers: Vec<ScalarEventSubscriber<Status>>,
     restore_progress_subscribers: Vec<ArchiveEventSubscriber<RestoreProgress>>,
@@ -94,7 +96,7 @@ pub struct BackupServerSender {
 }
 
 impl BackupServerSender {
-    pub fn send(&self, event: BackupWorkerEvent) { self.conn.try_send_move(event).ok(); }
+    pub fn send(&self, event: BackupWorkerEvent) { self.conn.try_send_archive(event).ok(); }
 }
 
 impl Server for BackupServer {
@@ -119,6 +121,7 @@ impl BackupServer {
             fs,
             ql,
             security: Default::default(),
+            settings: Default::default(),
 
             status_subscribers: Vec::new(),
             restore_progress_subscribers: Vec::new(),
@@ -138,12 +141,13 @@ impl BackupServer {
         }
     }
 
-    fn update_status(&mut self, last_backup_at: SystemTime) {
-        if let Some(state) = self.state.as_mut() {
-            state.guard().last_published_backup = Some(last_backup_at);
-            let status = Status { last_backup_at: Some(last_backup_at) };
-            self.status_subscribers.retain(|s| s.send(&status).is_ok());
-        }
+    fn status(&self, publish_failed: bool) -> Status {
+        let last_backup_at = self.state.as_ref().and_then(|state| state.last_published_backup);
+        Status { last_backup_at, publish_failed }
+    }
+
+    fn publish_status(&mut self, status: Status) {
+        self.status_subscribers.retain(|s| s.send(&status).is_ok());
     }
 
     fn get_backup_key(&mut self) -> Result<BackupKey, backup::Error> {
@@ -160,6 +164,7 @@ impl BackupServer {
         &mut self,
         backup_path: &str,
         backup_location: fs::Location,
+        publish_mode: publish::PublishMode,
     ) -> Result<BackupFile, backup::Error> {
         let res = self.create_backup_internal(backup_path, backup_location).map_err(|e| {
             log::info!("create backup failed: {e:?}");
@@ -177,7 +182,7 @@ impl BackupServer {
             let backup_file = backup_file.clone();
 
             let task = async move {
-                let res = publish::publish_backup(&worker, &ql_status, &backup_file).await;
+                let res = publish::publish_backup(&worker, &ql_status, &backup_file, publish_mode).await;
                 match res {
                     Ok(_) => sender.send(BackupWorkerEvent::BackupPublished {
                         created_at: backup_file.created_at,
@@ -185,6 +190,7 @@ impl BackupServer {
                     }),
                     Err(e) => {
                         log::error!("Failed to publish backup: {e:?}");
+                        sender.send(BackupWorkerEvent::BackupPublishFailed);
                     }
                 }
             };
@@ -200,7 +206,14 @@ impl BackupServer {
         backup_location: fs::Location,
     ) -> whence::Result<BackupFile, backup::Error> {
         let backup_key = self.get_backup_key().whence()?;
-        core::create_backup::<_, CryptoLive>(&self.fs, backup_path, backup_location, &backup_key)
+        let device_name = Some(self.settings.get_device_name().0);
+        core::create_backup::<_, core::v2::CryptoLive>(
+            &self.fs,
+            backup_path,
+            backup_location,
+            &backup_key,
+            device_name,
+        )
     }
 
     fn restore_backup(&mut self, backup_path: &str, location: fs::Location) -> Result<(), backup::Error> {
@@ -218,6 +231,9 @@ impl BackupServer {
                     let mut state = state.guard();
                     state.last_created_backup = Some(metadata.created_at);
                     state.last_published_backup = Some(metadata.created_at);
+                }
+                if let Some(name) = metadata.device_name.clone() {
+                    self.settings.set_device_name(settings::global::DeviceName(name));
                 }
             }
             Err(_) => {
@@ -242,7 +258,12 @@ impl BackupServer {
         backup_location: fs::Location,
     ) -> whence::Result<BackupMetadata, backup::Error> {
         let backup_key = self.get_backup_key().whence()?;
-        core::restore_backup::<_, CryptoLive>(&self.fs, backup_path, backup_location, &backup_key)
+        core::restore_backup::<_, core::v1::CryptoLive, core::v2::CryptoLive>(
+            &self.fs,
+            backup_path,
+            backup_location,
+            &backup_key,
+        )
     }
 
     fn set_onboarding_complete(&mut self, onboarding_complete: bool) {
@@ -299,7 +320,7 @@ impl BackupServer {
         };
 
         if delay.is_zero() {
-            self.create_backup(BACKUP_FILE, BACKUP_LOCATION).ok();
+            self.create_backup(BACKUP_FILE, BACKUP_LOCATION, publish::PublishMode::WaitForEnvoy).ok();
             self.request_backup_cb(BACKUP_INTERVAL, "interval-elapsed");
         } else {
             self.request_backup_cb(delay, "waiting-for-next-interval");
@@ -309,13 +330,6 @@ impl BackupServer {
     fn request_backup_cb(&mut self, delay: Duration, reason: &str) {
         log::debug!("[auto-backup] requesting backup callback in {}s: reason={reason}", delay.as_secs());
         self.backup_cb.request(delay.as_millis() as usize, PeriodicBackup::ID, 0);
-    }
-
-    fn notify_status(&mut self) {
-        if let Some(state) = self.state.as_mut() {
-            let status = Status { last_backup_at: state.last_published_backup };
-            self.status_subscribers.retain(|s| s.send(&status).is_ok())
-        }
     }
 
     fn notify_restore_sub(&mut self, event: RestoreProgress) {

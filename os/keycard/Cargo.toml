@@ -2,27 +2,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 [package]
-name = "keycard"
+name = "keycard-server"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 backup-shard = { workspace = true }
 crypto = { workspace = true }
-log = "0.4.14"
-log-server = { package = "xous-api-log", path = "../../xous/api/log" }
+keycard = { workspace = true }
+log = { workspace = true }
+log-server = { workspace = true }
 ndef = { workspace = true }
-nfc = { path = "../nfc" }
-num-derive = "0.4"
-num-traits = "0.2"
-rkyv = { workspace = true }
+nfc = { workspace = true }
 security = { workspace = true }
-server = { path = "../../server" }
-thiserror = "1.0"
-xous = { path = "../../xous/xous-rs" }
-zeroize = { version = "1.8.1", default-features = false, features = [
-    "zeroize_derive",
-] }
+server = { workspace = true }
+xous = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

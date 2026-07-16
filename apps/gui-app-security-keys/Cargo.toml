@@ -15,15 +15,13 @@ haptics = { workspace = true }
 i18n = { path = "../../i18n" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
-nfc = { path = "../../os/nfc" }
-ordered-table = { path = "../../utils/ordered-table" }
+nfc = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 server = { path = "../../server" }
 settings = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 thiserror = "1.0"
-usb = { workspace = true }
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

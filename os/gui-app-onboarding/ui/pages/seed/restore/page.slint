@@ -36,6 +36,7 @@ export component RestoreSeedPage inherits OnboardingShieldPage {
 
                 TextMd {
                     text: TR2.lookup(TrId.RecoverMainContent);
+                    color: Palette.content-secondary;
                     horizontal-alignment: center;
                 }
             }
@@ -104,7 +105,7 @@ export component RestoreSeedPage inherits OnboardingShieldPage {
             show-ok: true;
             cancel-text: TR2.lookup(TrId.CommonButtonReturn);
             show-cancel: true;
-            width: 352px;
+            width: UISize.modal-width;
             on-cancel => {
                 show-dialog = false;
             }

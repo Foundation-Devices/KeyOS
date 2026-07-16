@@ -3,9 +3,9 @@
 
 use fs::{messages::GetMetadata, Metadata};
 
-use crate::{date_from_fatfs, datetime_from_fatfs, Error, OpenFile, Server};
+use crate::{date_from_fatfs, datetime_from_fatfs, Error, Server};
 
-impl server::ArchiveHandler<GetMetadata> for Server {
+impl server::BlockingArchiveHandler<GetMetadata> for Server {
     fn handle(
         &mut self,
         metadata: GetMetadata,
@@ -17,11 +17,8 @@ impl server::ArchiveHandler<GetMetadata> for Server {
                 self.check_read_access(sender, location)?;
                 let path = crate::path_of(location, &path, sender);
                 let (base, name) = path.rsplit_once('/').unwrap_or(("", &path));
-                let dir = if base.is_empty() {
-                    self.root_dir(location)?
-                } else {
-                    self.root_dir(location)?.open_dir(base)?
-                };
+                let root = self.mount(location).ok_or(Error::NoMedia)?.root_dir();
+                let dir = if base.is_empty() { root } else { root.open_dir(base)? };
                 for entry in dir.iter() {
                     let entry = entry?;
                     if entry.file_name() == name {
@@ -37,16 +34,14 @@ impl server::ArchiveHandler<GetMetadata> for Server {
                 Err(Error::FileNotFound)
             }
             GetMetadata::Handle { handle } => {
-                let OpenFile { file, .. } = self
-                    .files
-                    .get_mut(&sender)
+                let entry = self
+                    .mount(handle.location()?)
+                    .ok_or(Error::NoMedia)?
+                    .file(sender, handle)
                     .ok_or(Error::FileNotOpen)?
-                    .open
-                    .get_mut(&handle)
+                    .file
+                    .entry()
                     .ok_or(Error::FileNotOpen)?;
-                let Some(entry) = file.entry() else {
-                    return Err(Error::FileNotOpen);
-                };
                 Ok(Metadata {
                     created: datetime_from_fatfs(entry.created()),
                     accessed: date_from_fatfs(entry.accessed()),

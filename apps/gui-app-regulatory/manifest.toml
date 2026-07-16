@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0xc677731d8ee7380a38faa7cd97cbd3a5"
 
 [appName]
@@ -8,5 +9,5 @@ template = ["gui-app", "fs-generic"]
 "os/bt" = ["EnableBle", "DisableBle", "GetState", "DisableAdvChannels"]
 "os/camera" = ["SetEnabled"]
 "os/fs" = ["GetUsbReadAccess", "GetUsbWriteAccess"]
-"os/gui-server" = ["IsCameraReady", "ShowCamera", "HideCamera"]
+"os/gui-server" = ["ShowCamera", "HideCamera"]
 "os/nfc" = ["SetEnabled", "ReadNdefRawMsg"]

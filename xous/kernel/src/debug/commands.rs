@@ -60,7 +60,7 @@ pub fn debug_command(cmd: u8, mut output: impl core::fmt::Write) {
                 for process in system_services.processes.iter().flatten() {
                     let mut buffer = BufStr::from(unsafe { (*core::ptr::addr_of_mut!(TMP)).as_mut_slice() });
                     process.activate();
-                    system_services.print_current_process(&mut buffer, false).unwrap();
+                    system_services.print_current_process(&mut buffer).unwrap();
                     system_services.process(current_pid).unwrap().activate();
                     writeln!(output, "{buffer}").ok();
                 }

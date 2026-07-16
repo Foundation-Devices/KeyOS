@@ -11,7 +11,7 @@ pub fn main() {
 
     xous::set_thread_priority(xous::ThreadPriority::System6).unwrap();
 
-    let i2c_server = implementation::I2cServer::init();
+    let i2c_server = implementation::I2cServer::new();
     server::listen(i2c_server);
 }
 

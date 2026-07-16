@@ -1,0 +1,10 @@
+manifestVersion = "0"
+appId = "0xc781da2a8f5f4a68b2ee0e6ad83d41b7"
+
+[appName]
+en = "Crypto Perf"
+
+[permissions]
+template = ["gui-app"]
+"os/crypto" = ["ShaSetContext", "ShaUpdate", "ShaGetContext", "ShaDrop"]
+"os/security" = ["SignWithFidoKey"]

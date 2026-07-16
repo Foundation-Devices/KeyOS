@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x75736200000000000000000000000000"
 memory = ["UDPHS", "UDPHS_RAM", "UHPHS_EHCI"]
 syscall = ["ClaimInterrupt", "VirtToPhys", "SetThreadPriority"]
@@ -9,14 +10,24 @@ en = "USB Server"
 [servers."os/usb"]
 DoWork = { id = 0, type = "scalar" }
 SubscriberDisconnected = { id = 64, type = "scalar" }
+HostOtgMode = { id = 65, type = "scalar" }
 
 [servers."os/usbdev"]
-EndOfReset = { id = 16, type = "scalar" }
-Ep0RxComplete = { id = 19, type = "scalar" }
-Ep0TxComplete = { id = 18, type = "scalar" }
-DmaInterrupt = { id = 20, type = "scalar" }
+SetDeviceEmulationEnabled = { id = 99, type = "scalar" }
+EndOfReset = { id = 100, type = "scalar" }
+DmaInterrupt = { id = 101, type = "scalar" }
+RxCompleteInterrupt = { id = 102, type = "move" }
+TxCompleteInterrupt = { id = 103, type = "scalar" }
+SetCableConnected = { id = 104, type = "scalar" }
+OtgMode = { id = 105, type = "scalar" }
 
 [permissions]
 template = ["gpio"]
-"os/power-manager" = ["SetPeripheralEnabled", "SetUsbBoost"]
-"os/settings" = ["SubscribeDeviceName", "SubscribeUsbEnabled"]
+"os/power-manager" = ["SetPeripheralEnabled"]
+"os/power-manager-ext" = ["SetUsbBoost", "SetOtgPriority"]
+"os/settings" = [
+    "SubscribeDeviceName",
+    "SubscribeUsbEnabled",
+    "SubscribeAirlockMode",
+    "SetAirlockMode",
+]

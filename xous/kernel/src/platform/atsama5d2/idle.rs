@@ -15,9 +15,6 @@ static mut SUSPEND_FN: Option<unsafe extern "C" fn(usize, usize)> = None;
 
 static mut REQUESTED_IDLE_MODE: DramIdleMode = DramIdleMode::KeepClocked;
 
-#[cfg(feature = "trace-systemview")] // can't suspend DRAM if SystemView is active
-const MASTER_CLOCK_CAN_BE_SLOWED_DOWN: bool = false;
-
 extern "C" {
     static suspend_f: u8;
     static suspend_end: u8;

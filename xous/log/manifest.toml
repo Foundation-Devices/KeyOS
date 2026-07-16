@@ -1,5 +1,15 @@
+manifestVersion = "0"
 appId = "0x786f75732d6c6f670000000000000000"
 syscall = ["SetThreadPriority", "GetPanicMessage"]
 
 [appName]
 en = "Log Server"
+
+# Not all messages are listed since `log` goes around the manifest and Server
+# infrastructure for much of its work; so these are just the privileged messages
+# for permission purposes.
+[servers."os/log"]
+ReadLogs = { id = 2000, type = "lendMut" }
+
+[fixedSids]
+"os/log" = "xous-log-server "

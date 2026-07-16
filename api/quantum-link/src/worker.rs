@@ -52,7 +52,7 @@ where
     pub fn send_ql_archive<M>(&self, msg: M) -> impl Future<Output = M::Response>
     where
         P: server::MessageAllowed<M>,
-        M: server::Archive + Send + 'static,
+        M: server::BlockingArchive + Send + 'static,
         M::Response: Send,
     {
         let this = self.clone();
@@ -70,7 +70,7 @@ where
     ) -> impl Future<Output = T>
     where
         P: server::CheckedPermissions + server::MessageAllowed<M>,
-        M: server::Archive<Response = Result<T, E>> + Send + Clone + 'static,
+        M: server::BlockingArchive<Response = Result<T, E>> + Send + Clone + 'static,
         M::Response: Send,
         T: server::ArchiveCodec + Send + 'static,
         <T as rkyv::Archive>::Archived:

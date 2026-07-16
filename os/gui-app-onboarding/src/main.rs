@@ -23,7 +23,6 @@ use slint_keyos_platform::{
     app, async_archive,
     futures_lite::StreamExt,
     gui_server_api::{
-        msg::UpdateKioskPolicy,
         navigation::filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
         InputMessage,
     },
@@ -37,7 +36,7 @@ use slint_keyos_platform::{
 use update::messages::ProgressUpdate;
 
 use crate::{
-    power_manager_permissions::PowerManagerPermissions,
+    power_manager_ext_permissions::PowerManagerExtPermissions,
     quantum_link_permissions::QuantumLinkPermissions,
     security_permissions::SecurityPermissions,
     state::{erase::init_erase_callbacks, AppState},
@@ -46,7 +45,6 @@ use crate::{
 
 #[cfg(not(feature = "production"))]
 mod debug;
-mod seed;
 mod state;
 
 app_manager::use_api!();
@@ -55,12 +53,11 @@ bt::use_api!();
 haptics::use_api!();
 keycard::use_api!();
 power_manager::use_api!();
+power_manager::use_ext_api!();
 quantum_link::use_api!();
 quantum_link::use_prestart_api!();
 security::use_api!();
 update::use_api!();
-#[cfg(keyos)]
-usb::use_host_api!();
 
 app!("Onboarding", kind = Onboarding);
 
@@ -69,7 +66,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     log::set_max_level(log::LevelFilter::Info);
 
     cx.config.enable_swipe_back.set(false);
-    cx.gui.update_kiosk_policy(UpdateKioskPolicy::default().set_home_button(false)).ok();
 
     let state = init_state(ui.clone_strong(), cx.gui.clone());
 
@@ -93,12 +89,21 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     on_startup(state);
     init_ql_status_monitor(cx.router, state);
 
-    // Wait for actually being hidden before exiting, because exiting immediately
-    // throws away the framebuffer that the gui-server might still be displaying.
-    cx.set_input_handler(move |input| {
-        if input.msg == InputMessage::Hidden && state.borrow().finished {
+    cx.set_input_handler(move |input| match input.msg {
+        InputMessage::Hidden if state.borrow().finished => {
+            // Wait for actually being hidden before exiting, because exiting immediately
+            // throws away the framebuffer that the gui-server might still be displaying.
             quit_runtime();
         }
+        InputMessage::Custom1 => {
+            let ui = state.borrow().ui();
+            let cb = ui.global::<OnboardingCallbacks>();
+            let seed = ui.global::<SeedGlobal>();
+            if !cb.get_fatal_disconnect() && !seed.get_is_master_key_recovery() {
+                cb.set_show_restart_modal(true);
+            }
+        }
+        _ => {}
     });
 
     ui.run().unwrap();
@@ -129,6 +134,7 @@ fn on_startup(state: StoredValue<AppState>) {
 
     if matches!(master_key_state, MasterKeyState::Erased) {
         log::info!("master key erased, prioritizing master key recovery flow");
+        ui.global::<SeedGlobal>().set_is_master_key_recovery(true);
         nav.invoke_master_key_deleted_main(NavigateOptions { animate: Animate::None, replace: true });
         return;
     }
@@ -153,10 +159,13 @@ fn on_startup(state: StoredValue<AppState>) {
         match master_key_state {
             MasterKeyState::Onboarding => {}
             _ => {
-                // if we have reached this branch, then we have rebooted mid-way through onboarding
-                // which is un-recoverable. we must factory reset restart onboarding
-                crate::erase_system_state();
-                state.borrow().security.lockout(security::LockoutOptions::erase_all()).ok();
+                #[cfg(keyos)]
+                {
+                    // if we have reached this branch, then we have rebooted mid-way through onboarding
+                    // which is un-recoverable. we must factory reset restart onboarding
+                    crate::erase_system_state();
+                    state.borrow().security.lockout(security::LockoutOptions::erase_all()).ok();
+                }
             }
         }
     }
@@ -291,6 +300,7 @@ fn init_callbacks(state: StoredValue<AppState>) {
 
     cb.on_qr_data(move || {
         let state = state.borrow();
+        spawn_worker(async_archive::<QuantumLinkPermissions, _>(UnpairFromEnvoy)).detach();
         ql_utils::static_qr(&state.settings, &state.bt_address, false).into()
     });
 
@@ -357,24 +367,6 @@ fn init_callbacks(state: StoredValue<AppState>) {
     }
 
     cb.on_update_from_file(move || {
-        // Ensure OTG mode and USB host are off upon returning from this function
-        #[cfg(keyos)]
-        let _guard = {
-            struct OtgGuard {}
-            impl Drop for OtgGuard {
-                fn drop(&mut self) {
-                    UsbHost::default().set_enabled(false).ok();
-                    PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Never).ok();
-                }
-            }
-            let guard = OtgGuard {};
-            {
-                UsbHost::default().set_enabled(true).ok();
-                PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Automatic).ok();
-            }
-            guard
-        };
-
         let Ok(file) =
             select_and_copy_release_file().inspect_err(|e| log::error!("Couldn't update from a file: {e:?}"))
         else {
@@ -391,7 +383,7 @@ fn init_callbacks(state: StoredValue<AppState>) {
         }
     });
 
-    ql_utils::on_update_sufficient_battery::<PowerManagerPermissions, _>(move |sufficient_battery| {
+    ql_utils::on_update_sufficient_battery::<PowerManagerExtPermissions, _>(move |sufficient_battery| {
         log::info!("update sufficient_battery={}", sufficient_battery);
         let ui = state.borrow().ui();
         ui.global::<OnboardingCallbacks>().set_update_sufficient_battery(sufficient_battery);
@@ -582,7 +574,42 @@ fn init_ql_status_monitor(router: StoredValue<Router>, state: StoredValue<AppSta
             return;
         }
     }
-    spawn_local(async move {
+
+    start_ql_status_monitor(state);
+
+    let ui = state.borrow().ui();
+    let cb = ui.global::<OnboardingCallbacks>();
+    cb.on_restart_onboarding(move || {
+        spawn_local(async move {
+            let key_state = state.borrow().security.master_key_state();
+            match key_state {
+                MasterKeyState::Onboarding => {
+                    router.borrow_mut().clear_history();
+                    let ui = state.borrow().ui();
+                    let nav = ui.global::<Navigate>();
+                    clear_slint_state(&ui, &state.borrow());
+                    start_ql_status_monitor(state);
+                    nav.invoke_welcome(NavigateOptions { animate: Animate::None, replace: false });
+                }
+                _ => {
+                    log::info!("resetting prime to go through onboarding again");
+                    erase_system_state();
+                    async_archive::<SecurityPermissions, _>(security::messages::Lockout {
+                        lockout_options: security::LockoutOptions::erase_all(),
+                        reboot: true,
+                    })
+                    .await
+                    .inspect_err(|_| log::error!("failed to factory reset on fatal disconnect"))
+                    .ok();
+                }
+            }
+        })
+        .detach()
+    });
+}
+
+fn start_ql_status_monitor(state: StoredValue<AppState>) {
+    let task = spawn_local(async move {
         let ql_status = state.borrow().ql_status.clone();
         let ui = state.borrow().ui();
         let cb = ui.global::<OnboardingCallbacks>();
@@ -607,38 +634,9 @@ fn init_ql_status_monitor(router: StoredValue<Router>, state: StoredValue<AppSta
                 cb.set_fatal_disconnect(true);
             }
         }
-    })
-    .detach();
-
-    let ui = state.borrow().ui();
-    let cb = ui.global::<OnboardingCallbacks>();
-    cb.on_restart_onboarding(move || {
-        spawn_local(async move {
-            let key_state = state.borrow().security.master_key_state();
-            match key_state {
-                MasterKeyState::Onboarding => {
-                    router.borrow_mut().clear_history();
-                    let state = state.borrow();
-                    let ui = state.ui();
-                    let nav = ui.global::<Navigate>();
-                    clear_slint_state(&ui, &state);
-                    nav.invoke_welcome(NavigateOptions { animate: Animate::None, replace: false });
-                }
-                _ => {
-                    log::info!("resetting prime to go through onboarding again");
-                    erase_system_state();
-                    async_archive::<SecurityPermissions, _>(security::messages::Lockout {
-                        lockout_options: security::LockoutOptions::erase_all(),
-                        reboot: true,
-                    })
-                    .await
-                    .inspect_err(|_| log::error!("failed to factory reset on fatal disconnect"))
-                    .ok();
-                }
-            }
-        })
-        .detach()
     });
+
+    state.borrow_mut().ql_status_monitor = Some(task);
 }
 
 async fn check_firmware_update_available(state: StoredValue<AppState>) {
@@ -724,14 +722,36 @@ fn init_seed_global(state: StoredValue<AppState>) {
     });
 
     seed_global.on_get_seed_words(move || {
-        get_seed_words(state)
+        state
+            .borrow()
+            .try_get_mnemonic_words()
+            .map(|words| {
+                slint::ModelRc::new(slint::VecModel::from(
+                    words.into_iter().map(slint::SharedString::from).collect::<Vec<_>>(),
+                ))
+            })
             .inspect_err(|e| log::error!("Failed to get seed words: {e}"))
             .unwrap_or_default()
     });
 
-    seed_global.on_generate_seed_word_challenges(move |num_challenges| {
-        generate_seed_word_challenges(state, num_challenges as usize)
-            .inspect_err(|e| log::error!("Failed to generate seed word challenges: {e}"))
+    seed_global.on_generate_mnemonic_order(move || {
+        state
+            .borrow()
+            .mnemonic_order()
+            .map(|order| {
+                slint::ModelRc::new(slint::VecModel::from(
+                    order.into_iter().map(|i| i as i32).collect::<Vec<_>>(),
+                ))
+            })
+            .inspect_err(|e| log::error!("Failed to generate mnemonic order: {e}"))
+            .unwrap_or_default()
+    });
+
+    seed_global.on_get_seed_word_challenge(move |mnemonic_index| {
+        usize::try_from(mnemonic_index)
+            .map_err(|_| anyhow::anyhow!("mnemonic_index {mnemonic_index} is negative"))
+            .and_then(|idx| state.borrow().get_seed_word_challenge(idx).map(Into::into))
+            .inspect_err(|e| log::error!("Failed to get seed word challenge: {e}"))
             .unwrap_or_default()
     });
 
@@ -836,37 +856,20 @@ fn init_connect_wallet(state: StoredValue<AppState>) {
     .detach();
 }
 
-impl From<seed::SeedWordChallenge> for SeedWordChallenge {
-    fn from(s: seed::SeedWordChallenge) -> SeedWordChallenge {
+impl From<state::seed_challenge::SeedWordChallenge> for SeedWordChallenge {
+    fn from(s: state::seed_challenge::SeedWordChallenge) -> SeedWordChallenge {
         let options = ModelRc::from(s.options.map(SharedString::from));
         crate::SeedWordChallenge {
             correct_option_index: s.correct_option_index as i32,
             options,
-            word_index: s.word_index as i32,
+            mnemonic_index: s.mnemonic_index as i32,
         }
     }
 }
 
-fn get_seed_words(state: StoredValue<AppState>) -> anyhow::Result<slint::ModelRc<slint::SharedString>> {
-    let seed = state.borrow().try_get_seed()?;
-    let words = seed::seed_to_words(&seed)?;
-    let slint_words: Vec<slint::SharedString> = words.into_iter().map(slint::SharedString::from).collect();
-    Ok(slint::ModelRc::new(slint::VecModel::from(slint_words)))
-}
-
-fn generate_seed_word_challenges(
-    state: StoredValue<AppState>,
-    num_challenges: usize,
-) -> anyhow::Result<slint::ModelRc<SeedWordChallenge>> {
-    let seed = state.borrow().try_get_seed()?;
-    let challenges = seed::generate_seed_word_challenge(&seed, num_challenges)?;
-    let slint_challenges: Vec<SeedWordChallenge> = challenges.into_iter().map(Into::into).collect();
-    Ok(slint::ModelRc::new(slint::VecModel::from(slint_challenges)))
-}
-
 fn get_standard_seed_qr(state: StoredValue<AppState>) -> anyhow::Result<slint::Image> {
     let seed = state.borrow().try_get_seed()?;
-    let data = seed::generate_standard_seed_qr_data(&seed)?;
+    let data = seed.to_standard_seed_qr_data()?;
     let qr_image = slint_keyos_platform::qrcode::render(
         &data,
         slint::Color::from_rgb_u8(0, 0, 0),       // black
@@ -877,7 +880,7 @@ fn get_standard_seed_qr(state: StoredValue<AppState>) -> anyhow::Result<slint::I
 
 fn get_compact_seed_qr(state: StoredValue<AppState>) -> anyhow::Result<slint::Image> {
     let seed = state.borrow().try_get_seed()?;
-    let data = seed::generate_compact_seed_qr_data(&seed)?;
+    let data = seed.to_compact_seed_qr_data()?;
     let qr_image = slint_keyos_platform::qrcode::render(
         &data,
         slint::Color::from_rgb_u8(0, 0, 0),       // black
@@ -925,6 +928,7 @@ fn clear_slint_state(ui: &AppWindow, state: &AppState) {
 
     cb.set_bt_connected(ql_status.bt_connected);
     cb.set_fatal_disconnect(Default::default());
+    cb.set_show_restart_modal(Default::default());
     cb.set_security_state(Default::default());
     cb.set_current_keyos_version(Default::default());
     cb.set_new_keyos_version(Default::default());
@@ -940,6 +944,7 @@ fn clear_slint_state(ui: &AppWindow, state: &AppState) {
     let seed = ui.global::<SeedGlobal>();
     seed.set_master_seed_state(Default::default());
     seed.set_restore_backup_state(Default::default());
+    seed.set_seed_qr_error(Default::default());
     seed.set_is_master_key_recovery(Default::default());
     seed.set_fingerprint_mismatch(Default::default());
 

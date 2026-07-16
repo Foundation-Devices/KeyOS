@@ -1,19 +1,23 @@
+manifestVersion = "0"
 appId = "0x8abc821d427553efab0c6b374d059bda"
 
 [appName]
 en = "FIDO Server"
 
 [servers."os/fido"]
-CreateSecurityKey = { id = 0, type = "scalar" }
-NextSecurityKeyIndex = { id = 1, type = "blockingScalar" }
-SetLive = { id = 2, type = "scalar" }
-IsLive = { id = 3, type = "blockingScalar" }
-GetSelectedSecurityKey = { id = 4, type = "blockingScalar" }
-SelectSecurityKey = { id = 5, type = "scalar" }
-EnsureSecurityKeys = { id = 6, type = "scalar" }
-U2fProcessApdu = { id = 32, type = "archive" }
-CtapProcessCbor = { id = 33, type = "archive" }
-ResetState = { id = 64, type = "blockingScalar", cfg = "feature = \"test-app\"" }
+GetSelectedSecurityKey = { id = 0, type = "blockingScalar" }
+SelectSecurityKey = { id = 1, type = "scalar" }
+SubscribeKeyChanges = { id = 2, type = "archiveEvent" }
+SubscribePresenceKeepAlive = { id = 3, type = "archiveEvent" }
+SubscribeOperationOutcomes = { id = 4, type = "archiveEvent" }
+CreateSecurityKey = { id = 5, type = "blockingArchive" }
+EditSecurityKey = { id = 6, type = "blockingArchive" }
+SetArchived = { id = 7, type = "blockingScalar" }
+ListSecurityKeys = { id = 8, type = "blockingArchive" }
+U2fProcessApdu = { id = 9, type = "blockingArchive" }
+CtapProcessCbor = { id = 10, type = "blockingArchive" }
+ResetState = { id = 11, type = "blockingScalar", cfg = "feature = \"test-app\"" }
+DisconnectHandlerMessage = { id = 12, type = "scalar" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]

@@ -32,7 +32,10 @@ impl TouchState {
     pub fn init() -> Self {
         TouchState {
             origin: TouchGestureOrigin::None,
-            offset: -30, // See SFT-5550
+            // See SFT-5550
+            // This initial value is a fallback, it will be controlled by system settings,
+            // and updated by the gui-server's subscription to the TouchOffset setting
+            offset: -30,
             #[cfg(keyos)]
             hw_state: Default::default(),
             switcher_gesture_state: SwitcherGestureState::default(),
@@ -60,7 +63,11 @@ pub(crate) enum TouchGestureOrigin {
 impl Gui {
     /// Sends incoming touch event to the currently active app, Control Center or the
     /// keyboard depending on the touch coordinates and the current state.
-    pub fn touch_dispatch(&mut self, touch: Touch) {
+    ///
+    /// When `injected` is true (debug bridge), the auto-lock dimming is still reset
+    /// but the touch is **not** swallowed — so a single tap is enough to interact
+    /// with the device even when the screen has dimmed.
+    pub fn touch_dispatch(&mut self, touch: Touch, injected: bool) {
         if self.is_control_center_animating() {
             return;
         }
@@ -120,7 +127,8 @@ impl Gui {
 
         // If reset_auto_lock returns true, it means we were dimmed. In this case swallow the gesture, because
         // 'undim' was the action. If the user actually wants to click something, they will press again.
-        if self.reset_auto_lock() {
+        // For injected (debug bridge) touches, still reset the auto-lock but don't swallow.
+        if self.reset_auto_lock() && !injected {
             self.touch_state.origin = TouchGestureOrigin::None;
             return;
         }
@@ -170,11 +178,11 @@ impl Gui {
         self.touch_state.last_x = touch.x;
         self.touch_state.last_y = touch.y;
 
-        // Apply touch offset once for all touch origins
-        #[cfg(keyos)]
-        let offset = self.touch_state.offset;
-        #[cfg(not(keyos))]
-        let offset = 0; // simulator touch is exact
+        // Apply touch offset once for all touch origins.
+        // Skip for injected (debug bridge) touches — their coordinates are already
+        // in screen-visual space and don't need hardware calibration.
+        // Simulator is touch-perfect and has a locked default offset of 0.
+        let offset = if injected { 0 } else { self.touch_state.offset };
         let touch = touch.with_offset(0, offset);
 
         match self.touch_state.origin {

@@ -15,7 +15,7 @@ use crate::{
     error::DmaError,
     messages::{
         DropTransferMsg, ExecuteTransferMsg, FlushTransferMsg, PeripheralTransferMsg, StopTransferMsg,
-        WaitTransferMsg,
+        SubscribeTransferComplete, TransferComplete, WaitTransferMsg,
     },
 };
 
@@ -56,12 +56,27 @@ impl<P: CheckedPermissions> Dma<P> {
         P: MessageAllowed<PeripheralTransferMsg>,
         P: MessageAllowed<DropTransferMsg>,
     {
-        let id = self.conn.send_archive(PeripheralTransferMsg { address, config })?;
+        let id = self.conn.send_blocking_archive(PeripheralTransferMsg { address, config })?;
         Ok(DmaTransfer { conn: self.conn.clone(), id })
     }
 }
 
 impl<P: CheckedPermissions + MessageAllowed<DropTransferMsg>> DmaTransfer<P> {
+    /// Returns the channel index for this transfer for matching with TransferCompletes.
+    pub fn id(&self) -> usize { self.id }
+
+    /// Subscribe to `TransferComplete` events for this specific transfer/channel.
+    pub fn subscribe_transfer_complete<SR>(
+        &self,
+        context: &mut server::ServerContext<SR>,
+    ) -> Result<(), DmaError>
+    where
+        P: MessageAllowed<SubscribeTransferComplete>,
+        SR: server::ScalarEventHandler<TransferComplete>,
+    {
+        self.conn.subscribe_scalar(SubscribeTransferComplete(self.id), context)
+    }
+
     /// Start the transfer. Does not block.
     ///
     /// Be sure that caches are cleaned before Memory->peripheral transfers, and invalidated before and after

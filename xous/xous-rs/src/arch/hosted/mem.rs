@@ -1,38 +1,19 @@
-use crate::{Error, MemoryAddress, MemoryFlags, MemoryRange};
-const PAGE_SIZE: usize = 4096;
+use crate::{Error, MemoryRange, PAGE_SIZE};
 
 extern crate alloc;
 use alloc::alloc::{alloc_zeroed, dealloc, Layout};
 
-pub fn map_memory_pre(
-    _phys: &Option<MemoryAddress>,
-    _virt: &Option<MemoryAddress>,
-    _size: usize,
-    _flags: MemoryFlags,
-) -> core::result::Result<(), Error> {
-    Ok(())
-}
-
-pub fn map_memory_post(
-    _phys: Option<MemoryAddress>,
-    _virt: Option<MemoryAddress>,
-    size: usize,
-    _flags: MemoryFlags,
-    _range: MemoryRange,
-) -> core::result::Result<MemoryRange, Error> {
-    // let rounded_size = (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+/// Allocate a backing region for a memory message that just arrived from the kernel.
+/// Used by the hosted arch's `receive_message` path. The kernel-side `MemoryRange` is
+/// a placeholder; this gives it actual storage on the host.
+pub fn alloc_message_buf(size: usize) -> core::result::Result<MemoryRange, Error> {
     let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap().pad_to_align();
     let mem = unsafe { alloc_zeroed(layout) } as usize;
-
-    // println!("Allocated {} bytes (requested {}) @ {:016x}", rounded_size, size, mem);
     unsafe { MemoryRange::new(mem, size) }
 }
 
-pub fn unmap_memory_pre(_range: &MemoryRange) -> core::result::Result<(), Error> { Ok(()) }
-
-pub fn unmap_memory_post(range: MemoryRange) -> core::result::Result<(), Error> {
-    // println!("Request to free {} bytes @ {:016x}", range.len(), range.as_ptr() as usize);
-    // let rounded_size = (range.len() + 4095) / 4096;
+/// Free a backing region allocated for a memory message.
+pub fn free_message_buf(range: MemoryRange) -> core::result::Result<(), Error> {
     let layout = Layout::from_size_align(range.len(), PAGE_SIZE).unwrap().pad_to_align();
     let ptr = range.as_mut_ptr();
     unsafe { dealloc(ptr, layout) };

@@ -25,6 +25,8 @@ pub(crate) enum SwitchingAnimation {
     SlideIn,
     // Slide "from" out to the bottom
     SlideOut,
+    // Slide "to" from the top
+    SlideInTop,
     // Slide "from" out to the top
     SlideOutTop,
 
@@ -53,6 +55,7 @@ impl SwitchingAnimation {
         let (bg, fg, progress) = match self {
             SwitchingAnimation::ZoomIn
             | SwitchingAnimation::SlideIn
+            | SwitchingAnimation::SlideInTop
             | SwitchingAnimation::FromSwitcher
             | SwitchingAnimation::FadeIn => (from, to, progress),
             SwitchingAnimation::ZoomOut
@@ -72,7 +75,7 @@ impl SwitchingAnimation {
             SwitchingAnimation::SlideIn | SwitchingAnimation::SlideOut => {
                 fg.with_position(0, SCREEN_HEIGHT * (100 - progress) / 100)
             }
-            SwitchingAnimation::SlideOutTop => {
+            SwitchingAnimation::SlideOutTop | SwitchingAnimation::SlideInTop => {
                 let progress_f32 = progress as f32 / 100.0;
                 let progress = (simple_easing::expo_out(progress_f32) * 100.0) as usize;
 
@@ -128,6 +131,8 @@ impl Gui {
             }
         } else if Some(from) == self.app_registry.lock_screen_pid() {
             SwitchingAnimation::SlideOutTop
+        } else if Some(to) == self.app_registry.lock_screen_pid() {
+            SwitchingAnimation::SlideInTop
         } else if Some(to) == self.app_registry.settings_app_pid() {
             SwitchingAnimation::SlideIn
         } else if Some(from) == self.app_registry.settings_app_pid() {

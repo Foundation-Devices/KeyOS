@@ -51,8 +51,7 @@ pub unsafe extern "C" fn init(arg_offset: *const u32) -> ! {
     let args = args::KernelArguments::get();
     // Everything needs memory, so the first thing we should do is initialize the memory manager.
     crate::mem::MemoryManager::with_mut(|mm| {
-        mm.init_from_memory(keyos::ALLOCATION_TRACKER_OFFSET as _, &args)
-            .expect("couldn't initialize memory manager");
+        mm.init_from_memory(keyos::ALLOCATION_TRACKER_OFFSET as _);
     });
 
     #[cfg(feature = "trace-systemview")]

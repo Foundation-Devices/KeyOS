@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Button, Modal } from "@ui/widgets.slint";
+import { Palette, Size, Importance, UISize } from "@ui/theme.slint";
+
+import { ModalGlobal } from "./global.slint";
+import { TR2, TrId } from "../gen/tr.slint";
+
+export component FormatModal inherits Modal {
+    in property <bool> is-airlock;
+    icon: "alert";
+    icon-color: Palette.content-notice;
+    title: is-airlock ? TR2.lookup(TrId.FormatAirlockModalTitle) : TR2.lookup(TrId.ExternalFormatStorageModalAreYouSureTitle);
+    text: is-airlock ? TR2.lookup(TrId.FormatAirlockModalContent) : TR2.lookup(TrId.ExternalFormatStorageModalAreYouSureContent);
+
+    Button {
+        icon: "alert";
+        label: root.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFormatAirlock) : TR2.lookup(TrId.ExternalFormatStorageModalAreYouSureFormatStorage);
+        importance: Importance.negative;
+        clicked => {
+            ModalGlobal.format-confirmed();
+        }
+    }
+
+    Button {
+        icon: "";
+        label: TR2.lookup(TrId.CommonButtonCancel);
+        importance: Importance.secondary;
+        clicked => {
+            ModalGlobal.cancel();
+        }
+    }
+}

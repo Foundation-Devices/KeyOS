@@ -3,18 +3,52 @@
 
 use core::arch::asm;
 
-use keyos::PAGE_SIZE;
-use xous::{arch::irq::IrqNumber, SysCall};
+use keyos::{PAGE_SIZE, STACK_PAGE_COUNT};
+use xous::{arch::irq::IrqNumber, MemoryRange, SysCall};
 
 use crate::{
     arch::{
-        process::{current_pid, ProcessorMode, EXIT_THREAD},
+        process::{crash_current_process, current_pid, ProcessorMode, EXIT_THREAD},
         Thread,
     },
     mem::MemoryManager,
     services::ArchProcess,
     SystemServices,
 };
+
+/// Formats how far `addr` is from `stack`, suppressing output beyond
+/// half a default stack size from either edge.
+struct StackDistance {
+    addr: usize,
+    stack: Option<MemoryRange>,
+}
+
+impl core::fmt::Display for StackDistance {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Some(stack) = self.stack else { return Ok(()) };
+        let start = stack.as_ptr() as usize;
+        let end = start + stack.len();
+        let threshold = STACK_PAGE_COUNT * PAGE_SIZE / 2;
+        let addr = self.addr;
+        if addr >= start && addr < end {
+            write!(f, " (inside thread stack)")
+        } else if addr < start {
+            let dist = start - addr;
+            if dist <= threshold {
+                write!(f, " (0x{dist:x} bytes below stack)")
+            } else {
+                Ok(())
+            }
+        } else {
+            let dist = addr - end + 1;
+            if dist <= threshold {
+                write!(f, " (0x{dist:x} bytes above stack)")
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
 
 extern "Rust" {
     fn _xous_syscall_return_result(context: &Thread, enable_irqs: bool) -> !;
@@ -68,8 +102,8 @@ pub extern "C" fn swi_handler() {
         klog!("SWI at {}:{tid}", crate::arch::process::current_pid());
         let mode = p.current_thread().processor_mode();
         if mode != ProcessorMode::User && mode != ProcessorMode::System {
-            println!("[!] SWI in kernel mode ({mode:?})! pid: {}", crate::arch::process::current_pid());
-            crate::arch::process::crash_current_process();
+            let pid = crate::arch::process::current_pid();
+            panic!("SWI in kernel mode ({mode:?})! pid: {pid}");
         }
 
         (tid, thread.get_args())
@@ -173,23 +207,17 @@ pub extern "C" fn abort_handler() {
 
     // See ARM ARM Table B3-12 VMSAv7 DFSR encodings
     let dfsr_fault_cause = dfsr & 0b1111;
-    let is_data_translation_page_fault = dfsr_fault_cause == 0b0111;
-    let is_data_alignment_fault = dfsr_fault_cause == 0b0001;
-    let is_data_permission_fault = dfsr_fault_cause == 0b0110
-        || dfsr_fault_cause == 0b0011
-        || dfsr_fault_cause == 0b0101
-        || dfsr_fault_cause == 0b1101
-        || dfsr_fault_cause == 0b1111;
     let ifsr_fault_cause = ifsr & 0b1111;
-    let is_null_pointer_exception = dfar == 0 && (is_data_permission_fault || ifsr_fault_cause == 0b0101);
+    let is_write = (dfsr & (1 << 11)) != 0;
     let pid = current_pid();
 
     let mode = ArchProcess::with_current(|p| p.current_thread().processor_mode());
     if mode != ProcessorMode::User && mode != ProcessorMode::System {
+        super::backtrace::capture_current_process_backtrace();
         #[cfg(not(feature = "production"))]
         SystemServices::with(|ss| {
             crate::debug::serial::with_output(|stream| {
-                ss.print_current_process(stream, true).ok();
+                ss.print_current_process(stream).ok();
             })
         });
         // Both the stack and the register file are probably corrupted at this point
@@ -238,48 +266,60 @@ pub extern "C" fn abort_handler() {
         }
 
         _ => {
-            if is_data_translation_page_fault {
-                MemoryManager::with_mut(|mm| mm.ensure_page_exists((dfar & !(PAGE_SIZE - 1)) as *mut usize))
-                    .map(|_| {
-                        klog!("Handed new page to process");
+            let error: &str = match dfsr_fault_cause {
+                // Page-level translation fault: may be an on-demand page awaiting backing.
+                0b0111 => {
+                    let ensure = MemoryManager::with_mut(|mm| {
+                        mm.ensure_page_exists((dfar & !(PAGE_SIZE - 1)) as *mut usize)
+                    });
+                    match ensure {
+                        Ok(()) => {
+                            klog!("Handed new page to process");
 
-                        #[cfg(all(feature = "trace-systemview", feature = "trace-aborts-systemview"))]
-                        {
-                            systemview_keyos::SystemView::isr_exit();
+                            #[cfg(all(feature = "trace-systemview", feature = "trace-aborts-systemview"))]
+                            {
+                                systemview_keyos::SystemView::isr_exit();
+                            }
+
+                            ArchProcess::with_current_mut(|process| {
+                                let thread = process.current_thread_mut();
+
+                                // Retry the instruction that caused abort
+                                thread.pc = thread.pc.saturating_sub(8);
+
+                                resume(process.current_thread_mut())
+                            });
+                            return;
                         }
+                        Err(xous::Error::OutOfMemory) => {
+                            let page = dfar & !(PAGE_SIZE - 1);
+                            crash_current_process!(
+                                "Out of physical memory for PID {pid} | virt: 0x{page:08x}"
+                            );
+                            return;
+                        }
+                        Err(_) => "Invalid memory access (L2)",
+                    }
+                }
+                // Section-level translation fault: no L2 table, so no on-demand possible.
+                0b0101 => "Invalid memory access (L1)",
+                0b0001 => "Unaligned memory access",
+                0b1101 | 0b1111 => "Memory permission violation",
+                _ => {
+                    crash_current_process!(
+                        "Unhandled abort fault: PID {pid} | addrD {dfar:08x} addrI: {ifar:08x}, causeD: {dfsr_fault_cause:04b} causeI: {ifsr_fault_cause:04b}"
+                    );
+                    return;
+                }
+            };
 
-                        ArchProcess::with_current_mut(|process| {
-                            let thread = process.current_thread_mut();
+            let verb = if is_write { "write" } else { "read" };
+            let stack = ArchProcess::with_current(|p| p.current_thread().stack);
+            let stack_suffix = StackDistance { addr: dfar, stack };
 
-                            // Retry the instruction that caused abort
-                            thread.pc = thread.pc.saturating_sub(8);
-
-                            resume(process.current_thread_mut())
-                        });
-                    })
-                    .map_err(|_e| {
-                        println!(
-                            "[!] Couldn't allocate a physical page for PID {} | virt: 0x{:08x}",
-                            pid,
-                            dfar & !0xfff
-                        );
-                        println!("[!] {:?}", _e);
-                    })
-                    .ok(); // On error, fall through to crash the process
-            } else if is_null_pointer_exception {
-                println!("[!] Process PID {} accessed 0x00000000 address (null pointer)", pid);
-            } else if is_data_alignment_fault || is_data_permission_fault {
-                println!("[!] Data alignment or access permissions violation");
-                println!("[!] PID: {}, address: {:08x}", pid, dfar);
-            } else {
-                println!("[!] Unhandled abort fault!");
-                println!(
-                    "KERNEL({}): ABORT | addrD {:08x} addrI: {:08x}, causeD: {:04b} causeI: {:04b}",
-                    pid, dfar, ifar, dfsr_fault_cause, ifsr_fault_cause,
-                );
-            }
-
-            crate::arch::process::crash_current_process();
+            crash_current_process!(
+                "{error}: PID {pid} attempted to {verb} address 0x{dfar:08x}{stack_suffix} (DFSR 0x{dfsr:08x})"
+            );
         }
     }
 }
@@ -301,10 +341,11 @@ pub extern "C" fn _irq_handler_rust() {
     // IRQ shall only be enabled during user-mode, because
     // some of the kernel functionality are very non-preeemptible
     if mode != ProcessorMode::User && mode != ProcessorMode::System {
+        super::backtrace::capture_current_process_backtrace();
         #[cfg(not(feature = "production"))]
         SystemServices::with(|ss| {
             crate::debug::serial::with_output(|stream| {
-                ss.print_current_process(stream, true).ok();
+                ss.print_current_process(stream).ok();
             })
         });
         // The register file is probably corrupted at this point
@@ -334,14 +375,9 @@ pub extern "C" fn _irq_handler_rust() {
 
 #[export_name = "_undef_handler_rust"]
 pub extern "C" fn undef_handler() {
-    println!("[!] The process PID={} issued an undefined or forbidden instruction", current_pid());
-
-    ArchProcess::with_current_mut(|process| {
-        let _thread = process.current_thread_mut();
-        println!("[*] The invalid instruction was at address 0x{:08x}", _thread.pc.saturating_sub(4));
-    });
-
-    crate::arch::process::crash_current_process();
+    let pid = current_pid();
+    let pc = ArchProcess::with_current(|p| p.current_thread().pc.saturating_sub(4));
+    crash_current_process!("PID {pid} issued an undefined or forbidden instruction at address 0x{pc:08x}");
 }
 
 extern "C" {
@@ -389,5 +425,7 @@ fn irq_number_to_str(irq_number: IrqNumber) -> [u8; 16] {
         IrqNumber::Xdmac1 => b"I#18=XDMAC1\0    ",
         IrqNumber::Flexcom2 => b"I#19=FLEXCOM2\0  ",
         IrqNumber::Sys => b"I#20=SYS\0       ",
+        IrqNumber::Secumod => b"I#21=SECUMOD\0   ",
+        IrqNumber::Icm => b"I#22=ICM\0       ",
     }
 }

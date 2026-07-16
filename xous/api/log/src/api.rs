@@ -8,13 +8,11 @@ pub enum Opcode {
     /// A `&[u8]` destined for stderr
     StandardError = 2,
 
-    /// A `xous::StringBuffer` containing this program's name
+    /// This program's name (unused)
     ProgramName = 3,
 
-    /// A panic occurred, and a panic log is forthcoming
+    /// Deprecated panic-related messages. Use kernel functionality for panic logging.
     PanicStarted = 1000,
-
-    /// Log messages of varying size
     PanicMessage0 = 1100,
     PanicMessage1 = 1101,
     PanicMessage2 = 1102,
@@ -48,13 +46,10 @@ pub enum Opcode {
     PanicMessage30 = 1130,
     PanicMessage31 = 1131,
     PanicMessage32 = 1132,
-
-    /// End of a panic
     PanicFinished = 1200,
 
     /// Read log messages that were received since the last call. Blocks if there are none.
     ReadLogs = 2000,
 
-    /// Read last panic message that was received since the last call
-    ReadLastPanicMessage = 3000,
+    ProcessDisconnected = 3000,
 }

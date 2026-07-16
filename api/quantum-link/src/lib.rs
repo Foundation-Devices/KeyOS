@@ -48,7 +48,7 @@ impl<P: CheckedPermissions> QuantumLinkApi<P> {
     where
         P: MessageAllowed<GetXidDocument>,
     {
-        self.conn.send_archive(GetXidDocument)
+        self.conn.send_blocking_archive(GetXidDocument)
     }
 
     pub fn subscribe_restore_magic_backup<S>(&self, context: &mut server::ServerContext<S>)
@@ -71,14 +71,7 @@ impl<P: CheckedPermissions> QuantumLinkApi<P> {
     where
         P: MessageAllowed<StartFirmwareUpdate>,
     {
-        self.conn.send_archive(StartFirmwareUpdate { chunk_offset })
-    }
-
-    pub fn clear_paired_device(&self)
-    where
-        P: MessageAllowed<ClearPairedDevice>,
-    {
-        self.conn.send_archive(ClearPairedDevice)
+        self.conn.send_blocking_archive(StartFirmwareUpdate { chunk_offset })
     }
 }
 

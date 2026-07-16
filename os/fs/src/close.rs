@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::io::Write;
-
 use fs::messages::{CloseDir, CloseFile};
 use server::xous;
 
@@ -15,12 +13,8 @@ impl server::BlockingScalarHandler<CloseFile> for Server {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), Error> {
-        let open = &mut self.files.get_mut(&sender).ok_or(Error::FileNotOpen)?.open;
-        open.remove(&close.0).ok_or(Error::FileNotOpen)?.file.flush()?;
-        if open.is_empty() {
-            self.files.remove(&sender).unwrap();
-        }
-        Ok(())
+        let mount = self.mount_mut(close.0.location()?).ok_or(Error::NoMedia)?;
+        mount.close_file(sender, close.0)
     }
 }
 
@@ -31,11 +25,7 @@ impl server::BlockingScalarHandler<CloseDir> for Server {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), Error> {
-        let open = &mut self.dirs.get_mut(&sender).ok_or(Error::FileNotOpen)?.open;
-        open.remove(&close.0).ok_or(Error::FileNotOpen)?;
-        if open.is_empty() {
-            self.dirs.remove(&sender).unwrap();
-        }
-        Ok(())
+        let mount = self.mount_mut(close.0.location()?).ok_or(Error::NoMedia)?;
+        mount.close_dir(sender, close.0)
     }
 }

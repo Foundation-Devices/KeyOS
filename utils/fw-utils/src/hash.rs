@@ -4,7 +4,7 @@
 use std::io::Read;
 use std::num::NonZero;
 
-use crypto::{CryptoApi, SHA_DMA_ALIGNMENT};
+use crypto::CryptoApi;
 use fs::{FileSystem, Location, OpenFlags};
 use micro_ecc_sys::{uECC_decompress, uECC_secp256k1, uECC_valid_public_key, uECC_verify};
 use server::{CheckedPermissions, MessageAllowed};
@@ -97,14 +97,7 @@ where
 }
 
 /// Calculate the SHA256 hash of the bootloader plaintext in SRAM.
-pub fn hash_bootloader<P>(crypto: &CryptoApi<P>) -> Result<[u8; 32], HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-{
+pub fn hash_bootloader<P: crypto::ShaPermissions>(crypto: &CryptoApi<P>) -> Result<[u8; 32], HashError> {
     const BOOTLOADER_MAX_SIZE: usize = 1024 * 64; // 64KB
     const BOOTLOADER_SIZE_IDX: usize = 5; // bootloader actual size is stored in its vector table at this location
     let sram = DropDeallocate::new(xous::map_memory(
@@ -124,24 +117,16 @@ where
     bootloader_mem.as_slice_mut::<u8>()[..bootloader_size]
         .copy_from_slice(&sram.as_slice::<u8>()[..bootloader_size]);
 
-    Ok(crypto.sha256(*bootloader_mem, 0, bootloader_size)?)
+    Ok(crypto.sha256(&bootloader_mem.as_slice::<u8>()[..bootloader_size])?)
 }
 
-pub fn verify_cosign2_mem<P>(
+pub fn verify_cosign2_mem<P: crypto::ShaPermissions>(
     crypto: &CryptoApi<P>,
-    file_mem: &MemoryRange,
-    total_size: usize,
+    data: &[u8],
     check_trust: bool,
-) -> Result<cosign2::Header, HashError>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-{
+) -> Result<cosign2::Header, HashError> {
     let Some(header) = cosign2::Header::parse(
-        &file_mem.as_slice()[..total_size],
+        data,
         &KNOWN_SIGNERS,
         &Sha256 { crypto },
         &EccVerifier {},
@@ -177,11 +162,7 @@ where
     P: MessageAllowed<fs::messages::OpenFileMessage>,
     P: MessageAllowed<fs::messages::ReadFile>,
     P: MessageAllowed<fs::messages::CloseFile>,
-    PC: CheckedPermissions,
-    PC: MessageAllowed<crypto::messages::ShaInit>,
-    PC: MessageAllowed<crypto::messages::ShaUpdate>,
-    PC: MessageAllowed<crypto::messages::ShaFinalize>,
-    PC: MessageAllowed<crypto::messages::ShaAbort>,
+    PC: crypto::ShaPermissions,
 {
     let path_str = path.into();
     let metadata = fs.metadata(path_str.clone(), location)?;
@@ -411,78 +392,22 @@ where
     Ok(())
 }
 
-struct Sha256<'a, P>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-{
+struct Sha256<'a, P: crypto::ShaPermissions> {
     crypto: &'a CryptoApi<P>,
 }
 
-impl<'a, P> cosign2::Sha256 for Sha256<'a, P>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-{
-    fn hash(&self, data: &[u8]) -> [u8; 32] {
-        use sha2::Digest;
-
-        let addr = data.as_ptr() as usize;
-        let size = data.len();
-        let is_aligned = addr & (SHA_DMA_ALIGNMENT - 1) == 0;
-        let offset = addr & (PAGE_SIZE - 1);
-
-        // FIXME: sometimes hashing small data results in a wrong hash
-        if size < PAGE_SIZE {
-            return sha2::Sha256::digest(data).into();
-        }
-
-        if is_aligned {
-            let mem = unsafe {
-                xous::MemoryRange::new(addr & !(PAGE_SIZE - 1), (size + offset).next_multiple_of(PAGE_SIZE))
-                    .expect("mem")
-            };
-            self.crypto.sha256(mem, offset, size).expect("sha256")
-        } else {
-            let size_aligned = if size == 0 { PAGE_SIZE } else { size.next_multiple_of(PAGE_SIZE) };
-            let mut mem =
-                DropDeallocate::new(xous::map_memory(None, None, size_aligned, MemoryFlags::W).expect("map"));
-            mem.as_slice_mut()[..size].copy_from_slice(data);
-            self.crypto.sha256(*mem, 0, size).expect("sha256")
-        }
-    }
+impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
+    fn hash(&self, data: &[u8]) -> [u8; 32] { self.crypto.sha256(data).expect("sha256") }
 }
 
 /// Streaming SHA-256 implementation to allow hashing of large files
-struct Sha256Streaming<'a, P, F>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-    F: Fn(f32),
-{
+struct Sha256Streaming<'a, P: crypto::ShaPermissions, F: Fn(f32)> {
     crypto: &'a CryptoApi<P>,
     progress_fn: &'a F,
     binary_size: usize,
 }
 
-impl<'a, P, F> cosign2::Sha256Streaming for Sha256Streaming<'a, P, F>
-where
-    P: CheckedPermissions,
-    P: MessageAllowed<crypto::messages::ShaInit>,
-    P: MessageAllowed<crypto::messages::ShaUpdate>,
-    P: MessageAllowed<crypto::messages::ShaFinalize>,
-    P: MessageAllowed<crypto::messages::ShaAbort>,
-    F: Fn(f32),
-{
+impl<'a, P: crypto::ShaPermissions, F: Fn(f32)> cosign2::Sha256Streaming for Sha256Streaming<'a, P, F> {
     type Error = HashError;
 
     fn hash_streaming<R: std::io::Read>(
@@ -494,14 +419,14 @@ where
             DropDeallocate::new(xous::map_memory(None, None, CHUNK_SIZE_BYTES, MemoryFlags::W)?);
 
         // Initialize streaming SHA-256 context
-        let sha_ctx = self.crypto.sha256_init(total_len)?;
+        let mut sha_ctx = self.crypto.sha256_init();
 
         let mut bytes_hashed = 0usize;
         while bytes_hashed < total_len {
             let chunk_size = (total_len - bytes_hashed).min(CHUNK_SIZE_BYTES);
 
             reader.read_exact(&mut chunk_mem.as_slice_mut()[..chunk_size])?;
-            sha_ctx.update(*chunk_mem, 0, chunk_size)?;
+            sha_ctx.update(&chunk_mem.as_slice::<u8>()[..chunk_size])?;
             bytes_hashed += chunk_size;
 
             (self.progress_fn)(bytes_hashed as f32 / self.binary_size as f32 * 0.9);

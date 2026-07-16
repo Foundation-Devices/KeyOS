@@ -121,13 +121,13 @@ impl server::ScalarEventHandler<fs::FileSystemEvent> for Server {
     }
 }
 
-impl server::ArchiveHandler<LookupTimeZone> for Server {
+impl server::BlockingArchiveHandler<LookupTimeZone> for Server {
     fn handle(
         &mut self,
         LookupTimeZone { name, offset_minutes }: LookupTimeZone,
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
-    ) -> <LookupTimeZone as server::Archive>::Response {
+    ) -> <LookupTimeZone as server::BlockingArchive>::Response {
         if let Some((name, data)) = jiff_tzdb::get(&name) {
             return settings::global::TimeZone { name: name.into(), data: data.to_vec() };
         }
@@ -136,13 +136,13 @@ impl server::ArchiveHandler<LookupTimeZone> for Server {
     }
 }
 
-impl server::ArchiveHandler<ListTimeZone> for Server {
+impl server::BlockingArchiveHandler<ListTimeZone> for Server {
     fn handle(
         &mut self,
         ListTimeZone { offset, count }: ListTimeZone,
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
-    ) -> <ListTimeZone as server::Archive>::Response {
+    ) -> <ListTimeZone as server::BlockingArchive>::Response {
         jiff_tzdb::available()
             .skip(offset.unwrap_or(0) as usize)
             .take(count.map(|c| c as usize).unwrap_or_else(|| jiff_tzdb::available().count()))

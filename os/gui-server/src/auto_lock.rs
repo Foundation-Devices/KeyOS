@@ -20,7 +20,7 @@ const DIM_TIMEOUT: Duration = Duration::from_secs(45);
 // Poweroff timeout = lock timeout * POWEROFF_MULTIPLIER
 // TODO (SFT-5047): This should be configurable
 #[cfg(all(keyos, not(feature = "recovery-os")))]
-const POWEROFF_MULTIPLIER: u32 = 5;
+const POWEROFF_MULTIPLIER: u32 = 2;
 
 #[cfg(not(feature = "recovery-os"))]
 const DIM_TIMEOUT_LOCKED: Duration = Duration::from_secs(10);
@@ -150,7 +150,7 @@ impl ScalarHandler<AutoLockTimerCallback> for Gui {
                     return;
                 }
                 use power_manager::ChargeStatus;
-                let power_manager = crate::PowerManagerApi::default();
+                let power_manager = crate::PowerManagerExtApi::default();
                 match power_manager.status().unwrap().charge_status {
                     ChargeStatus::Charging | ChargeStatus::ChargeDone => {
                         log::debug!("Not shutting down yet, we are on a charger");
@@ -167,13 +167,6 @@ impl ScalarHandler<AutoLockTimerCallback> for Gui {
 }
 
 impl Gui {
-    #[cfg(all(keyos, not(feature = "recovery-os")))]
-    fn is_onboarding_running(&self) -> bool {
-        self.active_app_pid()
-            .map(|pid| self.app_registry.onboarding_app_pid() == Some(pid))
-            .unwrap_or_default()
-    }
-
     #[cfg(all(keyos, not(feature = "recovery-os")))]
     fn auto_lock_timeout(&self) -> Duration {
         if self.is_onboarding_running() {

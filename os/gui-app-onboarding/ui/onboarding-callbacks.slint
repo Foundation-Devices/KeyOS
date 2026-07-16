@@ -28,6 +28,7 @@ export global OnboardingCallbacks {
     in property <bool> bt-connected;
 
     in property <bool> fatal-disconnect;
+    in-out property <bool> show-restart-modal: false;
     callback restart-onboarding();
 
     // bluetooth pairing scan
@@ -94,7 +95,7 @@ export enum RestoreBackupState {
 }
 
 export struct SeedWordChallenge {
-    word-index: int,           // Which word position we're verifying (0-based)
+    mnemonic-index: int,       // Which word position we're verifying (0-based)
     options: [string],         // The 4 multiple choice options
     correct-option-index: int  // Which option is correct (0-3)
 }
@@ -102,6 +103,8 @@ export struct SeedWordChallenge {
 export global SeedGlobal {
     in property <MasterSeedState> master-seed-state;
     in property <RestoreBackupState> restore-backup-state;
+    // invalid scanned SeedQR payload
+    in-out property <bool> seed-qr-error: false;
 
     // Store the pin to be set later
     // params:(pin, is-pin)
@@ -124,8 +127,10 @@ export global SeedGlobal {
     // ========== Manual seed Backup ==========
     // Get the seed words for display
     pure callback get-seed-words() -> [string];
-    // Generate verification challenges (configurable number)
-    pure callback generate-seed-word-challenges(num-challenges: int) -> [SeedWordChallenge];
+    // Shuffled sequence of mnemonic word positions to quiz the user on
+    callback generate-mnemonic-order() -> [int];
+    // Fetch the challenge for the given mnemonic position
+    callback get-seed-word-challenge(mnemonic-index: int) -> SeedWordChallenge;
     // Get QR code images
     pure callback get-standard-seed-qr() -> image;
     pure callback get-compact-seed-qr() -> image;

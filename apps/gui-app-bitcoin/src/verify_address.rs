@@ -46,7 +46,7 @@ pub fn init(state: StoredValue<AppState>) {
             let verify = ui.global::<VerifyAddress>();
 
             match scan {
-                ScanQrResult::Qr(data) => {
+                ScanQrResult::Qr { data, .. } => {
                     let Ok(address) = String::from_utf8(data)
                         .inspect_err(|e| log::error!("failed to decode qr scanner data: {}", e))
                     else {

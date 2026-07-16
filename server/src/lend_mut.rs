@@ -76,7 +76,8 @@ pub fn handle_lend_mut<M: LendMut, S: LendMutHandler<M>>(
     context: &mut ServerContext<S>,
 ) {
     let xous::Message::MutableBorrow(mem) = &mut raw.body else {
-        panic!("invalid message: {raw:?}");
+        log::warn!("invalid message: {raw:?}");
+        return;
     };
 
     let msg = M::from(SimpleMemoryMessage::from(&*mem));

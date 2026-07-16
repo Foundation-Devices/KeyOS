@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#![cfg_attr(test, allow(dead_code))]
+
 use crate::error::EmmcError;
 
 #[derive(Debug, server::Message)]
@@ -89,3 +91,12 @@ impl From<WriteEncryptedBlocks> for server::SimpleMemoryMessage {
         Self { buf: write.buf, arg1: write.block_index as usize, arg2: write.block_count }
     }
 }
+
+/// Barrier: blocks the caller until all writes enqueued before this message have hit flash.
+#[derive(Debug, Clone, Copy, server::Message)]
+#[response(())]
+pub struct Flush;
+
+/// In-process scalar sent by the SDMMC IRQ handler to the eMMC server to signal DMA completion.
+#[derive(Debug, Clone, Copy, server::Message)]
+pub(crate) struct SdmmcDone;

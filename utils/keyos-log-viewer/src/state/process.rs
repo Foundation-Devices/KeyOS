@@ -11,7 +11,7 @@ use ratatui::widgets::{ListState, TableState};
 use super::{
     copy_to_clipboard, ensure_list_selection, move_selection, move_table_selection, KeyResult, Notification,
 };
-use crate::serial::SerialCommand;
+use crate::transport::TransportCommand;
 
 const PROCESS_MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 
@@ -189,12 +189,12 @@ impl ProcessViewState {
             KeyCode::Down | KeyCode::Char('j') => self.scroll_processes(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll_processes(-1),
             KeyCode::Char('p') => {
-                return KeyResult::consumed().set_serial(SerialCommand::RequestProcessList);
+                return KeyResult::consumed().set_transport(TransportCommand::RequestProcessList);
             }
             KeyCode::Char('r') => {
                 let mut result = KeyResult::consumed();
                 if self.toggle_monitor(Instant::now()) {
-                    result = result.set_serial(SerialCommand::RequestProcessList);
+                    result = result.set_transport(TransportCommand::RequestProcessList);
                 }
                 return result;
             }
@@ -232,7 +232,7 @@ impl ProcessViewState {
         }
     }
 
-    pub fn handle_tick(&mut self, now: Instant) -> Option<SerialCommand> {
+    pub fn handle_tick(&mut self, now: Instant) -> Option<TransportCommand> {
         if !self.monitor_enabled {
             self.next_monitor_request_at = None;
             return None;
@@ -240,7 +240,7 @@ impl ProcessViewState {
 
         if self.next_monitor_request_at.is_none_or(|next_request| now >= next_request) {
             self.next_monitor_request_at = Some(now + PROCESS_MONITOR_INTERVAL);
-            Some(SerialCommand::RequestProcessList)
+            Some(TransportCommand::RequestProcessList)
         } else {
             None
         }

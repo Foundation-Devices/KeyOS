@@ -20,7 +20,7 @@ use keyos::{
 use super::consts::{
     FLG_DEV, FLG_GUARD, FLG_NO_CACHE, FLG_R, FLG_U, FLG_VALID, FLG_W, FLG_X, KERNEL_ARGUMENT_OFFSET,
 };
-use crate::{bzero, BootConfig, PAGE_SIZE};
+use crate::{additional_regions, bzero, BootConfig, PAGE_SIZE};
 
 const DEBUG_PAGE_MAPPING: bool = false;
 macro_rules! dprint {
@@ -121,11 +121,10 @@ impl BootConfig {
         // The region isn't in RAM, so check the other memory regions.
         let mut rpt_offset = RAM_PAGES;
 
-        for region in self.regions.iter() {
-            let rstart = region.start as usize;
-            let rlen = region.length as usize;
-            if addr >= rstart && addr < rstart + rlen {
-                self.runtime_page_tracker[rpt_offset + (addr - rstart) / PAGE_SIZE] = 1;
+        for range in additional_regions() {
+            let rlen = range.end - range.start;
+            if range.contains(&addr) {
+                self.runtime_page_tracker[rpt_offset + (addr - range.start) / PAGE_SIZE] = 1;
                 return;
             }
             rpt_offset += rlen / PAGE_SIZE;

@@ -17,17 +17,17 @@ fn handle_panic(_arg: &PanicInfo) -> ! {
     let panic_message_buf = crate::SystemServices::with_mut(|ss| {
         let mut panic_message_buf = BufStr::<[u8; KernelPanicMessage::MAX_MSG_LENGTH - 1]>::new();
 
-        // Check if there's an existing user process panic message with a backtrace
-        let (existing_pid, existing_msg) = ss.take_panic_message();
-        let has_user_backtrace = existing_msg.windows(10).any(|w| w == b"Backtrace:");
-
         write!(panic_message_buf, "PANIC (PID {}):\n{}", crate::arch::process::current_pid(), _arg).ok();
 
+        // Check if there's an existing user process panic message with a backtrace
+        let (existing_pid, existing_msg) = ss.get_panic_message();
+        let mut has_user_backtrace = false;
         // Include the existing user process panic message if present
-        if existing_pid.is_some() {
+        if existing_pid == Some(crate::arch::process::current_pid()) {
             if let Ok(msg) = core::str::from_utf8(existing_msg) {
                 write!(panic_message_buf, "\n{}", msg).ok();
             }
+            has_user_backtrace = existing_msg.windows(10).any(|w| w == b"Backtrace:");
         }
 
         // Only capture kernel backtrace if we don't already have a user process backtrace

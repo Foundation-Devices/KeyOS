@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6775692d6170702d7265636f76657279"
 memory = ["SECURAM"]
 
@@ -12,7 +13,8 @@ template = ["gui-app", "fs-generic"]
     "GetSystemWriteAccess",
 ]
 "os/gui-server" = ["Shutdown"]
-"os/power-manager" = ["GetStatus", "Reboot", "SetOtgPriority"]
+"os/power-manager" = ["Reboot"]
+"os/power-manager-ext" = ["GetStatus"]
 "os/recovery-worker" = [
     "CopyArchive",
     "GetAppBinVerificationState",

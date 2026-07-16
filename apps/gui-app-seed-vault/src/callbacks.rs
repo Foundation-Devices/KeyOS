@@ -4,13 +4,20 @@
 use {
     crate::{
         error::ToValidationString,
-        seed::{Seed, SeedType},
-        state::AppState,
-        CallbackResult, Callbacks, SeedView, SeedViewType,
+        error::VaultError,
+        gui_permissions::GuiPermissions,
+        seed::SeedType,
+        state::{AppState, PendingImport},
+        tr, CallbackResult, Callbacks, ImportedSeedInfo, SeedView, SeedViewType, TrId,
     },
+    anyhow::Context,
+    bip85_extended::bip39::{Language, Mnemonic},
+    nostr::{FromBech32, ToBech32},
     ordered_table::CardSortMode,
     slint_keyos_platform::{
-        slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel},
+        gui_server_api::navigation::qrscanner::{ScanQrOptions, ScanQrResult},
+        navigation::open_qr_scanner,
+        slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel},
         StoredValue,
     },
 };
@@ -34,10 +41,11 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
         move |seed_index: SharedString, view_type: SeedViewType| {
             let app_state = state.borrow();
 
-            let seed_type = match SeedType::from_view_type(view_type, Some(seed_index), None, None) {
-                Ok(st) => st,
-                Err(e) => return e.to_validation_string().into(),
-            };
+            let seed_type =
+                match SeedType::from_view_type(view_type, Some(seed_index.into()), None, None, None, None) {
+                    Ok(st) => st,
+                    Err(e) => return e.to_validation_string().into(),
+                };
 
             if let Err(e) = app_state.validate_new_index(seed_type) {
                 return e.to_validation_string().into();
@@ -47,22 +55,27 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
         }
     });
 
-    callbacks.on_save({
-        move |seed_view: SeedView| {
-            let mut app_state = state.borrow_mut();
+    callbacks.on_save(move |seed_view: SeedView| state.borrow_mut().save_from_view(seed_view, None, None));
 
-            let seed = match Seed::from_view(seed_view) {
-                Ok(s) => s,
-                Err(e) => return CallbackResult::from(e),
-            };
+    callbacks.on_import_nsec({
+        move |seed_view: SeedView, nsec| {
+            let result = state.borrow_mut().save_from_view(seed_view, Some(nsec), None);
 
-            if let Err(e) = app_state.save(seed) {
-                return CallbackResult::from(e);
+            if result.success {
+                state.borrow_mut().pending_import = None;
             }
 
-            app_state.update_accounts();
-            app_state.nav_accounts();
-            CallbackResult::success()
+            result
+        }
+    });
+
+    callbacks.on_import_seed_entropy({
+        move |seed_view: SeedView, seed_entropy| {
+            let result = state.borrow_mut().save_from_view(seed_view, None, Some(seed_entropy));
+            if result.success {
+                state.borrow_mut().pending_import = None;
+            }
+            result
         }
     });
 
@@ -154,7 +167,7 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let mut app_state = state.borrow_mut();
 
             if let Err(e) = app_state.set_archived(index, archived) {
-                log::warn!("{}", e);
+                log::error!("{}", e);
                 return;
             }
 
@@ -167,7 +180,7 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let mut app_state = state.borrow_mut();
 
             if let Err(e) = app_state.delete(index) {
-                log::warn!("{}", e);
+                log::error!("{}", e);
                 return;
             }
 
@@ -180,14 +193,12 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let app_state = state.borrow();
 
             let words = app_state
-                .get_words(index)
+                .get_entry_mnemonic(index)
+                .map(|m| m.words().map(SharedString::from).collect::<Vec<SharedString>>())
                 .unwrap_or_else(|e| {
-                    log::warn!("Could not get seed words: {:?}", e);
-                    String::new()
-                })
-                .split(' ')
-                .map(SharedString::from)
-                .collect::<Vec<SharedString>>();
+                    log::error!("Could not get seed words: {:?}", e);
+                    Vec::new()
+                });
 
             ModelRc::new(VecModel::from(words))
         }
@@ -198,7 +209,7 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let app_state = state.borrow();
 
             app_state.get_standard_seed_qr(index).unwrap_or_else(|e| {
-                log::warn!("Could not get seed qr: {:?}", e);
+                log::error!("Could not get seed qr: {:?}", e);
                 Image::default()
             })
         }
@@ -209,29 +220,7 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let app_state = state.borrow();
 
             app_state.get_compact_seed_qr(index).unwrap_or_else(|e| {
-                log::warn!("Could not get compact seed qr: {:?}", e);
-                Image::default()
-            })
-        }
-    });
-
-    callbacks.on_get_npub_qr({
-        move |index| {
-            let app_state = state.borrow();
-
-            app_state.get_npub_qr(index).unwrap_or_else(|e| {
-                log::warn!("Could not get npub qr: {:?}", e);
-                Image::default()
-            })
-        }
-    });
-
-    callbacks.on_get_nsec_qr({
-        move |index| {
-            let app_state = state.borrow();
-
-            app_state.get_nsec_qr(index).unwrap_or_else(|e| {
-                log::warn!("Could not get nsec qr: {:?}", e);
+                log::error!("Could not get compact seed qr: {:?}", e);
                 Image::default()
             })
         }
@@ -242,7 +231,7 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let app_state = state.borrow();
 
             app_state.get_npub(index).map(SharedString::from).unwrap_or_else(|e| {
-                log::warn!("Could not get npub: {:?}", e);
+                log::error!("Could not get npub: {:?}", e);
                 SharedString::new()
             })
         }
@@ -253,9 +242,173 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
             let app_state = state.borrow();
 
             app_state.get_nsec(index).map(SharedString::from).unwrap_or_else(|e| {
-                log::warn!("Could not get nsec: {:?}", e);
+                log::error!("Could not get nsec: {:?}", e);
                 SharedString::new()
             })
         }
     });
+
+    callbacks.on_get_fingerprint({
+        move |index| {
+            let app_state = state.borrow();
+
+            app_state.get_fingerprint(index).map(SharedString::from).unwrap_or_else(|e| {
+                log::error!("Could not get fingerprint: {:?}", e);
+                SharedString::new()
+            })
+        }
+    });
+
+    callbacks.on_scan_qr({
+        move || {
+            let opts = ScanQrOptions {
+                header_title: tr::lookup_id(TrId::ImportItemTitle).into(),
+                message: tr::lookup_id(TrId::ImportItemContent).into(),
+                header_left_icon: String::from("chevron-left"),
+                ..ScanQrOptions::default()
+            };
+
+            let scan = match open_qr_scanner::<GuiPermissions>(opts) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    log::info!("Nothing returned from qr scanner");
+                    return;
+                }
+                Err(e) => {
+                    log::error!("Error while scanning QR: {:?}", e);
+                    return;
+                }
+            };
+
+            match scan {
+                ScanQrResult::Qr { data, .. } => {
+                    state.borrow_mut().handle_qr_input(data);
+                }
+                ScanQrResult::LeftClicked => (),
+                _ => {
+                    log::error!("QR scan failed: unexpected result type");
+                }
+            }
+        }
+    });
+
+    callbacks.on_generate_password({
+        move |index, length| {
+            let app_state = state.borrow();
+            let index = index.trim().parse::<u32>().unwrap_or(0);
+            let length = length.trim().parse::<u32>().unwrap_or(0);
+
+            app_state.generate_password(index, length).map(SharedString::from).unwrap_or_else(|e| {
+                log::error!("Could not generate password: {:?}", e);
+                SharedString::new()
+            })
+        }
+    });
+
+    callbacks.on_validate_seed_word({
+        move |word: SharedString| {
+            let word = word.as_str();
+            Language::English.word_list().contains(&word)
+        }
+    });
+
+    callbacks.on_validate_full_seed(move |words| words_to_mnemonic(words).is_ok());
+
+    callbacks.on_get_seed_fingerprint({
+        move |words| {
+            let app_state = state.borrow();
+            words_to_mnemonic(words)
+                .and_then(|mnemonic| app_state.get_seed_fingerprint(&mnemonic))
+                .map(SharedString::from)
+                .unwrap_or_else(|e| {
+                    log::error!("Could not get fingerprint from seed words: {:?}", e);
+                    SharedString::new()
+                })
+        }
+    });
+
+    callbacks.on_entropy_to_words({
+        move |entropy| {
+            entropy_to_words(entropy).unwrap_or_else(|e| {
+                log::error!("Could not convert entropy to mnemonic: {:?}", e);
+                ModelRc::new(VecModel::from(Vec::new()))
+            })
+        }
+    });
+
+    callbacks.on_words_to_entropy({
+        move |words| {
+            words_to_entropy(words).unwrap_or_else(|e| {
+                log::error!("Could not convert words to mnemonic: {:?}", e);
+                SharedString::new()
+            })
+        }
+    });
+
+    callbacks.on_nsec_to_npub({
+        move |nsec| {
+            nsec_to_npub(nsec).unwrap_or_else(|e| {
+                log::error!("Could not convert nsec to npub: {:?}", e);
+                SharedString::new()
+            })
+        }
+    });
+
+    callbacks.on_get_pending_nostr_key({
+        move || match state.borrow().pending_import {
+            Some(PendingImport::NostrKey(ref key)) => key.as_str().into(),
+            _ => SharedString::default(),
+        }
+    });
+
+    callbacks.on_get_pending_imported_seed({
+        move || match state.borrow().pending_import {
+            Some(PendingImport::ImportedSeed { ref entropy, ref fingerprint }) => ImportedSeedInfo {
+                entropy: entropy.as_str().into(),
+                fingerprint: fingerprint.as_str().into(),
+            },
+            _ => ImportedSeedInfo::default(),
+        }
+    });
+
+    callbacks.on_get_seed_details(move |index: i32| state.borrow().get_seed_view_by_index(index));
+
+    callbacks.on_set_pending_imported_seed({
+        move |entropy: SharedString, fingerprint: SharedString| {
+            state.borrow_mut().pending_import = Some(PendingImport::ImportedSeed {
+                entropy: entropy.to_string(),
+                fingerprint: fingerprint.to_string(),
+            });
+        }
+    });
+
+    callbacks.on_clear_pending_import({
+        move || {
+            state.borrow_mut().pending_import.take();
+        }
+    });
+}
+
+// Use inner functions to enable ? early returns
+fn words_to_mnemonic(words: ModelRc<SharedString>) -> Result<Mnemonic, VaultError> {
+    let mnemonic_str = words.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" ");
+    Ok(Mnemonic::parse_normalized(&mnemonic_str).context("Could not parse seed words")?)
+}
+fn words_to_entropy(words: ModelRc<SharedString>) -> Result<SharedString, VaultError> {
+    let mnemonic = words_to_mnemonic(words)?;
+    Ok(hex::encode_upper(mnemonic.to_entropy()).into())
+}
+
+fn entropy_to_words(entropy: SharedString) -> Result<ModelRc<SharedString>, VaultError> {
+    let entropy = hex::decode(entropy).context("Could not decode entropy")?;
+    let mnemonic =
+        Mnemonic::from_entropy(entropy.as_slice()).context("Could not convert entropy to mnemonic")?;
+    let words = mnemonic.words().map(SharedString::from).collect::<Vec<SharedString>>();
+    Ok(ModelRc::new(VecModel::from(words)))
+}
+
+fn nsec_to_npub(nsec: SharedString) -> Result<SharedString, VaultError> {
+    let secret = nostr::SecretKey::from_bech32(&nsec).context("Could not get nostr secret from nsec")?;
+    let key = nostr::Keys::new(secret);
+    Ok(key.public_key().to_bech32().map(SharedString::from).context("Could not build nostr npub")?)
 }

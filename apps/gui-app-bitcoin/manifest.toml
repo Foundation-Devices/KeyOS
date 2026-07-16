@@ -1,4 +1,25 @@
+manifestVersion = "0"
 appId = "0x426974636f696e2057616c6c65740000"
+# PSBT: sign a transaction
+[[qrMatchRules]]
+id = "psbt"
+idLocalizations = { en = "PSBT" }
+subRules = { ur = { UR = { ur_type = "psbt" } } }
+
+# UR bytes: ambiguous payload, could be a PSBT or multisig config
+[[qrMatchRules]]
+id = "psbt-or-multisig-config"
+idLocalizations = { en = "PSBT or Multisig Configuration" }
+subRules = { bytes = { UR = { ur_type = "bytes" } } }
+
+# Multisig configuration: several interoperable formats
+[[qrMatchRules]]
+id = "multisig-config"
+idLocalizations = { en = "Multisig Configuration" }
+[qrMatchRules.subRules]
+crypto-output = { UR = { ur_type = "crypto-output" } }
+config-qr = { QR = { regex_pattern = "(?im)^\\s*policy\\s*:\\s*\\d+\\s+of\\s+\\d+\\s*(?:#.*)?$" } }
+descriptor-qr = { QR = { regex_pattern = "sortedmulti\\s*\\(" } }
 
 [appName]
 en = "Bitcoin Wallet"
@@ -12,11 +33,11 @@ template = ["gui-app", "fs-generic"]
     "SendAccountUpdate",
     "PublishPsbt",
     "SendApplyPassphrase",
+    "SendPrimeFiatPreference",
 
     "SubscribeExchangeRate",
     "SubscribeSignPsbt",
     "SubscribeAccountUpdate",
-    "SubscribePairingEvent",
     "SubscribeConnectionStatus",
 ]
 "os/fs" = [

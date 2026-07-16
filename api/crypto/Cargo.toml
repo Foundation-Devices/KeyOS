@@ -14,8 +14,10 @@ num-derive = { workspace = true }
 num-traits = { workspace = true }
 rkyv = { workspace = true }
 server = { workspace = true }
+sha2 = { version = "0.10", features = ["compress"] }
 thiserror = "1.0"
 xous = { workspace = true }
+zeroize = { version = "1.8.1", default-features = false, features = ["zeroize_derive"] }
 
 [target.'cfg(keyos)'.dependencies]
 

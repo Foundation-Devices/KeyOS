@@ -30,7 +30,9 @@ impl BlockDevice for EmmcApi {
         self.write_blocks(block_idx, block_buf).map_err(|_| std::io::ErrorKind::Other.into())
     }
 
-    fn flush_blocks(&mut self) -> Result<(), std::io::Error> { Ok(()) }
+    fn flush_blocks(&mut self) -> Result<(), std::io::Error> {
+        self.flush().map_err(|_| std::io::ErrorKind::Other.into())
+    }
 }
 
 impl BlockDevice for PartiallyEncryptedEmmc {
@@ -72,5 +74,7 @@ impl BlockDevice for PartiallyEncryptedEmmc {
         })
     }
 
-    fn flush_blocks(&mut self) -> Result<(), std::io::Error> { Ok(()) }
+    fn flush_blocks(&mut self) -> Result<(), std::io::Error> {
+        self.emmc.flush().map_err(|_| std::io::ErrorKind::Other.into())
+    }
 }

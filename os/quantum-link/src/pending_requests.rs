@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use quantum_link::{messages::*, SendMessageError};
+use quantum_link::{foundation_api::backup::CreateMagicBackupResult, messages::*, SendMessageError};
 use server::ArchiveRequest;
 
 #[derive(Debug, Default)]
@@ -18,14 +18,35 @@ pub struct PendingRequests {
     pub timezone: Option<PendingRequest<EnvoyTimezone>>,
 
     // does not have an initiator
-    pub create_magic_backup_result: Option<ArchiveRequest<AwaitCreateMagicBackupResult>>,
+    pub create_magic_backup_result: Option<PendingRequest<AwaitCreateMagicBackupResult>>,
 }
 
 impl PendingRequests {
+    /// Force every pending request to expire immediately and fire its timeout
+    /// response on the next `cleanup_expired`. Used when BLE drops, since
+    /// heartbeat ticks stop while disconnected and the periodic cleanup path
+    /// would never reach the natural expiration.
+    pub fn expire_all_now(&mut self) {
+        fn expire<T: server::BlockingArchive>(opt: &mut Option<PendingRequest<T>>) {
+            if let Some(req) = opt.as_mut() {
+                req.expiration = Instant::now();
+            }
+        }
+        expire(&mut self.envoy_magic_backup_enabled);
+        expire(&mut self.update_check);
+        expire(&mut self.update_start);
+        expire(&mut self.backup_shard);
+        expire(&mut self.restore_shard);
+        expire(&mut self.restore_magic_backup);
+        expire(&mut self.prime_magic_backup_status_response);
+        expire(&mut self.timezone);
+        expire(&mut self.create_magic_backup_result);
+    }
+
     pub fn cleanup_expired(&mut self) {
         fn cleanup<T>(opt: &mut Option<PendingRequest<T>>, now: Instant)
         where
-            T: server::Archive,
+            T: server::BlockingArchive,
             T::Response: TimeoutResponse,
         {
             if let Some(req) = opt.take_if(|req| req.is_expired(now)) {
@@ -43,17 +64,18 @@ impl PendingRequests {
         cleanup(&mut self.restore_magic_backup, now);
         cleanup(&mut self.prime_magic_backup_status_response, now);
         cleanup(&mut self.timezone, now);
+        cleanup(&mut self.create_magic_backup_result, now);
     }
 }
 
-pub struct PendingRequest<T: server::Archive> {
+pub struct PendingRequest<T: server::BlockingArchive> {
     inner: ArchiveRequest<T>,
     expiration: Instant,
 }
 
 impl<T> std::fmt::Debug for PendingRequest<T>
 where
-    T: server::Archive + std::fmt::Debug,
+    T: server::BlockingArchive + std::fmt::Debug,
     T::Response: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -64,7 +86,7 @@ where
     }
 }
 
-impl<T: server::Archive> PendingRequest<T> {
+impl<T: server::BlockingArchive> PendingRequest<T> {
     pub fn new(request: ArchiveRequest<T>) -> Self
     where
         T: TimeoutDuration,
@@ -106,6 +128,10 @@ impl<T> TimeoutResponse for Result<T, SendMessageError> {
     fn timeout() -> Self { Err(SendMessageError::Timeout) }
 }
 
+impl TimeoutResponse for CreateMagicBackupResult {
+    fn timeout() -> Self { CreateMagicBackupResult::Error { error: String::from("timeout") } }
+}
+
 pub trait TimeoutDuration {
     const TIMEOUT: Duration = Duration::from_secs(4);
 }
@@ -124,6 +150,12 @@ impl TimeoutDuration for EnvoyMagicBackupEnabled {}
 impl TimeoutDuration for MagicBackupStatus {}
 impl TimeoutDuration for StartRestoreMagicBackup {}
 impl TimeoutDuration for EnvoyTimezone {}
+
+// Envoy must upload to cloud + ack over BLE; 90s covers slow uploads
+// before we give up and tell the user.
+impl TimeoutDuration for AwaitCreateMagicBackupResult {
+    const TIMEOUT: Duration = Duration::from_secs(90);
+}
 
 #[test]
 fn ty_name() {

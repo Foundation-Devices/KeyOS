@@ -8,30 +8,44 @@ use std::{
 
 use server::xous;
 
-pub struct Subscription<M> {
-    pub(crate) rx: async_channel::Receiver<xous::MessageEnvelope>,
-    pub(crate) decode: fn(xous::MessageEnvelope) -> M,
+use crate::implementation::CancelOnDrop;
+
+pin_project_lite::pin_project! {
+    /// Stream of decoded subscription events
+    pub struct Subscription<M> {
+        #[pin]
+        pub(crate) rx: async_channel::Receiver<xous::MessageEnvelope>,
+        pub(crate) decode: fn(xous::MessageEnvelope) -> M,
+        pub(crate) cancel: CancelOnDrop,
+    }
 }
 
 impl<M> Subscription<M> {
     pub async fn next(&mut self) -> Option<M> {
-        self.rx.recv().await.ok().map(|envelope| (self.decode)(envelope))
+        decode_next(self.rx.recv().await.ok(), self.decode, &mut self.cancel)
     }
 }
 
 impl<M> futures_lite::Stream for Subscription<M> {
     type Item = M;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let rx = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.rx) };
-        match rx.poll_next(cx) {
-            Poll::Ready(Some(envelope)) => Poll::Ready(Some((self.decode)(envelope))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        futures_lite::Stream::poll_next(this.rx, cx)
+            .map(|envelope| decode_next(envelope, *this.decode, this.cancel))
     }
 }
 
-impl<T> Clone for Subscription<T> {
-    fn clone(&self) -> Self { Self { rx: self.rx.clone(), decode: self.decode.clone() } }
+fn decode_next<M>(
+    envelope: Option<xous::MessageEnvelope>,
+    decode: fn(xous::MessageEnvelope) -> M,
+    cancel: &mut CancelOnDrop,
+) -> Option<M> {
+    envelope.map_or_else(
+        || {
+            cancel.disarm();
+            None
+        },
+        |envelope| Some(decode(envelope)),
+    )
 }

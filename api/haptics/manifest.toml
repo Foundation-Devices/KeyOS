@@ -1,2 +1,3 @@
+manifestVersion = "0"
 [servers."os/haptics"]
 Vibrate = { id = 0, type = "scalar" }

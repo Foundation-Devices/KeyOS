@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Drop-in TouchArea variant: clicked fires if release is inside or within `slop` of press.
+export component CapturingTouchArea {
+    in property <bool> enabled: true;
+    in property <length> slop: 24px;
+
+    out property <bool> captured;
+    out property <bool> pressed <=> inner.pressed;
+    out property <bool> has-hover <=> inner.has-hover;
+    out property <length> mouse-x <=> inner.mouse-x;
+    out property <length> mouse-y <=> inner.mouse-y;
+    out property <length> pressed-x <=> inner.pressed-x;
+    out property <length> pressed-y <=> inner.pressed-y;
+
+    callback clicked();
+
+    inner := TouchArea {
+        enabled: root.enabled;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.cancel) {
+                root.captured = false;
+                return;
+            }
+            if (e.button != PointerEventButton.left) {
+                return;
+            }
+            if (e.kind == PointerEventKind.down) {
+                root.captured = true;
+            } else if (e.kind == PointerEventKind.up) {
+                // Slint emits up on a TouchArea even when down was elsewhere; captured rejects those.
+                if (root.captured && ((self.mouse-x >= 0px && self.mouse-x <= self.width && self.mouse-y >= 0px && self.mouse-y <= self.height) || (abs(self.mouse-x - self.pressed-x) <= root.slop && abs(self.mouse-y - self.pressed-y) <= root.slop))) {
+                    root.clicked();
+                }
+                root.captured = false;
+            }
+        }
+    }
+}

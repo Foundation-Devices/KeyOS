@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundationdevices.com>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use tiny_skia::{ColorU8, Path, PathBuilder, PixmapMut, PremultipliedColorU8, Rect};
+use tiny_skia::{ColorU8, IntRect, Path, PathBuilder, PixmapMut, PixmapRef, PremultipliedColorU8, Rect};
 
 const ICON_SIZE: usize = 24;
 
@@ -169,5 +169,26 @@ pub fn drop_shadow(
                 .unwrap();
             }
         }
+    }
+}
+
+/// Copy a rectangular region of pixels from `source` into `target`. Both
+/// pixmaps must have identical dimensions. Pure blit -- no alpha blending.
+/// `region` is clamped to the source/target bounds; an empty intersection
+/// is a no-op.
+pub fn blit(target: &mut PixmapMut, source: PixmapRef, region: IntRect) {
+    let bounds = IntRect::from_xywh(0, 0, source.width(), source.height()).unwrap();
+    let Some(region) = region.intersect(&bounds) else { return };
+    if region.width() == target.width() && region.height() == target.height() {
+        target.data_mut()[..source.data().len()].copy_from_slice(source.data());
+        return;
+    }
+    let width = target.width() as i32;
+    let target_pixels = target.pixels_mut();
+    let source_pixels = source.pixels();
+    for row in region.top()..region.bottom() {
+        let from = (row * width + region.left()) as usize;
+        let to = (row * width + region.right()) as usize;
+        target_pixels[from..to].copy_from_slice(&source_pixels[from..to]);
     }
 }

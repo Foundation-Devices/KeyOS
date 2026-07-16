@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gui-app-crypto-perf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.22"
+crypto = { workspace = true }
+log = { workspace = true }
+log-server = { workspace = true }
+p256 = "0.13"
+secp256k1 = "0.29"
+security = { workspace = true }
+server = { workspace = true }
+sha2 = { workspace = true }
+slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
+
+[build-dependencies]
+slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

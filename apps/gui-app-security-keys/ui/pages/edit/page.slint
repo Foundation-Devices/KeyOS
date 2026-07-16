@@ -33,6 +33,9 @@ export component EditPage inherits Rectangle {
                     size: Size.sz8;
                     importance: Importance.normal;
                     clicked => {
+                        if (props.caller == EditCaller.register) {
+                            CB.create-new-key-cancelled();
+                        }
                         Navigate.backward();
                     }
                 }
@@ -121,6 +124,11 @@ export component EditPage inherits Rectangle {
                             if (props.caller == EditCaller.add) {
                                 Navigate.backward-animate(Animate.None);
                                 Navigate.main({ version: CardPageVersion.main }, { replace: true, animate: Animate.None });
+                            } else if (props.caller == EditCaller.register) {
+                                // Return to the Register presence modal with the newly
+                                // created key pre-selected in the dropdown.
+                                CB.auto-select-last-created();
+                                Navigate.backward();
                             } else {
                                 Navigate.backward();
                             }

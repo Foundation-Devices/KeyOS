@@ -39,7 +39,7 @@ impl<P: CheckedPermissions> BluetoothApi<P> {
     where
         P: MessageAllowed<GetBtAddr>,
     {
-        self.conn.send_archive(GetBtAddr)
+        self.conn.send_blocking_archive(GetBtAddr)
     }
 
     /// Enables the Bluetooth Low Energy (BLE) controller.
@@ -120,14 +120,14 @@ impl<P: CheckedPermissions> BluetoothApi<P> {
     where
         P: MessageAllowed<SendBle>,
     {
-        self.conn.send_archive(SendBle(data.to_vec()))
+        self.conn.send_blocking_archive(SendBle(data.to_vec()))
     }
 
     pub fn test_echo(&mut self, size: usize, character: u8) -> Result<(), BluetoothError>
     where
         P: MessageAllowed<TestEcho>,
     {
-        self.conn.send_archive(TestEcho { size, character })
+        self.conn.send_blocking_archive(TestEcho { size, character })
     }
 
     /// Returns the version of the BLE controller's bootloader and firmware.
@@ -135,7 +135,7 @@ impl<P: CheckedPermissions> BluetoothApi<P> {
     where
         P: MessageAllowed<GetBleVersionInfo>,
     {
-        self.conn.send_archive(GetBleVersionInfo)
+        self.conn.send_blocking_archive(GetBleVersionInfo)
     }
 }
 

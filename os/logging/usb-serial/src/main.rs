@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use server::{handle_archive_message, ArchiveHandler, MessageId, Server, ServerMessages};
+use server::{handle_blocking_archive_message, BlockingArchiveHandler, MessageId, Server, ServerMessages};
 use usb::device::{
     api::{EndpointDirection, EndpointType},
     messages::{EndpointProperties, SetupPacketCallback},
@@ -21,11 +21,11 @@ impl ServerMessages for SetupResponder {
     where
         Self: Sized,
     {
-        &[(SetupPacketCallback::ID, handle_archive_message::<SetupPacketCallback, _>)]
+        &[(SetupPacketCallback::ID, handle_blocking_archive_message::<SetupPacketCallback, _>)]
     }
 }
 impl Server for SetupResponder {}
-impl ArchiveHandler<SetupPacketCallback> for SetupResponder {
+impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
     fn handle(
         &mut self,
         SetupPacketCallback(msg): SetupPacketCallback,
@@ -60,7 +60,7 @@ fn out_drain_thread(mut ep_out: UsbEmulatedEndpoint) {
     let debug_command_buffer =
         xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W).expect("Could not allocate buffer");
     loop {
-        match ep_out.read_buf(usb_recv_buffer, usb_recv_buffer.len() as u16) {
+        match ep_out.read_buf(usb_recv_buffer, 512) {
             Ok(l) => {
                 // Only react to the last received command, so we
                 // don't freeze on too many commands coming in.
@@ -90,7 +90,7 @@ fn main() -> ! {
 
     let log_buffer =
         xous::map_memory(None, None, 0x4000, xous::MemoryFlags::W).expect("Could not allocate buffer");
-    let log_reader = log_server::LogReader::default();
+    let log_reader = log_server::reader::LogReader::default();
 
     let mut usb_api = UsbDeviceEmulation::default();
     let interface_num = usb_api.registered_interfaces() as u16;
@@ -107,6 +107,7 @@ fn main() -> ! {
                 ep_direction: EndpointDirection::In,
                 max_packet_len: 64,
                 interval: 16,
+                use_dma: false,
             }],
             &[
                 // Additional descriptors
@@ -147,12 +148,14 @@ fn main() -> ! {
                     ep_direction: EndpointDirection::Out,
                     max_packet_len: 512,
                     interval: 0,
+                    use_dma: false,
                 },
                 EndpointProperties {
                     ep_type: EndpointType::Bulk,
                     ep_direction: EndpointDirection::In,
                     max_packet_len: 512,
                     interval: 0,
+                    use_dma: true,
                 },
             ],
             &[],
@@ -167,7 +170,7 @@ fn main() -> ! {
         if len == 0 {
             len = log_reader.read(log_buffer);
         }
-        match ep_in.write_buf(log_buffer, len as u16) {
+        match ep_in.write_buf(log_buffer, len) {
             Ok(_) => len = 0,
             Err(e) => match e {
                 usb::error::UsbError::HostDisconnected => {

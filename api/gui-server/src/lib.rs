@@ -5,7 +5,7 @@ use {
     num_derive::FromPrimitive,
     num_traits::FromPrimitive,
     server::{AsScalar, CheckedConn, CheckedPermissions, FromScalar, MessageAllowed},
-    xous::{CID, PID, SID},
+    xous::{MemoryRange, CID, PID, SID},
 };
 
 pub mod consts;
@@ -15,7 +15,6 @@ pub mod navigation;
 #[cfg(not(keyos))]
 pub mod simulator;
 pub mod touch;
-pub mod utils;
 
 pub use error::GuiServerError;
 
@@ -38,54 +37,6 @@ macro_rules! use_api {
     };
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct DoubleBuffer {
-    pub disp_buf: usize,
-    pub work_buf: usize,
-}
-
-impl DoubleBuffer {
-    /// # Safety
-    ///
-    /// This function is unsafe because it operates on raw pointers.
-    pub unsafe fn fill_with(&mut self, fill: u8, len: usize) -> Result<(), xous::Error> {
-        let mut work_buf_range = xous::MemoryRange::new(self.work_buf, len)?;
-        let mut disp_buf_range = xous::MemoryRange::new(self.disp_buf, len)?;
-
-        work_buf_range.as_slice_mut().fill(fill);
-        disp_buf_range.as_slice_mut().fill(fill);
-
-        #[cfg(keyos)]
-        xous::flush_cache(work_buf_range, xous::CacheOperation::Clean)?;
-        #[cfg(keyos)]
-        xous::flush_cache(disp_buf_range, xous::CacheOperation::Clean)?;
-
-        Ok(())
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct DoubleBufferVMA {
-    pub disp_buf: VMALocation,
-    pub work_buf: VMALocation,
-}
-
-impl DoubleBufferVMA {
-    pub fn from_single(buf: VMALocation) -> DoubleBufferVMA {
-        DoubleBufferVMA { disp_buf: buf, work_buf: buf }
-    }
-
-    pub fn swap(&mut self) -> &mut DoubleBufferVMA {
-        *self = Self { disp_buf: self.work_buf, work_buf: self.disp_buf };
-        self
-    }
-
-    /// Returns the virtual memory portion of the double buffer.
-    pub fn to_double_buf_virt(&self) -> DoubleBuffer {
-        DoubleBuffer { disp_buf: self.disp_buf.virt_addr, work_buf: self.work_buf.virt_addr }
-    }
-}
-
 pub type AppName = String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -93,7 +44,6 @@ pub enum AppKind {
     App,
     ControlCenter,
     Keyboard,
-    Camera,
     Launcher,
     Settings,
     Onboarding,
@@ -107,106 +57,7 @@ pub struct RegisterApp {
     pub app_kind: AppKind,
     pub cid: CID,
     pub name: AppName,
-    pub bufs: DoubleBufferRegistration,
-}
-
-#[cfg(not(keyos))]
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct DoubleBufferRegistration {
-    pub work_buf_id: [u8; 32],
-    pub disp_buf_id: [u8; 32],
-    pub size: usize,
-}
-
-#[cfg(keyos)]
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct DoubleBufferRegistration {
-    pub work_buf_id: usize,
-    pub disp_buf_id: usize,
-    pub size: usize,
-}
-
-impl DoubleBufferRegistration {
-    #[cfg(not(keyos))]
-    pub fn into_bufs(self) -> Result<DoubleBuffer, GuiServerError> {
-        let disp_id = utils::str_from_u8_nul_utf8(&self.disp_buf_id)?;
-        let work_id = utils::str_from_u8_nul_utf8(&self.work_buf_id)?;
-        Ok(DoubleBuffer {
-            work_buf: utils::fb_id_to_addr(disp_id, self.size)?,
-            disp_buf: utils::fb_id_to_addr(work_id, self.size)?,
-        })
-    }
-
-    #[cfg(keyos)]
-    pub fn into_bufs(self) -> Result<DoubleBuffer, GuiServerError> {
-        Ok(DoubleBuffer { work_buf: self.work_buf_id, disp_buf: self.disp_buf_id })
-    }
-
-    #[cfg(keyos)]
-    pub fn create_mirrors(&self, gui_server_pid: PID) -> Result<DoubleBufferRegistration, GuiServerError> {
-        let work_buf_range = unsafe { xous::MemoryRange::new(self.work_buf_id, self.size)? };
-        let work_buf_mirror = xous::mirror_memory_to_pid(work_buf_range, gui_server_pid)?;
-
-        let disp_buf_range = unsafe { xous::MemoryRange::new(self.disp_buf_id, self.size)? };
-        let disp_buf_mirror = xous::mirror_memory_to_pid(disp_buf_range, gui_server_pid)?;
-
-        Ok(DoubleBufferRegistration {
-            work_buf_id: work_buf_mirror.as_ptr() as _,
-            disp_buf_id: disp_buf_mirror.as_ptr() as _,
-            size: self.size,
-        })
-    }
-
-    pub fn swap(&mut self) -> &mut Self {
-        *self = Self { disp_buf_id: self.work_buf_id, work_buf_id: self.disp_buf_id, size: self.size };
-        self
-    }
-}
-
-#[derive(Copy, Clone, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct VMALocation {
-    pub virt_addr: usize,
-    pub phys_addr: usize,
-}
-
-impl VMALocation {
-    pub fn new(virt_addr: usize, phys_addr: usize) -> VMALocation { Self { virt_addr, phys_addr } }
-
-    pub fn new_vma(virt_addr: usize) -> Result<VMALocation, GuiServerError> { utils::to_vma(virt_addr) }
-
-    pub fn shift_by(self, shift: usize) -> VMALocation {
-        VMALocation { virt_addr: self.virt_addr + shift, phys_addr: self.phys_addr + shift }
-    }
-
-    /// # Safety
-    ///
-    /// This function is unsafe because it operates on raw pointers.
-    pub unsafe fn fill_with(&mut self, fill: u32, len: usize) -> Result<(), xous::Error> {
-        let mut work_buf_range = xous::MemoryRange::new(self.virt_addr, len)?;
-        work_buf_range.as_slice_mut::<u32>().fill(fill);
-
-        #[cfg(keyos)]
-        xous::flush_cache(work_buf_range, xous::CacheOperation::Clean)?;
-
-        Ok(())
-    }
-}
-
-impl DoubleBuffer {
-    pub fn swap(&mut self) -> &mut DoubleBuffer {
-        *self = Self { disp_buf: self.work_buf, work_buf: self.disp_buf };
-        self
-    }
-
-    pub fn into_vma(self) -> Result<DoubleBufferVMA, GuiServerError> {
-        let work_buf = utils::to_vma(self.work_buf)?;
-        let disp_buf = utils::to_vma(self.disp_buf)?;
-
-        Ok(DoubleBufferVMA { work_buf, disp_buf })
-    }
-
-    #[cfg(keyos)]
-    pub fn work_buf(&self, _size: usize) -> usize { self.work_buf }
+    pub height: usize,
 }
 
 #[derive(Debug, Copy, Clone, FromPrimitive, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default)]
@@ -228,7 +79,7 @@ pub enum ModalStyle {
 }
 
 /// Reduced GUI API, usable by non-gui daemons
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct GuiApiLight<P: CheckedPermissions> {
     conn: CheckedConn<P>,
 }
@@ -237,20 +88,8 @@ pub struct GuiApiLight<P: CheckedPermissions> {
 #[derive(Debug)]
 pub struct GuiApi<P: CheckedPermissions> {
     inner: GuiApiLight<P>,
+    cid_self: CID,
     sid: SID,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Vsync {
-    /// Always wait for the LCDC to give back the backbuffer before returning from this call. This prevents
-    /// visual artifacts because the app can be sure it doesn't write to in-use buffers.
-    Wait = 0,
-    /// Never wait for buffer swaps. Can cause artifacting.
-    DontWait = 1,
-    /// If the previous swap is hasn't been rendered at least once (i.e. the app is calling swap faster than
-    /// the LCDC can consume it), wait before returning. This is a middle-ground between Wait and
-    /// DontWait; it is equivalent to Wait if the app is fast, and to DontWait if it's slow.
-    CapFPS = 2,
 }
 
 impl<P: CheckedPermissions> GuiApiLight<P> {
@@ -286,6 +125,46 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         Ok(self.conn.try_send_blocking_scalar(msg::Shutdown { reboot: true })?)
     }
 
+    /// Closes the app window of the given PID.
+    /// Used by the launcher, switcher, and usb-debug protocol to gracefully close apps.
+    pub fn close_app(&self, pid: PID) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::CloseApp>,
+    {
+        self.conn.try_send_scalar(msg::CloseApp { pid: pid.get() as usize })?;
+        Ok(())
+    }
+
+    /// Captures the current composited screen as raw pixel data.
+    /// Returns a `DropDeallocate` of length `FB_SIZE` (SCREEN_WIDTH * SCREEN_HEIGHT * 4)
+    /// that auto-unmaps on drop. Dereferences to `MemoryRange` / `&[u8]`.
+    pub fn capture_screen(&self) -> Result<xous::DropDeallocate, GuiServerError>
+    where
+        P: MessageAllowed<msg::CaptureScreen>,
+    {
+        let mem = xous::map_memory(None, None, consts::FB_SIZE, xous::MemoryFlags::W)?;
+        self.conn.lend_mut(msg::CaptureScreen(mem));
+        Ok(xous::DropDeallocate::new(mem))
+    }
+
+    /// Injects a touch event as if it came from the hardware touch controller.
+    pub fn inject_touch(&self, touch: touch::Touch) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::InjectTouch>,
+    {
+        self.conn.try_send_scalar(msg::InjectTouch(touch))?;
+        Ok(())
+    }
+
+    /// Injects a key press or release event into the active app.
+    pub fn inject_key(&self, is_pressed: bool, key: Key) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::InjectKey>,
+    {
+        self.conn.try_send_scalar(msg::InjectKey { is_pressed, key })?;
+        Ok(())
+    }
+
     pub fn update_kiosk_policy(&self, policy: msg::UpdateKioskPolicy) -> Result<(), GuiServerError>
     where
         P: MessageAllowed<msg::UpdateKioskPolicy>,
@@ -296,56 +175,33 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
 }
 
 impl<P: CheckedPermissions> GuiApi<P> {
-    pub fn register(
-        app_kind: AppKind,
-        name: &str,
-        fb_size: usize,
-    ) -> Result<(Self, DoubleBufferRegistration), GuiServerError>
+    pub fn register(app_kind: AppKind, name: &str, height: usize) -> Result<Self, GuiServerError>
     where
         P: MessageAllowed<msg::RegisterAppMessage>,
     {
-        let bufs = utils::allocate_double_framebuffer(fb_size).expect("allocate app double framebuffer");
-        let sid = xous::create_server()?.to_array();
-        let api = Self { inner: GuiApiLight::default(), sid: sid.into() };
+        let sid = xous::create_server()?;
+        let cid_self = xous::connect(sid)?;
+        let api = Self { inner: GuiApiLight::default(), sid, cid_self };
         let gui_server_pid = api.inner.conn.get_remote_pid();
 
         let gui_server_cid = xous::connect_for_process(gui_server_pid, api.sid)?;
         xous::allow_messages_on_connection(gui_server_pid, gui_server_cid, 0..64)?;
 
-        let registration = RegisterApp {
-            app_kind,
-            cid: gui_server_cid,
-            name: name.into(),
-            #[cfg(keyos)]
-            bufs: bufs.create_mirrors(gui_server_pid)?,
-            #[cfg(not(keyos))]
-            bufs: bufs.clone(),
-        };
+        let registration = RegisterApp { app_kind, cid: gui_server_cid, name: name.into(), height };
 
-        api.inner.conn.send_archive(msg::RegisterAppMessage(registration))?;
+        api.inner.conn.send_blocking_archive(msg::RegisterAppMessage(registration))?;
 
-        Ok((api, bufs))
+        Ok(api)
     }
 
     pub fn sid(&self) -> SID { self.sid }
 
-    /// Swap display buffers. Returns
-    /// - Ok(Some(timestamp)) if everything went well, the timestamp being Ticktimer::elapsed_ms() when the
-    ///   buffer was last sent to the LCDC
-    /// - Ok(None) if the message was passed, but no actual swap took place,
-    /// - Err() in case of a fatal error
-    pub fn swap_buffers(&self, vsync: Vsync) -> Result<Option<u64>, GuiServerError>
+    /// Submit a frame for display.
+    pub fn submit_frame(&self, buffer: MemoryRange) -> Result<(), GuiServerError>
     where
-        P: MessageAllowed<msg::SwapBuffers>,
+        P: MessageAllowed<msg::SubmitFrame>,
     {
-        Ok(self.conn.try_send_blocking_scalar(msg::SwapBuffers { vsync })?)
-    }
-
-    pub fn is_camera_ready(&self) -> Result<bool, GuiServerError>
-    where
-        P: MessageAllowed<msg::IsCameraReady>,
-    {
-        Ok(self.conn.try_send_blocking_scalar(msg::IsCameraReady)?)
+        Ok(self.conn.try_send_move(msg::SubmitFrame { buffer })?)
     }
 
     pub fn show_camera(&self, y_pos: u16) -> Result<(), GuiServerError>
@@ -364,11 +220,11 @@ impl<P: CheckedPermissions> GuiApi<P> {
         Ok(())
     }
 
-    pub fn update_keyboard(&self, kind: KeyboardKind, request_caps: bool) -> Result<(), GuiServerError>
+    pub fn update_keyboard(&self, msg: msg::UpdateKeyboard) -> Result<(), GuiServerError>
     where
         P: MessageAllowed<msg::UpdateKeyboard>,
     {
-        self.conn.try_send_scalar(msg::UpdateKeyboard { kind, request_caps })?;
+        self.conn.try_send_archive(msg)?;
         Ok(())
     }
 
@@ -386,6 +242,13 @@ impl<P: CheckedPermissions> GuiApi<P> {
     {
         self.conn.try_send_scalar(msg::LoginSuccess)?;
         Ok(())
+    }
+
+    pub fn wake_event_loop(&self) {
+        let msg = xous::Message::new_scalar(InputMessage::Noop as usize, 0, 0, 0, 0);
+        if let Err(e) = xous::send_message(self.cid_self, msg) {
+            log::error!("Failed to send wake event to self: {e:?}");
+        }
     }
 
     pub fn request_redraw(&self) -> Result<(), GuiServerError>
@@ -430,18 +293,6 @@ impl<P: CheckedPermissions> GuiApi<P> {
         Ok(())
     }
 
-    /// Closes the app window of the given PID.
-    /// Used by the app launcher when an app is crashed to perform necessary cleanups.
-    ///
-    /// Can't be called by other apps that are not the launcher.
-    pub fn close_app(&self, pid: PID) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<msg::CloseApp>,
-    {
-        self.conn.try_send_scalar(msg::CloseApp { pid: pid.get() as usize })?;
-        Ok(())
-    }
-
     pub fn animate_next_frame(&self, animation_kind: NextFrameAnimationKind) -> Result<(), GuiServerError>
     where
         P: MessageAllowed<msg::AnimateNextFrame>,
@@ -470,16 +321,18 @@ pub enum InputMessage {
     /// The app is being navigated away from and is no longer in modal focus.
     NavigationCancelled,
 
-    /// The apps that block on input can unblock themselves by requesting a redraw from the `gui-server`.
-    /// The `gui-server` will send this input message to an app that requested a redraw to unblock
-    /// its event loop thread.
-    RedrawRequested,
+    /// The apps that block on input can unblock themselves by sending this message to themselves.
+    Noop,
 
     /// The app is brought into the foreground.
     Visible,
 
     /// The app is getting minimized and hidden in the background.
     Hidden,
+
+    /// A new framebuffer the app can draw to.
+    /// Can be the same as a previous buffer or a completely new one.
+    FrameBuffer,
 
     Custom1,
     Custom2,
@@ -488,6 +341,11 @@ pub enum InputMessage {
 
     /// The app should exit gracefully after receiving this.
     CloseRequested,
+
+    /// Mouse/trackpad scroll in the emulator (hosted mode only).
+    /// Scalar args: arg1 = x (physical px), arg2 = y (physical px),
+    ///              arg3 = delta_x (f32 bits), arg4 = delta_y (f32 bits).
+    Scroll,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -497,6 +355,8 @@ pub enum Key {
     Delete,
     CursorLeft,
     CursorRight,
+    Enter,
+    Tab,
 }
 
 impl server::AsScalar<2> for Key {
@@ -507,6 +367,8 @@ impl server::AsScalar<2> for Key {
             Key::Delete => [2, 0],
             Key::CursorLeft => [3, 0],
             Key::CursorRight => [4, 0],
+            Key::Enter => [5, 0],
+            Key::Tab => [6, 0],
         }
     }
 }
@@ -518,13 +380,19 @@ impl server::FromScalar<2> for Key {
             2 => Key::Delete,
             3 => Key::CursorLeft,
             4 => Key::CursorRight,
+            5 => Key::Enter,
+            6 => Key::Tab,
             _ => Key::Char(value[1] as _),
         }
     }
 }
 
 impl<P: CheckedPermissions> Drop for GuiApi<P> {
-    fn drop(&mut self) { xous::destroy_server(self.sid).unwrap(); }
+    fn drop(&mut self) {
+        if let Err(e) = xous::destroy_server(self.sid) {
+            log::error!("Error destroying gui api event server: {e:?}");
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, FromPrimitive, Default)]
@@ -536,7 +404,19 @@ pub enum NextFrameAnimationKind {
     SlideOutRight,
 }
 
-#[derive(Debug, Copy, Clone, FromPrimitive, Default, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    FromPrimitive,
+    Default,
+    PartialEq,
+    Eq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub enum KeyboardKind {
     #[default]
     Alphanumeric = 0,
@@ -552,4 +432,10 @@ impl FromScalar<1> for KeyboardKind {
 
 impl AsScalar<1> for KeyboardKind {
     fn as_scalar(&self) -> [u32; 1] { [*self as u32] }
+}
+
+impl From<&ArchivedKeyboardKind> for KeyboardKind {
+    fn from(archived: &ArchivedKeyboardKind) -> Self {
+        rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap()
+    }
 }

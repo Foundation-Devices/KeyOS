@@ -5,12 +5,14 @@ use std::sync::Arc;
 
 use crate::{
     archive_async_response_handler, archive_event_handler, lend_mut, scalar_async_response_handler,
-    scalar_event_handler, send_archive, send_archive_async, send_archive_buf, send_blocking_scalar,
-    send_move, send_move_nowait, send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive,
-    subscribe_scalar, try_send_archive, try_send_archive_buf, try_send_blocking_scalar, try_send_scalar,
-    try_send_scalar_async, Archive, ArchiveEventHandler, ArchiveResponseHandler, ArchiveSubscription,
-    BlockingScalar, BlockingScalarResponseHandler, LendMut, Move, Scalar, ScalarEventHandler,
-    ScalarSubscription, Server, ServerContext,
+    scalar_event_handler, send_archive, send_archive_nowait, send_blocking_archive,
+    send_blocking_archive_async, send_blocking_archive_buf, send_blocking_scalar, send_move,
+    send_move_nowait, send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive,
+    subscribe_scalar, try_send_blocking_archive, try_send_blocking_archive_buf, try_send_blocking_scalar,
+    try_send_move, try_send_scalar, try_send_scalar_async, Archive, ArchiveEventHandler,
+    ArchiveResponseHandler, ArchiveSubscription, BlockingArchive, BlockingScalar,
+    BlockingScalarResponseHandler, LendMut, Move, Scalar, ScalarEventHandler, ScalarSubscription, Server,
+    ServerContext,
 };
 
 /// A connection to a running server.
@@ -183,8 +185,65 @@ impl<P: CheckedPermissions> CheckedConn<P> {
 
     // ==================== Archive Messages ====================
 
-    /// Send an [`Archive`] message and block for response.
-    pub fn send_archive<M>(&self, msg: M) -> M::Response
+    /// Send an [`BlockingArchive`] message and block for response.
+    pub fn send_blocking_archive<M>(&self, msg: M) -> M::Response
+    where
+        M: BlockingArchive,
+        P: MessageAllowed<M>,
+    {
+        send_blocking_archive(self.cid.0, msg)
+    }
+
+    /// Send an [`BlockingArchive`] message and block for response.
+    /// Retains the error channel
+    pub fn try_send_blocking_archive<M>(&self, msg: M) -> Result<M::Response, xous::Error>
+    where
+        M: BlockingArchive,
+        P: MessageAllowed<M>,
+    {
+        try_send_blocking_archive(self.cid.0, msg).map_err(|e| e.into_inner().into_xous())
+    }
+
+    /// Send an [`BlockingArchive`] message but reuses the `Buffer`.
+    pub fn send_blocking_archive_buf<M>(&self, buf: &mut xous_ipc::Buffer, msg: M) -> M::Response
+    where
+        M: BlockingArchive,
+        P: MessageAllowed<M>,
+    {
+        send_blocking_archive_buf(self.cid.0, buf, msg)
+    }
+
+    /// Send an [`BlockingArchive`] message but reuses the `Buffer`.
+    /// Preserves the error channel
+    pub fn try_send_blocking_archive_buf<M>(
+        &self,
+        buf: &mut xous_ipc::Buffer,
+        msg: M,
+    ) -> Result<M::Response, xous::Error>
+    where
+        M: BlockingArchive,
+        P: MessageAllowed<M>,
+    {
+        try_send_blocking_archive_buf(self.cid.0, buf, msg).map_err(|e| e.into_inner().into_xous())
+    }
+
+    /// Send an [`BlockingArchive`] message without blocking (for server-to-server async).
+    pub fn send_blocking_archive_async<M, SR>(&self, msg: M, context: &mut ServerContext<SR>)
+    where
+        M: BlockingArchive,
+        P: MessageAllowed<M>,
+        SR: ArchiveResponseHandler<M::Response>,
+    {
+        let msg_id = send_blocking_archive_async(self.cid.0, msg, context.sid);
+        context.handlers.push((msg_id, archive_async_response_handler::<M, SR>));
+    }
+
+    // ==================== Archive Messages (fire-and-forget) ====================
+
+    /// Send a [`Archive`] message, retaining the error. Blocks if the message queue is full.
+    ///
+    /// Warning: Cannot be used in an IRQ handler context.
+    pub fn try_send_archive<M>(&self, msg: M) -> Result<(), xous::Error>
     where
         M: Archive,
         P: MessageAllowed<M>,
@@ -192,83 +251,26 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         send_archive(self.cid.0, msg)
     }
 
-    /// Send an [`Archive`] message and block for response.
-    /// Retains the error channel
-    pub fn try_send_archive<M>(&self, msg: M) -> Result<M::Response, xous::Error>
-    where
-        M: Archive,
-        P: MessageAllowed<M>,
-    {
-        try_send_archive(self.cid.0, msg).map_err(|e| e.into_inner().into_xous())
-    }
-
-    /// Send an [`Archive`] message but reuses the `Buffer`.
-    pub fn send_archive_buf<M>(&self, buf: &mut xous_ipc::Buffer, msg: M) -> M::Response
-    where
-        M: Archive,
-        P: MessageAllowed<M>,
-    {
-        send_archive_buf(self.cid.0, buf, msg)
-    }
-
-    /// Send an [`Archive`] message but reuses the `Buffer`.
-    /// Preserves the error channel
-    pub fn try_send_archive_buf<M>(
-        &self,
-        buf: &mut xous_ipc::Buffer,
-        msg: M,
-    ) -> Result<M::Response, xous::Error>
-    where
-        M: Archive,
-        P: MessageAllowed<M>,
-    {
-        try_send_archive_buf(self.cid.0, buf, msg).map_err(|e| e.into_inner().into_xous())
-    }
-
-    /// Send an [`Archive`] message without blocking (for server-to-server async).
-    pub fn send_archive_async<M, SR>(&self, msg: M, context: &mut ServerContext<SR>)
-    where
-        M: Archive,
-        P: MessageAllowed<M>,
-        SR: ArchiveResponseHandler<M::Response>,
-    {
-        let msg_id = send_archive_async(self.cid.0, msg, context.sid);
-        context.handlers.push((msg_id, archive_async_response_handler::<M, SR>));
-    }
-
-    // ==================== Move Messages (fire-and-forget) ====================
-
-    /// Send a [`Move`] message, retaining the error. Blocks if the message queue is full.
-    ///
-    /// Warning: Cannot be used in an IRQ handler context.
-    pub fn try_send_move<M>(&self, msg: M) -> Result<(), xous::Error>
-    where
-        M: Move,
-        P: MessageAllowed<M>,
-    {
-        send_move(self.cid.0, msg)
-    }
-
-    /// Send a [`Move`] message. Blocks if the message queue is full.
+    /// Send a [`Archive`] message. Blocks if the message queue is full.
     ///
     /// Warning: Cannot be used in an IRQ handler context.
     #[track_caller]
-    pub fn send_move<M>(&self, msg: M)
+    pub fn send_archive<M>(&self, msg: M)
     where
-        M: Move,
+        M: Archive,
         P: MessageAllowed<M>,
     {
-        send_move(self.cid.0, msg).unwrap()
+        send_archive(self.cid.0, msg).unwrap()
     }
 
-    /// Send a [`Move`] message. Does not block if the message queue is full.
+    /// Send a [`Archive`] message. Does not block if the message queue is full.
     /// Can be used in an IRQ handler context.
-    pub fn send_move_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
+    pub fn send_archive_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
     where
-        M: Move,
+        M: Archive,
         P: MessageAllowed<M>,
     {
-        send_move_nowait(self.cid.0, msg)
+        send_archive_nowait(self.cid.0, msg)
     }
 
     // ==================== LendMut Messages ====================
@@ -280,6 +282,40 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         P: MessageAllowed<M>,
     {
         lend_mut(self.cid.0, msg)
+    }
+
+    // ==================== Move Messages ====================
+
+    /// Send a [`Move`] message, retaining the error. Blocks if the message queue is full.
+    ///
+    /// Warning: Cannot be used in an IRQ handler context.
+    pub fn send_move<M>(&self, msg: M)
+    where
+        M: Move,
+        P: MessageAllowed<M>,
+    {
+        send_move(self.cid.0, msg)
+    }
+
+    /// Send a [`Move`] message, retaining the error. Blocks if the message queue is full.
+    ///
+    /// Warning: Cannot be used in an IRQ handler context.
+    pub fn try_send_move<M>(&self, msg: M) -> Result<(), xous::Error>
+    where
+        M: Move,
+        P: MessageAllowed<M>,
+    {
+        try_send_move(self.cid.0, msg).map_err(|e| e.into_inner())
+    }
+
+    /// Send a [`Move`] message. Does not block if the message queue is full.
+    /// Can be used in an IRQ handler context.
+    pub fn send_move_nowait<M>(&self, msg: M) -> Result<(), xous::Error>
+    where
+        M: Move,
+        P: MessageAllowed<M>,
+    {
+        send_move_nowait(self.cid.0, msg).map_err(|e| e.into_inner())
     }
 
     // ==================== Subscriptions ====================

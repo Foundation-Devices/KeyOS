@@ -3,7 +3,7 @@
 
 use log::{debug, error, info};
 use server::{
-    ArchiveEventSubscriber, ArchiveEventSubscriptionHandler, ArchiveHandler, BlockingScalar,
+    ArchiveEventSubscriber, ArchiveEventSubscriptionHandler, BlockingArchiveHandler, BlockingScalar,
     BlockingScalarHandler, MessageId as _, ScalarHandler, Server, ServerContext,
 };
 use xous::{AppId, SystemEvent, PID};
@@ -13,7 +13,7 @@ mod registry;
 mod system_messages;
 
 use app_manager::{AppEvent, LaunchError};
-use app_manager::{GetAppName, LaunchApp, LaunchAppBlocking, SubscribeAppEvents};
+use app_manager::{GetAppName, GetQrMatchRules, LaunchApp, LaunchAppBlocking, SubscribeAppEvents};
 use system_messages::{ChildCrashed, Disconnected};
 
 use crate::launch::launch_app;
@@ -31,14 +31,26 @@ pub struct AppManagerServer {
 
 impl Default for AppManagerServer {
     fn default() -> Self {
-        let panic_message_buf = xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W)
-            .expect("Failed to allocate panic message buffer");
+        let panic_message_buf =
+            xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
+                .expect("Failed to allocate panic message buffer");
 
         Self {
             app_event_subscribers: Vec::default(),
             app_registry: AppRegistry::default(),
             panic_message_buf,
         }
+    }
+}
+
+impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {
+    fn handle(
+        &mut self,
+        _msg: GetQrMatchRules,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> Vec<app_manager::AppQrMatchRules> {
+        self.app_registry.qr_match_rules()
     }
 }
 
@@ -99,7 +111,7 @@ impl ScalarHandler<LaunchApp> for AppManagerServer {
     }
 }
 
-impl ArchiveHandler<GetAppName> for AppManagerServer {
+impl BlockingArchiveHandler<GetAppName> for AppManagerServer {
     fn handle(
         &mut self,
         msg: GetAppName,
@@ -173,20 +185,12 @@ impl AppManagerServer {
     }
 
     fn read_panic_message(&mut self, child_pid: PID) -> Option<String> {
-        let panic_message = log_server::LogReader::default().read_last_panic_message(self.panic_message_buf);
-        if panic_message != 0 {
-            let panic_message_slice = self.panic_message_buf.as_slice::<u8>();
-            let pid = panic_message_slice[0];
-            if pid == child_pid.get() {
-                let panic_message = std::str::from_utf8(&panic_message_slice[1..panic_message])
-                    .unwrap_or("<panic message utf8 error>");
-                Some(panic_message.to_string())
-            } else {
-                log::warn!("Panic message PID mismatch: expected {child_pid}, got {pid}");
-                None
+        if let Ok((panic_pid, panic_size)) = xous::get_panic_message(self.panic_message_buf) {
+            if xous::PID::new(panic_pid) == Some(child_pid) {
+                return String::from_utf8(self.panic_message_buf.as_slice()[..panic_size].to_owned()).ok();
             }
-        } else {
-            None
+            log::debug!("Panic message PID mismatch: expected {child_pid}, got {panic_pid}");
         }
+        None
     }
 }

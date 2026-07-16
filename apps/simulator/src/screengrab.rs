@@ -52,8 +52,11 @@ pub fn screenshot(grab_entire_device: bool) -> anyhow::Result<()> {
 
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
-    let frame = gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default()
-        .device_frame(grab_entire_device)?;
+    let frame = if grab_entire_device {
+        gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default().device_frame()?
+    } else {
+        gui_server_api::GuiApiLight::<GuiPermissions>::default().capture_screen()?.as_slice().to_vec()
+    };
 
     let Some(screen) = RgbaImage::from_vec(width as u32, height as u32, frame) else {
         anyhow::bail!("Could not convert screenshot to RgbaImage")
@@ -129,8 +132,11 @@ fn start_recording(grab_entire_device: bool) -> anyhow::Result<(Option<GifEncode
 fn record_frame(encoder: &mut GifEncoder<File>, grab_entire_device: bool) -> anyhow::Result<()> {
     let (width, height) = get_frame_dimensions(grab_entire_device);
 
-    let frame = gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default()
-        .device_frame(grab_entire_device)?;
+    let frame = if grab_entire_device {
+        gui_server_api::simulator::SimulatorApi::<GuiPermissions>::default().device_frame()?
+    } else {
+        gui_server_api::GuiApiLight::<GuiPermissions>::default().capture_screen()?.as_slice().to_vec()
+    };
 
     let Some(screen) = RgbaImage::from_vec(width, height, frame) else {
         anyhow::bail!("Could not convert recording screenshot to RgbaImage")

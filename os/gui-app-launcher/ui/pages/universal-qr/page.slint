@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { BasePage, JumboIconPageBody, NavHeader, Dropdown, WrappedIcon, HeadingMd, TextMd, Button, DropdownOverlay, ButtonSection } from "@ui/widgets.slint";
+import { Size } from "@ui/theme.slint";
+import { LauncherCallbacks as CB, State } from "../../launcher-callbacks.slint";
+import { UniversalQrProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component UniversalQrPage inherits BasePage {
+    in property <UniversalQrProps> props;
+
+    VerticalLayout {
+        NavHeader {
+            left-icon: "chevron-left";
+
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        VerticalLayout {
+            alignment: space-between;
+            padding-left: Size.sz4;
+            padding-right: Size.sz4;
+            padding-bottom: Size.sz4;
+
+            VerticalLayout {
+                spacing: Size.sz10;
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        inner-icon: "scan-qr";
+                    }
+                }
+
+                HeadingMd {
+                    horizontal-alignment: center;
+                    text: TR2.lookup(TrId.SelectAppHeader);
+                }
+
+                VerticalLayout {
+                    spacing: Size.sz3;
+                    padding-right: Size.sz3;
+                    padding-left: Size.sz3;
+
+                    TextMd {
+                        horizontal-alignment: center;
+                        text: TR2.lookup(TrId.SelectAppContent);
+                    }
+
+                    app-picker := Dropdown {
+                        placeholder: TR2.lookup(TrId.SelectAppSelectAnApp);
+                        placeholder-icon: "grid-view";
+                        selected-index: -1;
+                        model: State.dropdown-model;
+                    }
+                }
+            }
+
+            ButtonSection {
+                alignment: end;
+
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonContinue);
+                    importance: primary;
+                    enabled: app-picker.selected-index != -1;
+
+                    clicked => {
+                        CB.universal-qr-continue(app-picker.selected-value);
+                    }
+                }
+            }
+        }
+    }
+
+    if app-picker.showing: DropdownOverlay {
+        dropdown-x: app-picker.absolute-position.x;
+        dropdown-y: app-picker.absolute-position.y - 24px;
+        dropdown-width: app-picker.width;
+        model: app-picker.model;
+        selected-index: app-picker.selected-index;
+
+        item-selected(index, value) => {
+            app-picker.selected-index = index;
+            app-picker.selected-value = value;
+            app-picker.showing = false;
+        }
+
+        touched-off => {
+            app-picker.showing = false;
+        }
+    }
+}

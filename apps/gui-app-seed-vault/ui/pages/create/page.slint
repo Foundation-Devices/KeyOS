@@ -7,7 +7,7 @@ import { Palette, Size, Importance, CallbackResult, ResultLevel } from "@ui/them
 import { IconButton, AppHeader, BasePage, PageBody, ScrollBody,
          ContentSection, ErrorModal, Dropdown, DropdownOverlay,
          TitledInput, ButtonSection, Button, TextMd,
-         Icon, ShowHide } from "@ui/widgets.slint";
+         ShowHide, Link, QrOverlay } from "@ui/widgets.slint";
 import { CreateProps } from "./props.slint";
 import { Navigate } from "../../gen/navigate.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
@@ -17,25 +17,29 @@ export component CreatePage inherits BasePage {
 
     property <SeedView> new-seed;
     property <CallbackResult> result: { level: ResultLevel.info, success: true, text: "", title: "" };
-    property <bool> has-errors: type-picker.selected-index == -1 || label-error || (CB.is-indexed-seed(new-seed.seed-type) && index-error) || (new-seed.seed-type == SeedViewType.password && password-error);
+    property <bool> has-errors: type-picker.selected-index == -1 || label-error || (CB.index-required(new-seed.seed-type) && index-error);
     property <bool> label-error: true;
     property <string> index-message: "";
     property <bool> index-error: index-message != "";
-    property <bool> password-error: true;
-    property <bool> password-has-focus: password-input.has-focus;
     property <string> next-available-index: "";
+    property <string> password-length: "21";
+    property <string> learn-more-url: "";
 
-    // Trigger auto-scroll when password input gains focus
-    changed password-has-focus => {
-        if (password-has-focus && new-seed.seed-type == SeedViewType.password) {
-            content-scroll.viewport-y = -150px;
+    property <bool> index-input-has-focus: false;
+    property <bool> length-input-has-focus: false;
+    property <bool> generated-inputs-have-focus: index-input-has-focus || length-input-has-focus;
+
+    // Trigger auto-scroll when index/length inputs gain focus
+    changed generated-inputs-have-focus => {
+        if (generated-inputs-have-focus && new-seed.seed-type == SeedViewType.password-generated) {
+            content-scroll.viewport-y = -350px;
         }
     }
 
     property <[SeedViewType]> seed-view-types: [
         SeedViewType.bitcoin-12,
         SeedViewType.bitcoin-24,
-        SeedViewType.password,
+        SeedViewType.password-generated,
         SeedViewType.nostr-key,
     ];
 
@@ -84,8 +88,8 @@ export component CreatePage inherits BasePage {
                                 icon: "acorn",
                             },
                             {
-                                label: CB.get-seed-name(SeedViewType.password),
-                                value: "password",
+                                label: CB.get-seed-name(SeedViewType.password-generated),
+                                value: "password-generated",
                                 icon: "pin",
                             },
                             {
@@ -116,36 +120,7 @@ export component CreatePage inherits BasePage {
                         }
                     }
 
-                    if (type-picker.selected-index != -1 && CB.is-indexed-seed(new-seed.seed-type)): ShowHide {
-                        text: TR2.lookup(TrId.CreateItemAdvancedOptions);
-
-                        TitledInput {
-                            title: TR2.lookup(TrId.CreateItemIndex);
-                            text: new-seed.indexed-seed.index;
-                            message: index-message;
-                            has-notice: self.message != "" || self.text == "";
-                            input-type: InputType.number;
-                            bounded-number: true;
-                            minimum: "0";
-                            maximum: "4294967295";  // Bitcoin indices are u32s, so bound to u32 max
-
-                            edited(text) => {
-                                new-seed.indexed-seed.index = text;
-                                self.message = CB.validate-new-index(new-seed.indexed-seed.index, new-seed.seed-type);
-                                self.has-notice = self.message != "" || text == "";  // TODO: maybe add error copy for empty index, it's unlikely though
-                                index-error = self.has-notice;
-                            }
-
-                            accepted(text) => {
-                                if (text == "") {
-                                    self.text = next-available-index;
-                                    self.edited(self.text);
-                                }
-                            }
-                        }
-                    }
-
-                    if (type-picker.selected-index != -1 && new-seed.seed-type == SeedViewType.password): TitledInput {
+                    if (type-picker.selected-index != -1 && new-seed.seed-type == SeedViewType.password-generated): TitledInput {
                         title: TR2.lookup(TrId.CreateItemAccount);
                         placeholder: TR2.lookup(TrId.CreateItemAccountFillerText);
                         text: new-seed.password.account;
@@ -156,31 +131,86 @@ export component CreatePage inherits BasePage {
                         }
                     }
 
-                    password-input := TitledInput {
-                        visible: type-picker.selected-index != -1 && new-seed.seed-type == SeedViewType.password;
+                    if (type-picker.selected-index != -1 && new-seed.seed-type == SeedViewType.password-generated): TitledInput {
                         title: TR2.lookup(TrId.CreateItemPassword);
                         placeholder: TR2.lookup(TrId.CreateItemPasswordFillerText);
                         text: new-seed.password.password;
                         has-notice: self.text == "";
                         show-password: false;
                         input-type: InputType.password;
-
-                        edited(text) => {
-                            new-seed.password.password = text;
-                            self.has-notice = text == "";
-                            // TODO: potentially add warning copy
-                            // if (self.has-notice) {
-                            //     self.message = "Passwords must not be empty";
-                            // } else {
-                            //     self.message = "";
-                            // }
-                            password-error = self.has-notice;
-                        }
+                        locked: true;
                     }
 
-                    // Conditional spacer for keyboard scrolling
-                    if password-has-focus: Rectangle {
-                        height: 250px;
+                    if (type-picker.selected-index != -1 && CB.index-required(new-seed.seed-type)): ShowHide {
+                        text: TR2.lookup(TrId.CreateItemAdvancedOptions);
+
+                        VerticalLayout {
+                            spacing: Size.sz6;
+                            padding-bottom: Size.sz6;
+
+                            TitledInput {
+                                title: TR2.lookup(TrId.CreateItemIndex);
+                                text: new-seed.indexed-seed.index;
+                                message: index-message;
+                                has-notice: self.message != "" || self.text == "";
+                                input-type: InputType.number;
+                                bounded-number: true;
+                                minimum: "0";
+                                maximum: "2147483647";  // BIP32 hardened indices use bit 31 as flag, so max is 2^31-1
+
+                                changed has-focus => {
+                                    index-input-has-focus = self.has-focus;
+                                }
+
+                                edited(text) => {
+                                    new-seed.indexed-seed.index = text;
+
+                                    if (new-seed.seed-type == SeedViewType.password-generated) {
+                                        new-seed.password.password = CB.generate-password(text, password-length);
+                                    }
+                                    self.message = CB.validate-new-index(new-seed.indexed-seed.index, new-seed.seed-type);
+                                    self.has-notice = self.message != "" || text == "";  // TODO: maybe add error copy for empty index, it's unlikely though
+                                    index-error = self.has-notice;
+                                }
+
+                                accepted(text) => {
+                                    if (text == "") {
+                                        self.text = next-available-index;
+                                        self.edited(self.text);
+                                    }
+                                }
+                            }
+
+                            if (new-seed.seed-type == SeedViewType.password-generated): TitledInput {
+                                title: TR2.lookup(TrId.CreateItemLength);
+                                text: password-length;
+                                input-type: InputType.number;
+                                bounded-number: true;
+                                minimum: "10";
+                                maximum: "80";
+
+                                changed has-focus => {
+                                    length-input-has-focus = self.has-focus;
+                                }
+
+                                edited(text) => {
+                                    password-length = text;
+                                    new-seed.password.password = CB.generate-password(new-seed.indexed-seed.index, password-length);
+                                }
+
+                                accepted(text) => {
+                                    if (text == "") {
+                                        self.text = "21";
+                                        self.edited(self.text);
+                                    }
+                                }
+                            }
+
+                            // Conditional spacer for keyboard scrolling
+                            if (generated-inputs-have-focus && new-seed.seed-type == SeedViewType.password-generated): Rectangle {
+                                height: 250px;
+                            }
+                        }
                     }
                 }
             }
@@ -199,6 +229,33 @@ export component CreatePage inherits BasePage {
         }
     }
 
+    if type-picker.selected-index == -1: VerticalLayout {
+        alignment: center;
+
+        HorizontalLayout {
+            alignment: center;
+            padding-left: Size.sz6;
+            padding-right: Size.sz6;
+
+            VerticalLayout {
+                spacing: Size.sz3;
+
+                TextMd {
+                    text: TR2.lookup(TrId.CreateItemContent);
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                }
+
+                Link {
+                    label: TR2.lookup(TrId.CommonButtonLearnMore);
+                    clicked => {
+                        learn-more-url = "https://docs.foundation.xyz/prime/prime-apps/vault/";
+                    }
+                }
+            }
+        }
+    }
+
     if type-picker.showing: DropdownOverlay {
         dropdown-x: type-picker.absolute-position.x;
         dropdown-y: type-picker.absolute-position.y;
@@ -210,10 +267,14 @@ export component CreatePage inherits BasePage {
             type-picker.selected-index = index;
             type-picker.selected-value = value;
             new-seed.seed-type = index-to-seed-view-type(index);
-            if (CB.is-indexed-seed(new-seed.seed-type)) {
+
+            if (CB.index-required(new-seed.seed-type)) {
                 next-available-index = CB.get-next-index-string(new-seed.seed-type);
                 new-seed.indexed-seed.index = next-available-index;
                 index-message = CB.validate-new-index(new-seed.indexed-seed.index, new-seed.seed-type);
+            }
+            if (new-seed.seed-type == SeedViewType.password-generated) {
+                new-seed.password.password = CB.generate-password(new-seed.indexed-seed.index, password-length);
             }
             type-picker.showing = false;
         }
@@ -221,6 +282,11 @@ export component CreatePage inherits BasePage {
         touched-off => {
             type-picker.showing = false;
         }
+    }
+
+    if learn-more-url != "": QrOverlay {
+        url <=> learn-more-url;
+        title: TR2.lookup(TrId.CommonSupportModalDocumentationHeader);
     }
 
     if !result.success: ErrorModal {

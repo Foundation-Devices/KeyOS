@@ -68,12 +68,39 @@ component AppTile inherits Rectangle {
     }
 }
 
+component BitcoinPriceDetails inherits VerticalLayout {
+    in property <string> line-one;
+    in property <string> line-two;
+
+    horizontal-stretch: 0;
+    alignment: start;
+    padding-top: Size.sz1;
+
+    TextSm {
+        text: line-one;
+        horizontal-alignment: right;
+        color: LightPalette.content-tertiary;
+        wrap: no-wrap;
+        overflow: clip;
+        vertical-alignment: center;
+    }
+
+    TextSm {
+        text: line-two;
+        horizontal-alignment: right;
+        color: LightPalette.content-tertiary;
+        wrap: no-wrap;
+        overflow: clip;
+        vertical-alignment: center;
+    }
+}
+
 component BitcoinTile inherits Rectangle {
     property <bool> is-loading: State.loading-app-id == "0x426974636f696e2057616c6c65740000";
 
     in property <string> name;
     in property <string> price: "120,000";
-    in property <string> currency: "Bitcoin USD";
+    in property <string> currency;
     in property <string> last-change-percent: "+10.20%";
     in property <string> last-price-update-time: "2 minutes ago";
 
@@ -81,6 +108,15 @@ component BitcoinTile inherits Rectangle {
     border-radius: Size.sz6;
 
     callback clicked();
+    property <length> graph-width: 402px;
+    property <length> graph-height: 76px;
+    property <length> scrub-marker-size: 10px;
+    property <length> drag-threshold: 6px;
+    property <length> press-x: 0px;
+    property <length> press-y: 0px;
+    property <bool> is-touch-active: false;
+    property <bool> is-scrubbing-gesture: false;
+    property <bool> has-dragged-gesture: false;
 
     HorizontalLayout {
         padding-top: is-loading ? Size.sz1 : 0px;
@@ -91,10 +127,6 @@ component BitcoinTile inherits Rectangle {
             width: parent.width;
             height: parent.height;
             card-color: CardColor.dark-copper;
-
-            clicked => {
-                clicked();
-            }
 
             Shimmer {
                 active: root.is-loading;
@@ -125,62 +157,47 @@ component BitcoinTile inherits Rectangle {
 
                                     HeadingXl {
                                         horizontal-stretch: 0;
-                                        text: State.is-price-expired ? "" : "$";
+                                        text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : Utils.currency-symbol(State.bitcoin-currency-code);
                                         color: Palette.content-tertiary;
                                     }
 
                                     HeadingXl {
                                         horizontal-stretch: 1;
-                                        text: State.is-price-expired ? "" : price;
+                                        text: State.bitcoin-scrub-active ? State.bitcoin-scrub-price : (State.is-price-expired ? "" : price);
                                         color: Palette.content-secondary;
                                     }
 
-                                    if State.is-price-stale: VerticalLayout {
-                                        horizontal-stretch: 0;
-                                        alignment: start;
-                                        padding-top: Size.sz1;
-
-                                        TextSm {
-                                            text: State.is-price-expired ? (State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected)) : TR2.lookup(TrId.MainLastUpdate);
-                                            horizontal-alignment: right;
-                                            color: LightPalette.content-tertiary;
-                                        }
-
-                                        TextSm {
-                                            text: State.is-price-expired ? "" : TR2.format(TrId.MainXAgo, [last-price-update-time]);
-                                            horizontal-alignment: right;
-                                            color: LightPalette.content-tertiary;
-                                        }
-                                    }
-
-                                    if !State.is-price-stale: VerticalLayout {
-                                        horizontal-stretch: 0;
-                                        alignment: start;
-                                        padding-top: Size.sz1;
-
-                                        TextSm {
-                                            text: currency;
-                                            horizontal-alignment: right;
-                                            color: LightPalette.content-tertiary;
-                                        }
-
-                                        TextSm {
-                                            text: last-change-percent;
-                                            horizontal-alignment: right;
-                                            color: LightPalette.content-tertiary;
-                                        }
+                                    BitcoinPriceDetails {
+                                        line-one: State.bitcoin-scrub-active ? State.bitcoin-point-date : (State.is-price-stale ? (State.is-price-expired ? (State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected)) : TR2.lookup(TrId.MainLastUpdate)) : currency);
+                                        line-two: State.bitcoin-scrub-active ? State.bitcoin-point-time : (State.is-price-stale ? (State.is-price-expired ? "" : TR2.format(TrId.MainXAgo, [last-price-update-time])) : last-change-percent);
                                     }
                                 }
                             }
 
                             Rectangle {
+                                height: root.graph-height;
                                 border-bottom-left-radius: Size.sz4;
                                 border-bottom-right-radius: Size.sz4;
+                                clip: true;
 
-                                VerticalLayout {
+                                graph-area := Rectangle {
+                                    width: root.graph-width;
+                                    height: root.graph-height;
+                                    x: parent.width / 2 - self.width / 2;
+                                    clip: true;
+
                                     Image {
+                                        width: parent.width;
+                                        height: parent.height;
                                         image-fit: preserve;
                                         source: State.bitcoin-graph-image;
+                                    }
+
+                                    if State.bitcoin-scrub-active: Circle {
+                                        size: root.scrub-marker-size;
+                                        x: State.bitcoin-scrub-marker-x;
+                                        y: State.bitcoin-scrub-marker-y;
+                                        background: Palette.content-secondary;
                                     }
                                 }
 
@@ -224,6 +241,54 @@ component BitcoinTile inherits Rectangle {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    touch-area := TouchArea {
+        pointer-event(e) => {
+            if self.enabled {
+                if (e.kind == PointerEventKind.down) {
+                    root.press-x = self.mouse-x;
+                    root.press-y = self.mouse-y;
+                    root.is-touch-active = true;
+                    root.is-scrubbing-gesture = false;
+                    root.has-dragged-gesture = false;
+                } else if (e.kind == PointerEventKind.up) {
+                    if !root.is-touch-active {
+                        return;
+                    }
+                    root.is-touch-active = false;
+                    if root.is-scrubbing-gesture {
+                        root.is-scrubbing-gesture = false;
+                        CB.bitcoin-scrub-end();
+                    }
+                    if !root.has-dragged-gesture {
+                        root.clicked();
+                    }
+                    root.has-dragged-gesture = false;
+                } else if (e.kind == PointerEventKind.cancel) {
+                    if root.is-scrubbing-gesture {
+                        root.is-scrubbing-gesture = false;
+                        CB.bitcoin-scrub-end();
+                    }
+                    root.is-touch-active = false;
+                    root.has-dragged-gesture = true;
+                }
+            }
+        }
+
+        moved => {
+            if self.enabled && root.is-touch-active {
+                if !root.is-scrubbing-gesture && (abs(self.mouse-x - root.press-x) >= root.drag-threshold || abs(self.mouse-y - root.press-y) >= root.drag-threshold) {
+                    root.has-dragged-gesture = true;
+                    if State.bitcoin-scrub-enabled {
+                        root.is-scrubbing-gesture = true;
+                    }
+                }
+                if root.is-scrubbing-gesture {
+                    CB.bitcoin-scrub-update(self.mouse-x - graph-area.x, root.graph-width);
                 }
             }
         }
@@ -406,7 +471,7 @@ export component MainPage inherits BasePage {
 
                 BitcoinTile {
                     price: State.bitcoin-price;
-                    currency: "Bitcoin USD";
+                    currency: "Bitcoin " + State.bitcoin-currency-code;
                     last-change-percent: State.bitcoin-price-change-percent;
                     last-price-update-time: State.last-update-time;
                     name: TR2.lookup(TrId.MainWallet);

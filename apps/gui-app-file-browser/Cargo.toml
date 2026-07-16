@@ -17,6 +17,7 @@ fs = { workspace = true }
 i18n = { path = "../../i18n" }
 log = { workspace = true }
 log-server = { workspace = true }
+serde = { workspace = true }
 server = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 whence = { workspace = true }

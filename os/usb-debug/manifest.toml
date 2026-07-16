@@ -1,0 +1,31 @@
+manifestVersion = "0"
+appId = "0x6c6f672d7573622d73657269616c0000"
+memory = ["BUREG", "RSTC"]
+syscall = ["DebugCommand"]
+
+[appName]
+en = "USB Debug Protocol"
+
+[permissions]
+"os/usbdev" = [
+    "ReadEndpoint",
+    "WriteEndpoint",
+    "NumInterfaces",
+    "RegisterSetupResponder",
+    "RegisterInterface",
+    "RegisterCapability",
+    "WaitForConnection",
+]
+"os/log" = ["ReadLogs"]
+"os/gui-server" = [
+    "CaptureScreen",
+    "InjectTouch",
+    "InjectKey",
+    "CloseApp",
+]
+"os/power-manager" = [
+    "Reboot",
+]
+"os/security" = [
+    "GetOsVersionInfo",
+]

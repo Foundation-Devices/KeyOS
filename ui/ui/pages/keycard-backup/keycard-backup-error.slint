@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette } from "@ui/theme.slint";
+import { Palette, UISize } from "@ui/theme.slint";
 import { Dialog } from "@ui/widgets.slint";
 
 export struct KeycardBackupError {
@@ -24,7 +24,7 @@ export component KeycardBackupErrorDialog inherits Rectangle {
         Dialog {
             icon: "alert";
             icon-color: Palette.content-notice;
-            width: 352px;
+            width: UISize.modal-width;
 
             title: error.title;
             message: error.message;

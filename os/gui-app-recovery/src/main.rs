@@ -5,16 +5,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use slint_keyos_platform::{
     app,
-    gui_server_api::{
-        navigation::filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
-        InputMessage,
+    gui_server_api::navigation::filepicker::{
+        AllowedExtensions, AllowedLocations, Location, SelectFileOptions,
     },
-    navigation, AppInput,
+    navigation,
 };
 
 use crate::gui_permissions::GuiPermissions;
 
 power_manager::use_api!();
+power_manager::use_ext_api!();
 #[cfg(keyos)]
 recovery_worker::use_api!();
 security::use_api!();
@@ -36,8 +36,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     log::set_max_level(log::LevelFilter::Info);
 
     log::trace!("Running the recovery app");
-
-    cx.set_input_handler(input_handler_fn);
 
     #[cfg(keyos)]
     ui.global::<Callbacks>().on_reset_usb_drive(move || {
@@ -63,7 +61,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.global::<Callbacks>().on_has_sufficient_battery_charge(move || {
-        let power_manager_api = PowerManagerApi::default();
+        let power_manager_api = PowerManagerExtApi::default();
         power_manager_api
             .status()
             .map(|status| status.battery_percent >= MIN_BATTERY_PERCENT_FOR_RECOVERY)
@@ -72,7 +70,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     ui.global::<Callbacks>().on_reboot_clicked(move || {
         log::info!("Reboot clicked");
-        PowerManagerApi::default().reboot().unwrap();
+        PowerManagerApi::default().reboot();
     });
 
     ui.global::<Callbacks>().on_shut_down_clicked({
@@ -88,8 +86,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let ui = ui.clone_strong();
 
         move || {
-            UsbHost::default().set_enabled(true).ok();
-
             let ui = ui.clone_strong();
             slint_keyos_platform::spawn_local(async move {
                 let mut sub = slint_keyos_platform::subscribe_scalar::<
@@ -205,8 +201,6 @@ fn fs_event_handler(event: fs::FileSystemEvent, ui: AppWindow) {
             recovery_global.set_is_usb_drive_connected(false);
             recovery_global.set_is_tar_copied(false);
         }
-
-        PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Automatic).ok();
     }
 
     let is_usb_enabled = UsbHost::default().is_enabled().unwrap_or(false);
@@ -276,23 +270,6 @@ fn file_selection_popup() -> Option<(String, Location)> {
     log::debug!("File selection popup result: {:?}", res);
 
     res.files().first().map(|(file, location)| (file.to_owned(), *location))
-}
-
-fn input_handler_fn(app_input: AppInput<gui_permissions::GuiPermissions>) {
-    match app_input.msg {
-        InputMessage::Visible => {
-            // The OTG priority is also managed by the file browser, but setting it here as well allows us to
-            // detect when a thumb drive is connected and show a popup automatically.
-            #[cfg(keyos)]
-            PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Automatic).ok();
-        }
-        InputMessage::Hidden => {
-            // This allows the device to charge while the app is hidden (screen off, etc.)
-            #[cfg(keyos)]
-            PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Never).ok();
-        }
-        _ => {}
-    }
 }
 
 fn erase_system_state() {

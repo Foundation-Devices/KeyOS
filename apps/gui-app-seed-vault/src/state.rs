@@ -8,27 +8,36 @@ use {
         error::VaultError,
         fs_permissions::FileSystemPermissions,
         seed::{Seed, SeedDuplicateReason, SeedEditField, SeedType},
-        AccountsParams, Animate, AppWindow, Callbacks, GuiApi, Navigate, NavigateOptions, SeedView,
-        SeedViewType,
+        AccountsParams, Animate, AppWindow, CallbackResult, Callbacks, GuiApi, Navigate, NavigateOptions,
+        SeedView, SeedViewType,
     },
-    bip39::Mnemonic,
-    fuzzy_filter::FuzzyFilter,
-    ngwallet::{
-        bdk_wallet::bitcoin::{
+    anyhow::Context,
+    bip85_extended::{
+        bip39::Mnemonic,
+        bitcoin::{
+            bip32::Xpriv,
             secp256k1::{Secp256k1, SignOnly},
             Network,
         },
-        bip39::{MasterKey, WordCount},
     },
-    nostr::{nips::nip06::FromMnemonic, ToBech32},
+    fuzzy_filter::FuzzyFilter,
+    nostr::{nips::nip06::FromMnemonic, FromBech32, ToBech32},
     ordered_table::{CardSortMode, FilePersistence, OrderedTable, SortableCard},
-    slint_keyos_platform::slint::{self, ComponentHandle, Image, ModelRc, VecModel},
+    security::Seed as SecuritySeed,
+    slint_keyos_platform::slint::{self, ComponentHandle, Image, ModelRc, SharedString, VecModel},
     std::{rc::Rc, sync::Arc},
+    zeroize::{Zeroize, ZeroizeOnDrop},
 };
 
 security::use_api!();
 
 pub const DATABASE_FILE: &str = "seed_vault_database_v2.json";
+
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub enum PendingImport {
+    NostrKey(String),
+    ImportedSeed { entropy: String, fingerprint: String },
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct VaultSettings {
@@ -44,11 +53,11 @@ pub struct AppState {
     pub gui: Arc<GuiApi>,
     seed_table: OrderedTable<Seed, FilePersistence<FileSystemPermissions>>,
     pub search_text: String,
-    // new_seed: Option<Seed>,
     pub archive_mode: bool,
     secp: Secp256k1<SignOnly>,
     security_api: Security,
     model: Rc<VecModel<SeedView>>,
+    pub pending_import: Option<PendingImport>,
     #[cfg(not(test))]
     settings: JsonBacked<VaultSettings, FileSystemPermissions>,
     #[cfg(test)]
@@ -66,7 +75,7 @@ impl AppState {
                 .with_persistence(FilePersistence::new(String::from(DATABASE_FILE), fs::Location::AppData))
                 .expect("failed to create seed vault database"),
             search_text: String::new(),
-            // new_seed: None,
+            pending_import: None,
             archive_mode: false,
             secp: Secp256k1::signing_only(),
             security_api: Security::default(),
@@ -119,6 +128,26 @@ impl AppState {
         Ok(())
     }
 
+    pub fn save_from_view(
+        &mut self,
+        seed_view: SeedView,
+        nsec: Option<SharedString>,
+        seed_entropy: Option<SharedString>,
+    ) -> CallbackResult {
+        let seed = match Seed::from_view(seed_view, nsec, seed_entropy) {
+            Ok(s) => s,
+            Err(e) => return CallbackResult::from(e),
+        };
+
+        if let Err(e) = self.save(seed) {
+            return CallbackResult::from(e);
+        }
+
+        self.update_accounts();
+        self.nav_accounts();
+        CallbackResult::success()
+    }
+
     pub fn save(&mut self, seed: Seed) -> Result<(), VaultError> {
         self.seed_table.separate_categories(|s| s.get_category());
         self.seed_table.push_categorized(|s| s.get_category(), seed)?;
@@ -157,7 +186,9 @@ impl AppState {
     pub fn nav_accounts(&mut self) {
         let ui = self.ui();
         let ui_nav = ui.global::<Navigate>();
-        ui_nav.invoke_backward_animate(Animate::None);
+
+        ui_nav.invoke_return_home();
+
         ui_nav.invoke_accounts(
             AccountsParams::default(),
             NavigateOptions { replace: true, animate: Animate::None },
@@ -180,7 +211,11 @@ impl AppState {
             .filter_map(|s| match (seed_view_type, s.seed.clone()) {
                 (SeedViewType::Bitcoin12, SeedType::Bitcoin12 { index })
                 | (SeedViewType::Bitcoin24, SeedType::Bitcoin24 { index })
-                | (SeedViewType::NostrKey, SeedType::NostrKey { index }) => Some(index),
+                | (SeedViewType::NostrKey, SeedType::NostrKey { index })
+                | (
+                    SeedViewType::PasswordGenerated,
+                    SeedType::PasswordGenerated { account: _, password: _, index },
+                ) => Some(index),
                 (_, _) => None,
             })
             .collect::<Vec<u32>>();
@@ -261,28 +296,48 @@ impl AppState {
         Ok(())
     }
 
-    fn get_key(&self, words: WordCount, index: u32) -> Result<MasterKey, VaultError> {
+    fn get_root_mnemonic(&self) -> Result<Mnemonic, VaultError> {
         let entropy = self
             .security_api
             .seed()
             .map_err(|e| VaultError::from(anyhow::anyhow!("Could not retrieve bitcoin seed: {:?}", e)))?
             .ok_or(anyhow::anyhow!("No seed or error returned, securam may be corrupt"))?;
 
-        MasterKey::from_entropy(&self.secp, Network::Bitcoin, entropy.bytes(), "", Some((words, index)))
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not derive bitcoin seed: {e}")))
+        Ok(Mnemonic::from_entropy(entropy.bytes()).context("Could not construct mnemonic from entropy")?)
     }
 
-    pub fn get_words(&self, index: i32) -> Result<String, VaultError> {
+    fn get_bip85_child_mnemonic(&self, words: u32, index: u32) -> Result<Mnemonic, VaultError> {
+        let mnemonic = self.get_root_mnemonic()?;
+        let key = mnemonic.to_seed("");
+        let xpriv =
+            Xpriv::new_master(Network::Bitcoin, &key).context("Could not construct xpriv from key")?;
+
+        match words {
+            12 | 24 => (),
+            other => {
+                return Err(VaultError::from(anyhow::anyhow!(
+                    "Only 12 and 24 word child seeds are supported, not {}.",
+                    other
+                )));
+            }
+        }
+
+        bip85_extended::to_mnemonic(&self.secp, &xpriv, words, index)
+            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not derive bitcoin seed: {:?}", e)))
+    }
+
+    pub fn get_entry_mnemonic(&self, index: i32) -> Result<Mnemonic, VaultError> {
         let index = usize::try_from(index)?;
         let seed = self.seed_table.get(index)?;
 
-        let key = match seed.seed {
-            SeedType::Bitcoin12 { index: seed_index } => self.get_key(WordCount::Twelve, seed_index)?,
-            SeedType::Bitcoin24 { index: seed_index } => self.get_key(WordCount::TwentyFour, seed_index)?,
-            _ => return Err(VaultError::from(anyhow::anyhow!("Unable to get words for seed"))),
+        let mnemonic = match &seed.seed {
+            SeedType::Bitcoin12 { index: seed_index } => self.get_bip85_child_mnemonic(12, *seed_index)?,
+            SeedType::Bitcoin24 { index: seed_index } => self.get_bip85_child_mnemonic(24, *seed_index)?,
+            SeedType::BitcoinImport { mnemonic: ref m } => m.clone(),
+            _ => return Err(VaultError::from(anyhow::anyhow!("Unable to get words for non-bitcoin item"))),
         };
 
-        Ok(key.mnemonic.clone())
+        Ok(mnemonic)
     }
 
     fn render_bw_qr_code(&self, data: Vec<u8>) -> Image {
@@ -293,41 +348,43 @@ impl AppState {
         )
     }
 
-    // TODO: make this a common function in slint_keyos_platform
     pub fn get_standard_seed_qr(&self, index: i32) -> Result<Image, VaultError> {
-        let mnemonic = Mnemonic::parse(self.get_words(index)?)
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not parse derived seed: {:?}", e)))?;
-        let indices: String = mnemonic.word_indices().map(|idx| format!("{:04}", idx)).collect();
-        Ok(self.render_bw_qr_code(indices.into_bytes()))
+        let mnemonic = self.get_entry_mnemonic(index)?;
+        let seed = SecuritySeed::from_mnemonic(&mnemonic);
+        let data = seed.to_standard_seed_qr_data().map_err(|e| {
+            VaultError::from(anyhow::anyhow!("Could not convert seed to standard SeedQR: {:?}", e))
+        })?;
+        Ok(self.render_bw_qr_code(data))
     }
 
-    // TODO: make this a common function in slint_keyos_platform
     pub fn get_compact_seed_qr(&self, index: i32) -> Result<Image, VaultError> {
-        let mnemonic = Mnemonic::parse(self.get_words(index)?)
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not parse derived seed: {:?}", e)))?;
-        Ok(self.render_bw_qr_code(mnemonic.to_entropy()))
+        let mnemonic = self.get_entry_mnemonic(index)?;
+        let seed = SecuritySeed::from_mnemonic(&mnemonic);
+        let data = seed.to_compact_seed_qr_data().map_err(|e| {
+            VaultError::from(anyhow::anyhow!("Could not convert seed to compact SeedQR: {:?}", e))
+        })?;
+        Ok(self.render_bw_qr_code(data))
     }
 
     fn get_nostr_key(&self, index: i32) -> Result<nostr::Keys, VaultError> {
         let index = usize::try_from(index)?;
         let seed = self.seed_table.get(index)?;
 
-        let entropy = self
-            .security_api
-            .seed()
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not retrieve bitcoin seed: {:?}", e)))?
-            .ok_or(anyhow::anyhow!("No seed or error returned, securam may be corrupt"))?;
-
-        let bitcoin_key = MasterKey::from_entropy(&self.secp, Network::Bitcoin, entropy.bytes(), "", None)
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not build bitcoin seed: {e}")))?;
-
-        let nostr_index = match seed.seed {
-            SeedType::NostrKey { index: seed_index } => seed_index,
+        let nostr_key = match &seed.seed {
+            SeedType::NostrKey { index: seed_index } => {
+                let mnemonic = self.get_root_mnemonic()?;
+                nostr::Keys::from_mnemonic_with_account(mnemonic.to_string(), None, Some(*seed_index))
+                    .context("Could not derive nostr key")?
+            }
+            SeedType::NostrKeyImport { ref nsec } => {
+                let secret =
+                    nostr::SecretKey::from_bech32(nsec).context("Could not get nostr secret from nsec")?;
+                nostr::Keys::new(secret)
+            }
             _ => return Err(VaultError::from(anyhow::anyhow!("Unable to get nostr keys for seed"))),
         };
 
-        nostr::Keys::from_mnemonic_with_account(bitcoin_key.mnemonic.clone(), None, Some(nostr_index))
-            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not derive nostr key: {:?}", e)))
+        Ok(nostr_key)
     }
 
     pub fn get_npub(&self, index: i32) -> Result<String, VaultError> {
@@ -337,11 +394,6 @@ impl AppState {
             .map_err(|e| VaultError::from(anyhow::anyhow!("Could not build nostr npub: {:?}", e)))
     }
 
-    pub fn get_npub_qr(&self, index: i32) -> Result<Image, VaultError> {
-        let npub = self.get_npub(index)?;
-        Ok(self.render_bw_qr_code(npub.into_bytes()))
-    }
-
     pub fn get_nsec(&self, index: i32) -> Result<String, VaultError> {
         let key = self.get_nostr_key(index)?;
         key.secret_key()
@@ -349,8 +401,70 @@ impl AppState {
             .map_err(|e| VaultError::from(anyhow::anyhow!("Could not build nostr nsec: {:?}", e)))
     }
 
-    pub fn get_nsec_qr(&self, index: i32) -> Result<Image, VaultError> {
-        let nsec = self.get_nsec(index)?;
-        Ok(self.render_bw_qr_code(nsec.into_bytes()))
+    pub fn get_fingerprint(&self, index: i32) -> Result<String, VaultError> {
+        let mnemonic = self.get_entry_mnemonic(index)?;
+        self.get_seed_fingerprint(&mnemonic)
+    }
+
+    pub fn generate_password(&self, password_index: u32, length: u32) -> Result<String, VaultError> {
+        let mnemonic = self.get_root_mnemonic()?;
+        let key = mnemonic.to_seed("");
+        let xpriv =
+            Xpriv::new_master(Network::Bitcoin, &key).context("Could not construct xpriv from key")?;
+
+        bip85_extended::to_pwd_base85(&self.secp, &xpriv, length, password_index)
+            .map_err(|e| VaultError::from(anyhow::anyhow!("Could not generate password: {:?}", e)))
+    }
+
+    pub fn get_seed_fingerprint(&self, mnemonic: &Mnemonic) -> Result<String, VaultError> {
+        let key = mnemonic.to_seed("");
+        let xpriv =
+            Xpriv::new_master(Network::Bitcoin, &key).context("Could not construct xpriv from key")?;
+        Ok(xpriv.fingerprint(&self.secp).to_string().to_uppercase())
+    }
+
+    pub fn handle_qr_input(&mut self, data: Vec<u8>) {
+        if let Err(e) = self.handle_qr_data(data) {
+            log::error!("Failed to handle QR data: {:?}", e);
+            self.ui().global::<Navigate>().invoke_import_item_failed(NavigateOptions::default());
+        }
+    }
+
+    pub fn handle_qr_data(&mut self, data: Vec<u8>) -> Result<(), VaultError> {
+        let ui = self.ui();
+        let ui_nav = ui.global::<Navigate>();
+
+        if let Ok(mnemonic) = security::parse_seedqr(&data).context("Failed to parse SeedQR") {
+            if !matches!(mnemonic.word_count(), 12 | 24) {
+                return Err(VaultError::UnknownQrDataType);
+            }
+            let fingerprint = self.get_seed_fingerprint(&mnemonic)?;
+            let entropy = hex::encode_upper(mnemonic.to_entropy());
+
+            self.pending_import = Some(PendingImport::ImportedSeed { entropy, fingerprint });
+
+            ui_nav.invoke_view_seed(NavigateOptions::default());
+            return Ok(());
+        };
+
+        let text = std::str::from_utf8(data.as_slice()).context("Failed to parse as utf8")?;
+
+        if let Ok(_secret_key) = nostr::SecretKey::from_bech32(&text) {
+            self.pending_import = Some(PendingImport::NostrKey(text.to_owned()));
+            ui_nav.invoke_nostr_key(NavigateOptions::default());
+            return Ok(());
+        }
+
+        Err(VaultError::UnknownQrDataType)
+    }
+
+    pub fn get_seed_view_by_index(&self, index: i32) -> SeedView {
+        let Ok(usize_index) = usize::try_from(index) else {
+            return SeedView::default();
+        };
+        self.seed_table
+            .get(usize_index)
+            .map(|seed| SeedView::from_seed(&seed).with_index(index))
+            .unwrap_or_default()
     }
 }

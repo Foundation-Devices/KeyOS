@@ -28,7 +28,7 @@ use crate::{
 use crate::{seed_fingerprint, sha256, sha256_batch};
 
 dma::use_api!();
-fs::use_api!();
+gpio::use_api!();
 power_manager::use_api!();
 
 pub fn new_pin(crypto: &CryptoApi, raw_pin: &str) -> Result<Pin, CryptoError> {
@@ -76,6 +76,12 @@ pub struct Server {
     pub compatibility: Compatibility,
 
     pending_app_seed_request: Vec<server::ArchiveResponse<Result<[u8; 32], AccessDenied>>>,
+
+    #[cfg(not(feature = "recovery-os"))]
+    disk_encryption_keys_ready: bool,
+    #[cfg(not(feature = "recovery-os"))]
+    disk_encryption_keys_ready_subscribers:
+        Vec<server::ScalarEventSubscriber<security::messages::DiskEncryptionKeysReady>>,
 }
 
 #[cfg(keyos)]
@@ -105,13 +111,13 @@ pub struct Compatibility {
     pub aes_keys_in_slot_12: bool,
 }
 
-impl server::ArchiveHandler<SetSeedAndPin> for Server {
+impl server::BlockingArchiveHandler<SetSeedAndPin> for Server {
     fn handle(
         &mut self,
         msg: SetSeedAndPin,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetSeedAndPin as server::Archive>::Response {
+    ) -> <SetSeedAndPin as server::BlockingArchive>::Response {
         // Validate PIN length before processing
         crate::validate_raw_pin(&msg.pin.0)?;
 
@@ -134,13 +140,13 @@ impl server::ArchiveHandler<SetSeedAndPin> for Server {
     }
 }
 
-impl server::ArchiveHandler<ChangePin> for Server {
+impl server::BlockingArchiveHandler<ChangePin> for Server {
     fn handle(
         &mut self,
         mut msg: ChangePin,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ChangePin as server::Archive>::Response {
+    ) -> <ChangePin as server::BlockingArchive>::Response {
         // Validate PIN length before processing
         crate::validate_raw_pin(&msg.pin.0)?;
 
@@ -173,7 +179,7 @@ impl server::ArchiveHandler<ChangePin> for Server {
     }
 }
 
-impl server::ArchiveAsyncHandler<Login> for Server {
+impl server::BlockingArchiveAsyncHandler<Login> for Server {
     fn handle(&mut self, request: server::ArchiveRequest<Login>, _context: &mut server::ServerContext<Self>) {
         let Ok(pin) = new_pin(&self.crypto, &request.message.pin.0)
             .inspect_err(|e| log::error!("Could not create PIN {e:?}"))
@@ -220,7 +226,7 @@ impl server::ArchiveAsyncHandler<Login> for Server {
                 if attempts_left == 0 {
                     log::error!("All PIN attempts exhausted, erasing seed");
                     self.lockout(LockoutOptions::erase_seed_only()).expect("Could not lock out device");
-                    self.pwr.reboot().expect("Could not reboot device");
+                    self.pwr.reboot();
                 }
                 request.response.respond(Err(LoginFailed { attempts_left })).ok();
             }
@@ -230,36 +236,36 @@ impl server::ArchiveAsyncHandler<Login> for Server {
     fn default_response() -> Result<(), LoginFailed> { Err(LoginFailed { attempts_left: 0 }) }
 }
 
-impl server::ArchiveHandler<GetAttemptsRemaining> for Server {
+impl server::BlockingArchiveHandler<GetAttemptsRemaining> for Server {
     fn handle(
         &mut self,
         _msg: GetAttemptsRemaining,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetAttemptsRemaining as server::Archive>::Response {
+    ) -> <GetAttemptsRemaining as server::BlockingArchive>::Response {
         let last_success = self.get_last_success().map_err(|_| AccessDenied)?;
         Ok(last_success.attempts_left)
     }
 }
 
-impl server::ArchiveHandler<GetFactoryResetCounter> for Server {
+impl server::BlockingArchiveHandler<GetFactoryResetCounter> for Server {
     fn handle(
         &mut self,
         _msg: GetFactoryResetCounter,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFactoryResetCounter as server::Archive>::Response {
+    ) -> <GetFactoryResetCounter as server::BlockingArchive>::Response {
         self.get_counter_insecure(1).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetSeed> for Server {
+impl server::BlockingArchiveHandler<GetSeed> for Server {
     fn handle(
         &mut self,
         _msg: GetSeed,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSeed as server::Archive>::Response {
+    ) -> <GetSeed as server::BlockingArchive>::Response {
         let Some((auth_hash, xor_hash)) = self.pin_hash.as_ref() else {
             return Err(AccessDenied);
         };
@@ -276,13 +282,13 @@ impl server::ArchiveHandler<GetSeed> for Server {
     }
 }
 
-impl server::ArchiveHandler<SetSeed> for Server {
+impl server::BlockingArchiveHandler<SetSeed> for Server {
     fn handle(
         &mut self,
         mut msg: SetSeed,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetSeed as server::Archive>::Response {
+    ) -> <SetSeed as server::BlockingArchive>::Response {
         let Some((_, xor_hash)) = self.pin_hash.as_ref() else {
             return Err(AccessDenied);
         };
@@ -293,7 +299,7 @@ impl server::ArchiveHandler<SetSeed> for Server {
     }
 }
 
-impl server::ArchiveAsyncHandler<GetAppSeed> for Server {
+impl server::BlockingArchiveAsyncHandler<GetAppSeed> for Server {
     fn handle(
         &mut self,
         request: server::ArchiveRequest<GetAppSeed>,
@@ -308,27 +314,27 @@ impl server::ArchiveAsyncHandler<GetAppSeed> for Server {
         }
     }
 
-    fn default_response() -> <GetAppSeed as server::Archive>::Response { Err(AccessDenied) }
+    fn default_response() -> <GetAppSeed as server::BlockingArchive>::Response { Err(AccessDenied) }
 }
 
-impl server::ArchiveHandler<GetFirmwareTimestamp> for Server {
+impl server::BlockingArchiveHandler<GetFirmwareTimestamp> for Server {
     fn handle(
         &mut self,
         _msg: GetFirmwareTimestamp,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFirmwareTimestamp as server::Archive>::Response {
+    ) -> <GetFirmwareTimestamp as server::BlockingArchive>::Response {
         self.get_firmware_timestamp().map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<SetFirmwareTimestamp> for Server {
+impl server::BlockingArchiveHandler<SetFirmwareTimestamp> for Server {
     fn handle(
         &mut self,
         msg: SetFirmwareTimestamp,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetFirmwareTimestamp as server::Archive>::Response {
+    ) -> <SetFirmwareTimestamp as server::BlockingArchive>::Response {
         self.change_firmware_timestamp(&msg.0).map_err(|_| AccessDenied)
     }
 }
@@ -355,61 +361,61 @@ impl server::BlockingScalarHandler<LoggedIn> for Server {
     }
 }
 
-impl server::ArchiveHandler<Lockout> for Server {
+impl server::BlockingArchiveHandler<Lockout> for Server {
     fn handle(
         &mut self,
         msg: Lockout,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Lockout as server::Archive>::Response {
+    ) -> <Lockout as server::BlockingArchive>::Response {
         self.lockout(msg.lockout_options)?;
         if msg.reboot {
-            self.pwr.reboot().map_err(|_| AccessDenied)?;
+            self.pwr.reboot();
         }
         Ok(())
     }
 }
 
-impl server::ArchiveHandler<SignWithSecurityCheckKey> for Server {
+impl server::BlockingArchiveHandler<SignWithSecurityCheckKey> for Server {
     fn handle(
         &mut self,
         msg: SignWithSecurityCheckKey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SignWithSecurityCheckKey as server::Archive>::Response {
+    ) -> <SignWithSecurityCheckKey as server::BlockingArchive>::Response {
         self.sign_with_security_check_key(&msg.0).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<SignWithFidoKey> for Server {
+impl server::BlockingArchiveHandler<SignWithFidoKey> for Server {
     fn handle(
         &mut self,
         msg: SignWithFidoKey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SignWithFidoKey as server::Archive>::Response {
+    ) -> <SignWithFidoKey as server::BlockingArchive>::Response {
         self.sign_with_fido_key(&msg.0).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetFidoPubkey> for Server {
+impl server::BlockingArchiveHandler<GetFidoPubkey> for Server {
     fn handle(
         &mut self,
         _msg: GetFidoPubkey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFidoPubkey as server::Archive>::Response {
+    ) -> <GetFidoPubkey as server::BlockingArchive>::Response {
         self.get_pubkey(Slot::FidoPrivateKey).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetSecurityWords> for Server {
+impl server::BlockingArchiveHandler<GetSecurityWords> for Server {
     fn handle(
         &mut self,
         msg: GetSecurityWords,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSecurityWords as server::Archive>::Response {
+    ) -> <GetSecurityWords as server::BlockingArchive>::Response {
         let seed_fingerprint = self.get_seed_fingerprint().map_err(|_| AccessDenied)?;
         let words = self
             .anti_phishing_words(&msg.pin_prefix, &self.serial_number, &seed_fingerprint)
@@ -420,35 +426,35 @@ impl server::ArchiveHandler<GetSecurityWords> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetSeedFingerprint> for Server {
+impl server::BlockingArchiveHandler<GetSeedFingerprint> for Server {
     fn handle(
         &mut self,
         _msg: GetSeedFingerprint,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSeedFingerprint as server::Archive>::Response {
+    ) -> <GetSeedFingerprint as server::BlockingArchive>::Response {
         self.get_seed_fingerprint().map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<ComputeSeedFingerprint> for Server {
+impl server::BlockingArchiveHandler<ComputeSeedFingerprint> for Server {
     fn handle(
         &mut self,
         msg: ComputeSeedFingerprint,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ComputeSeedFingerprint as server::Archive>::Response {
+    ) -> <ComputeSeedFingerprint as server::BlockingArchive>::Response {
         seed_fingerprint(&self.crypto, &msg.0).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetOsVersionInfo> for Server {
+impl server::BlockingArchiveHandler<GetOsVersionInfo> for Server {
     fn handle(
         &mut self,
         _msg: GetOsVersionInfo,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetOsVersionInfo as server::Archive>::Response {
+    ) -> <GetOsVersionInfo as server::BlockingArchive>::Response {
         let Some(securam_manager::OsArguments::NormalMode { keyos_version, bootloader_version, .. }) =
             Server::with_securam(|securam| securam.os_arguments().cloned().ok())
         else {
@@ -459,13 +465,13 @@ impl server::ArchiveHandler<GetOsVersionInfo> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetBootloaderBuildDate> for Server {
+impl server::BlockingArchiveHandler<GetBootloaderBuildDate> for Server {
     fn handle(
         &mut self,
         _msg: GetBootloaderBuildDate,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetBootloaderBuildDate as server::Archive>::Response {
+    ) -> <GetBootloaderBuildDate as server::BlockingArchive>::Response {
         #[cfg(feature = "recovery-os")]
         {
             let Some(securam_manager::OsArguments::RecoveryMode { bootloader_build_date, .. }) =
@@ -482,13 +488,13 @@ impl server::ArchiveHandler<GetBootloaderBuildDate> for Server {
     }
 }
 
-impl server::ArchiveHandler<ScChallenge> for Server {
+impl server::BlockingArchiveHandler<ScChallenge> for Server {
     fn handle(
         &mut self,
         msg: ScChallenge,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ScChallenge as server::Archive>::Response {
+    ) -> <ScChallenge as server::BlockingArchive>::Response {
         use p256::{
             ecdsa::{self, signature::hazmat::PrehashVerifier},
             elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint},
@@ -593,13 +599,13 @@ impl server::ArchiveHandler<ScChallenge> for Server {
     }
 }
 
-impl server::ArchiveHandler<IsPinSet> for Server {
+impl server::BlockingArchiveHandler<IsPinSet> for Server {
     fn handle(
         &mut self,
         _msg: IsPinSet,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <IsPinSet as server::Archive>::Response {
+    ) -> <IsPinSet as server::BlockingArchive>::Response {
         self.pin_is_zero().map_err(|_| AccessDenied).map(|is_zero| !is_zero)
     }
 }
@@ -622,13 +628,13 @@ impl From<se_port::Error> for ScChallengeError {
     }
 }
 
-impl server::ArchiveHandler<GetDeviceId> for Server {
+impl server::BlockingArchiveHandler<GetDeviceId> for Server {
     fn handle(
         &mut self,
         _msg: GetDeviceId,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetDeviceId as server::Archive>::Response {
+    ) -> <GetDeviceId as server::BlockingArchive>::Response {
         if let Some(device_id) = self.device_id {
             return Ok(device_id);
         }
@@ -650,18 +656,18 @@ impl server::ArchiveHandler<GetDeviceId> for Server {
     }
 }
 
-impl server::ArchiveHandler<KeycardAuthenticityMac> for Server {
+impl server::BlockingArchiveHandler<KeycardAuthenticityMac> for Server {
     fn handle(
         &mut self,
         msg: KeycardAuthenticityMac,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <KeycardAuthenticityMac as server::Archive>::Response {
+    ) -> <KeycardAuthenticityMac as server::BlockingArchive>::Response {
         self.keycard_authenticity_mac(msg.0).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetBluetoothChallengeSecret> for Server {
+impl server::BlockingArchiveHandler<GetBluetoothChallengeSecret> for Server {
     fn handle(
         &mut self,
         _msg: GetBluetoothChallengeSecret,
@@ -686,7 +692,7 @@ impl server::BlockingScalarHandler<SetBluetoothCheckSecretSent> for Server {
     }
 }
 
-impl server::ArchiveHandler<SetBluetoothDeviceId> for Server {
+impl server::BlockingArchiveHandler<SetBluetoothDeviceId> for Server {
     fn handle(
         &mut self,
         msg: SetBluetoothDeviceId,
@@ -697,13 +703,13 @@ impl server::ArchiveHandler<SetBluetoothDeviceId> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetRandom> for Server {
+impl server::BlockingArchiveHandler<GetRandom> for Server {
     fn handle(
         &mut self,
         _msg: GetRandom,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetRandom as server::Archive>::Response {
+    ) -> <GetRandom as server::BlockingArchive>::Response {
         let num_in = [0u8; 32];
         let mut rand_out = self.se.nonce_rand(&num_in).map_err(|_| AccessDenied)?;
 
@@ -715,13 +721,13 @@ impl server::ArchiveHandler<GetRandom> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetPinEntryMode> for Server {
+impl server::BlockingArchiveHandler<GetPinEntryMode> for Server {
     fn handle(
         &mut self,
         _msg: GetPinEntryMode,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetPinEntryMode as server::Archive>::Response {
+    ) -> <GetPinEntryMode as server::BlockingArchive>::Response {
         Self::with_securam(|securam| securam.pin_entry_mode().unwrap_or(0).into())
     }
 }
@@ -755,8 +761,27 @@ impl server::ScalarHandler<TamperEvent> for Server {
     fn handle(&mut self, _msg: TamperEvent, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
         log::error!("Tamper detected, erasing sensitive SE data");
         self.lockout(LockoutOptions::erase_seed_only()).expect("Could not lock out");
-        self.pwr.reboot().expect("Could not reboot");
+        self.pwr.reboot();
         panic!("Tamper happened but did not reboot");
+    }
+}
+
+#[cfg(not(feature = "recovery-os"))]
+impl server::ScalarEventSubscriptionHandler<security::messages::SubscribeDiskEncryptionKeysReady> for Server {
+    fn handle(
+        &mut self,
+        _msg: security::messages::SubscribeDiskEncryptionKeysReady,
+        subscriber: server::ScalarEventSubscriber<security::messages::DiskEncryptionKeysReady>,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<(), server::Infallible> {
+        if self.disk_encryption_keys_ready {
+            if let Err(e) = subscriber.send(&security::messages::DiskEncryptionKeysReady) {
+                log::warn!("DiskEncryptionKeysReady replay send failed: {e:?}");
+            }
+        } else {
+            self.disk_encryption_keys_ready_subscribers.push(subscriber);
+        }
+        Ok(())
     }
 }
 
@@ -778,6 +803,9 @@ impl server::Server for Server {
 
 impl Default for Server {
     fn default() -> Self {
+        // Wait for gpio server to mux FLEXCOM2 pins.
+        let _gpio = GpioApi::default();
+
         let pwr = PowerManagerApi::default();
         pwr.enable_peripheral(atsama5d27::pmc::PeripheralId::Flexcom2).unwrap();
 
@@ -814,6 +842,10 @@ impl Default for Server {
             device_id: None,
             compatibility: Default::default(),
             pending_app_seed_request: Default::default(),
+            #[cfg(not(feature = "recovery-os"))]
+            disk_encryption_keys_ready: false,
+            #[cfg(not(feature = "recovery-os"))]
+            disk_encryption_keys_ready_subscribers: Vec::new(),
         }
     }
 }
@@ -909,7 +941,7 @@ impl Server {
         auth_hash: &AuthPinHash,
         xor_hash: &XorPinHash,
     ) -> Result<(), se_port::Error> {
-        Self::with_securam(|securam| {
+        Self::with_securam(|securam| -> Result<(), se_port::Error> {
             let (aes_key0, aes_key1) = securam.disk_encryption_keys().expect("SECURAM corrupt");
             let keys_are_set = !(aes_key0.is_zero() || aes_key1.is_zero());
             if keys_are_set {
@@ -923,14 +955,14 @@ impl Server {
             let seed_digest = sha256_batch(&self.crypto, &[seed.bytes(), AES_DISK_KEY_ENCRYPTION_SALT])
                 .map_err(se_port::Error::Crypto)?;
 
-            let aes_key0: [u8; 32] = entropy.0[0..32]
+            let mut aes_key0: [u8; 32] = entropy.0[0..32]
                 .iter()
                 .zip(&seed_digest)
                 .map(|(&x, &y)| x ^ y)
                 .collect::<Vec<_>>()
                 .try_into()
                 .expect("incorrect vector length");
-            let aes_key1 = entropy.0[32..64]
+            let mut aes_key1: [u8; 32] = entropy.0[32..64]
                 .iter()
                 .zip(&seed_digest)
                 .map(|(&x, &y)| x ^ y)
@@ -938,13 +970,32 @@ impl Server {
                 .try_into()
                 .expect("incorrect vector length");
 
-            securam.set_disk_encryption_keys((&aes_key0, &aes_key1)).expect("SECURAM corrupt");
-            if let Err(e) = FileSystem::default().disk_encryption_keys_ready() {
-                log::error!("Could not tell fs that the disk encryption keys have been set: {e:?}");
+            // Volumes formatted before 1.3.0 were encrypted with these keys
+            // word-swapped (set_key loaded each 4-byte word big-endian), so keep
+            // deriving the swapped form or those volumes decrypt to garbage.
+            for word in aes_key0.chunks_exact_mut(4).chain(aes_key1.chunks_exact_mut(4)) {
+                word.reverse();
             }
 
+            securam.set_disk_encryption_keys((&aes_key0, &aes_key1)).expect("SECURAM corrupt");
             Ok(())
-        })
+        })?;
+
+        // Keys can already be present after a security-server restart (SECURAM
+        // persists), so signal unconditionally or subscribers wait forever.
+        #[cfg(not(feature = "recovery-os"))]
+        self.signal_disk_encryption_keys_ready();
+        Ok(())
+    }
+
+    #[cfg(not(feature = "recovery-os"))]
+    fn signal_disk_encryption_keys_ready(&mut self) {
+        self.disk_encryption_keys_ready = true;
+        for sub in self.disk_encryption_keys_ready_subscribers.drain(..) {
+            if let Err(e) = sub.send(&security::messages::DiskEncryptionKeysReady) {
+                log::warn!("DiskEncryptionKeysReady send failed: {e:?}");
+            }
+        }
     }
 
     fn get_app_seed(

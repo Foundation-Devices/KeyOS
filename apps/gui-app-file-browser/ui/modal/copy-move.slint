@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Drawer, Icon, IconButton, ModalWindow, TextMd, Button } from "@ui/widgets.slint";
+import { Icon, IconButton, ModalWindow, TextMd, Button } from "@ui/widgets.slint";
 import { Palette, Size, Importance } from "@ui/theme.slint";
-import { FileList } from "../file-list.slint";
+import { FileList, FileListData, FileListType } from "../file-list.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 import { ModalGlobal, FileAction } from "./global.slint";
 import { LocationSwitcher } from "../location-switcher.slint";
@@ -37,6 +37,7 @@ export component CopyMoveModal inherits Rectangle {
     background: Palette.overlay-50;
 
     property <length> drawer-height: 600px;
+    property <FileListData> file-list: ModalGlobal.copy-move-file-lists[ModalGlobal.copy-move-location-idx];
 
     function get-action-label() -> string {
         if (ModalGlobal.loading) {
@@ -50,6 +51,14 @@ export component CopyMoveModal inherits Rectangle {
             return TR2.lookup(TrId.MainPasteHere);
         } else {
             return TR2.lookup(TrId.MainMoveHere);
+        }
+    }
+
+    function get-action-icon() -> string {
+        if (ModalGlobal.copy-move-action == FileAction.Copy) {
+            return "copy";
+        } else {
+            return "cut";
         }
     }
 
@@ -78,7 +87,17 @@ export component CopyMoveModal inherits Rectangle {
 
         property <length> p-x: Size.sz6;
 
-        VerticalLayout {
+        FileList {
+            file-list: root.file-list;
+            is-select-mode: false;
+            long-press-enabled: false;
+            compact-airlock-usb: true;
+            entry-pressed(name, is-folder) => {
+                if (is-folder) {
+                    ModalGlobal.copy-move-enter-folder(name);
+                }
+            }
+
             padding-top: Size.sz2;
             padding-bottom: Size.sz8;
             padding-left: p-x;
@@ -160,17 +179,6 @@ export component CopyMoveModal inherits Rectangle {
                     background: Palette.content-tertiary;
                 }
             }
-
-            FileList {
-                model: ModalGlobal.copy-move-file-lists[ModalGlobal.copy-move-location-idx].files;
-                is-select-mode: false;
-                long-press-enabled: false;
-                entry-pressed(name, is-folder) => {
-                    if (is-folder) {
-                        ModalGlobal.copy-move-enter-folder(name);
-                    }
-                }
-            }
         }
 
         HorizontalLayout {
@@ -188,10 +196,10 @@ export component CopyMoveModal inherits Rectangle {
                 Button {
                     width: 256px;
                     label: get-action-label();
-                    icon: "copy";
+                    icon: get-action-icon();
                     loading: ModalGlobal.loading;
                     importance: Importance.primary;
-                    enabled: ModalGlobal.copy-move-action-enabled && !ModalGlobal.loading;
+                    enabled: ModalGlobal.copy-move-action-enabled && !ModalGlobal.loading && root.file-list.list-type == FileListType.FileList;
                     clicked => {
                         ModalGlobal.copy-move-confirmed();
                     }

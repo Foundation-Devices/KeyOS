@@ -75,6 +75,7 @@ pub enum Command {
     ModeSense6(ModeSense6) = 0x1A,
     PreventAllowMediumRemoval([u8; 15]) = 0x1e,
     ReadFormatCapacity([u8; 15]) = 0x23,
+    StartStopUnit([u8; 15]) = 0x1b,
 }
 
 const _: () = assert!(size_of::<Command>() == 16);
@@ -309,6 +310,7 @@ impl Command {
             Command::ModeSense6(_) => 6,
             Command::PreventAllowMediumRemoval(_) => 6,
             Command::ReadFormatCapacity(_) => 10,
+            Command::StartStopUnit(_) => 6,
         }
     }
 }

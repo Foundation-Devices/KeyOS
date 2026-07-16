@@ -15,7 +15,7 @@ pub use card::line_card;
 pub use circular_progress::circular_progress;
 pub use corners::round_corners;
 pub use corners::round_corners_scaling;
-pub use graph::{draw_graph, PricePoint};
+pub use graph::{draw_graph, graph_points, GraphPoint, PricePoint};
 pub use loader::loader;
 pub use panel::circle;
 pub use panel::frame;

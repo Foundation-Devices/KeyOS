@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
-use app_manager::decode_app_id_str;
+use app_manager::AppQrMatchRules;
 use app_manifest::Manifest;
-use log::error;
+use serde_json::to_vec;
 use xous::{AppId, PID};
 
 use crate::launch::list_apps;
@@ -34,12 +34,13 @@ impl AppRegistry {
         match list_apps("/keyos/apps") {
             Ok(apps_list) => {
                 for (path, manifest) in apps_list {
-                    let Ok(app_id) = decode_app_id_str(&manifest.app_id) else {
-                        error!("Invalid app ID format in manifest: {}", manifest.app_id);
-                        continue;
-                    };
+                    let app_id = AppId(manifest.app_id);
 
                     if self.installed_apps.contains_key(&app_id) {
+                        log::warn!(
+                            "scan_installed_apps: skipping duplicate app_id=0x{}",
+                            hex::encode(app_id.0)
+                        );
                         continue;
                     }
 
@@ -50,6 +51,10 @@ impl AppRegistry {
 
                     self.installed_apps.insert(app_id, AppInfo { id: app_id, elf_path, manifest });
                 }
+                log::info!(
+                    "scan_installed_apps: registry tracks {} installed apps",
+                    self.installed_apps.len()
+                );
             }
 
             Err(e) => {
@@ -70,6 +75,26 @@ impl AppRegistry {
         self.running_apps
             .get(&pid)
             .and_then(|app_info| app_info.info.manifest.app_name.get(&locale.to_string().into()).cloned())
+    }
+
+    pub(crate) fn qr_match_rules(&self) -> Vec<AppQrMatchRules> {
+        self.installed_apps
+            .values()
+            .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
+            .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
+                Ok(rules_json) if !rules_json.is_empty() => {
+                    Some(AppQrMatchRules { id: (&app_info.id).into(), rules_json })
+                }
+                Ok(_) => None,
+                Err(_) => {
+                    log::warn!(
+                        "qr_match_rules: failed to serialize qr_match_rules for app_id=0x{}",
+                        hex::encode(app_info.id.0)
+                    );
+                    None
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn elf_path(&self, app_id: AppId) -> Option<String> {

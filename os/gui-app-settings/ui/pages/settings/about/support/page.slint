@@ -3,26 +3,24 @@
 
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { Palette, Size } from "@ui/theme.slint";
-import { 
-    TextMd, TextSm, TextLg, TextXl, 
+import {
+    TextMd, TextSm, TextLg, TextXl,
     HeadingMd,
     MenuSection,
     MenuSectionLayout,
     MenuItemRightLayout,
     MenuActionItem,
     HLine,
-    Qrcode,
-    Panel,
     Icon,
     MenuItemLayout,
     BasePage,
     PageBody,
-    ButtonSection
+    ButtonSection,
+    QrOverlay
 } from "@ui/widgets.slint";
 
 import { SupportProps } from "props.slint";
 import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
-import { QrOverlay } from "../../../../widgets/qr-code.slint";
 
 component SupportItem inherits MenuItemLayout {
     in property <string> text: "";
@@ -121,5 +119,6 @@ export component SupportPage inherits BasePage {
     // QR code overlay
     if qrcode-url != "": QrOverlay {
         url <=> qrcode-url;
+        title: TR2.lookup(TrId.CommonSupportModalDocumentationHeader);
     }
 }

@@ -59,6 +59,4 @@ impl XousTickTimer {
                 as i64;
         TIME_OFFSET.store(real_time - time as i64, Ordering::SeqCst);
     }
-
-    pub fn reset_system_time(&self) { TIME_OFFSET.store(0, Ordering::SeqCst); }
 }

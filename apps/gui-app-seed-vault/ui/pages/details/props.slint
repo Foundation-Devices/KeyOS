@@ -1,13 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { SeedView } from "../../types.slint";
-
 import { EditPageVersion } from "@ui/pages.slint";
 export { EditPageVersion }
 
-@rust-attr(route(path = "/details?{seed}&{version}"))
+@rust-attr(route(path = "/details?{index}&{version}"))
 export struct DetailsProps {
-    seed: SeedView,
+    index: int,
     version: EditPageVersion,
 }

@@ -34,6 +34,9 @@ export component Input inherits Rectangle {
     in-out property <bool> filtered-character: false;
     in property <string> special-chars-removed-label;
     in property <brush> text-color: Palette.content-primary;
+    in property <bool> locked: false;
+    in property <string> accept-button-text;
+    in property <bool> accept-button-enabled: !has-error && !has-notice;
 
     callback accepted(string);
     callback edited(string);
@@ -58,17 +61,19 @@ export component Input inherits Rectangle {
                 size: Size.sz6;
                 touch-factor: 3;
                 icon: "minus";
-                icon-color: transparent;
+                icon-color: Palette.content-primary;
 
                 clicked => {
-                    debug("Decrementing number");
-                    if (bounded-number) {
-                        root.text = Utils.check-bounds(Utils.decrement-string(root.text), minimum, maximum);
-                    } else {
-                        root.text = Utils.decrement-string(root.text);
+                    if (!locked) {
+                        debug("Decrementing number");
+                        if (bounded-number) {
+                            root.text = Utils.check-bounds(Utils.decrement-string(root.text), minimum, maximum);
+                        } else {
+                            root.text = Utils.decrement-string(root.text);
+                        }
+                        text-input.text = root.text;
+                        root.edited(root.text);
                     }
-                    text-input.text = root.text;
-                    root.edited(root.text);
                 }
             }
         }
@@ -120,9 +125,15 @@ export component Input inherits Rectangle {
                         font-weight: Font.text-md.weight;
                         input-type: root.input-type == InputType.password ? (root.show-password ? InputType.text : InputType.password) : root.input-type;
                         caps-mode: root.caps-mode;
+                        accept-button-text: root.accept-button-text;
+                        accept-button-enabled: root.accept-button-enabled;
                         horizontal-alignment: input-type == InputType.number ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
                         vertical-alignment: TextVerticalAlignment.center;
-                        enabled: enabled;
+                        enabled: enabled && !locked;
+                        // Horizontal auto-scroll for long text — pattern from upstream Slint's ExtendedLineEdit demo.
+                        width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                        property <length> computed-x: 0;
+                        x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
 
                         accepted() => {
                             root.accepted(self.text);
@@ -149,6 +160,23 @@ export component Input inherits Rectangle {
                             root.edited(self.text);
                         }
 
+                        cursor-position-changed(cursor-position) => {
+                            if (root.input-type == InputType.number) {
+                                return;
+                            }
+                            if cursor-position.x + self.computed-x < Size.sz2 {
+                                self.computed-x = - cursor-position.x + Size.sz2;
+                            } else if cursor-position.x + self.computed-x > parent.width - Size.sz2 - self.text-cursor-width {
+                                self.computed-x = parent.width - cursor-position.x - Size.sz2 - self.text-cursor-width;
+                            }
+                        }
+
+                        // input-type swap (password reveal/hide) doesn't fire cursor-position-changed on its own;
+                        // re-poke the cursor so the scroll re-clamps in the new font metrics.
+                        changed input-type => {
+                            self.set-selection-offsets(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                        }
+
                         key-pressed(event) => {
                             root.key-pressed(event)
                         }
@@ -158,7 +186,7 @@ export component Input inherits Rectangle {
                 // Ensure that touching in the padding area focuses the text input
                 TouchArea {
                     clicked => {
-                        if (enabled) {
+                        if (enabled && !locked) {
                             text-input.focus();
                             debug("Clicked on input");
                         }
@@ -176,11 +204,12 @@ export component Input inherits Rectangle {
             IconButton {
                 size: Size.sz6;
                 touch-factor: 3;
-                icon: input-type == InputType.number ? "plus" : (input-type == InputType.password ? (root.show-password ? "eye-off" : "eye") : "remove");
-                icon-color: input-type == InputType.password ? Palette.content-primary : transparent;
+                icon: input-type == InputType.number ? "plus" : (input-type == InputType.password ? (root.show-password ? "eye-off" : "eye") : locked ? "" : "remove");
+                // "remove" (x) button has its own coloration and transparency, only shows for normal text
+                icon-color: input-type == InputType.text ? transparent : Palette.content-primary;
 
                 clicked => {
-                    if (input-type == InputType.number) {
+                    if (input-type == InputType.number && !locked) {
                         debug("Incrementing number");
                         if (bounded-number) {
                             root.text = Utils.check-bounds(Utils.increment-string(root.text), minimum, maximum);
@@ -200,10 +229,11 @@ export component Input inherits Rectangle {
                                 root.show-password = true;
                             }
                         }
-                    } else {
+                    } else if (!locked) {
                         debug("Clearing text");
                         root.text = "";
                         text-input.text = "";
+                        text-input.computed-x = 0;
                         root.edited("")
                     }
                 }

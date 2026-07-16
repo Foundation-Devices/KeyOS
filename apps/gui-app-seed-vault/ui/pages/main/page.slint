@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette } from "@ui/theme.slint";
-import { Button, HeadingLg, TextMd, ShieldPage, ContentSection, ButtonSection, WrappedIcon } from "@ui/widgets.slint";
+import { Palette, Size } from "@ui/theme.slint";
+import { Button, HeadingLg, TextMd, ShieldPage, ContentSection, ButtonSection, WrappedIcon, NavHeader, PageBody, BasePage } from "@ui/widgets.slint";
 import { MainProps } from "./props.slint";
 import { Navigate } from "../../gen/navigate.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 
-export component MainPage inherits ShieldPage {
+component MainShield inherits ShieldPage {
     in property <MainProps> props;
-    property <bool> light-mode: true;
 
     ContentSection {
+        padding-top: Size.sz4;
         HorizontalLayout {
             alignment: center;
             WrappedIcon {
@@ -34,6 +34,16 @@ export component MainPage inherits ShieldPage {
     }
 
     ButtonSection {
+        padding-bottom: Size.zero;
+
+        Button {
+            label: TR2.lookup(TrId.CreateItemImportItem);
+            importance: secondary;
+            clicked => {
+                Navigate.manual-import({ });
+            }
+        }
+
         Button {
             label: TR2.lookup(TrId.MainNewItem);
             importance: primary;
@@ -41,5 +51,77 @@ export component MainPage inherits ShieldPage {
                 Navigate.create({ });
             }
         }
+    }
+}
+
+component MainBase inherits BasePage {
+    in property <MainProps> props;
+
+    VerticalLayout {
+        NavHeader {
+            left-icon: Navigate.has-backward ? "chevron-left" : "";
+
+            clicked => {
+                if Navigate.has-backward {
+                    Navigate.backward();
+                }
+            }
+        }
+
+        PageBody {
+            padding-top: Size.zero;
+
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        outer-icon: "jumbo-circle";
+                        inner-icon: "acorn";
+                    }
+                }
+
+                HeadingLg {
+                    vertical-stretch: 0;
+                    text: TR2.lookup(TrId.MainHeader);
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    text: TR2.lookup(TrId.MainSubheader);
+                    color: Palette.content-secondary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: TR2.lookup(TrId.CreateItemImportItem);
+                    importance: secondary;
+                    clicked => {
+                        Navigate.manual-import({ });
+                    }
+                }
+
+                Button {
+                    label: TR2.lookup(TrId.MainNewItem);
+                    importance: primary;
+                    clicked => {
+                        Navigate.create({ });
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MainPage inherits Rectangle {
+    in property <MainProps> props;
+
+    if Navigate.has-backward: MainBase {
+        props: props;
+    }
+
+    if !Navigate.has-backward: MainShield {
+        props: props;
     }
 }

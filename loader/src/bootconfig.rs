@@ -4,16 +4,13 @@
 
 use keyos::{BOOT_SPLASH_PAGES, BOOT_SPLASH_PHYS_ADDR, PAGE_SIZE, PLAINTEXT_DRAM_END};
 
-use crate::{args::KernelArguments, MemoryRegionExtra, XousPid};
+use crate::{args::KernelArguments, XousPid};
 
 /// In-memory copy of the configuration page. Stage 1 sets up the gross structure,
 /// and Stage 2 fills in the details.
 pub struct BootConfig {
     /// Where the tagged args list starts in RAM.
     pub args: KernelArguments,
-
-    /// Additional memory regions in this system
-    pub regions: &'static [MemoryRegionExtra],
 
     /// Additional pages that are consumed during init.
     /// This includes pages that are allocated to other
@@ -37,7 +34,6 @@ impl Default for BootConfig {
         // sure the splash image is in fact at the top of the memory.
         const _: () = assert!(BOOT_SPLASH_PHYS_ADDR == PLAINTEXT_DRAM_END - BOOT_SPLASH_PAGES * PAGE_SIZE);
         BootConfig {
-            regions: Default::default(),
             args: KernelArguments::new(core::ptr::null::<usize>()),
             rpt_size_bytes: 0,
             extra_pages: BOOT_SPLASH_PAGES,

@@ -1,20 +1,36 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
+use fs::DirEntry;
+#[cfg(not(feature = "recovery-os"))]
+use slint_keyos_platform::file_backed::JsonBacked;
 use slint_keyos_platform::{
     gui_server_api::navigation::filepicker::{AllowedExtensions, SelectFileResult},
+    sleep,
     slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel},
     spawn_local, StoredValue,
 };
 
-use crate::fsutils::list::{list_directory, ListingParams};
+#[cfg(not(feature = "recovery-os"))]
+use crate::fs_permissions::FileSystemPermissions;
+use crate::{
+    fsutils::list::{list_directory, ListingParams},
+    FileListType,
+};
 use crate::{
     location::LocationKey, location::LocationMap, path::FsPath, picker::PickerState, tr, ActiveModal,
     AppWindow, BreadCrumb, BrowserGlobal, FileAction, FileEntryModel, FileListData, FileSystem, GuiApi,
     ModalGlobal, PickerGlobal, SegmentModel, SortDirection, SortMode,
 };
+
+#[cfg(not(feature = "recovery-os"))]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct FileBrowserSettings {
+    pub show_hidden_files: bool,
+    pub quick_tip_dismissed: bool,
+}
 
 pub struct AppState {
     pub ui: AppWindow,
@@ -24,8 +40,8 @@ pub struct AppState {
     pub browser: BrowserState,
     pub picker: Option<PickerState>,
     pub copy_move: Option<CopyMoveState>,
-    #[cfg(keyos)]
-    pub otg_priority_was_enabled: bool,
+    #[cfg(not(feature = "recovery-os"))]
+    pub settings: JsonBacked<FileBrowserSettings, FileSystemPermissions>,
 }
 
 #[derive(Clone)]
@@ -48,10 +64,13 @@ pub struct ListingState {
     pub per_location: LocationMap<ListingSlot>,
 }
 
+#[derive(Clone)]
 pub struct ListingSlot {
-    pub loading: bool,
-    pub error: bool,
-    pub num_filtered: usize,
+    #[allow(dead_code)]
+    pub location: LocationKey,
+    pub list_type: FileListType,
+    pub num_excluded: usize,
+    pub num_excluded_by_search: usize,
     pub files: ModelRc<FileEntryModel>,
 }
 
@@ -65,10 +84,22 @@ impl AppState {
             browser: BrowserState::new(),
             picker: None,
             copy_move: None,
-            #[cfg(keyos)]
-            otg_priority_was_enabled: false,
+            #[cfg(not(feature = "recovery-os"))]
+            settings: JsonBacked::new("settings.json", fs::Location::AppData).0,
         }
     }
+
+    #[cfg(not(feature = "recovery-os"))]
+    pub fn show_hidden_files(&self) -> bool { self.settings.show_hidden_files }
+
+    #[cfg(not(feature = "recovery-os"))]
+    pub fn set_show_hidden_files(&mut self, show: bool) { self.settings.guard().show_hidden_files = show; }
+
+    #[cfg(not(feature = "recovery-os"))]
+    pub fn quick_tip_dismissed(&self) -> bool { self.settings.quick_tip_dismissed }
+
+    #[cfg(not(feature = "recovery-os"))]
+    pub fn set_quick_tip_dismissed(&mut self) { self.settings.guard().quick_tip_dismissed = true; }
 
     pub fn apply_ui(&self) {
         if self.picker.is_some() {
@@ -116,17 +147,6 @@ impl AppState {
             global.set_location_idx(current_idx);
             global.set_allowed_locations(allowed_locations.clone());
             global.set_current_path(current_path);
-
-            #[cfg(not(feature = "recovery-os"))]
-            {
-                global.set_is_airlock_selected(current_location == LocationKey::Airlock);
-                global.set_is_airlock_mounted(!self.is_mounted(LocationKey::Airlock));
-            }
-            #[cfg(feature = "recovery-os")]
-            {
-                global.set_is_airlock_selected(false);
-                global.set_is_airlock_mounted(false);
-            }
 
             let file_lists = order
                 .iter()
@@ -314,11 +334,8 @@ impl AppState {
 impl AppState {
     pub fn list_directory_browser(state: StoredValue<Self>) {
         let (fs, params, key) = {
-            let mut state = state.borrow_mut();
+            let state = state.borrow();
             let key = state.browser.current;
-            let slot = state.browser.listing.per_location.get_mut(key);
-            slot.loading = true;
-            slot.error = false;
             let params = state.browser_listing_params();
             let fs = state.fs.clone();
             state.apply_ui();
@@ -329,36 +346,29 @@ impl AppState {
     }
 
     pub fn list_directory_picker(state: StoredValue<Self>) {
-        let (fs, params, key, dir_only) = {
-            let mut state = state.borrow_mut();
-            let Some(picker) = state.picker.as_mut() else {
+        let (fs, params, key) = {
+            let state = state.borrow();
+            let Some(picker) = &state.picker else {
                 return;
             };
+            let user_show_hidden = state.browser_global().get_show_hidden_files();
             let key = picker.current;
-            let slot = picker.listing.per_location.get_mut(key);
-            slot.loading = true;
-            slot.error = false;
-            let params = picker.listing_params();
-            let dir_only = picker.options.dir_selection_mode;
+            let params = picker.listing_params(user_show_hidden);
             let fs = state.fs.clone();
             state.apply_ui();
-            (fs, params, key, dir_only)
+            (fs, params, key)
         };
 
-        spawn_local(Self::list_picker_task(state, fs, key, params, dir_only)).detach();
+        spawn_local(Self::list_picker_task(state, fs, key, params)).detach();
     }
 
     pub fn list_directory_copy_move(state: StoredValue<Self>) {
         let (fs, params, key, selected) = {
-            let mut state = state.borrow_mut();
-            let Some(ctx) = &mut state.copy_move else {
+            let state = state.borrow();
+            let Some(ctx) = &state.copy_move else {
                 return;
             };
             let key = ctx.current;
-            let slot = ctx.listing.per_location.get_mut(key);
-            slot.loading = true;
-            slot.error = false;
-
             let params = ctx.listing_params();
             let fs = state.fs.clone();
             let selected = state.browser.selection.get(state.browser.current).clone();
@@ -376,34 +386,29 @@ impl AppState {
         params: ListingParams,
         selected_names: Vec<FsPath>,
     ) {
-        let result = list_directory(fs, params).await;
+        let result = {
+            let _delayed_loading = spawn_local(async move {
+                sleep(Duration::from_millis(100)).await;
+                if let Some(ctx) = &mut state.borrow_mut().copy_move {
+                    ctx.listing.per_location.get_mut(key).list_type = FileListType::Loading;
+                }
+                state.borrow().apply_ui();
+            });
+            list_directory(fs, params).await
+        };
 
         let mut state = state.borrow_mut();
+        let state = &mut *state;
         let Some(ctx) = &mut state.copy_move else {
             return;
         };
         let slot = ctx.listing.per_location.get_mut(key);
-        slot.clear();
-
-        match result {
-            Ok((list, _)) => {
-                slot.error = false;
-                slot.num_filtered = 0;
-                let entries = list
-                    .iter()
-                    .filter(|entry| entry.is_dir)
-                    .filter(|entry| !selected_names.iter().any(|name| name.as_str() == entry.name.as_str()))
-                    .map(|entry| entry.into());
-                slot.extend(entries);
-            }
-            Err(e) => {
-                log::error!("Failed to list copy/move directory: {e:?}");
-                slot.error = true;
-                slot.num_filtered = 0;
-                slot.files = ModelRc::new(VecModel::from(Vec::<FileEntryModel>::new()));
-            }
-        }
-        slot.loading = false;
+        Self::list_result_to_slot(result, slot, key, &state.availability, |list| {
+            list.into_iter()
+                .filter(|entry| entry.is_dir)
+                .filter(|entry| !selected_names.iter().any(|name| name.as_str() == entry.name.as_str()))
+                .map(|entry| entry.into())
+        });
         state.apply_ui();
     }
 
@@ -413,48 +418,30 @@ impl AppState {
         key: LocationKey,
         params: ListingParams,
     ) {
-        let result = list_directory(fs, params).await;
+        let result = {
+            let _delayed_loading = spawn_local(async move {
+                sleep(Duration::from_millis(100)).await;
+                state.borrow_mut().browser.listing.per_location.get_mut(key).list_type =
+                    FileListType::Loading;
+                state.borrow().apply_ui();
+            });
+            list_directory(fs, params).await
+        };
 
-        {
-            let state = state.borrow_mut();
-            let is_select_mode = state.browser_global().get_is_select_mode();
-            let selection =
-                if is_select_mode { state.browser.selection.get(key).clone() } else { Vec::new() };
-            let (mut availability, mut listing) =
-                state.map_split(|state| (&mut state.availability, &mut state.browser.listing));
+        let mut state = state.borrow_mut();
+        let state = &mut *state;
+        let is_select_mode = state.browser_global().get_is_select_mode();
+        let selection = if is_select_mode { state.browser.selection.get(key).clone() } else { Vec::new() };
 
-            let slot = listing.per_location.get_mut(key);
-            slot.clear();
-
-            #[cfg(feature = "recovery-os")]
-            let _ = &mut availability;
-
-            match result {
-                Ok((list, num_filtered)) => {
-                    slot.error = false;
-                    slot.num_filtered = num_filtered;
-                    let entries = list.iter().map(|entry| {
-                        let mut entry: FileEntryModel = entry.into();
-                        entry.is_selected = selection.iter().any(|name| name.as_str() == entry.name.as_str());
-                        entry
-                    });
-                    slot.extend(entries);
-                }
-                #[cfg(not(feature = "recovery-os"))]
-                Err(whence::Error { error: fs::Error::NoMedia, .. }) if key == LocationKey::Airlock => {
-                    availability.insert(key, Some(fs::FileSystemEventType::Unmounted));
-                    slot.error = false;
-                    slot.num_filtered = 0;
-                }
-                Err(e) => {
-                    log::error!("Failed to list browser directory: {e:?}");
-                    slot.error = true;
-                    slot.num_filtered = 0;
-                }
-            }
-            slot.loading = false;
-        }
-        state.borrow().apply_ui();
+        let slot = state.browser.listing.per_location.get_mut(key);
+        Self::list_result_to_slot(result, slot, key, &state.availability, |list| {
+            list.into_iter().map(|entry| {
+                let mut entry: FileEntryModel = entry.into();
+                entry.is_selected = selection.iter().any(|name| name.as_str() == entry.name.as_str());
+                entry
+            })
+        });
+        state.apply_ui();
     }
 
     async fn list_picker_task(
@@ -462,32 +449,72 @@ impl AppState {
         fs: FileSystem,
         key: LocationKey,
         params: ListingParams,
-        dir_only: bool,
     ) {
-        let result = list_directory(fs, params).await;
+        let result = {
+            let _delayed_loading = spawn_local(async move {
+                sleep(Duration::from_millis(100)).await;
+                if let Some(picker) = &mut state.borrow_mut().picker {
+                    picker.listing.per_location.get_mut(key).list_type = FileListType::Loading;
+                }
+                state.borrow().apply_ui();
+            });
+            list_directory(fs, params).await
+        };
 
         let mut state = state.borrow_mut();
+        let state = &mut *state;
         let Some(picker) = state.picker.as_mut() else {
             return;
         };
         let slot = picker.listing.per_location.get_mut(key);
+        Self::list_result_to_slot(result, slot, key, &state.availability, |list| {
+            list.into_iter().map(|entry| entry.into())
+        });
+        state.apply_ui();
+    }
+
+    fn list_result_to_slot<TI: IntoIterator<Item = FileEntryModel>>(
+        result: whence::Result<(Vec<DirEntry>, crate::fsutils::list::FilterCounts), fs::Error>,
+        slot: &mut ListingSlot,
+        key: LocationKey,
+        availability: &LocationMap<Option<fs::FileSystemEventType>>,
+        entry_filter: impl FnOnce(Vec<DirEntry>) -> TI,
+    ) {
         slot.clear();
 
         match result {
-            Ok((list, num_filtered)) => {
-                slot.error = false;
-                slot.num_filtered = num_filtered;
-                let entries = list.iter().filter(|entry| !dir_only || entry.is_dir).map(|entry| entry.into());
-                slot.extend(entries);
+            Ok((list, filter_counts)) => {
+                slot.list_type = FileListType::FileList;
+                slot.num_excluded = filter_counts.excluded;
+                slot.num_excluded_by_search = filter_counts.excluded_by_search;
+                slot.extend(entry_filter(list));
+            }
+            #[cfg(not(feature = "recovery-os"))]
+            Err(whence::Error { error: fs::Error::NoMedia, .. }) if key == LocationKey::Airlock => {
+                if availability.get(key) == &Some(fs::FileSystemEventType::Error) {
+                    slot.list_type = FileListType::NotFormatted;
+                } else {
+                    slot.list_type = FileListType::AirlockUsb;
+                }
+                slot.num_excluded = 0;
+                slot.num_excluded_by_search = 0;
+            }
+            Err(whence::Error { error: fs::Error::NoMedia, .. }) if key == LocationKey::External => {
+                if availability.get(key) == &Some(fs::FileSystemEventType::Error) {
+                    slot.list_type = FileListType::NotFormatted;
+                } else {
+                    slot.list_type = FileListType::UsbNotConnected;
+                }
+                slot.num_excluded = 0;
+                slot.num_excluded_by_search = 0;
             }
             Err(e) => {
-                log::error!("Failed to list picker directory: {e:?}");
-                slot.error = true;
-                slot.num_filtered = 0;
+                log::error!("Failed to list directory: {e:?}");
+                slot.list_type = FileListType::GeneralError;
+                slot.num_excluded = 0;
+                slot.num_excluded_by_search = 0;
             }
         }
-        slot.loading = false;
-        state.apply_ui();
     }
 }
 
@@ -521,24 +548,29 @@ impl CopyMoveState {
 }
 
 impl ListingState {
-    pub fn new() -> Self { ListingState { per_location: LocationMap::from_fn(|_| ListingSlot::new()) } }
+    pub fn new() -> Self { ListingState { per_location: LocationMap::from_fn(|l| ListingSlot::new(l)) } }
 }
 
 impl ListingSlot {
-    fn new() -> Self {
+    fn new(location: LocationKey) -> Self {
         ListingSlot {
-            loading: false,
-            error: false,
-            num_filtered: 0,
+            location,
+            list_type: FileListType::FileList,
+            num_excluded: 0,
+            num_excluded_by_search: 0,
             files: ModelRc::new(VecModel::from(Vec::<FileEntryModel>::new())),
         }
     }
 
     fn to_file_list(&self) -> FileListData {
         FileListData {
-            loading: self.loading,
-            error: self.error,
-            num_files_filtered: self.num_filtered as i32,
+            #[cfg(not(feature = "recovery-os"))]
+            is_airlock: self.location == LocationKey::Airlock,
+            #[cfg(feature = "recovery-os")]
+            is_airlock: false,
+            list_type: self.list_type,
+            num_files_excluded: self.num_excluded as i32,
+            num_files_excluded_by_search: self.num_excluded_by_search as i32,
             files: self.files.clone(),
         }
     }
@@ -553,20 +585,7 @@ impl ListingSlot {
     fn extend(&self, iter: impl IntoIterator<Item = FileEntryModel>) {
         let vec = self.vec_model();
         vec.clear();
-        for file in iter.into_iter() {
-            vec.push(file);
-        }
-    }
-}
-
-impl Clone for ListingSlot {
-    fn clone(&self) -> Self {
-        ListingSlot {
-            loading: self.loading,
-            error: self.error,
-            num_filtered: self.num_filtered,
-            files: self.files.clone(),
-        }
+        vec.extend(iter);
     }
 }
 

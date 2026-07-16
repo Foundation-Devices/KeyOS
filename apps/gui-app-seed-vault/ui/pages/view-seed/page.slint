@@ -1,0 +1,75 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Callbacks as CB } from "../../callbacks.slint";
+import { Palette, Size, Importance, CallbackResult, ResultLevel } from "@ui/theme.slint";
+import { IconButton, AppHeader, BasePage,
+         ErrorModal,
+         ButtonSection, Button,
+         SeedWords } from "@ui/widgets.slint";
+import { ViewSeedProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component ViewSeedPage inherits BasePage {
+    in property <ViewSeedProps> props;
+
+    property <string> entropy;
+    property <CallbackResult> result: { level: ResultLevel.info, success: true, text: "", title: "" };
+
+    init => {
+        entropy = CB.get-pending-imported-seed().entropy;
+    }
+    property <bool> has-errors: label-error;
+    property <bool> label-error: true;
+
+    VerticalLayout {
+        AppHeader {
+            title: TR2.lookup(TrId.ViewSeedWordsTitle);
+
+            IconButton {
+                icon: "chevron-left";
+                size: Size.sz8;
+                importance: Importance.normal;
+                clicked => {
+                    CB.clear-pending-import();
+                    Navigate.backward();
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding-top: Size.sz16;
+            padding-bottom: Size.sz4;
+
+            SeedWords {
+                words: CB.entropy-to-words(entropy);
+                dots-padding-bottom: Size.sz6;
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonDone);
+                    clicked => {
+                        Navigate.save-seed({ });
+                    }
+                }
+            }
+        }
+    }
+
+    if !result.success: ErrorModal {
+        icon: result.level == ResultLevel.info ? "info" : "alert";
+        icon-color: result.level == ResultLevel.info ? Palette.content-brand : Palette.content-notice;
+        title: result.title;
+        text: result.text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+
+        confirm-clicked => {
+            result.success = true;
+        }
+    }
+}

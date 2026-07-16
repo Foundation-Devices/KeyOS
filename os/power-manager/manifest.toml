@@ -1,6 +1,7 @@
+manifestVersion = "0"
 appId = "0x6f732f706f7765722d6d616e61676572"
 memory = ["RSTC", "PMC"]
-syscall = ["PowerManagement", "SetThreadPriority"]
+syscall = ["PowerManagement", "SetThreadPriority", "Shutdown"]
 extends = "../../api/power-manager"
 
 [appName]

@@ -1,5 +1,6 @@
+manifestVersion = "0"
 appId = "0xbf5cdfbfda7e85b5253ff268d32ea957"
-syscall = ["CreateProcess"]
+syscall = ["CreateProcess", "GetPanicMessage"]
 extends = "../../api/app-manager"
 
 [appName]
@@ -11,6 +12,6 @@ Disconnected = { id = 6, type = "scalar" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]
-"os/crypto" = ["ShaInit", "ShaUpdate", "ShaFinalize", "ShaAbort"]
+"os/crypto" = ["ShaSetContext", "ShaUpdate", "ShaGetContext", "ShaDrop"]
 "os/fs" = ["GetSystemReadAccess"]
 "os/nameserver" = ["AddManifest"]

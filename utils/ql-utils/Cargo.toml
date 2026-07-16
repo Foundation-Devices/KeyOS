@@ -18,6 +18,7 @@ server = { workspace = true }
 settings = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 update = { workspace = true }
+urlencoding = "2.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

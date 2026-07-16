@@ -238,7 +238,7 @@ export component TransactionCard inherits Rectangle {
             height: 226px;  // 206px card, 8px spacing, 12px page dots
             width: 448px;
             page-spacing: Size.sz2_5;
-            vertical-spacing: Size.sz2;
+            dots-padding-top: Size.sz2;
 
             for output[index] in psbt.outputs: VerticalLayout {
                 width: root.width;

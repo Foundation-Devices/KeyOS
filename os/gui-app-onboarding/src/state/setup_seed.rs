@@ -6,7 +6,10 @@ use std::future::Future;
 use anyhow::Context;
 use fs::messages::FormatEncryptedVolume;
 use quantum_link::foundation_api::onboarding::OnboardingState;
-use security::messages::{ComputeSeedFingerprint, GetSeedFingerprint, SetSeedAndPin};
+use security::{
+    messages::{ComputeSeedFingerprint, GetSeedFingerprint, SetSeedAndPin},
+    Seed,
+};
 use slint_keyos_platform::{
     async_archive, async_scalar,
     gui_server_api::navigation::qrscanner::{ScanQrOptions, ScanQrResult},
@@ -20,7 +23,6 @@ use crate::{
     gui_permissions::GuiPermissions,
     notify_onboarding_state,
     security_permissions::SecurityPermissions,
-    seed,
     state::{AppState, PendingPin},
     tr, Animate, MasterSeedState, Navigate, NavigateOptions, QlStatus, SeedGlobal, TrId,
 };
@@ -33,7 +35,7 @@ pub async fn create_new_master_seed(state: StoredValue<AppState>) {
 
         let mut seed_bytes = [0u8; 16];
         getrandom::getrandom(&mut seed_bytes).context("Failed to generate random seed")?;
-        let seed = security::Seed::Twelve(seed_bytes);
+        let seed = Seed::Twelve(seed_bytes);
 
         async_archive::<SecurityPermissions, _>(SetSeedAndPin { seed, pin, pin_entry })
             .await
@@ -56,8 +58,7 @@ pub async fn restore_from_seed_words(state: StoredValue<AppState>, words: ModelR
         seed_global.set_master_seed_state(MasterSeedState::Failed);
         return;
     };
-    let entropy = mnemonic.to_entropy();
-    let seed = security::Seed::from_bytes(&entropy);
+    let seed = Seed::from_mnemonic(&mnemonic);
 
     // In case we're recovering a previously erased master key,
     // compare the fingerprints to ensure they're matching
@@ -86,6 +87,11 @@ pub async fn restore_from_seed_words(state: StoredValue<AppState>, words: ModelR
 
 pub async fn restore_from_seed_qr(state: StoredValue<AppState>) -> anyhow::Result<()> {
     let PendingPin { pin, pin_entry } = state.borrow().get_pending_pin()?;
+    let ui = state.borrow().ui();
+    let nav = ui.global::<Navigate>();
+    let seed_global = ui.global::<SeedGlobal>();
+
+    seed_global.set_seed_qr_error(false);
 
     log::info!("Found pending PIN, opening QR scanner");
 
@@ -96,7 +102,7 @@ pub async fn restore_from_seed_qr(state: StoredValue<AppState>) -> anyhow::Resul
     .context("qr scan failed")?;
 
     let qr_data = match scan_result {
-        Some(ScanQrResult::Qr(data)) => data,
+        Some(ScanQrResult::Qr { data, .. }) => data,
         Some(ScanQrResult::LeftClicked) => {
             log::info!("QR scan cancelled by user");
             return Ok(());
@@ -106,14 +112,18 @@ pub async fn restore_from_seed_qr(state: StoredValue<AppState>) -> anyhow::Resul
         }
     };
 
-    // has to be before navigation in case it fails
-    let words = seed::parse_seedqr(&qr_data).context("Failed to parse SeedQR")?;
-    let seed = seed::mnemonic_to_seed(&words);
-
-    let ui = state.borrow().ui();
-    let nav = ui.global::<Navigate>();
-    let seed_global = ui.global::<SeedGlobal>();
     nav.invoke_restore_seed_qr(NavigateOptions { animate: Animate::None, replace: false });
+
+    let words = match security::parse_seedqr(&qr_data).context("Failed to parse SeedQR") {
+        Ok(words) => words,
+        Err(e) => {
+            log::error!("failed to parse SeedQR: {e:?}");
+            seed_global.set_seed_qr_error(true);
+            return Ok(());
+        }
+    };
+
+    let seed = Seed::from_mnemonic(&words);
 
     // In case we're recovering a previously erased master key,
     // compare the fingerprints to ensure they're matching
@@ -200,7 +210,7 @@ async fn reset_fs_encrypted_if_needed() {
     }
 }
 
-pub(crate) async fn compare_with_current_seed(seed: &security::Seed) -> anyhow::Result<bool> {
+pub(crate) async fn compare_with_current_seed(seed: &Seed) -> anyhow::Result<bool> {
     let old_fingerprint = async_archive::<SecurityPermissions, _>(GetSeedFingerprint)
         .await
         .context("failed to get old seed fingerprint")?;

@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0xdac5321775d449c11bc9c90f38067f8f"
 
 [appName]
@@ -9,7 +10,7 @@ template = ["gui-app", "fs-generic"]
 "os/bt" = ["GetBtAddr", "SubscribeBleState"]
 "os/haptics" = ["Vibrate"]
 "os/fs" = ["FormatEncryptedVolume", "Remove", "GetSystemWriteAccess", "GetUsbReadAccess", "GetSystemReadAccess"]
-"os/gui-server" = ["SwitchToLauncher", "UpdateKioskPolicy"]
+"os/gui-server" = ["SwitchToLauncher"]
 "os/keycard" = [
     "IdentifyKeycard",
     "GenerateShards",
@@ -20,6 +21,7 @@ template = ["gui-app", "fs-generic"]
     "StoreShardToKeycard",
     "RestoreMasterSeed",
     "DetectKeycard",
+    "SetShamirScheme",
 ]
 "os/quantum-link" = [
     "BackupShard",
@@ -36,6 +38,7 @@ template = ["gui-app", "fs-generic"]
     "SubscribePublishedAccountUpdate",
     "SubscribeSecurityCheckState",
     "SubscribeConnectionStatus",
+    "UnpairFromEnvoy",
 ]
 "os/ql-prestart" = ["StartWithoutFilesystem"]
 "os/security" = [
@@ -75,5 +78,5 @@ template = ["gui-app", "fs-generic"]
 "os/backup" = [
     "SubscribeRestoreProgress",
 ]
-"os/power-manager" = ["Reboot", "StatusSubscribe", "SetOtgPriority"]
-"os/usb" = ["IsEnabled", "SetEnabled"]
+"os/power-manager" = ["Reboot"]
+"os/power-manager-ext" = ["StatusSubscribe"]

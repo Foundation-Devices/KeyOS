@@ -7,7 +7,7 @@ use tiny_skia::{
 
 use super::{drawing::draw_icon, font::draw_text, keys::KeyDef};
 use crate::{
-    colors::to_color,
+    colors::{to_color, KeyStyle},
     drawing::{drop_shadow, round_rect_path},
     keyboard::{KEY_BORDER_RADIUS, KEY_DEFAULT_WIDTH, KEY_HEIGHT},
 };
@@ -29,13 +29,13 @@ impl KeySlot {
         Self { key, width, height: KEY_HEIGHT }
     }
 
-    fn draw_label(&self, pixmap: &mut PixmapMut, rect: &Rect, color: ColorU8) {
+    fn draw_label(&self, pixmap: &mut PixmapMut, rect: &Rect, color: ColorU8, label_override: Option<&str>) {
         let shift_y = -2_f32;
         let rect = Rect::from_xywh(rect.x(), rect.y() + shift_y, rect.width(), rect.height()).unwrap();
 
         // render label or icon
-        match self.key.icon {
-            Some(icon) => draw_icon(
+        match (label_override, self.key.icon) {
+            (None, Some(icon)) => draw_icon(
                 icon,
                 pixmap,
                 rect.x() as usize,
@@ -44,13 +44,23 @@ impl KeySlot {
                 self.height as usize,
                 color,
             ),
-            None => draw_text(self.key.label, self.key.font_scale, pixmap, &rect, color),
+            (Some(label), _) => draw_text(label, self.key.font_scale, pixmap, &rect, color),
+            (None, None) => draw_text(self.key.label, self.key.font_scale, pixmap, &rect, color),
         }
     }
 
-    pub fn draw(&self, x: f32, y: f32, pixmap: &mut PixmapMut, pressed: bool) {
+    pub fn draw(
+        &self,
+        x: f32,
+        y: f32,
+        pixmap: &mut PixmapMut,
+        pressed: bool,
+        label_override: Option<&str>,
+        style_override: Option<KeyStyle>,
+    ) {
         let rect = Rect::from_xywh(x, y, self.width, self.height).unwrap(); // get button coordinates
-        let colors = self.key.style.colors();
+        let style = style_override.unwrap_or(self.key.style);
+        let colors = style.colors();
         let path = round_rect_path(&rect, KEY_BORDER_RADIUS);
 
         pixmap.fill_path(
@@ -100,6 +110,6 @@ impl KeySlot {
 
         let label_rect =
             if pressed { rect.transform(Transform::from_translate(0.0, 4.0)).unwrap() } else { rect };
-        self.draw_label(pixmap, &label_rect, colors.text);
+        self.draw_label(pixmap, &label_rect, colors.text, label_override);
     }
 }

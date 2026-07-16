@@ -21,10 +21,10 @@ export enum FontSize {
 
 export global Font {
     out property <FontInfo> heading-xl: { family: "Montserrat", size: 40px, weight: 600, italic: false, letter-spacing: 0px };
-    out property <FontInfo> heading-lg: { family: "Montserrat", size: 32px, weight: 700, italic: false, letter-spacing: 0px };
-    out property <FontInfo> heading-md: { family: "Montserrat", size: 28px, weight: 700, italic: false, letter-spacing: 0px };
-    out property <FontInfo> heading-sm: { family: "Montserrat", size: 24px, weight: 700, italic: false, letter-spacing: 0px };
-    out property <FontInfo> heading-xs: { family: "Montserrat", size: 22px, weight: 700, italic: false, letter-spacing: 0px };
+    out property <FontInfo> heading-lg: { family: "Montserrat", size: 32px, weight: 600, italic: false, letter-spacing: 0px };
+    out property <FontInfo> heading-md: { family: "Montserrat", size: 28px, weight: 600, italic: false, letter-spacing: 0px };
+    out property <FontInfo> heading-sm: { family: "Montserrat", size: 24px, weight: 600, italic: false, letter-spacing: 0px };
+    out property <FontInfo> heading-xs: { family: "Montserrat", size: 22px, weight: 600, italic: false, letter-spacing: 0px };
 
     out property <FontInfo> text-time: { family: "Montserrat", size: 44px, weight: 350, italic: false, letter-spacing: 0px };
     out property <FontInfo> text-xl: { family: "Montserrat", size: 26px, weight: 400, italic: false, letter-spacing: 0px };
@@ -51,7 +51,7 @@ export global FontHelpers {
                 return Font.text-md-bold;
             } else if (size == FontSize.lg) {
                 return Font.text-lg-bold;
-            } else if (size == FontSize.lg) {
+            } else if (size == FontSize.xl) {
                 return Font.text-xl-bold;
             } else {
                 return Font.text-md-bold;

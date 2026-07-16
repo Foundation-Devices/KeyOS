@@ -11,7 +11,7 @@ use crate::error::UsbError;
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SetupPacketCallback(pub SetupPacket);
 
-impl server::Archive for SetupPacketCallback {
+impl server::BlockingArchive for SetupPacketCallback {
     type Response = Option<Vec<u8>>;
 }
 
@@ -43,6 +43,11 @@ pub struct EndpointProperties {
     pub ep_direction: EndpointDirection,
     pub max_packet_len: u16,
     pub interval: u8,
+    /// When `true`, the endpoint uses DMA for data transfer, supporting fragmented reads/writes
+    /// across multiple packets (the hardware reassembles automatically). When `false`, the endpoint
+    /// uses FIFO mode where each read/write operates on a single packet only — the caller must
+    /// ensure the buffer fits within `max_packet_len`.
+    pub use_dma: bool,
 }
 
 #[derive(Debug, server::Message, Clone)]
@@ -84,23 +89,31 @@ impl From<ReadEndpoint> for server::SimpleMemoryMessage {
 pub struct WriteEndpoint {
     pub buf: xous::MemoryRange,
     pub endpoint: u8,
-    pub length: u16,
+    pub length: usize,
+    /// When true, send a ZLP after max_packet_len-aligned transfers to
+    /// signal end-of-transfer to the host.
+    pub zlp: bool,
 }
+
+const ZLP_FLAG: usize = 1 << 31;
 
 impl From<server::SimpleMemoryMessage> for WriteEndpoint {
     fn from(msg: server::SimpleMemoryMessage) -> Self {
-        Self { buf: msg.buf, endpoint: msg.arg1 as u8, length: msg.arg2 as u16 }
+        Self {
+            buf: msg.buf,
+            endpoint: (msg.arg1 & 0xFF) as u8,
+            zlp: msg.arg1 & ZLP_FLAG != 0,
+            length: msg.arg2,
+        }
     }
 }
 
 impl From<WriteEndpoint> for server::SimpleMemoryMessage {
-    fn from(read: WriteEndpoint) -> Self {
-        Self { buf: read.buf, arg1: read.endpoint as usize, arg2: read.length as usize }
+    fn from(val: WriteEndpoint) -> Self {
+        let arg1 = val.endpoint as usize | if val.zlp { ZLP_FLAG } else { 0 };
+        Self { buf: val.buf, arg1, arg2: val.length }
     }
 }
-
-#[derive(Debug, server::Message, Clone)]
-pub struct SetDeviceEmulationEnabled(pub bool);
 
 #[derive(Debug, server::Message, Clone)]
 #[response(usize)]

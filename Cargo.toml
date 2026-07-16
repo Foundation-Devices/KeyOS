@@ -10,6 +10,7 @@ members = [
     "api/app-manager",
     "api/backup",
     "api/bt",
+    "api/camera",
     "api/crypto",
     "api/dma",
     "api/fs",
@@ -17,6 +18,8 @@ members = [
     "api/gui-server",
     "api/haptics",
     "api/i2c",
+    "api/keycard",
+    "api/nfc",
     "api/power-manager",
     "api/quantum-link",
     "api/rgb-led",
@@ -27,6 +30,7 @@ members = [
     "api/usb",
     "apps/gui-app-authenticator",
     "apps/gui-app-bitcoin",
+    "apps/gui-app-crypto-perf",
     "apps/gui-app-file-browser",
     "apps/gui-app-image-viewer",
     "apps/gui-app-playground",
@@ -51,6 +55,7 @@ members = [
     "integration-tests/ordered-table-test",
     "integration-tests/settings-test-client",
     "integration-tests/worker-test",
+    "integration-tests/worker-test/disposable",
     "keyos",
     "loader",
     "os/accelerometer",
@@ -84,6 +89,8 @@ members = [
     "os/logging/serial",
     "os/logging/usb-file",
     "os/logging/usb-serial",
+    "os/usb-debug",
+    "os/usb-debug/protocol",
     "os/mass-storage-emulation",
     "os/mass-storage-server",
     "os/nfc",
@@ -94,6 +101,7 @@ members = [
     "os/security",
     "os/settings",
     "os/spi",
+    "os/system-manifests",
     "os/update",
     "os/usb",
     "release-manifest",
@@ -138,12 +146,14 @@ members = [
     "test-apps/ticktimer-test-client",
     "test-apps/undef-test",
     "ui/slintbook",
+    "utils/fiat-symbols",
     "utils/fuse",
     "utils/fw-utils",
     "utils/keycard-auth-tool",
     "utils/keycard-scan",
     "utils/localizer",
     "utils/ordered-table",
+    "utils/repo-sync",
     "utils/sambuca",
     "utils/shared-fut",
     "utils/update-slint-preview",
@@ -161,6 +171,7 @@ members = [
     "xous/trng",
     "xous/xous-rs",
     "xtask",
+    "utils/passport-drive",
 ]
 
 [workspace.dependencies]
@@ -168,10 +179,12 @@ members = [
 app-manager = { path = "api/app-manager" }
 backup = { path = "api/backup" }
 bt = { path = "api/bt" }
-cosign2 = { path = "imports/cosign2/cosign2" }
+camera = { path = "api/camera" }
+cosign2 = { path = "imports/cosign2/cosign2", default-features = false }
 crypto = { path = "api/crypto" }
 defer = { path = "utils/defer" }
 dma = { path = "api/dma" }
+fiat-symbols = { path = "utils/fiat-symbols" }
 file-backed = { path = "utils/file-backed" }
 fs = { path = "api/fs" }
 fw-utils = { path = "utils/fw-utils" }
@@ -180,12 +193,15 @@ gpio = { path = "api/gpio" }
 gui-server-api = { path = "api/gui-server" }
 haptics = { path = "api/haptics" }
 i2c = { path = "api/i2c" }
-keycard = { path = "os/keycard" }
+keycard = { path = "api/keycard" }
 keycard-scan = { path = "utils/keycard-scan" }
 log-server = { package = "xous-api-log", path = "xous/api/log" }
+nfc = { path = "api/nfc" }
 power-manager = { path = "api/power-manager" }
 ql-utils = { path = "utils/ql-utils" }
 quantum-link = { path = "api/quantum-link" }
+rand = "0.8"
+regex = "1"
 rgb-led = { path = "api/rgb-led" }
 security = { path = "api/security" }
 server = { path = "server" }
@@ -196,6 +212,7 @@ slint-keyos-platform-build = { path = "slint-keyos-platform/build" }
 spi = { path = "api/spi" }
 update = { path = "api/update" }
 usb = { path = "api/usb" }
+usb-debug-protocol = { path = "os/usb-debug/protocol" }
 utralib = { path = "utralib" }
 whence = { path = "utils/whence" }
 worker = { path = "worker" }
@@ -226,14 +243,14 @@ tusb320 = { path = "imports/tusb320" }
 anyhow = "1.0"
 async-channel = { version = "2.5" }
 async-task = { version = "4.7" }
-async-watch = { version = "0.3" }
 bitflags = "2.6.0"
 bzip2 = "0.6.0"
 cargo_metadata = "0.18.1"
 crc = "3.2.1"
 embedded-hal = "1.0"
+event-listener = { version = "5.3" }
 foundation-ur = { version = "0.4.0" }
-foundation-urtypes = { version = "0.5.0" }
+foundation-urtypes = { git = "https://github.com/Foundation-Devices/foundation-rs.git", tag = "0.6.0" }
 futures-lite = { version = "2.5" }
 hex = { version = "0.4.3" }
 jiff = { version = "0.2.5", default-features = false, features = ["std"] }
@@ -244,7 +261,7 @@ num-traits = "0.2.18"
 oneshot = { version = "0.1" }
 paste = { version = "1" }
 postcard = { version = "1.0.8", features = ["use-std"] }
-rkyv = { version = "0.8.13", default-features = false, features = [
+rkyv = { version = "0.8.16", default-features = false, features = [
     "std",
     "bytecheck",
 ] }
@@ -253,27 +270,27 @@ serde_json = "1.0.139"
 sha2 = { version = "0.10" }
 thiserror = "2.0"
 
-rfal = { version = "3.0.0", git = "https://github.com/Foundation-Devices/rfal-sys", rev = "12ffcc2bffad8d545b3dc6da429b166d1bed8205" }
-st25r95 = { version = "0.1.0", git = "https://github.com/Foundation-Devices/st25r95", rev = "86224011bf2ccfe9464f651587ca1dff9d76f064" }
+rfal = { version = "4.0.0", git = "https://github.com/Foundation-Devices/rfal-sys", rev = "1a5ba4ee2fd47b41f1788ae2068d9f4a2602b892" }
+st25r95 = "0.4"
 
-backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "add-chunk-offset", features = [
+backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0", features = [
     "keyos",
 ] }
-btp = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "add-chunk-offset" }
-foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "add-chunk-offset", features = [
+btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0" }
+foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0", features = [
     "keyos",
 ] }
-ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "2.15.0", features = [
+ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.4.0", features = [
     "rkyv",
     "sha2",
 ] }
 
-i-slint-backend-winit = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8" }
-i-slint-common = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8" }
-i-slint-compiler = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8" }
-i-slint-core = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8", default-features = false }
-slint = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8", default-features = false }
-slint-build = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation8" }
+i-slint-backend-winit = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11" }
+i-slint-common = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11" }
+i-slint-compiler = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11" }
+i-slint-core = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11", default-features = false }
+slint = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11", default-features = false }
+slint-build = { git = "https://github.com/Foundation-Devices/slint.git", tag = "v1.12.1-foundation11" }
 
 [profile.release]
 codegen-units = 1  # 1 better optimizations

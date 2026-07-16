@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { TR2, TrId } from "../../gen/tr.slint";
-import { Palette, Size } from "@ui/theme.slint";
+import { Palette, Size, UISize } from "@ui/theme.slint";
 import { 
     BasePage, 
     PageBody, 
@@ -53,13 +53,14 @@ component Connected inherits Rectangle {
     if show-dialog: Rectangle {
         background: Palette.overlay;
         Dialog {
+            icon: "question-circle";
             title: TR2.lookup(TrId.ConnectionDoneModalHeader);
             message: TR2.lookup(TrId.ConnectionDoneModalSubheader);
             show-ok: true;
             show-cancel: true;
             ok-text: TR2.lookup(TrId.CommonButtonContinue);
             cancel-text: TR2.lookup(TrId.CommonButtonCancel);
-            width: 352px;
+            width: UISize.modal-width;
             on-cancel => {
                 show-dialog = false;
             }

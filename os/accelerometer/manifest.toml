@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x616363656c65726f6d657465720a0000"
 syscall = ["SetThreadPriority"]
 

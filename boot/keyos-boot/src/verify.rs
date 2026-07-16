@@ -125,11 +125,10 @@ impl cosign2::Sha256 for Sha256 {
             channel.configure_peripheral_transfer(Sha::DMA_CONFIG);
             self.sha
                 .hash_dma::<atsama5d27::sha::Sha256, _>(aligned_data.len() * 4, || {
-                    channel.execute_transfer(
-                        aligned_data.as_ptr() as u32,
-                        sha1_phys_addr as u32,
-                        aligned_data.len(),
-                    );
+                    for chunk in aligned_data.chunks(atsama5d27::dma::BIG_TRANSFER_THRESHOLD / 2) {
+                        channel.execute_transfer(chunk.as_ptr() as u32, sha1_phys_addr as u32, chunk.len());
+                        while !channel.is_transfer_complete() {}
+                    }
                     Ok::<_, ()>(())
                 })
                 .unwrap()

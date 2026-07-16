@@ -82,6 +82,11 @@ export component ScrollBody inherits Rectangle {
         p-y: p-y;
 
         flickable := Flickable {
+            // Allow defocusing the keyboard by clicking somewhere else
+            // Flickable doesn't let touch events through, which is why we need it here too,
+            // and not just in BaseWindow.
+            FocusScope { }
+
             @children
         }
     }
@@ -230,13 +235,19 @@ export component ShieldPage inherits Rectangle {
     width: UISize.screen-width;
     height: UISize.app-window-height - Size.sz5;
     padding-top: Size.sz1;
+
+    in property <length> top-inner-padding: Size.sz6;
+    in property <bool> mask: true;
+
     Shield {
+        mask: mask;
+
         VerticalLayout {
             alignment: space-between;
 
             padding-left: Size.sz6;
             padding-right: Size.sz6;
-            padding-top: Size.sz6;
+            padding-top: top-inner-padding;
             padding-bottom: 10px;  // Adds with built-in shield padding to 42px as per spec
 
             @children

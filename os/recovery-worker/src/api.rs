@@ -15,21 +15,21 @@ impl<P: CheckedPermissions> RecoveryWorkerApi<P> {
     where
         P: MessageAllowed<ReadArchive>,
     {
-        self.0.send_archive(ReadArchive { path: path.to_string(), location })
+        self.0.send_blocking_archive(ReadArchive { path: path.to_string(), location })
     }
 
     pub fn archive_state(&self) -> ArchiveState
     where
         P: MessageAllowed<GetArchiveState>,
     {
-        self.0.send_archive(GetArchiveState)
+        self.0.send_blocking_archive(GetArchiveState)
     }
 
     pub fn app_bin_verification_state(&self) -> AppBinVerificationState
     where
         P: MessageAllowed<GetAppBinVerificationState>,
     {
-        self.0.send_archive(GetAppBinVerificationState)
+        self.0.send_blocking_archive(GetAppBinVerificationState)
     }
 
     pub fn copy_archive(&self) -> Result<(), RecoveryWorkerError>
@@ -52,6 +52,6 @@ impl<P: CheckedPermissions> RecoveryWorkerApi<P> {
     where
         P: MessageAllowed<GetLastError>,
     {
-        self.0.send_archive(GetLastError)
+        self.0.send_blocking_archive(GetLastError)
     }
 }

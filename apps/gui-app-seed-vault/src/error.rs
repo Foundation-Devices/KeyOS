@@ -21,6 +21,8 @@ pub enum VaultError {
     DuplicateError(#[from] SeedDuplicateReason),
     #[error("Invalid index could not be parsed: {0:?}")]
     IndexError(#[from] TryFromIntError),
+    #[error("Unknwon QR data payload type")]
+    UnknownQrDataType,
     #[error("{0:?}")]
     GenericError(#[from] anyhow::Error),
 }
@@ -89,6 +91,9 @@ impl ToValidationString for SeedDuplicateReason {
                 tr::lookup_id(TrId::CreateItemSeedErrorsIndexAlreadyInUse).to_string()
             }
             SeedDuplicateReason::NostrKey(_other) => {
+                tr::lookup_id(TrId::CreateItemSeedErrorsIndexAlreadyInUse).to_string()
+            }
+            SeedDuplicateReason::PasswordGeneratedIndex(_other) => {
                 tr::lookup_id(TrId::CreateItemSeedErrorsIndexAlreadyInUse).to_string()
             } // ref other => other.to_string(),
         }

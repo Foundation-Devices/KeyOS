@@ -20,7 +20,7 @@ const SW_UNKNOWN: [u8; 2] = [0x6F, 0x00];
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    ConditionNotSatified,
+    ConditionNotSatisfied,
     WrongData,
     WrongLength,
     ClassNotSupported,
@@ -35,7 +35,12 @@ pub enum Error {
 impl From<crate::FidoError> for Error {
     fn from(e: crate::FidoError) -> Error {
         match e {
-            crate::FidoError::InvalidIndex => Error::ConditionNotSatified,
+            // Per FIDO U2F §5.4, "not my key handle" is SW_WRONG_DATA (0x6A80). An out-of-range
+            // (security_key_index, registered_key_index) from a well-formed APDU means the RP is
+            // presenting a handle that belongs to a different authenticator — return WrongData so
+            // the RP moves on to the next credential in its list, rather than ConditionNotSatisfied
+            // which some RPs treat as "needs user action" and retry in a tight loop.
+            crate::FidoError::InvalidIndex => Error::WrongData,
             _ => Error::Other,
         }
     }
@@ -51,7 +56,7 @@ impl<T> From<&Result<T, Error>> for Status {
     fn from(r: &Result<T, Error>) -> Status {
         match r {
             Ok(_) => Status(SW_NO_ERROR),
-            Err(Error::ConditionNotSatified) => Status(SW_CONDITIONS_NOT_SATISFIED),
+            Err(Error::ConditionNotSatisfied) => Status(SW_CONDITIONS_NOT_SATISFIED),
             Err(Error::WrongData) => Status(SW_WRONG_DATA),
             Err(Error::WrongLength) => Status(SW_WRONG_LENGTH),
             Err(Error::ClassNotSupported) => Status(SW_CLA_NOT_SUPPORTED),

@@ -1,18 +1,11 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gui_server_api::{
-    msg::{
-        AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwapBuffers, SwitchTo, SwitchToLauncher,
-        UpdateKioskPolicy,
-    },
-    InputMessage,
+use gui_server_api::msg::{
+    AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwitchTo, SwitchToLauncher, UpdateKioskPolicy,
 };
 use log::{error, info, warn};
-use server::{
-    BlockingScalar, BlockingScalarAsyncHandler, BlockingScalarHandler, BlockingScalarRequest, ScalarHandler,
-    ServerContext,
-};
+use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
 use xous::PID;
 
 use super::{BlurDone, CloseAppTimeout, ForceShutdownTimeout, OnFreeMemoryBelowThreshold};
@@ -20,14 +13,6 @@ use crate::{
     handlers::{DisconnectHandlerMessage, OnVsyncMessage, PowerButtonTimerCallback},
     Gui, KioskPolicy,
 };
-
-impl BlockingScalarAsyncHandler<SwapBuffers> for Gui {
-    fn handle(&mut self, msg: BlockingScalarRequest<SwapBuffers>, _context: &mut ServerContext<Self>) {
-        self.handle_update_buffers(msg);
-    }
-
-    fn default_response() -> <SwapBuffers as BlockingScalar>::Response { None }
-}
 
 impl ScalarHandler<SwitchTo> for Gui {
     fn handle(
@@ -49,6 +34,15 @@ impl ScalarHandler<SwitchTo> for Gui {
             // TODO
             let _ = x;
             let _ = y;
+
+            #[cfg(not(feature = "recovery-os"))]
+            if self.is_locked() {
+                // An app is opened when the screen is locked, postpone switching to it to after an unlock.
+                if self.startup_state == crate::StartupState::Started {
+                    self.app_registry.set_pre_lock_app_pid(Some(pid));
+                }
+                return;
+            }
 
             self.switch_to_window(pid);
         } else {
@@ -75,37 +69,27 @@ impl BlockingScalarHandler<SwitchToLauncher> for Gui {
 
 impl ScalarHandler<UpdateKioskPolicy> for Gui {
     fn handle(&mut self, update: UpdateKioskPolicy, sender: PID, _context: &mut ServerContext<Self>) {
-        fn update_kiosk_policy(policy: &mut KioskPolicy, update: UpdateKioskPolicy) {
-            if let Some(auto_lock_enabled) = update.auto_lock_enabled {
-                policy.auto_lock_enabled = auto_lock_enabled;
-            }
-            if let Some(control_center_enabled) = update.control_center_enabled {
-                policy.control_center_enabled = control_center_enabled;
-            }
-            if let Some(home_button_enabled) = update.home_button_enabled {
-                policy.home_button_enabled = home_button_enabled;
-            }
-            if let Some(power_button_enabled) = update.power_button_enabled {
-                policy.power_button_enabled = power_button_enabled;
-            }
-        }
-        use std::collections::hash_map::Entry;
-
         info!("Kiosk policy set to {update:?} by PID={sender}");
-        match self.kiosk_policies.entry(sender) {
-            Entry::Occupied(mut entry) => {
-                update_kiosk_policy(entry.get_mut(), update);
-                if *entry.get() == KioskPolicy::default() {
-                    entry.remove();
-                }
-            }
-            Entry::Vacant(entry) => {
-                let mut policy = KioskPolicy::default();
-                update_kiosk_policy(&mut policy, update);
-                if policy != KioskPolicy::default() {
-                    entry.insert(policy);
-                }
-            }
+        let Some(window) = self.windows.get_mut(&sender) else {
+            warn!("Ignoring kiosk policy update from unknown PID={sender}");
+            return;
+        };
+
+        if let Some(home_button_enabled) = update.home_button_enabled {
+            window.kiosk_policy.home_button_enabled = home_button_enabled;
+        }
+        if let Some(power_button_enabled) = update.power_button_enabled {
+            window.kiosk_policy.power_button_enabled = power_button_enabled;
+        }
+        if let Some(control_center_enabled) = update.control_center_enabled {
+            window.kiosk_policy.control_center_enabled = control_center_enabled;
+        }
+        if let Some(auto_lock_enabled) = update.auto_lock_enabled {
+            window.kiosk_policy.auto_lock_enabled = auto_lock_enabled;
+        }
+
+        if window.kiosk_policy == KioskPolicy::default() {
+            log::debug!("Kiosk policy reset by PID={sender}");
         }
 
         if update.auto_lock_enabled.is_some() {
@@ -116,21 +100,20 @@ impl ScalarHandler<UpdateKioskPolicy> for Gui {
 
 impl ScalarHandler<RequestRedraw> for Gui {
     fn handle(&mut self, _msg: RequestRedraw, sender: PID, _context: &mut ServerContext<Self>) {
-        let app_input_cid = if Some(sender) == self.control_center_window.as_ref().map(|w| w.pid) {
-            self.control_center_window.as_ref().map(|w| w.input_cid)
-        } else if Some(sender) == self.keyboard_window.as_ref().map(|w| w.pid) {
-            self.keyboard_window.as_ref().map(|w| w.input_cid)
-        } else {
-            self.windows.get_mut(&sender).map(|w| w.input_cid)
-        };
+        self.update_vsync_states();
 
-        if let Some(cid) = app_input_cid {
-            let msg = xous::Message::new_scalar(InputMessage::RedrawRequested as usize, 0, 0, 0, 0);
-            if let Err(e) = xous::send_message(cid, msg) {
-                error!("Failed to send the input event to the app PID={sender}: {e:?}");
-            }
+        if let Some(window) = &mut self.control_center_window
+            && window.pid == sender
+        {
+            window.buffers.buffer_requested(self.last_vsync_time);
+        } else if let Some(window) = &mut self.keyboard_window
+            && window.pid == sender
+        {
+            window.buffers.buffer_requested(self.last_vsync_time);
+        } else if let Some(window) = self.windows.get_mut(&sender) {
+            window.buffers.buffer_requested(self.last_vsync_time);
         } else {
-            warn!("Redraw requested by an unknown app with PID={sender}");
+            log::error!("RequestRedraw from unknown PID={sender}");
         }
     }
 }

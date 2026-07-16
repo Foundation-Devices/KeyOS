@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6F732F75706461746500000000000000"
 syscall = ["SetThreadPriority"]
 
@@ -6,15 +7,15 @@ en = "Update Server"
 
 [servers."os/update"]
 SubscribeUpdateProgress = { id = 0, type = "archiveEvent" }
-StartUpdate = { id = 1, type = "move" }
-ContinueUpdate = { id = 2, type = "move" }
+StartUpdate = { id = 1, type = "archive" }
+ContinueUpdate = { id = 2, type = "archive" }
 DownloadStallTick = { id = 3, type = "scalar" }
-FirmwareVersion = { id = 4, type = "archive" }
-ApplyDownloadedUpdate = { id = 5, type = "move" }
+FirmwareVersion = { id = 4, type = "blockingArchive" }
+ApplyDownloadedUpdate = { id = 5, type = "archive" }
 GetUpdateApplied = { id = 6, type = "blockingScalar" }
 ClearUpdateApplied = { id = 7, type = "scalar" }
-GetUpdateStatus = { id = 8, type = "archive" }
-FirmwareInstallWorkerEvent = { id = 9, type = "move", cfg = "keyos" }
+GetUpdateStatus = { id = 8, type = "blockingArchive" }
+FirmwareInstallWorkerEvent = { id = 9, type = "archive", cfg = "keyos" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]
@@ -24,7 +25,7 @@ template = ["fs-generic", "crypto-sha"]
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
 ]
-"os/power-manager" = ["GetStatus"]
+"os/power-manager-ext" = ["GetStatus"]
 "os/quantum-link" = ["SubscribeFirmwareFetch", "StartFirmwareUpdate"]
 "os/gui-server" = ["Shutdown"]
 "os/security" = ["GetFirmwareTimestamp", "SetFirmwareTimestamp"]

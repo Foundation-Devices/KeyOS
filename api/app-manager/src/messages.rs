@@ -36,6 +36,11 @@ pub enum AppEvent {
 
 #[derive(Debug, server::Message)]
 pub struct LaunchApp(pub AppId);
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AppQrMatchRules {
+    pub id: [u32; 4],
+    pub rules_json: Vec<u8>,
+}
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Option<String>)]
@@ -52,3 +57,7 @@ impl GetAppName {
 
     pub fn new_by_pid(pid: PID, locale: &str) -> Self { Self::ByPid { pid, locale: locale.to_string() } }
 }
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Vec<AppQrMatchRules>)]
+pub struct GetQrMatchRules;

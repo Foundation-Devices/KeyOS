@@ -85,7 +85,7 @@ export component SegmentedSelector inherits Rectangle {
         border-radius: Size.sz6;
 
         states [
-            pressed when touchArea.pressed && enabled: {
+            pressed when touch.pressed && enabled: {
                 background: bg-color.mix(Palette.black, 0.8);
             }
         ]
@@ -112,17 +112,29 @@ export component SegmentedSelector inherits Rectangle {
         }
     }
 
-    touchArea := TouchArea {
-        x: -Size.sz4;
+    // Left half: moves selection left; right half: moves selection right
+    touch := TouchArea {
+        x: -(parent.width / 10);
         y: -Size.sz4;
-        width: parent.width + (Size.sz4 * 2);
+        width: parent.width + (parent.width / 10) * 2;
         height: parent.height + (Size.sz4 * 2);
         clicked => {
             if (enabled) {
-                if (!one-way-selected-index) {
-                    selected_index = mod((selected_index + 1), segments.length);
+                if (self.pressed-x < parent.width / 2) {
+                    if (!one-way-selected-index) {
+                        selected_index = mod(selected_index - 1 + segments.length, segments.length);
+                        clicked(id, selected_index);
+                    } else {
+                        clicked(id, mod(selected_index - 1 + segments.length, segments.length));
+                    }
+                } else {
+                    if (!one-way-selected-index) {
+                        selected_index = mod(selected_index + 1, segments.length);
+                        clicked(id, selected_index);
+                    } else {
+                        clicked(id, mod(selected_index + 1, segments.length));
+                    }
                 }
-                clicked(id, selected_index);
             }
         }
     }

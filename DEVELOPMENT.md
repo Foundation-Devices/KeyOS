@@ -190,9 +190,9 @@ The viewer automatically detects and visually separates multiple logging session
 
 To view logs from a connected device via serial port:
 
-    just logs-serial <port>
+    just logs
 
-Replace `<port>` with the serial port device path (e.g., `/dev/ttyUSB0` on Linux or `/dev/tty.usbXXXXX` on macOS).
+The log viewer auto-discovers the KeyOS USB serial interface by VID:PID (`0x1307:0x0165`) and reconnects after device reboots.
 
 ### Viewing Log Files
 
@@ -297,7 +297,7 @@ Formatting can be applied easily using `just fmt`, and checked using `just lint`
     just fmt
     just lint
 
-The pre-commit git hook may find lint errors, in which case it will run `just fmt`, and prompt you to stage the changes it may have made. `reuse` lint errors need to be fixed by hand and staged as well. Both lints can be checked by running `just lint` before attempting to commit.
+The pre-push git hook runs `just short-lint` and rejects the push if it finds lint errors. Run `just fmt` to fix formatting issues; `reuse` lint errors must be fixed by hand. Commit the fixes and push again. The same checks can be run any time with `just short-lint` (or the full `just lint`).
 
 Code files should start with a comment that includes license info to comply with `reuse` lints, for example:
 

@@ -10,7 +10,7 @@ description = "KeyOS platform support for Slint UI framework"
 [dependencies]
 anyhow = "1.0"
 euclid = "0.22"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 indoc = "2.0.5"
 itertools = "0.13.0"
 miette = { version = "7.2.0", features = ["fancy"] }

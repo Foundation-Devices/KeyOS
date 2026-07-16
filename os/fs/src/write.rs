@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use {
-    crate::{Error, FileHandle, OpenFile, Server},
+    crate::{Error, FileHandle, Server},
     fs::messages::{AsyncWrite, WriteFile},
     server::xous,
     std::io::Write,
@@ -23,7 +23,7 @@ impl server::LendMutHandler<WriteFile> for Server {
     }
 }
 
-impl server::ArchiveHandler<AsyncWrite> for Server {
+impl server::BlockingArchiveHandler<AsyncWrite> for Server {
     fn handle(
         &mut self,
         msg: AsyncWrite,
@@ -36,12 +36,15 @@ impl server::ArchiveHandler<AsyncWrite> for Server {
 
 impl Server {
     fn write_file(&mut self, handle: FileHandle, buffer: &[u8], sender: xous::PID) -> Result<usize, Error> {
-        let files = self.files.get_mut(&sender).ok_or(Error::FileNotOpen)?;
-        let OpenFile { file, flags, .. } = files.open.get_mut(&handle).ok_or(Error::FileNotOpen)?;
-        if !flags.write {
+        let open = self
+            .mount_mut(handle.location()?)
+            .ok_or(Error::NoMedia)?
+            .file_mut(sender, handle)
+            .ok_or(Error::FileNotOpen)?;
+        if !open.flags.write {
             return Err(Error::InvalidOperation);
         }
-        file.write_all(buffer).map_err(|_| Error::Io)?;
+        open.file.write_all(buffer).map_err(|_| Error::Io)?;
         Ok(buffer.len())
     }
 }

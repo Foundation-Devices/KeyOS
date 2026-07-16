@@ -5,14 +5,10 @@
 #![deny(must_not_suspend)]
 
 use {
-    crate::{psbt_signing::PendingPsbt, state::AppState},
-    quantum_link::PairingEvent,
+    crate::state::AppState,
     slint_keyos_platform::{
         app,
-        gui_server_api::{
-            navigation::bitcoin::{BitcoinAction, OpenBitcoinOptions},
-            InputMessage,
-        },
+        gui_server_api::{navigation::qrscanner::MatchedQrResult, InputMessage},
         spawn_local, subscribe_archive, StoredValue,
     },
 };
@@ -47,7 +43,20 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             .await
             .inspect_err(|e| log::error!("failed to load accounts {e:?}"))
             .ok();
-        AppState::publish_accounts(state);
+
+        let ql_status = state.borrow().ql_status.clone();
+        ql_status.ready().await;
+        log::info!("QL ready, syncing accounts and passphrase");
+        AppState::publish_accounts_and_passphrase(state);
+        AppState::publish_fiat_preference(state);
+
+        loop {
+            ql_status.wait_until(|s| !s.bt_connected || !s.ql_paired || !s.live).await;
+            ql_status.ready().await;
+            log::info!("QL reconnected, re-syncing accounts and passphrase");
+            AppState::publish_accounts_and_passphrase(state);
+            AppState::publish_fiat_preference(state);
+        }
     })
     .detach();
 
@@ -76,19 +85,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     })
     .detach();
 
-    spawn_local(async move {
-        let mut pairing_events = subscribe_archive::<quantum_link_permissions::QuantumLinkPermissions, _>(
-            quantum_link::messages::SubscribePairingEvent,
-        );
-        while let Some(pairing_event) = pairing_events.next().await {
-            if let PairingEvent::PairingComplete { new: true, .. } = pairing_event {
-                log::info!("Quantum link re-paired, re-publishing all accounts");
-                AppState::publish_accounts(state);
-            }
-        }
-    })
-    .detach();
-
     bitcoin_settings::init_settings(state);
     callbacks::init_callbacks(state);
     verify_address::init(state);
@@ -106,61 +102,13 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                     log::error!("Navigation focused but no pending nav request");
                     return;
                 };
-
-                let Some(options) = OpenBitcoinOptions::from_slice(&nav_bytes) else {
-                    log::error!("Failed to parse OpenBitcoinOptions from nav request");
-                    return;
-                };
-
-                match options.action {
-                    BitcoinAction::Scan => {
-                        // Use a limited scope to drop globals after resetting state
-                        {
-                            let ui = state.borrow().ui();
-                            let sign_global = ui.global::<SignPsbt>();
-                            // TODO: find a more robust way to reset SignPsbt State
-                            sign_global.set_state(SignPsbtState::Idle);
-                            sign_global.set_origin(PsbtOriginView::Qr);
-                            sign_global.set_pending_psbt(PsbtView::default());
-                            sign_global.set_show_account_not_found_modal(false);
-                            sign_global.set_is_multisig_account(false);
-                            sign_global.set_account_index("".into());
-                            sign_global.set_show_account_archived_modal(false);
-                            sign_global.set_file_save_state(FileSaveState::Idle);
-                            sign_global.set_saved_file_path("".into());
-                            sign_global.set_show_cant_sign_modal(false);
-                            sign_global.set_needed_fingerprint("".into());
-                            sign_global.set_found_fingerprints("".into());
-
-                            let account_global = ui.global::<CreateAccount>();
-                            // TODO: find a more robust way to reset CreateAccount State
-                            account_global.set_state(CreateAccountState::Idle);
-                            account_global.set_pending_multisig_account(MultiSigView::default());
-                            account_global.set_new_account_id("".into());
-                            account_global.set_prefilled_mode(false);
-                            account_global.set_prefilled_index("".into());
-                            account_global.set_prefilled_network(Network::Bitcoin);
-
-                            // Navigate backward until we reach the home page
-                            let navigate = ui.global::<Navigate>();
-                            while navigate.get_has_backward() {
-                                navigate.invoke_backward_animate(Animate::None);
-                            }
-                        }
-
-                        // Reset AppState pending fields
-                        {
-                            let mut state_mut = state.borrow_mut();
-                            state_mut.pending_multisig = None;
-                            state_mut.pending_singlesig = None;
-                            state_mut.pending_psbt = PendingPsbt::None;
-                            state_mut.pending_archived_account_id = None;
-                        }
-
-                        if let Err(e) = callbacks::execute_scan(state, true) {
-                            log::error!("scan failed: {e:?}");
-                        }
+                if let Some(options) = MatchedQrResult::from_slice(&nav_bytes) {
+                    let MatchedQrResult { scan_result, .. } = options;
+                    callbacks::reset_for_incoming_scan(state);
+                    if let Err(e) = callbacks::handle_scan_result(state, scan_result) {
+                        log::error!("scan failed: {e:?}");
                     }
+                    return;
                 }
             }
         }

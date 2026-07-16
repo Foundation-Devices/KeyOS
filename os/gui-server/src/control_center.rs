@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use {
-    crate::{DoubleBufferVMA, Gui, GuiState},
+    crate::{BufferChain, Gui, GuiState},
     gui_server_api::{
         consts::{
             CONTROL_CENTER_DRAG_MARGIN_PX, CONTROL_CENTER_HEIGHT_COLLAPSED_PX,
@@ -14,6 +14,14 @@ use {
     log::{debug, error},
     xous::{CID, PID},
 };
+
+/// Width of the corner dead zones on each side of the collapsed Control Center bar.
+/// Touches in these areas fall through to the app so that NavHeader buttons (left/right)
+/// have priority over accidentally dragging out the Control Center.
+///
+/// Sized to cover the NavHeader button visual area:
+///   side-padding (Size.sz8 = 32 px) + button size (Size.sz10 = 40 px) = 72 px.
+const CONTROL_CENTER_CORNER_SIZE_PX: usize = 72;
 
 /// The dark overlay won't become darker than this value
 /// TODO: put into the "fine tuning" settings
@@ -41,22 +49,27 @@ pub(crate) enum ControlCenterWindowState {
 pub(crate) struct ControlCenterWindow {
     pub(crate) input_cid: CID,
     pub(crate) pid: PID,
-    pub(crate) bufs: DoubleBufferVMA,
+    pub(crate) buffers: BufferChain,
     pub(crate) state: ControlCenterWindowState,
     pub(crate) curr_height: usize,
     in_shutdown_mode: bool,
 }
 
 impl ControlCenterWindow {
-    pub fn new(input_cid: CID, pid: PID, bufs: DoubleBufferVMA) -> Self {
-        ControlCenterWindow {
+    pub fn new(input_cid: CID, pid: PID) -> Result<Self, xous::Error> {
+        let mut buffers =
+            BufferChain::new(input_cid, u16::try_from(CONTROL_CENTER_HEIGHT_EXPANDED_PX).unwrap());
+        // Control center starts out as visible
+        buffers.show();
+        Gui::send_visible_event(pid, input_cid);
+        Ok(ControlCenterWindow {
             input_cid,
             pid,
-            bufs,
+            buffers,
             state: ControlCenterWindowState::Collapsed,
             curr_height: CONTROL_CENTER_HEIGHT_COLLAPSED_PX,
             in_shutdown_mode: false,
-        }
+        })
     }
 
     pub(crate) fn notify_expanded(&self, expanded: bool) {
@@ -93,12 +106,19 @@ impl Gui {
             && self
                 .control_center_window
                 .as_ref()
-                .map(|window| touch.is_within_area(0, 0, SCREEN_WIDTH, window.curr_height))
+                .map(|window| {
+                    // When collapsed, corner areas fall through to the app so NavHeader buttons
+                    // (left/right) take priority over accidentally dragging out the Control Center.
+                    let in_corner = window.state == ControlCenterWindowState::Collapsed
+                        && (touch.x < CONTROL_CENTER_CORNER_SIZE_PX
+                            || touch.x >= SCREEN_WIDTH - CONTROL_CENTER_CORNER_SIZE_PX);
+                    touch.is_within_area(0, 0, SCREEN_WIDTH, window.curr_height) && !in_corner
+                })
                 .unwrap_or(false)
     }
 
     pub(crate) fn is_control_center_visible(&self) -> bool {
-        !matches!(self.state, GuiState::BootSplash)
+        !matches!(self.state, GuiState::Splash | GuiState::SplashFade { .. })
             && (self.control_center_window.as_ref().map(|cw| cw.in_shutdown_mode).unwrap_or(false)
                 || self.control_center_enabled())
     }
@@ -220,18 +240,6 @@ impl Gui {
             .as_ref()
             .map(|w| w.curr_height > CONTROL_CENTER_HEIGHT_EXPANDED_PX / 3)
             .unwrap_or(false)
-    }
-
-    pub(crate) fn swap_control_center_bufs(&mut self, pid: PID) -> bool {
-        let Some(control_center_window) = &mut self.control_center_window else {
-            return false;
-        };
-        if control_center_window.pid != pid {
-            return false;
-        }
-
-        control_center_window.bufs = *control_center_window.bufs.swap();
-        true
     }
 
     pub(crate) fn control_center_animation_tick(&mut self) {

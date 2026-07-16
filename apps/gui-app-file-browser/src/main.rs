@@ -6,12 +6,12 @@
 
 use std::time::Duration;
 
-use fs::DirEntry;
+use fs::{messages::FormatUsb, DirEntry};
 pub use i18n::{format_currency, format_date, format_float, format_int, format_time};
 #[cfg(not(feature = "recovery-os"))]
 use slint_keyos_platform::settings;
 use slint_keyos_platform::{
-    app,
+    app, async_scalar,
     gui_server_api::{
         navigation::filepicker::{SelectFileOptions, SelectFileResult},
         InputMessage,
@@ -33,9 +33,6 @@ mod location;
 mod path;
 mod picker;
 mod state;
-
-#[cfg(keyos)]
-power_manager::use_api!();
 
 app!("Files");
 
@@ -323,11 +320,41 @@ fn init_browser(ui: &AppWindow, state: StoredValue<AppState>) {
         state::build_breadcrumbs(key, path.as_str())
     });
 
+    global.on_format_clicked(move || {
+        let state = state.borrow();
+        let global = state.modal_global();
+        global.set_active_modal(ActiveModal::Format);
+        global.set_loading(false);
+    });
+
+    global.on_format_ok_acknowledged(move || {
+        AppState::list_directory_browser(state);
+    });
+
     #[cfg(not(feature = "recovery-os"))]
     global.on_airlock_mode_changed(move |am| {
         let settings = SettingsApi::default();
         settings.set_airlock_mode(am);
     });
+
+    #[cfg(not(feature = "recovery-os"))]
+    global.on_hidden_files_toggled(move |show| {
+        state.borrow_mut().set_show_hidden_files(show);
+    });
+
+    #[cfg(not(feature = "recovery-os"))]
+    global.on_quick_tip_dismissed(move || {
+        state.borrow_mut().set_quick_tip_dismissed();
+    });
+
+    #[cfg(not(feature = "recovery-os"))]
+    {
+        let state = state.borrow();
+        global.set_show_hidden_files(state.show_hidden_files());
+        if state.quick_tip_dismissed() {
+            global.set_show_quick_tip(false);
+        }
+    }
 
     #[cfg(not(feature = "recovery-os"))]
     spawn_local({
@@ -583,6 +610,51 @@ fn init_modals(ui: &AppWindow, state: StoredValue<AppState>) {
         })
         .detach();
     });
+
+    global.on_format_confirmed(move || {
+        let key = state.borrow().browser.current;
+        spawn_local(async move {
+            state.with(|state| {
+                state.close_modal();
+                state.browser.listing.per_location.get_mut(key).list_type = FileListType::Formatting;
+                state.apply_ui();
+            });
+            let format_result = match key {
+                LocationKey::External => {
+                    async_scalar::<fs_permissions::FileSystemPermissions, _>(FormatUsb).await
+                }
+                #[cfg(not(feature = "recovery-os"))]
+                LocationKey::Internal => {
+                    log::error!("Format confirmed on internal location");
+                    return;
+                }
+                #[cfg(not(feature = "recovery-os"))]
+                LocationKey::Airlock => {
+                    use fs::messages::{FormatAirlock, MountAirlock};
+
+                    match async_scalar::<fs_permissions::FileSystemPermissions, _>(FormatAirlock).await {
+                        Ok(()) => {
+                            async_scalar::<fs_permissions::FileSystemPermissions, _>(MountAirlock(true)).await
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            };
+            let result = match format_result {
+                Ok(()) => FileListType::FormatSuccessful,
+                Err(e) => {
+                    log::error!("Format failed: {e:?}");
+                    FileListType::FormatFailed
+                }
+            };
+
+            state.with(|state| {
+                state.browser.listing.per_location.get_mut(key).list_type = result;
+                state.apply_ui();
+            });
+        })
+        .detach();
+    })
 }
 
 fn input_handler_fn(app_input: AppInput<gui_permissions::GuiPermissions>, state: StoredValue<AppState>) {
@@ -592,29 +664,6 @@ fn input_handler_fn(app_input: AppInput<gui_permissions::GuiPermissions>, state:
             if should_list {
                 state.borrow().apply_ui();
                 AppState::list_directory_browser(state);
-            }
-
-            #[cfg(keyos)]
-            {
-                let allow_external = state
-                    .borrow()
-                    .picker
-                    .as_ref()
-                    .map(|picker| picker.locations.get(LocationKey::External).allowed)
-                    .unwrap_or(true);
-                if allow_external {
-                    PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Automatic).ok();
-                    state.borrow_mut().otg_priority_was_enabled = true;
-                }
-            }
-        }
-
-        InputMessage::Hidden =>
-        {
-            #[cfg(keyos)]
-            if state.borrow().otg_priority_was_enabled {
-                PowerManagerApi::default().set_otg_priority(power_manager::OtgPriority::Never).ok();
-                state.borrow_mut().otg_priority_was_enabled = false;
             }
         }
 
@@ -688,7 +737,18 @@ fn fs_event_handler(state: StoredValue<AppState>, event: fs::FileSystemEvent) {
             AppState::list_directory_copy_move(state)
         }
     } else {
-        AppState::list_directory_browser(state)
+        let current_list_type =
+            state.with(|state| state.browser.listing.per_location.get(state.browser.current).list_type);
+        // Don't switch away from the format dialog. An fs event is expected and handled differently there.
+        let expected_event = match current_list_type {
+            FileListType::Formatting => true,
+            FileListType::FormatSuccessful => event.event_type == fs::FileSystemEventType::Mounted,
+            FileListType::FormatFailed => event.event_type == fs::FileSystemEventType::Error,
+            _ => false,
+        };
+        if !expected_event {
+            AppState::list_directory_browser(state)
+        }
     }
 }
 
@@ -704,8 +764,8 @@ fn subscribe_fs_events(state: StoredValue<AppState>, location: fs::Location) {
     .detach();
 }
 
-impl From<&DirEntry> for FileEntryModel {
-    fn from(value: &DirEntry) -> Self {
+impl From<DirEntry> for FileEntryModel {
+    fn from(value: DirEntry) -> Self {
         FileEntryModel {
             info: "".into(),
             is_folder: value.is_dir,

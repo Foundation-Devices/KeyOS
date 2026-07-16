@@ -9,28 +9,25 @@ use std::{
 
 use anyhow::{self, Context};
 use bt::BtAddr;
-use i18n::replace_placeholders;
 use jiff::fmt::strtime;
 use ngwallet::bdk_wallet::bitcoin::secp256k1::{All, Secp256k1};
 use quantum_link::SendMessageError;
 use slint_keyos_platform::{
     file_backed::JsonBacked,
-    gui_server_api::{
-        msg::UpdateKioskPolicy,
-        navigation::filepicker::{Location, SelectFileOptions},
-    },
+    gui_server_api::msg::UpdateKioskPolicy,
+    gui_server_api::navigation::filepicker::{AllowedExtensions, Location, SelectFileOptions},
     navigation::select_file,
     settings::global,
     slint::{self, ComponentHandle},
     PlatformConfig, TaskHandle,
 };
-use xous_api_ticktimer::Ticktimer;
+use xous_api_ticktimer::TicktimerPrivileged;
 
 use crate::{
     backup_permissions::BackupPermissions, fs_permissions::FileSystemPermissions,
     gui_permissions::GuiPermissions, timezones::TimeZoneModel, tr, AppWindow, BackupGlobal, BatteryGlobal,
-    BluetoothApi, DateTimeGlobal, GuiApi, PowerManagerApi, QlStatus, QuantumLinkApi, Security, SettingsApi,
-    TrId, UpdateApi,
+    BluetoothApi, DateTimeGlobal, GuiApi, PowerManagerExtApi, QlStatus, QuantumLinkApi, Security,
+    SettingsApi, UpdateApi,
 };
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -43,8 +40,8 @@ pub struct AppState {
     pub settings: SettingsApi,
     pub fs: crate::FileSystem,
     pub security: Security,
-    pub power_manager: PowerManagerApi,
-    pub ticktimer: Ticktimer,
+    pub power_manager: PowerManagerExtApi,
+    pub ticktimer: TicktimerPrivileged,
     pub bt: BluetoothApi,
     pub ql_status: QlStatus,
 
@@ -76,8 +73,8 @@ impl AppState {
             settings: SettingsApi::default(),
             fs: crate::FileSystem::default(),
             security: Security::default(),
-            power_manager: PowerManagerApi::default(),
-            ticktimer: Ticktimer::new().unwrap(),
+            power_manager: Default::default(),
+            ticktimer: TicktimerPrivileged::default(),
             bt: BluetoothApi::default(),
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             secp: Secp256k1::new(),
@@ -173,20 +170,19 @@ impl AppState {
         let ui = self.ui();
         let global = ui.global::<BackupGlobal>();
 
-        let backup_time = match self.last_backup {
+        let backup_duration = match self.last_backup {
             Some(timestamp) => {
                 let duration = std::time::SystemTime::now().duration_since(timestamp).unwrap_or_else(|e| {
                     log::warn!("formatting a backup time in the future: {:?}", e);
                     Duration::ZERO
                 });
 
-                let duration_str = tr::format_duration(duration);
-                replace_placeholders(&tr::lookup_id(TrId::CommonBackupBackedUpXAgo), &[duration_str])
+                tr::format_duration(duration)
             }
-            None => tr::lookup_id(TrId::CommonBackupNeverBackedUp).to_string(),
+            None => String::new(),
         };
 
-        global.set_last_backup_time_ago(backup_time.into());
+        global.set_last_backup_duration(backup_duration.into());
     }
 
     pub fn save_log_files(&self) -> anyhow::Result<()> {
@@ -194,7 +190,8 @@ impl AppState {
             .with_hidden_allowed(false)
             .with_dirs_allowed(true)
             .with_dir_selection_mode(true)
-            .with_multiple_selection_mode(false);
+            .with_multiple_selection_mode(false)
+            .with_allowed_extensions(AllowedExtensions::specific(&["txt"]));
 
         let (path, location) = select_file::<GuiPermissions>(options)
             .context("Failed to select directory")?
@@ -262,23 +259,6 @@ impl AppState {
         }
 
         Ok(())
-    }
-
-    pub fn with_otg_allowed<F, R>(&self, f: F) -> anyhow::Result<R>
-    where
-        F: FnOnce(&Self) -> anyhow::Result<R>,
-    {
-        #[cfg(keyos)]
-        {
-            self.power_manager
-                .with_otg_allowed(move || f(self))
-                .map_err(|e| anyhow::anyhow!("Failed to with otg allowed: {e:?}"))
-                .and_then(|e| e)
-        }
-        #[cfg(not(keyos))]
-        {
-            f(self)
-        }
     }
 
     // cancel background tasks when the user navigates away.

@@ -17,22 +17,22 @@ export component DeleteModal inherits Modal {
 
     Button {
         icon: "";
-        label: TR2.lookup(TrId.CommonButtonCancel);
-        importance: Importance.secondary;
-        enabled: !root.loading;
-        clicked => {
-            ModalGlobal.cancel();
-        }
-    }
-
-    Button {
-        icon: "";
         label: TR2.lookup(TrId.CommonButtonDelete);
         importance: Importance.negative;
         enabled: !root.loading;
         loading: root.loading;
         clicked => {
             ModalGlobal.delete-confirmed();
+        }
+    }
+
+    Button {
+        icon: "";
+        label: TR2.lookup(TrId.CommonButtonCancel);
+        importance: Importance.secondary;
+        enabled: !root.loading;
+        clicked => {
+            ModalGlobal.cancel();
         }
     }
 }

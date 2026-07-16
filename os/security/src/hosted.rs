@@ -55,13 +55,28 @@ impl Default for Server {
     }
 }
 
-impl server::ArchiveHandler<SetSeedAndPin> for Server {
+#[cfg(not(feature = "recovery-os"))]
+impl server::ScalarEventSubscriptionHandler<SubscribeDiskEncryptionKeysReady> for Server {
+    fn handle(
+        &mut self,
+        _msg: SubscribeDiskEncryptionKeysReady,
+        subscriber: server::ScalarEventSubscriber<DiskEncryptionKeysReady>,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<(), server::Infallible> {
+        if let Err(e) = subscriber.send(&DiskEncryptionKeysReady) {
+            log::warn!("DiskEncryptionKeysReady send failed: {e:?}");
+        }
+        Ok(())
+    }
+}
+
+impl server::BlockingArchiveHandler<SetSeedAndPin> for Server {
     fn handle(
         &mut self,
         mut msg: SetSeedAndPin,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetSeedAndPin as server::Archive>::Response {
+    ) -> <SetSeedAndPin as server::BlockingArchive>::Response {
         // Validate PIN length before processing
         validate_raw_pin(&msg.pin.0)?;
 
@@ -75,13 +90,13 @@ impl server::ArchiveHandler<SetSeedAndPin> for Server {
     }
 }
 
-impl server::ArchiveHandler<ChangePin> for Server {
+impl server::BlockingArchiveHandler<ChangePin> for Server {
     fn handle(
         &mut self,
         mut msg: ChangePin,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ChangePin as server::Archive>::Response {
+    ) -> <ChangePin as server::BlockingArchive>::Response {
         // Validate PIN length before processing
         validate_raw_pin(&msg.pin.0)?;
 
@@ -96,24 +111,24 @@ impl server::ArchiveHandler<ChangePin> for Server {
     }
 }
 
-impl server::ArchiveHandler<IsPinSet> for Server {
+impl server::BlockingArchiveHandler<IsPinSet> for Server {
     fn handle(
         &mut self,
         _msg: IsPinSet,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <IsPinSet as server::Archive>::Response {
+    ) -> <IsPinSet as server::BlockingArchive>::Response {
         Ok(self.data.raw_pin.len() > 0)
     }
 }
 
-impl server::ArchiveHandler<Login> for Server {
+impl server::BlockingArchiveHandler<Login> for Server {
     fn handle(
         &mut self,
         msg: Login,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Login as server::Archive>::Response {
+    ) -> <Login as server::BlockingArchive>::Response {
         std::thread::sleep(std::time::Duration::from_millis(500));
         if msg.pin.0 == self.data.raw_pin {
             self.logged_in = true;
@@ -130,35 +145,35 @@ impl server::ArchiveHandler<Login> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetAttemptsRemaining> for Server {
+impl server::BlockingArchiveHandler<GetAttemptsRemaining> for Server {
     fn handle(
         &mut self,
         _msg: GetAttemptsRemaining,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetAttemptsRemaining as server::Archive>::Response {
+    ) -> <GetAttemptsRemaining as server::BlockingArchive>::Response {
         Ok(MAX_LOGIN_ATTEMPTS - self.data.login_attempts)
     }
 }
 
-impl server::ArchiveHandler<GetFactoryResetCounter> for Server {
+impl server::BlockingArchiveHandler<GetFactoryResetCounter> for Server {
     fn handle(
         &mut self,
         _msg: GetFactoryResetCounter,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFactoryResetCounter as server::Archive>::Response {
+    ) -> <GetFactoryResetCounter as server::BlockingArchive>::Response {
         Ok(self.data.factory_reset_counter)
     }
 }
 
-impl server::ArchiveHandler<GetSeed> for Server {
+impl server::BlockingArchiveHandler<GetSeed> for Server {
     fn handle(
         &mut self,
         _msg: GetSeed,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSeed as server::Archive>::Response {
+    ) -> <GetSeed as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: GetSeed");
         }
@@ -171,13 +186,13 @@ impl server::ArchiveHandler<GetSeed> for Server {
     }
 }
 
-impl server::ArchiveHandler<SetSeed> for Server {
+impl server::BlockingArchiveHandler<SetSeed> for Server {
     fn handle(
         &mut self,
         msg: SetSeed,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetSeed as server::Archive>::Response {
+    ) -> <SetSeed as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: SetSeed");
         }
@@ -189,13 +204,13 @@ impl server::ArchiveHandler<SetSeed> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetAppSeed> for Server {
+impl server::BlockingArchiveHandler<GetAppSeed> for Server {
     fn handle(
         &mut self,
         _msg: GetAppSeed,
         sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetAppSeed as server::Archive>::Response {
+    ) -> <GetAppSeed as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: GetAppSeed");
         }
@@ -213,24 +228,24 @@ impl server::ArchiveHandler<GetAppSeed> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetFirmwareTimestamp> for Server {
+impl server::BlockingArchiveHandler<GetFirmwareTimestamp> for Server {
     fn handle(
         &mut self,
         _msg: GetFirmwareTimestamp,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFirmwareTimestamp as server::Archive>::Response {
+    ) -> <GetFirmwareTimestamp as server::BlockingArchive>::Response {
         Ok(FirmwareTimestamp(self.data.firmware_timestamp))
     }
 }
 
-impl server::ArchiveHandler<SetFirmwareTimestamp> for Server {
+impl server::BlockingArchiveHandler<SetFirmwareTimestamp> for Server {
     fn handle(
         &mut self,
         msg: SetFirmwareTimestamp,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetFirmwareTimestamp as server::Archive>::Response {
+    ) -> <SetFirmwareTimestamp as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: SetFirmwareTimestamp");
         }
@@ -264,24 +279,24 @@ impl server::BlockingScalarHandler<LoggedIn> for Server {
 }
 
 #[cfg(not(keyos))]
-impl server::ArchiveHandler<GetPin> for Server {
+impl server::BlockingArchiveHandler<GetPin> for Server {
     fn handle(
         &mut self,
         _msg: GetPin,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetPin as server::Archive>::Response {
+    ) -> <GetPin as server::BlockingArchive>::Response {
         self.data.raw_pin.clone()
     }
 }
 
-impl server::ArchiveHandler<Lockout> for Server {
+impl server::BlockingArchiveHandler<Lockout> for Server {
     fn handle(
         &mut self,
         _msg: Lockout,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Lockout as server::Archive>::Response {
+    ) -> <Lockout as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: Lockout");
         }
@@ -294,13 +309,13 @@ impl server::ArchiveHandler<Lockout> for Server {
     }
 }
 
-impl server::ArchiveHandler<SignWithSecurityCheckKey> for Server {
+impl server::BlockingArchiveHandler<SignWithSecurityCheckKey> for Server {
     fn handle(
         &mut self,
         _msg: SignWithSecurityCheckKey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SignWithSecurityCheckKey as server::Archive>::Response {
+    ) -> <SignWithSecurityCheckKey as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: SignWithSecurityCheckKey");
         }
@@ -309,13 +324,13 @@ impl server::ArchiveHandler<SignWithSecurityCheckKey> for Server {
     }
 }
 
-impl server::ArchiveHandler<SignWithFidoKey> for Server {
+impl server::BlockingArchiveHandler<SignWithFidoKey> for Server {
     fn handle(
         &mut self,
         _msg: SignWithFidoKey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SignWithFidoKey as server::Archive>::Response {
+    ) -> <SignWithFidoKey as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: SignWithFidoKey");
         }
@@ -324,13 +339,13 @@ impl server::ArchiveHandler<SignWithFidoKey> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetFidoPubkey> for Server {
+impl server::BlockingArchiveHandler<GetFidoPubkey> for Server {
     fn handle(
         &mut self,
         _msg: GetFidoPubkey,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetFidoPubkey as server::Archive>::Response {
+    ) -> <GetFidoPubkey as server::BlockingArchive>::Response {
         if !self.logged_in {
             log::info!("not logged in, request would fail on hardware: GetFidoPubkey");
         }
@@ -339,96 +354,96 @@ impl server::ArchiveHandler<GetFidoPubkey> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetSecurityWords> for Server {
+impl server::BlockingArchiveHandler<GetSecurityWords> for Server {
     fn handle(
         &mut self,
         _msg: GetSecurityWords,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSecurityWords as server::Archive>::Response {
+    ) -> <GetSecurityWords as server::BlockingArchive>::Response {
         Ok([SecurityWord(0), SecurityWord(1)])
     }
 }
 
-impl server::ArchiveHandler<SetAttempts> for Server {
+impl server::BlockingArchiveHandler<SetAttempts> for Server {
     fn handle(
         &mut self,
         msg: SetAttempts,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetAttempts as server::Archive>::Response {
+    ) -> <SetAttempts as server::BlockingArchive>::Response {
         self.data.login_attempts = msg.0;
         self.data.save();
     }
 }
 
-impl server::ArchiveHandler<GetSeedFingerprint> for Server {
+impl server::BlockingArchiveHandler<GetSeedFingerprint> for Server {
     fn handle(
         &mut self,
         _msg: GetSeedFingerprint,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetSeedFingerprint as server::Archive>::Response {
+    ) -> <GetSeedFingerprint as server::BlockingArchive>::Response {
         Ok(self.data.seed_fingerprint.as_slice().try_into().unwrap())
     }
 }
 
-impl server::ArchiveHandler<ComputeSeedFingerprint> for Server {
+impl server::BlockingArchiveHandler<ComputeSeedFingerprint> for Server {
     fn handle(
         &mut self,
         msg: ComputeSeedFingerprint,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ComputeSeedFingerprint as server::Archive>::Response {
+    ) -> <ComputeSeedFingerprint as server::BlockingArchive>::Response {
         seed_fingerprint(&self.crypto, &msg.0).map_err(|_| AccessDenied)
     }
 }
 
-impl server::ArchiveHandler<GetOsVersionInfo> for Server {
+impl server::BlockingArchiveHandler<GetOsVersionInfo> for Server {
     fn handle(
         &mut self,
         _msg: GetOsVersionInfo,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetOsVersionInfo as server::Archive>::Response {
+    ) -> <GetOsVersionInfo as server::BlockingArchive>::Response {
         Ok(None)
     }
 }
 
-impl server::ArchiveHandler<ScChallenge> for Server {
+impl server::BlockingArchiveHandler<ScChallenge> for Server {
     fn handle(
         &mut self,
         _msg: ScChallenge,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ScChallenge as server::Archive>::Response {
+    ) -> <ScChallenge as server::BlockingArchive>::Response {
         Ok(ScProof([0u8; ScProof::SIZE]))
     }
 }
 
-impl server::ArchiveHandler<GetDeviceId> for Server {
+impl server::BlockingArchiveHandler<GetDeviceId> for Server {
     fn handle(
         &mut self,
         _msg: GetDeviceId,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetDeviceId as server::Archive>::Response {
+    ) -> <GetDeviceId as server::BlockingArchive>::Response {
         Ok(DeviceId([0u8; 32]))
     }
 }
 
-impl server::ArchiveHandler<KeycardAuthenticityMac> for Server {
+impl server::BlockingArchiveHandler<KeycardAuthenticityMac> for Server {
     fn handle(
         &mut self,
         _msg: KeycardAuthenticityMac,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <KeycardAuthenticityMac as server::Archive>::Response {
+    ) -> <KeycardAuthenticityMac as server::BlockingArchive>::Response {
         Ok([0u8; 32])
     }
 }
 
-impl server::ArchiveHandler<GetBluetoothChallengeSecret> for Server {
+impl server::BlockingArchiveHandler<GetBluetoothChallengeSecret> for Server {
     fn handle(
         &mut self,
         _msg: GetBluetoothChallengeSecret,
@@ -449,7 +464,7 @@ impl server::BlockingScalarHandler<SetBluetoothCheckSecretSent> for Server {
     }
 }
 
-impl server::ArchiveHandler<SetBluetoothDeviceId> for Server {
+impl server::BlockingArchiveHandler<SetBluetoothDeviceId> for Server {
     fn handle(
         &mut self,
         _msg: SetBluetoothDeviceId,
@@ -459,25 +474,25 @@ impl server::ArchiveHandler<SetBluetoothDeviceId> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetRandom> for Server {
+impl server::BlockingArchiveHandler<GetRandom> for Server {
     fn handle(
         &mut self,
         _msg: GetRandom,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetRandom as server::Archive>::Response {
+    ) -> <GetRandom as server::BlockingArchive>::Response {
         let random_bytes = rand::random::<[u8; 32]>();
         Ok(random_bytes)
     }
 }
 
-impl server::ArchiveHandler<GetPinEntryMode> for Server {
+impl server::BlockingArchiveHandler<GetPinEntryMode> for Server {
     fn handle(
         &mut self,
         _msg: GetPinEntryMode,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetPinEntryMode as server::Archive>::Response {
+    ) -> <GetPinEntryMode as server::BlockingArchive>::Response {
         self.data.pin_entry_mode.into()
     }
 }
@@ -499,7 +514,7 @@ impl server::BlockingScalarHandler<GetMasterKeyState> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetBootloaderBuildDate> for Server {
+impl server::BlockingArchiveHandler<GetBootloaderBuildDate> for Server {
     fn handle(
         &mut self,
         _msg: GetBootloaderBuildDate,

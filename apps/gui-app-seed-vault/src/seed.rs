@@ -3,6 +3,9 @@
 
 use {
     crate::{error::VaultError, IndexedSeedView, PasswordView, SeedView, SeedViewType},
+    anyhow::Context,
+    bip85_extended::bip39::Mnemonic,
+    nostr::{nips::nip19, FromBech32},
     ordered_table::{SortableCard, TableEntry},
     serde::{Deserialize, Serialize},
     slint_keyos_platform::slint::SharedString,
@@ -15,6 +18,8 @@ pub enum SeedValidationError {
     InvalidLabelError,
     #[error("Invalid password, passwords must not be empty")]
     EmptyPasswordError,
+    #[error("Invalid nsec")]
+    InvalidNsecError(#[from] nip19::Error),
 }
 
 #[derive(PartialEq, Debug, thiserror::Error)]
@@ -25,11 +30,8 @@ pub enum SeedDuplicateReason {
     Bitcoin12(String),
     #[error("Duplicate 24 word seed with label {0:?}")]
     Bitcoin24(String),
-    // Note: no current rules on account and password duplication, but these may be useful
-    // #[error("Different password for existing account: {0:?}")]
-    // DifferentPassword(String),
-    // #[error("Same password for existing account: {0:?}")]
-    // SamePassword(String),
+    #[error("Duplicate generated password with label {0:?}")]
+    PasswordGeneratedIndex(String),
     #[error("Duplicate Nostr key with label {0:?}")]
     NostrKey(String),
 }
@@ -39,7 +41,10 @@ pub enum SeedType {
     Bitcoin12 { index: u32 },
     Bitcoin24 { index: u32 },
     Password { account: String, password: String },
+    PasswordGenerated { account: String, password: String, index: u32 },
     NostrKey { index: u32 },
+    NostrKeyImport { nsec: String },
+    BitcoinImport { mnemonic: Mnemonic },
 }
 
 impl Default for SeedType {
@@ -52,37 +57,62 @@ impl std::fmt::Debug for SeedType {
             Self::Bitcoin12 { .. } => write!(f, "Bitcoin12"),
             Self::Bitcoin24 { .. } => write!(f, "Bitcoin24"),
             Self::Password { .. } => write!(f, "Password"),
+            Self::PasswordGenerated { .. } => write!(f, "PasswordGenerated"),
             Self::NostrKey { .. } => write!(f, "NostrKey"),
+            Self::NostrKeyImport { .. } => write!(f, "NostrKeyImport"),
+            Self::BitcoinImport { .. } => write!(f, "BitcoinImport"),
         }
     }
+}
+
+fn parse_index(seed_index: Option<String>) -> Result<u32, VaultError> {
+    let index = seed_index
+        .ok_or_else(|| VaultError::from(anyhow::anyhow!("Unable to make indexed seed type without an index")))
+        .map(|i| i.trim().parse::<u32>().unwrap_or(0))?;
+    if index >= 0x80000000 {
+        return Err(VaultError::from(anyhow::anyhow!(
+            "Index {index} exceeds maximum BIP32 hardened index (2147483647)"
+        )));
+    }
+    Ok(index)
 }
 
 impl SeedType {
     pub fn from_view_type(
         seed_type: SeedViewType,
-        seed_index: Option<SharedString>,
-        account: Option<SharedString>,
-        password: Option<SharedString>,
+        seed_index: Option<String>,
+        account: Option<String>,
+        password: Option<String>,
+        nsec: Option<String>,
+        seed_entropy: Option<String>,
     ) -> Result<Self, VaultError> {
-        let index: u32 = match (seed_type.is_indexed(), seed_index) {
-            (true, Some(i)) => i.trim().parse::<u32>().unwrap_or(0),
-            (true, None) => {
-                return Err(VaultError::from(anyhow::anyhow!(
-                    "Unable to make indexed seed type with an index"
-                )))
-            }
-            (false, _) => 0u32, // Index is irrelevant, just leave it at 0 and ignore
-        };
+        let account = account.unwrap_or_default();
+        let password = password.unwrap_or_default();
 
         let new_seed_type = match seed_type {
-            SeedViewType::Bitcoin12 => SeedType::Bitcoin12 { index },
-            SeedViewType::Bitcoin24 => SeedType::Bitcoin24 { index },
-            SeedViewType::Password => {
-                let account = account.map(String::from).unwrap_or(String::new());
-                let password = password.map(String::from).unwrap_or(String::new());
-                SeedType::Password { account, password }
+            SeedViewType::Bitcoin12 => SeedType::Bitcoin12 { index: parse_index(seed_index)? },
+            SeedViewType::Bitcoin24 => SeedType::Bitcoin24 { index: parse_index(seed_index)? },
+            SeedViewType::Password => SeedType::Password { account, password },
+            SeedViewType::PasswordGenerated => {
+                SeedType::PasswordGenerated { account, password, index: parse_index(seed_index)? }
             }
-            SeedViewType::NostrKey => SeedType::NostrKey { index },
+            SeedViewType::NostrKey => SeedType::NostrKey { index: parse_index(seed_index)? },
+            SeedViewType::NostrKeyImport => {
+                let nsec = nsec.ok_or_else(|| {
+                    VaultError::from(anyhow::anyhow!("Unable to build nostr import, no nsec"))
+                })?;
+                nostr::SecretKey::from_bech32(&nsec).context("Could not get nostr secret from nsec")?;
+                SeedType::NostrKeyImport { nsec }
+            }
+            SeedViewType::BitcoinImport12 | SeedViewType::BitcoinImport24 => {
+                let entropy = seed_entropy.ok_or_else(|| {
+                    VaultError::from(anyhow::anyhow!("Unable to build bitcoin import, no seed words"))
+                })?;
+                let entropy = hex::decode(entropy).context("Could not decode entropy")?;
+                let mnemonic = Mnemonic::from_entropy(entropy.as_slice())
+                    .context("Could not build mnemonic from entropy")?;
+                SeedType::BitcoinImport { mnemonic }
+            }
         };
 
         // Validate here to avoid repeated parameter validation in match body
@@ -115,11 +145,12 @@ impl SeedType {
             {
                 return Some(SeedDuplicateReason::Bitcoin24(other_label));
             }
-            // Note: no current rules on account and password duplication, but these may be useful
-            // (
-            //     SeedType::Password { account: account_a, password: password_a },
-            //     SeedType::Password { account: account_b, password: password_b },
-            // ) => {
+            (
+                SeedType::PasswordGenerated { account: _, password: _, index: index_a },
+                SeedType::PasswordGenerated { account: _, password: _, index: index_b },
+            ) if index_a == index_b => {
+                return Some(SeedDuplicateReason::PasswordGeneratedIndex(other_label));
+            }
             //     match (account_a == account_b, password_a == password_b) {
             //         (true, true) => return Some(SeedDuplicateReason::SamePassword(account_a.clone())),
             //         (true, false) => return
@@ -196,6 +227,24 @@ impl Seed {
         Ok(seed)
     }
 
+    pub fn from_view(
+        seed_view: SeedView,
+        nsec: Option<SharedString>,
+        seed_entropy: Option<SharedString>,
+    ) -> Result<Self, VaultError> {
+        let seed_type = SeedType::from_view_type(
+            seed_view.seed_type,
+            Some(seed_view.indexed_seed.index.into()),
+            Some(seed_view.password.account.into()),
+            Some(seed_view.password.password.into()),
+            nsec.map(String::from),
+            seed_entropy.map(String::from),
+        )?;
+
+        let time = get_timestamp_in_seconds();
+        Ok(Self::new(seed_type, seed_view.label.clone().into(), seed_view.color as u8, time)?)
+    }
+
     pub fn get_category(&self) -> u32 {
         (if self.archived { SeedCategories::Archived } else { SeedCategories::Active }) as u32
     }
@@ -210,6 +259,10 @@ impl Seed {
             (SeedType::Password { account: _, ref mut password }, SeedEditField::Password(val)) => {
                 *password = val
             }
+            (
+                SeedType::PasswordGenerated { ref mut account, password: _, index: _ },
+                SeedEditField::Account(val),
+            ) => *account = val,
             _ => {
                 log::warn!("Unsupported edit");
             }
@@ -251,38 +304,62 @@ impl SeedEditField {
 
 impl SeedView {
     pub fn from_seed(seed: &Seed) -> Self {
-        let (seed_type, index, account, password) = match seed.seed {
-            SeedType::Bitcoin12 { index } => (SeedViewType::Bitcoin12, index, String::new(), String::new()),
-            SeedType::Bitcoin24 { index } => (SeedViewType::Bitcoin24, index, String::new(), String::new()),
-            SeedType::Password { ref account, ref password } => {
-                (SeedViewType::Password, 0u32, account.clone(), password.clone())
-            }
-            SeedType::NostrKey { index } => (SeedViewType::NostrKey, index, String::new(), String::new()),
-        };
-        Self {
+        let mut view = Self {
             label: SharedString::from(seed.get_label()),
             color: seed.color as i32,
-            seed_type,
-            indexed_seed: IndexedSeedView { index: index.to_string().into() },
-            password: PasswordView { account: account.into(), password: password.into() },
             index: -1,
-        }
+            ..Default::default()
+        };
+
+        let seed_type = match seed.seed {
+            SeedType::Bitcoin12 { index } => {
+                view.set_seed_index(index);
+                SeedViewType::Bitcoin12
+            }
+            SeedType::Bitcoin24 { index } => {
+                view.set_seed_index(index);
+                SeedViewType::Bitcoin24
+            }
+            SeedType::Password { ref account, ref password } => {
+                view.set_password(account, password);
+                SeedViewType::Password
+            }
+            SeedType::PasswordGenerated { ref account, ref password, index } => {
+                view.set_seed_index(index);
+                view.set_password(account, password);
+                SeedViewType::PasswordGenerated
+            }
+            SeedType::NostrKey { index } => {
+                view.set_seed_index(index);
+                SeedViewType::NostrKey
+            }
+            SeedType::NostrKeyImport { nsec: _ } => SeedViewType::NostrKeyImport,
+            SeedType::BitcoinImport { ref mnemonic } => match mnemonic.word_count() {
+                12 => SeedViewType::BitcoinImport12,
+                24 => SeedViewType::BitcoinImport24,
+                other => {
+                    log::error!("Unsupported mnemonic length {}, assuming 24", other);
+                    SeedViewType::BitcoinImport24
+                }
+            },
+        };
+
+        view.seed_type = seed_type;
+
+        view
+    }
+
+    pub fn set_seed_index(&mut self, seed_index: u32) {
+        self.indexed_seed = IndexedSeedView { index: seed_index.to_string().into() };
+    }
+
+    pub fn set_password(&mut self, account: &str, password: &str) {
+        self.password = PasswordView { account: account.into(), password: password.into() }
     }
 
     pub fn with_index(mut self, index: i32) -> Self {
         self.index = index;
         self
-    }
-}
-
-impl SeedViewType {
-    fn is_indexed(&self) -> bool {
-        match self {
-            SeedViewType::Bitcoin12 | SeedViewType::Bitcoin24 | SeedViewType::NostrKey => true,
-            SeedViewType::Password => false,
-            // Note, if you're adding a new type and hit a compiler error here,
-            // make sure you update the parallel function in ui/callbacks.slint as well.
-        }
     }
 }
 
@@ -299,15 +376,4 @@ fn get_timestamp_in_seconds() -> u64 {
     return 0;
 }
 
-impl Seed {
-    pub fn from_view(seed_view: SeedView) -> Result<Self, VaultError> {
-        let seed_type = SeedType::from_view_type(
-            seed_view.seed_type,
-            Some(seed_view.indexed_seed.index.clone()),
-            Some(seed_view.password.account.clone()),
-            Some(seed_view.password.password.clone()),
-        )?;
-        let time = get_timestamp_in_seconds();
-        Ok(Self::new(seed_type, seed_view.label.clone().into(), seed_view.color as u8, time)?)
-    }
-}
+impl Seed {}

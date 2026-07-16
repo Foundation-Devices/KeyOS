@@ -1,0 +1,7 @@
+manifestVersion = "0"
+[servers."os/nfc"]
+ReadNdefRawMsg = { id = 0, type = "blockingArchive" }
+WriteNdefRawMsg = { id = 1, type = "blockingArchive" }
+SetEnabled = { id = 2, type = "blockingScalar" }
+IsEnabled = { id = 3, type = "blockingScalar" }
+IsActive = { id = 4, type = "blockingScalar" }

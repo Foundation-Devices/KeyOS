@@ -12,7 +12,7 @@ backup-shard = { workspace = true }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 ndef = { workspace = true }
-nfc = { path = "../../os/nfc" }
+nfc = { workspace = true }
 server = { path = "../../server" }
 xous = { path = "../../xous/xous-rs" }
 

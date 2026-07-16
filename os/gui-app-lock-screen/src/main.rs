@@ -39,12 +39,8 @@ impl AppState {
         let ui_state = ui.global::<State>();
 
         let zoned = self.timezone.now();
-        if self.use_standard_time_format.0 {
-            ui_state.set_hours(strtime::format("%02H", &zoned).unwrap().into());
-        } else {
-            ui_state.set_hours(strtime::format("%02I", &zoned).unwrap().into());
-        }
-        ui_state.set_minutes(strtime::format("%M", &zoned).unwrap().into());
+        let time = if self.use_standard_time_format.0 { "%H:%M" } else { "%-I:%M" };
+        ui_state.set_time(strtime::format(time, &zoned).unwrap().into());
         ui_state.set_date(strtime::format("%B %e, %Y", &zoned).unwrap().into());
     }
 }
@@ -153,10 +149,11 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
                 reset_input_state(&ui_state, ui_state.get_remaining_attempts() as _);
                 log::info!("Navigation cancelled");
             }
-            InputMessage::Visible => {
+            InputMessage::Custom1 => {
                 ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
             }
-            InputMessage::Hidden => {
+            InputMessage::Custom2 => {
+                ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
                 reset_input_state(&ui_state, ui_state.get_remaining_attempts() as _);
                 ui_state.set_show_login(false);
                 gui.hide_keyboard().ok();
@@ -172,6 +169,8 @@ fn init_state(state: StoredValue<AppState>) {
 
     // Configure UI with the max attempts from Rust
     ui_state.set_max_login_attempts(MAX_LOGIN_ATTEMPTS as _);
+
+    ui_state.set_is_pin_entry(state.borrow().security.get_pin_entry_mode() == security::PinEntryMode::Pin);
 
     ui_state.on_show_control_center(move || {
         state.borrow().gui.update_kiosk_policy(UpdateKioskPolicy::default().set_control_center(true)).ok();

@@ -43,6 +43,11 @@ pub struct AccountStore {
     pub device_serial: String,
     pub publish_tasks: BTreeMap<AccountId, TaskHandle<()>>,
     accounts: BTreeMap<AccountId, Account>,
+
+    // Fingerprints cached at passphrase-application time so that local view
+    // switches (Default <-> Passphrase) never need to re-read from the SE
+    pub default_fingerprint: Fingerprint,
+    passphrase_fingerprint: Option<Fingerprint>,
 }
 
 #[derive(Debug)]
@@ -132,7 +137,6 @@ impl<'a> Drop for ConfigBorrowMut<'a> {
 
 pub struct CreateSingleSigAccount {
     pub label: String,
-    pub color: AccountColor,
     pub network: NgNetwork,
 
     pub index: u32,
@@ -164,6 +168,8 @@ impl Default for AccountStore {
             passphrase: Default::default(),
             accounts: Default::default(),
             publish_tasks: Default::default(),
+            default_fingerprint: fingerprint,
+            passphrase_fingerprint: None,
         }
     }
 }
@@ -364,6 +370,9 @@ impl AccountStore {
     }
 
     pub fn validate_index(&self, index: u32, network: NgNetwork) -> Option<String> {
+        if index >= 0x80000000 {
+            return Some(format!("Index {index} exceeds maximum BIP32 hardened index (2147483647)"));
+        }
         self.active_accounts()
             .filter_map(|(_id, a)| {
                 if a.multisig.is_none() && a.network == network && a.index == index {
@@ -424,17 +433,24 @@ impl AccountStore {
         load_master_key(&self.secp, &self.security, self.passphrase.as_str(), network)
     }
 
-    pub fn try_passphrase(&self, passphrase: String) -> anyhow::Result<Fingerprint> {
-        load_master_key(&self.secp, &self.security, passphrase.as_str(), NgNetwork::Bitcoin)
-            .map(|m| m.fingerprint)
-    }
-
-    pub fn set_passphrase(&mut self, passphrase: String) {
+    /// Switches between Default and Passphrase views using cached fingerprints
+    /// Unlike set_passphrase, this never reads from the SE
+    pub fn switch_fingerprint(&mut self, passphrase: String) {
         if self.passphrase == passphrase {
             return;
         }
 
-        // Unload accounts from previous passphrase
+        self.unload_passphrase_accounts();
+
+        self.passphrase = passphrase;
+        self.fingerprint = if self.passphrase.is_empty() {
+            self.default_fingerprint
+        } else {
+            self.passphrase_fingerprint.unwrap_or(self.default_fingerprint)
+        };
+    }
+
+    fn unload_passphrase_accounts(&mut self) {
         let has_passphrase = self.has_passphrase();
         for (_id, acc) in self.accounts.iter_mut().filter(|(id, _a)| match id {
             AccountId::Single { fingerprint, .. } => has_passphrase && fingerprint == &self.fingerprint,
@@ -443,14 +459,19 @@ impl AccountStore {
         }) {
             acc.unload();
         }
+    }
 
+    /// Applies a pre-computed fingerprint after an async SE read. Handles account
+    /// unloading and caching without touching the SE itself
+    pub fn apply_fingerprint(&mut self, passphrase: String, fingerprint: Fingerprint) {
+        self.unload_passphrase_accounts();
         self.passphrase = passphrase;
-        let master_key =
-            load_master_key(&self.secp, &self.security, self.passphrase.as_str(), NgNetwork::Bitcoin)
-                .inspect_err(|e| {
-                    log::error!("failed to load master key {e:?}");
-                });
-        self.fingerprint = master_key.map(|m| m.fingerprint).unwrap_or_default();
+        self.fingerprint = fingerprint;
+        if self.has_passphrase() {
+            self.passphrase_fingerprint = Some(fingerprint);
+        } else {
+            self.passphrase_fingerprint = None;
+        }
     }
 
     pub fn delete_account(&mut self, id: AccountId) {
@@ -460,6 +481,14 @@ impl AccountStore {
             });
         }
     }
+}
+
+/// Computes the fingerprint for a passphrase by reading from the SE
+/// Creates its own Security and Secp instances so it can run in a worker thread
+pub fn fingerprint_for_passphrase(passphrase: &str) -> anyhow::Result<Fingerprint> {
+    let secp = Secp256k1::new();
+    let security = crate::Security::default();
+    load_master_key(&secp, &security, passphrase, NgNetwork::Bitcoin).map(|m| m.fingerprint)
 }
 
 fn load_master_key(

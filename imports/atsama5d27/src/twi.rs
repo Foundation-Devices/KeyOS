@@ -1,6 +1,13 @@
 //! ATSAMA5D2 TWIHS (I2C) driver.
 
 use {
+    crate::dma::{
+        DmaChunkSize,
+        DmaDataWidth,
+        DmaPeripheralId,
+        DmaPeripheralTransferConfig,
+        DmaTransferDirection,
+    },
     bitflags::bitflags,
     utralib::{utra::twihs0::*, HW_TWIHS0_BASE, HW_TWIHS1_BASE, *},
 };
@@ -101,11 +108,40 @@ impl eh_1::i2c::ErrorType for Twi {
 const TWI_CLK_OFFSET: usize = 3;
 const FIFO_SIZE: usize = 16;
 
+const RHR_OFFSET: u32 = 0x30;
+const THR_OFFSET: u32 = 0x34;
+
 pub struct Twi {
     base_addr: u32,
 }
 
 impl Twi {
+    pub const TX_DMA_CONFIG_TWI0: DmaPeripheralTransferConfig = DmaPeripheralTransferConfig {
+        peripheral_id: DmaPeripheralId::TwiHs0Tx,
+        direction: DmaTransferDirection::MemoryToPeripheral,
+        data_width: DmaDataWidth::D8,
+        chunk_size: DmaChunkSize::C1,
+    };
+    pub const RX_DMA_CONFIG_TWI0: DmaPeripheralTransferConfig = DmaPeripheralTransferConfig {
+        peripheral_id: DmaPeripheralId::TwiHs0Rx,
+        direction: DmaTransferDirection::PeripheralToMemory,
+        data_width: DmaDataWidth::D8,
+        chunk_size: DmaChunkSize::C1,
+    };
+
+    pub const RX_DMA_CONFIG_TWI1: DmaPeripheralTransferConfig = DmaPeripheralTransferConfig {
+        peripheral_id: DmaPeripheralId::TwiHs1Rx,
+        direction: DmaTransferDirection::PeripheralToMemory,
+        data_width: DmaDataWidth::D8,
+        chunk_size: DmaChunkSize::C1,
+    };
+    pub const TX_DMA_CONFIG_TWI1: DmaPeripheralTransferConfig = DmaPeripheralTransferConfig {
+        peripheral_id: DmaPeripheralId::TwiHs1Tx,
+        direction: DmaTransferDirection::MemoryToPeripheral,
+        data_width: DmaDataWidth::D8,
+        chunk_size: DmaChunkSize::C1,
+    };
+
     #[inline]
     pub fn with_base_addr(base_addr: u32) -> Self {
         Self { base_addr }
@@ -148,6 +184,26 @@ impl Twi {
         let bits = csr.r(SR);
         let mask = csr.r(IMR);
         TWIStatus::from_bits_retain(bits & mask)
+    }
+
+    #[inline]
+    pub fn set_txcomp_interrupt(&self, enable: bool) {
+        let mut csr = CSR::new(self.base_addr as *mut u32);
+        if enable {
+            csr.wfo(IER_TXCOMP, 1);
+        } else {
+            csr.wfo(IDR_TXCOMP, 1);
+        }
+    }
+
+    #[inline]
+    pub fn set_nack_interrupt(&self, enable: bool) {
+        let mut csr = CSR::new(self.base_addr as *mut u32);
+        if enable {
+            csr.wfo(IER_NACK, 1);
+        } else {
+            csr.wfo(IDR_NACK, 1);
+        }
     }
 
     fn sw_reset(&self) {
@@ -311,7 +367,31 @@ impl Twi {
         Ok(())
     }
 
-    fn send_bytes(&self, bytes: &[u8]) -> Result<(), I2cError> {
+    #[inline]
+    pub fn setup_write_read(&self, address: u8, write_len: usize, read_len: usize) {
+        self.clear_rx_fifo();
+        self.clear_tx_fifo();
+
+        self.init_write(address, 0, 0);
+
+        self.acm_set_datal(write_len as u32);
+        self.acm_set_ndatal(read_len as u32);
+        self.acm_set_direction(false);
+        self.acm_set_next_direction(true);
+    }
+
+    #[inline]
+    pub fn dma_tx_addr(&self) -> usize {
+        (self.base_addr + THR_OFFSET) as usize
+    }
+
+    #[inline]
+    pub fn dma_rx_addr(&self) -> usize {
+        (self.base_addr + RHR_OFFSET) as usize
+    }
+
+    #[inline]
+    pub fn send_bytes(&self, bytes: &[u8]) -> Result<(), I2cError> {
         let tx_fifo_available = self.tx_fifo_available();
         let fifo_bytes = tx_fifo_available.min(bytes.len());
         let remaining_bytes = bytes.len().saturating_sub(fifo_bytes);
@@ -331,7 +411,7 @@ impl Twi {
 
         // Send the bytes which didn't fit into FIFO while waiting for the TXRDY flag
         if remaining_bytes > 0 {
-            for byte in &bytes[fifo_bytes - 1..] {
+            for byte in &bytes[fifo_bytes..] {
                 self.wait_for_status(TWIStatus::TXRDY)?;
                 self.write_byte(*byte);
             }
@@ -340,7 +420,7 @@ impl Twi {
         Ok(())
     }
 
-    fn receive_bytes(&self, bytes: &mut [u8]) -> Result<(), I2cError> {
+    pub fn receive_bytes(&self, bytes: &mut [u8]) -> Result<(), I2cError> {
         let mut num_bytes_received = 0;
         while num_bytes_received < bytes.len() {
             self.wait_for_status(TWIStatus::RXRDY)?;

@@ -20,9 +20,6 @@ use state::AppState;
 
 app!("Switcher", kind = Switcher);
 fn app_main(cx: AppContext, ui: AppWindow) {
-    // Doesn't have graphical glitches but way slower (SFT-6542)
-    cx.config.vsync.replace(slint_keyos_platform::gui_server_api::Vsync::Wait);
-
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 

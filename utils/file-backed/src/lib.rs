@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    io::{Seek, SeekFrom, Write},
+    io::{BufReader, Seek, SeekFrom, Write},
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -200,8 +200,9 @@ where
         location: fs::Location,
         create: bool,
     ) -> Result<T, T::Error> {
-        let mut file = Self::try_open(fs, path, location, create)?;
-        let value = T::from_reader(&mut file)?;
+        let file = Self::try_open(fs, path, location, create)?;
+        let mut reader = BufReader::with_capacity(fs::FILE_BUFFER_SIZE, file);
+        let value = T::from_reader(&mut reader)?;
         Ok(value)
     }
 

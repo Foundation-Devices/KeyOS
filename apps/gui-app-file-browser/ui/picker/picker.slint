@@ -5,22 +5,26 @@ import { Button, IconButton, TextSm } from "@ui/widgets.slint";
 import { Importance, Size, Palette } from "@ui/theme.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 import { PickerGlobal } from "./global.slint";
-import { FileList, FileListLoading } from "../file-list.slint";
+import { FileList, FileListLoading, FileListType } from "../file-list.slint";
 import { LocationSwitcher } from "../location-switcher.slint";
 
 export component PickerBody inherits Rectangle {
-    private property <int> num-files: PickerGlobal.file-lists[PickerGlobal.location-idx].files.length;
-    private property <int> num-files-filtered: PickerGlobal.file-lists[PickerGlobal.location-idx].num-files-filtered;
-    private property <bool> loading: PickerGlobal.file-lists[PickerGlobal.location-idx].loading;
-    private property <bool> error: PickerGlobal.file-lists[PickerGlobal.location-idx].error;
-
-    VerticalLayout {
-        y: 0px;
+    FileList {
         padding-left: Size.sz6;
         padding-right: Size.sz6;
-        spacing: Size.sz6 - 2px;
+        file-list: PickerGlobal.file-lists[PickerGlobal.location-idx];
+        is-select-mode: false;
+        are-files-allowed: !PickerGlobal.is-dir-selection-mode;
+        are-folders-allowed: PickerGlobal.is-folders-allowed;
+        long-press-enabled: false;
+        compact-airlock-usb: true;
+
+        entry-pressed(name, is-folder) => {
+            PickerGlobal.entry-pressed(name, is-folder);
+        }
 
         header := Rectangle {
+            vertical-stretch: 0;
             HorizontalLayout {
                 alignment: start;
                 VerticalLayout {
@@ -38,47 +42,6 @@ export component PickerBody inherits Rectangle {
                 }
             }
         }
-
-        if (!loading && !error && num-files != 0): FileList {
-            model: PickerGlobal.file-lists[PickerGlobal.location-idx].files;
-            is-select-mode: false;
-            long-press-enabled: false;
-
-            entry-pressed(name, is-folder) => {
-                PickerGlobal.entry-pressed(name, is-folder);
-            }
-        }
-
-        if (!error && loading): FileListLoading {
-            are-folders-allowed: PickerGlobal.is-folders-allowed;
-        }
-
-        if (error && !loading): VerticalLayout {
-            height: parent.height;
-            padding: Size.sz6;
-
-            HorizontalLayout {
-                alignment: center;
-                TextSm {
-                    text: TR2.lookup(TrId.ErrorContent);
-                    color: Palette.content-notice;
-                    horizontal-alignment: center;
-                }
-            }
-        }
-        if (!error && !loading && num-files == 0): VerticalLayout {
-            height: parent.height;
-            padding: Size.sz6;
-
-            HorizontalLayout {
-                alignment: center;
-                TextSm {
-                    text: TR2.lookup(TrId.EmptyFolderEmpty) + TR2.format(TrId.EmptyFilesFiltered, [num-files-filtered]);
-                    color: Palette.content-tertiary;
-                    horizontal-alignment: center;
-                }
-            }
-        }
     }
 
     if PickerGlobal.is-dir-selection-mode: HorizontalLayout {
@@ -92,7 +55,7 @@ export component PickerBody inherits Rectangle {
                 width: 256px;
                 label: TR2.lookup(TrId.CommonButtonSave);
                 importance: Importance.primary;
-                enabled: !error;
+                enabled: PickerGlobal.file-lists[PickerGlobal.location-idx].list-type == FileListType.FileList;
                 clicked => {
                     PickerGlobal.select-directory();
                 }

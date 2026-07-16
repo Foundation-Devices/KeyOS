@@ -70,34 +70,33 @@ static SYSCALL_MAP: LazyLock<HashMap<String, u8>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Resolve a list of syscall names into a bitmask. Panics if a name is unknown.
+pub fn syscall_mask(names: &[String]) -> u64 {
+    let mut mask = 0u64;
+    for name in names {
+        let number = *SYSCALL_MAP.get(name).unwrap_or_else(|| panic!("Could not find the '{name}' syscall"));
+        mask |= 1 << number;
+    }
+    mask
+}
+
 pub struct SyscallPermission {
     pid: u8,
-    syscalls: Vec<(u8, String)>,
+    syscalls: Vec<String>,
+    mask: u64,
 }
 
 impl SyscallPermission {
     pub fn new(pid: u8, syscalls: &[String]) -> Self {
-        Self {
-            pid,
-            syscalls: syscalls
-                .iter()
-                .map(|name| {
-                    (
-                        *SYSCALL_MAP
-                            .get(name)
-                            .unwrap_or_else(|| panic!("Could not find the '{name}' syscall")),
-                        name.clone(),
-                    )
-                })
-                .collect(),
-        }
+        Self { pid, mask: syscall_mask(syscalls), syscalls: syscalls.to_vec() }
     }
 }
 
 impl std::fmt::Display for SyscallPermission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "        syscall permissions: ")?;
-        for (number, name) in &self.syscalls {
+        for name in &self.syscalls {
+            let number = SYSCALL_MAP.get(name).unwrap();
             write!(f, "{name}({number}), ")?;
         }
         writeln!(f)
@@ -111,12 +110,7 @@ impl XousArgument for SyscallPermission {
 
     fn serialize(&self, output: &mut dyn io::Write) -> io::Result<usize> {
         let mut written = output.write(&[self.pid, 0, 0, 0])?;
-        let mut mask = 0u64;
-        for (number, _name) in &self.syscalls {
-            mask |= 1 << number;
-        }
-        written += output.write(&mask.to_le_bytes())?;
-
+        written += output.write(&self.mask.to_le_bytes())?;
         Ok(written)
     }
 }

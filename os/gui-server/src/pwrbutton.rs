@@ -39,7 +39,7 @@ impl Gui {
         }
 
         // Don't turn off the screen during init
-        if matches!(self.state, crate::GuiState::BootSplash) {
+        if matches!(self.state, crate::GuiState::Splash) {
             return;
         }
 

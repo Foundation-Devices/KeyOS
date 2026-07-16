@@ -1,15 +1,31 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use server::{CheckedPermissions, WithAllPermissions};
-use settings::global::{DeviceName, UsbEnabled};
+use gpio::{GpioPin, IrqMessage, PinSettings};
+use server::{CheckedConn, CheckedPermissions, WithAllPermissions};
+#[cfg(not(feature = "recovery-os"))]
+use settings::global::{AirlockMode, DeviceName, UsbEnabled};
+use usb::host::messages::SetEnabled;
 
+#[cfg(not(feature = "recovery-os"))]
+use crate::device::messages::SetDeviceEmulationEnabled;
+use crate::device::messages::{OtgMode, SetCableConnected};
+use crate::host::messages::HostOtgMode;
+use crate::PowerManagerExtApi;
+
+gpio::use_api!();
+#[cfg(not(feature = "recovery-os"))]
 settings::use_api!();
 
 #[derive(Default)]
 pub struct SubscriptionServer {
-    device: usb::device::api::UsbDeviceEmulation<WithAllPermissions<DevicePermissions>>,
-    host: usb::host::api::UsbHost<WithAllPermissions<HostPermissions>>,
+    device: CheckedConn<WithAllPermissions<DevicePermissions>>,
+    host: CheckedConn<WithAllPermissions<HostPermissions>>,
+    #[cfg(not(feature = "recovery-os"))]
+    settings: SettingsApi,
+    power_manager_ext: PowerManagerExtApi,
+    #[cfg(not(feature = "recovery-os"))]
+    airlock_is_rw: bool,
 }
 
 #[derive(Default, Clone)]
@@ -34,12 +50,56 @@ impl server::ServerMessages for SubscriptionServer {
 
 impl server::Server for SubscriptionServer {
     fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
-        let settings = SettingsApi::default();
-        settings.server_subscribe_device_name(context);
-        settings.server_subscribe_usb_enabled(context);
+        #[cfg(not(feature = "recovery-os"))]
+        {
+            self.settings.server_subscribe_device_name(context);
+            self.settings.server_subscribe_usb_enabled(context);
+            self.settings.server_subscribe_airlock_mode(context);
+        }
+
+        let gpio_api = GpioApi::default();
+        gpio_api
+            .claim_pin(GpioPin::UsbOtgId, PinSettings::InterruptBoth, false)
+            .expect("Could not claim pin");
+
+        log::debug!("Enabling OTG_ID IRQ");
+        gpio_api.enable_irq(GpioPin::UsbOtgId, context).expect("Could not subscribe to gpio interrupt");
+
+        gpio_api
+            .claim_pin(GpioPin::UsbVbusIrq, PinSettings::InterruptBoth, false)
+            .expect("Could not claim pin");
+
+        log::debug!("Enabling VBUS IRQ");
+        gpio_api.enable_irq(GpioPin::UsbVbusIrq, context).expect("Could not subscribe to gpio interrupt");
+
+        let usb_otg_pin = gpio_api.get_pin(GpioPin::UsbOtgId).unwrap();
+        let usb_vbus = gpio_api.get_pin(GpioPin::UsbVbusIrq).unwrap();
+        // The pin is LOW if there is an OTG device present.
+        self.device.send_scalar(OtgMode(!usb_otg_pin));
+        self.host.send_scalar(HostOtgMode(!usb_otg_pin));
+        self.device.send_scalar(SetCableConnected(usb_vbus));
+
+        #[cfg(feature = "recovery-os")]
+        self.set_usb_host_enabled(true);
     }
 }
 
+impl SubscriptionServer {
+    #[cfg(not(feature = "recovery-os"))]
+    fn set_usb_enabled(&mut self, enabled: bool) {
+        self.set_usb_device_enabled(enabled);
+        self.set_usb_host_enabled(enabled);
+    }
+
+    #[cfg(not(feature = "recovery-os"))]
+    fn set_usb_device_enabled(&mut self, enabled: bool) {
+        self.device.send_scalar(SetDeviceEmulationEnabled(enabled));
+    }
+
+    fn set_usb_host_enabled(&mut self, enabled: bool) { self.host.send_scalar(SetEnabled(enabled)); }
+}
+
+#[cfg(not(feature = "recovery-os"))]
 impl server::ArchiveEventHandler<DeviceName> for SubscriptionServer {
     fn handle(
         &mut self,
@@ -53,6 +113,7 @@ impl server::ArchiveEventHandler<DeviceName> for SubscriptionServer {
     }
 }
 
+#[cfg(not(feature = "recovery-os"))]
 impl server::ScalarEventHandler<UsbEnabled> for SubscriptionServer {
     fn handle(
         &mut self,
@@ -61,13 +122,44 @@ impl server::ScalarEventHandler<UsbEnabled> for SubscriptionServer {
         _context: &mut server::ServerContext<Self>,
     ) {
         log::debug!("received usb enabled event {enabled}");
-        self.device
-            .set_enabled(enabled)
-            .inspect_err(|e| log::warn!("failed to set usb device enabled {enabled:?} {e:?}"))
-            .ok();
-        self.host
-            .set_enabled(enabled)
-            .inspect_err(|e| log::warn!("failed to set usb host enabled {enabled:?} {e:?}"))
-            .ok();
+        self.set_usb_enabled(enabled);
+    }
+}
+
+#[cfg(not(feature = "recovery-os"))]
+impl server::ScalarEventHandler<AirlockMode> for SubscriptionServer {
+    fn handle(&mut self, msg: AirlockMode, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        self.airlock_is_rw = msg == AirlockMode::ReadWrite
+    }
+}
+
+impl server::ScalarEventHandler<IrqMessage> for SubscriptionServer {
+    fn handle(&mut self, msg: IrqMessage, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        log::trace!("GPIO IRQ: {msg:?}");
+        match msg.pin {
+            GpioPin::UsbOtgId => {
+                // The pin is LOW if there is an OTG device present.
+                self.device.send_scalar(OtgMode(!msg.is_high));
+                self.host.send_scalar(HostOtgMode(!msg.is_high));
+            }
+            GpioPin::UsbVbusIrq => {
+                if !msg.is_high {
+                    #[cfg(not(feature = "recovery-os"))]
+                    {
+                        // Return mass storage to read-only when the cable is
+                        // unplugged. This is now independent of Developer Mode,
+                        // which no longer governs AirlockMode.
+                        if self.airlock_is_rw {
+                            log::info!("USB cable disconnected, setting airlock mode to ReadOnly");
+                            self.settings.set_airlock_mode(AirlockMode::ReadOnly);
+                        }
+                    }
+                    // Undo any Never priority set by the host server's timeout backoff.
+                    self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Automatic).ok();
+                }
+                self.device.send_scalar(SetCableConnected(msg.is_high));
+            }
+            _ => log::warn!("Unexpected GPIO IRQ: {msg:?}"),
+        }
     }
 }

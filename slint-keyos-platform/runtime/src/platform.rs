@@ -11,16 +11,17 @@ use std::{
 use gui_server_api::{
     consts::{FPS, SCREEN_HEIGHT},
     touch::{Touch, TouchKind},
-    DoubleBuffer, GuiApi, InputMessage, Key, NextFrameAnimationKind, Vsync,
+    GuiApi, InputMessage, Key, NextFrameAnimationKind,
 };
+use i_slint_core::{item_rendering::DirtyRegion, renderer::RendererSealed};
 use server::FromScalar;
 #[cfg(not(feature = "recovery-os"))]
 use slint::{platform::WindowAdapter, private_unstable_api::re_exports::WindowInner};
 use slint::{
     platform::{software_renderer::LineBufferProvider, EventLoopProxy, PointerEventButton, WindowEvent},
-    PhysicalPosition, PhysicalSize, PlatformError, SharedString,
+    LogicalPosition, PhysicalPosition, PhysicalSize, PlatformError, SharedString,
 };
-use xous::envelope::Envelope;
+use xous::{envelope::Envelope, DropDeallocate, MemoryRange};
 use xous_ticktimer::{Ticktimer, TicktimerCallback};
 
 use crate::{core::EventLoopStatus, pixel::KeyosPixel, window::KeyOsWindow, Runtime, StoredValue};
@@ -31,6 +32,7 @@ const SWIPE_RIGHT_EDGE_AREA_WIDTH_PX: usize = 30; // TODO(SFT-5093): tweak setti
 const SWIPE_RIGHT_VELOCITY_THRESHOLD: f32 = 300.; // TODO(SFT-5093): tweak setting
 /// Minimum swipe distance (in pixels) required to consider a swipe right gesture valid.
 const SWIPE_RIGHT_DISTANCE_THRESHOLD: isize = 100; // TODO(SFT-5093): tweak setting
+
 #[cfg(not(feature = "recovery-os"))]
 const DEBUG_TOUCH_COLOR: slint::Color = slint::Color::from_argb_u8(64, 255, 0, 255);
 #[cfg(not(feature = "recovery-os"))]
@@ -79,11 +81,10 @@ impl<PG: GuiAppGuiPermissions, PF: GuiAppFsPermissions> AppContext<PG, PF> {
 #[derive(Debug, Clone)]
 pub struct PlatformConfig {
     pub enable_swipe_back: Cell<bool>,
-    pub vsync: Cell<Vsync>,
 }
 
 impl Default for PlatformConfig {
-    fn default() -> Self { Self { enable_swipe_back: Cell::new(true), vsync: Cell::new(Vsync::CapFPS) } }
+    fn default() -> Self { Self { enable_swipe_back: Cell::new(true) } }
 }
 
 pub trait InputHandler<PG: GuiAppGuiPermissions>: FnMut(AppInput<PG>) {}
@@ -122,20 +123,22 @@ where
 pub trait GuiAppGuiPermissions:
     server::CheckedPermissions
     + 'static
-    + server::MessageAllowed<gui_server_api::msg::SwapBuffers>
+    + server::MessageAllowed<gui_server_api::msg::SubmitFrame>
     + server::MessageAllowed<gui_server_api::msg::UpdateKeyboard>
     + server::MessageAllowed<gui_server_api::msg::HideKeyboard>
     + server::MessageAllowed<gui_server_api::msg::AnimateNextFrame>
+    + server::MessageAllowed<gui_server_api::msg::RequestRedraw>
 {
 }
 
 impl<P> GuiAppGuiPermissions for P
 where
     P: server::CheckedPermissions + 'static,
-    P: server::MessageAllowed<gui_server_api::msg::SwapBuffers>,
+    P: server::MessageAllowed<gui_server_api::msg::SubmitFrame>,
     P: server::MessageAllowed<gui_server_api::msg::HideKeyboard>,
     P: server::MessageAllowed<gui_server_api::msg::UpdateKeyboard>,
     P: server::MessageAllowed<gui_server_api::msg::AnimateNextFrame>,
+    P: server::MessageAllowed<gui_server_api::msg::RequestRedraw>,
 {
 }
 
@@ -145,31 +148,30 @@ pub struct KeyOsPlatform<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiP
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> KeyOsPlatform<WIDTH, HEIGHT, PG> {
-    pub fn new<PF: GuiAppFsPermissions>(
-        _app_title: &'static str,
-        bufs: DoubleBuffer,
-        cx: AppContext<PG, PF>,
-    ) -> Self {
+    pub fn new<PF: GuiAppFsPermissions>(_app_title: &'static str, cx: AppContext<PG, PF>) -> Self {
         let window = KeyOsWindow::new(cx.gui.clone(), PhysicalSize::new(WIDTH as u32, HEIGHT as u32));
 
         crate::runtime::handle::global::init();
         crate::fonts::register_fonts(&cx.fs);
 
+        let wake_callback = TicktimerCallback::new(cx.gui.sid()).unwrap();
         Self {
             start: Instant::now(),
             state: RefCell::new(KeyOsEventLoopState {
                 window,
                 gui: cx.gui,
 
-                bufs,
                 visible: false,
-                redraw_callback: None,
+                wake_callback,
+
                 router: cx.router,
 
                 handlers: cx.handlers,
                 config: cx.config.clone(),
 
                 swipe_gesture_state: None,
+                ticktimer: Ticktimer::default(),
+                framebuffer: None,
             }),
         }
     }
@@ -236,9 +238,8 @@ struct KeyOsEventLoopState<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGu
     window: Rc<KeyOsWindow<PG>>,
     gui: Arc<GuiApi<PG>>,
 
-    bufs: DoubleBuffer,
     visible: bool,
-    redraw_callback: Option<TicktimerCallback>,
+    wake_callback: TicktimerCallback,
 
     router: StoredValue<crate::router::Router>,
 
@@ -246,87 +247,40 @@ struct KeyOsEventLoopState<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGu
     handlers: AppHandlers<PG>,
     config: Rc<PlatformConfig>,
 
-    // Tracks the time and position of the first touch for swipe detection
-    swipe_gesture_state: Option<(Instant, Touch)>,
+    // Tracks the time and position of the first touch for swipe detection.
+    // The bool is true when the initial Press was consumed (needs to be replayed on swipe failure).
+    swipe_gesture_state: Option<(Instant, Touch, bool)>,
+
+    ticktimer: Ticktimer,
+    framebuffer: Option<Framebuffer>,
 }
 
 impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
     KeyOsEventLoopState<WIDTH, HEIGHT, PG>
 {
     pub fn run(&mut self) {
-        let mut bufs = self.bufs;
         let mut events = Vec::new();
-        let mut last_swap = 0;
-        let ticktimer = Ticktimer::new().unwrap();
         loop {
-            slint::platform::update_timers_and_animations();
-
-            let work_fb = bufs.work_buf as *mut KeyosPixel;
-            let work_fb = unsafe { std::slice::from_raw_parts_mut(work_fb, WIDTH * HEIGHT) };
+            if self.should_block() {
+                let (event, msg) = self.gui.receive_input().unwrap();
+                self.wake_callback.cancel(InputMessage::Noop as usize);
+                self.process_input(event, msg, &mut events);
+            }
 
             while let Some((event, msg)) = self.gui.try_receive_input() {
                 self.process_input(event, msg, &mut events);
             }
 
-            {
-                let mut event_it = events.drain(..).peekable();
-                while let Some(event) = event_it.next() {
-                    // Only apply the last PointerMoved event if there are multiple consecutive ones. All
-                    // other ones would just be wasted calculation, as just the move is
-                    // rarely actionable, but slint does a surprisingly large amount of
-                    // calculations for each of these updates.
-                    if matches!(event, WindowEvent::PointerMoved { .. })
-                        && event_it.peek().map_or(false, |ne| matches!(ne, WindowEvent::PointerMoved { .. }))
-                    {
-                        continue;
-                    }
-                    self.window.dispatch_event(event);
-                }
-            }
+            slint::platform::update_timers_and_animations();
+
+            self.dispatch_events(&mut events);
 
             let status = Runtime::unsafe_run();
-
             if status == EventLoopStatus::Quit {
                 break;
             }
 
-            // Draw the scene if something needs to be drawn.
-            self.window.draw_if_needed(|renderer| {
-                // log::info!("Client: Rendering into {:x}", bufs.work_buf);
-                // let now = Instant::now();
-
-                renderer.render_by_line(LineProvider::<WIDTH> {
-                    work_fb,
-                    last_swap,
-                    next_timer_check: 0,
-                    ticktimer: &ticktimer,
-                });
-                #[cfg(keyos)]
-                xous::syscall::flush_cache(
-                    unsafe { xous::MemoryRange::new(bufs.work_buf, WIDTH * HEIGHT * 4).unwrap() },
-                    xous::CacheOperation::Clean,
-                )
-                .expect("clean cache");
-
-                // let elapsed = now.elapsed();
-                // log::debug!("Rendering took {elapsed:?}");
-
-                let vsync = self.config.vsync.get();
-                if let Some(new_last_swap) = self.gui.swap_buffers(vsync).expect("swap buffers") {
-                    last_swap = new_last_swap;
-                    bufs.swap();
-                } else {
-                    log::warn!("swap_buffers() was unsuccessful");
-                }
-            });
-
-            let should_block = self.should_block();
-
-            if should_block {
-                if let Ok((event, msg)) = self.gui.receive_input() {
-                    self.process_input(event, msg, &mut events);
-                }
-            }
+            self.draw();
         }
         log::info!("Closing normally (received close request)");
     }
@@ -350,13 +304,11 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
                 Some(duration) if duration < MIN_BLOCK_DURATION => false,
                 Some(callback_after) => {
                     log::debug!("Requesting callback in {callback_after:?}");
-                    self.redraw_callback
-                        .get_or_insert_with(|| TicktimerCallback::new(self.gui.sid()).unwrap())
-                        .request(
-                            callback_after.as_millis() as usize,
-                            InputMessage::RedrawRequested as usize,
-                            0,
-                        );
+                    self.wake_callback.request(
+                        callback_after.as_millis() as usize,
+                        InputMessage::Noop as usize,
+                        0,
+                    );
                     true
                 }
             }
@@ -367,15 +319,24 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
         match event {
             InputMessage::Touch => {
                 if let Some(touch) = Touch::try_from_input_message(&msg.body) {
+                    let button = PointerEventButton::Left;
+
                     if self.config.enable_swipe_back.get() {
                         let can_go_back = self.router.with(|r| r.has_back());
-                        if can_go_back && self.handle_swipe_right(&touch) {
-                            // Swipe right gesture detected, don't propagate the event to GUI
-                            return;
+                        if can_go_back {
+                            match self.handle_swipe_right(&touch) {
+                                SwipeResult::Consumed => return,
+                                SwipeResult::Passthrough => {}
+                                SwipeResult::ReplayPress(stored_touch) => {
+                                    let position =
+                                        PhysicalPosition::new(stored_touch.x as i32, stored_touch.y as i32)
+                                            .to_logical(self.window.scale_factor());
+                                    events.push(WindowEvent::PointerPressed { position, button });
+                                }
+                            }
                         }
                     }
 
-                    let button = PointerEventButton::Left;
                     let position = PhysicalPosition::new(touch.x as i32, touch.y as i32)
                         .to_logical(self.window.scale_factor());
                     events.push(match touch.kind {
@@ -391,26 +352,75 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
 
             InputMessage::KeyPress => events.push(self.handle_key_event_msg(true, &msg)),
             InputMessage::KeyRelease => events.push(self.handle_key_event_msg(false, &msg)),
+            InputMessage::Scroll => {
+                let scalar = msg.body.scalar_message().expect("scalar message");
+                // x/y are already in logical (device-space) pixels — use them directly.
+                let x = scalar.arg1 as i32;
+                let y = scalar.arg2 as i32;
+                // delta_x/delta_y are already in logical pixels (normalised in the emulator).
+                let delta_x = f32::from_bits(scalar.arg3 as u32);
+                let delta_y = f32::from_bits(scalar.arg4 as u32);
+                let position = LogicalPosition::new(x as f32, y as f32);
+                events.push(WindowEvent::PointerScrolled { position, delta_x, delta_y });
+            }
             InputMessage::Visible => {
                 log::debug!("App is now visible");
                 self.visible = true;
             }
             InputMessage::Hidden => {
                 log::debug!("App is hidden");
-                if let Some(cb) = &self.redraw_callback {
-                    log::trace!("Cancelling redraw timer");
-                    cb.cancel(InputMessage::RedrawRequested as usize);
-                }
                 self.visible = false;
             }
             InputMessage::CloseRequested => Runtime::unsafe_quit(),
-            /* do nothing but allow the event loop to redraw */
-            InputMessage::RedrawRequested => (),
+
+            // do nothing but allow the event loop to run
+            InputMessage::Noop => {}
+
+            InputMessage::FrameBuffer => {
+                self.framebuffer = Framebuffer::from_message(msg.take_message());
+                return;
+            }
             _ => (),
         }
         if let Some(handler) = self.handlers.input_handler.borrow_mut().as_mut() {
             handler(AppInput::new(self.window.clone(), event, msg));
         }
+    }
+
+    fn dispatch_events(&self, events: &mut Vec<WindowEvent>) {
+        let mut event_it = events.drain(..).peekable();
+        while let Some(event) = event_it.next() {
+            // Only apply the last PointerMoved event if there are multiple consecutive ones. All
+            // other ones would just be wasted calculation, as just the move is
+            // rarely actionable, but slint does a surprisingly large amount of
+            // calculations for each of these updates.
+            if matches!(event, WindowEvent::PointerMoved { .. })
+                && event_it.peek().map_or(false, |ne| matches!(ne, WindowEvent::PointerMoved { .. }))
+            {
+                continue;
+            }
+            self.window.dispatch_event(event);
+        }
+    }
+
+    fn draw(&mut self) {
+        let Some(framebuffer) = self.framebuffer.take() else { return };
+        if framebuffer.is_new {
+            let mut dirty = DirtyRegion::default();
+            dirty.add_rect(euclid::Rect::from_size(euclid::Size2D::new(16000.0, 16000.0)));
+            self.window.renderer.mark_dirty_region(dirty);
+        }
+        let last_swap = framebuffer.last_swap;
+        let mut work_fb = framebuffer.leak();
+        self.window.draw(LineProvider::<WIDTH> {
+            work_fb: work_fb.as_slice_mut(),
+            last_swap,
+            next_timer_check: 0,
+            ticktimer: &self.ticktimer,
+        });
+        #[cfg(keyos)]
+        xous::syscall::flush_cache(work_fb, xous::CacheOperation::Clean).expect("clean cache");
+        self.gui.submit_frame(work_fb).unwrap();
     }
 
     fn handle_key_event_msg(&self, is_press: bool, msg: &Envelope) -> WindowEvent {
@@ -423,6 +433,8 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
             Key::Delete => slint::platform::Key::Delete.into(),
             Key::CursorLeft => slint::platform::Key::LeftArrow.into(),
             Key::CursorRight => slint::platform::Key::RightArrow.into(),
+            Key::Enter => slint::platform::Key::Return.into(),
+            Key::Tab => slint::platform::Key::Tab.into(),
         };
 
         if is_press {
@@ -433,31 +445,34 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
     }
 
     /// Detects and handles the swipe right gesture that navigates the user back with the `Router`.
-    /// Returns `true` if the touch must not be propagated to the GUI.
-    fn handle_swipe_right(&mut self, touch: &Touch) -> bool {
+    fn handle_swipe_right(&mut self, touch: &Touch) -> SwipeResult {
         match touch.kind {
             TouchKind::Press if touch.x <= SWIPE_RIGHT_EDGE_AREA_WIDTH_PX => {
                 log::debug!("Detected initial swipe right touch at ({}, {})", touch.x, touch.y);
-                self.swipe_gesture_state = Some((Instant::now(), touch.clone()));
-                false
+                // Consume the press so we can replay it later if the gesture doesn't complete.
+                self.swipe_gesture_state = Some((Instant::now(), touch.clone(), true));
+                SwipeResult::Consumed
             }
 
             TouchKind::Drag => {
                 if self.swipe_gesture_state.is_none() {
                     if touch.x <= SWIPE_RIGHT_EDGE_AREA_WIDTH_PX {
                         log::debug!("Detected initial swipe right drag at ({}, {})", touch.x, touch.y);
-                        self.swipe_gesture_state = Some((Instant::now(), touch.clone()));
-                        return true;
+                        // The Press that started this touch was outside the edge zone and already
+                        // forwarded to Slint, so no replay is needed on failure.
+                        self.swipe_gesture_state = Some((Instant::now(), touch.clone(), false));
+                        return SwipeResult::Consumed;
                     }
                 } else {
-                    return true;
+                    return SwipeResult::Consumed;
                 }
 
-                false
+                SwipeResult::Passthrough
             }
 
             TouchKind::Release => {
-                if let Some((first_touch_time, first_touch)) = self.swipe_gesture_state.take() {
+                if let Some((first_touch_time, first_touch, press_consumed)) = self.swipe_gesture_state.take()
+                {
                     let elapsed = first_touch_time.elapsed().as_secs_f32();
                     let (dx, _dy) = touch.diff(&first_touch);
                     let velocity = if elapsed != 0. { dx as f32 / elapsed } else { 0. };
@@ -467,24 +482,57 @@ impl<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions>
                         log::debug!("Detected, navigating backward");
                         self.gui.animate_next_frame(NextFrameAnimationKind::SlideOutRight).ok();
                         self.router.with(|r| r.navigate_backward());
-                        return true;
+                        return SwipeResult::Consumed;
+                    }
+
+                    if press_consumed {
+                        return SwipeResult::ReplayPress(first_touch);
                     }
                 }
 
-                false
+                SwipeResult::Passthrough
             }
 
             _ => {
                 self.swipe_gesture_state = None;
-                false
+                SwipeResult::Passthrough
             }
         }
     }
 }
 
+enum SwipeResult {
+    /// The touch was consumed by the swipe handler; do not propagate it.
+    Consumed,
+    /// The touch was not consumed; propagate it normally.
+    Passthrough,
+    /// The gesture ended without a swipe and the initial Press was consumed. Re-emit the stored
+    /// touch as a `PointerPressed` before propagating the current Release.
+    ReplayPress(Touch),
+}
+
+struct Framebuffer {
+    buffer: DropDeallocate,
+    last_swap: usize,
+    is_new: bool,
+}
+
+impl Framebuffer {
+    pub fn from_message(msg: xous::Message) -> Option<Self> {
+        let mem = msg.memory_message()?;
+        Some(Self {
+            buffer: DropDeallocate::new(mem.buf),
+            last_swap: mem.offset.map(|o| o.get()).unwrap_or(0),
+            is_new: mem.valid.is_some(),
+        })
+    }
+
+    pub fn leak(self) -> MemoryRange { self.buffer.leak() }
+}
+
 struct LineProvider<'a, const WIDTH: usize> {
     work_fb: &'a mut [KeyosPixel],
-    last_swap: u64,
+    last_swap: usize,
     next_timer_check: usize,
     ticktimer: &'a Ticktimer,
 }
@@ -498,16 +546,24 @@ impl<const WIDTH: usize> LineBufferProvider for LineProvider<'_, WIDTH> {
         range: std::ops::Range<usize>,
         render_fn: impl FnOnce(&mut [KeyosPixel]),
     ) {
+        // Don't check the timer too often, as it takes 0.1ms each time.
+        const TIMER_CHECK_INTERVAL: usize = 100;
         if line >= self.next_timer_check {
-            let time_of_line = 1000 * line / SCREEN_HEIGHT / FPS;
-            // The additional milliseconds at the end is to mask inaccuracies
-            let lcdc_estimated_render_tick = self.last_swap + time_of_line as u64 + 2;
-            let current_tick = self.ticktimer.elapsed_ms();
+            let time_of_last_line = 1000 * (line + TIMER_CHECK_INTERVAL) / (FPS * SCREEN_HEIGHT);
+            let lcdc_estimated_render_tick = self.last_swap + time_of_last_line;
+            let current_tick = self.ticktimer.elapsed_ms() as usize;
             // If we would overtake the LCDC line scan, wait a bit instead.
             if lcdc_estimated_render_tick > current_tick {
-                std::thread::sleep(Duration::from_millis(lcdc_estimated_render_tick - current_tick));
+                let diff = lcdc_estimated_render_tick - current_tick;
+                // If the difference is too large, we probably wrapped on 32 bit,
+                // or there was some other issue with the calculation.
+                // In this case just let it glitch visually. It will resolve in 1-2 frames.
+                if diff < 100 {
+                    log::trace!("Sleeping {diff} on line {line}");
+                    std::thread::sleep(Duration::from_millis(diff as u64));
+                }
             }
-            self.next_timer_check = line + 100;
+            self.next_timer_check = line + TIMER_CHECK_INTERVAL;
         }
         render_fn(&mut self.work_fb[line * WIDTH..][range]);
     }

@@ -48,7 +48,7 @@ component QlPaired inherits HorizontalLayout {
         }
 
         TextSm {
-            text: BackupGlobal.last-backup-time-ago;
+            text: BackupGlobal.last-backup-duration == "" ? TR2.lookup(TrId.CommonBackupNeverBackedUp) : TR2.format(TrId.MainBackedUpXAgo, [BackupGlobal.last-backup-duration]);
             color: Palette.content-tertiary;
             horizontal-alignment: left;
         }

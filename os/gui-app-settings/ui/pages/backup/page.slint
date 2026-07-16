@@ -2,21 +2,22 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { TR2, TrId } from "../../gen/tr.slint";
-import { TextSm, Button, SwitchControlled , MenuSectionContainer, MenuItemLayout, MenuSectionLayout, MenuActionItem, HLine, BasePage, PageBody, ContentSection } from "@ui/widgets.slint";
-import { Size, Palette, Timings } from "@ui/theme.slint";
+import { TextSm, Button, SwitchControlled , MenuSectionContainer, MenuItemLayout, MenuSectionLayout, MenuActionItem, HLine, BasePage, PageBody, ContentSection, Dialog } from "@ui/widgets.slint";
+import { Size, Palette, Timings, UISize } from "@ui/theme.slint";
 
 import { SettingsNavHeader } from "../../widgets/nav-header.slint";
 import { Navigate } from "../../gen/navigate.slint";
 
 import { BackupProps } from "props.slint";
 import { EraseStatus } from "../settings/advanced/erase-device/props.slint";
-import { BackupGlobal } from "../../globals/backup-global.slint";
+import { BackupGlobal, BackupStatus } from "../../globals/backup-global.slint";
 import { QlGlobal } from "../../globals/ql-global.slint";
 
 export component BackupPage inherits BasePage {
     in property <BackupProps> props;
 
     private property <bool> envoy-connected: QlGlobal.ql-live;
+    private property <bool> creating-backup: BackupGlobal.status == BackupStatus.Creating;
 
     VerticalLayout {
         SettingsNavHeader {
@@ -59,16 +60,16 @@ export component BackupPage inherits BasePage {
 
                     TextSm {
                         color: Palette.content-tertiary;
-                        text: BackupGlobal.last-backup-time-ago;
+                        text: BackupGlobal.last-backup-duration == "" ? TR2.lookup(TrId.CommonBackupNeverBackedUp) : TR2.format(TrId.BackupLastUpdatedXAgo, [BackupGlobal.last-backup-duration]);
                         vertical-alignment: center;
                         horizontal-alignment: center;
                     }
                 }
 
                 if BackupGlobal.magic-backup-enabled: Button {
-                    label: BackupGlobal.creating-backup ? TR2.lookup(TrId.BackupBackingUp) : TR2.lookup(TrId.BackupBackUpNow);
-                    enabled: envoy-connected && !BackupGlobal.creating-backup;
-                    loading: BackupGlobal.creating-backup;
+                    label: creating-backup ? TR2.lookup(TrId.BackupBackingUp) : TR2.lookup(TrId.BackupBackUpNow);
+                    enabled: envoy-connected && !creating-backup;
+                    loading: creating-backup;
                     background: Palette.background-brand;
                     clicked => {
                         BackupGlobal.create-backup()
@@ -109,6 +110,26 @@ export component BackupPage inherits BasePage {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if BackupGlobal.status == BackupStatus.Error: Rectangle {
+        background: Palette.overlay;
+        Dialog {
+            icon: "decline-circle";
+            title: TR2.lookup(TrId.BackupModalBackupFailedHeader);
+            message: TR2.lookup(TrId.BackupModalBackupFailedContent);
+            show-ok: true;
+            show-cancel: true;
+            ok-text: TR2.lookup(TrId.CommonButtonDismiss);
+            cancel-text: TR2.lookup(TrId.CommonButtonRetry);
+            width: UISize.modal-width;
+            on-ok => {
+                BackupGlobal.status = BackupStatus.Idle;
+            }
+            on-cancel => {
+                BackupGlobal.create-backup();
             }
         }
     }

@@ -6,6 +6,7 @@ use core::ptr::{addr_of, addr_of_mut};
 
 #[cfg(keyos)]
 use xous::arch::MAX_PROCESS_NAME_LEN;
+use xous::ServerEvent;
 use xous::{
     arch::ProcessStartup, pid_from_usize, AppId, Error, MemoryAddress, MemoryRange, Message, ProcessInit,
     SystemEvent, ThreadInit, CID, PID, SID, TID,
@@ -14,7 +15,6 @@ use xous::{
 use crate::arch::mem::MemoryMapping;
 pub use crate::arch::process::Process as ArchProcess;
 pub use crate::arch::process::MAX_PROCESS_COUNT;
-#[cfg(keyos)]
 pub use crate::arch::process::MAX_THREAD_COUNT;
 use crate::debug::BufStr;
 use crate::platform;
@@ -105,19 +105,8 @@ impl SystemServices {
         Ok(())
     }
 
-    /// Returns the panic message for a process if there's one
-    #[cfg(not(keyos))]
-    pub fn get_panic_message(&self, pid: PID) -> Option<&BufStr<[u8; PANIC_MESSAGE_SIZE]>> {
-        if self.panic_message_pid == Some(pid) {
-            Some(&self.panic_message)
-        } else {
-            None
-        }
-    }
-
-    pub fn take_panic_message(&mut self) -> (Option<PID>, &[u8]) {
-        let pid = self.panic_message_pid.take();
-        (pid, self.panic_message.as_slice())
+    pub fn get_panic_message(&mut self) -> (Option<PID>, &[u8]) {
+        (self.panic_message_pid, self.panic_message.as_slice())
     }
 
     /// Create a new "System Services" object based on the arguments from the
@@ -224,10 +213,15 @@ impl SystemServices {
     /// and a new PID, though the process is in the state `Setup()`.
     pub fn create_process(&mut self, init_process: ProcessInit) -> Result<ProcessStartup, Error> {
         let ppid = crate::arch::process::current_pid();
-        let slot_index = self.processes.iter_mut().position(|p| p.is_none()).ok_or_else(|| {
-            println!("[!] No free PIDs left to allocate a new process");
-            Error::OutOfMemory
-        })?;
+        let slot_index = self
+            .processes
+            .iter()
+            .enumerate()
+            .position(|(i, p)| p.is_none() && self.panic_message_pid != PID::new(i as u8 + 1))
+            .ok_or_else(|| {
+                println!("[!] No free PIDs left to allocate a new process");
+                Error::KernelTableFull
+            })?;
         let pid = pid_from_usize(slot_index + 1)?;
         let mut mapping = MemoryMapping::default();
         unsafe { mapping.allocate(pid)? };
@@ -252,11 +246,14 @@ impl SystemServices {
     }
 
     pub fn process(&self, pid: PID) -> Result<&Process, Error> {
-        self.processes[Self::process_index(pid)].as_ref().ok_or(Error::ProcessNotFound)
+        self.processes.get(Self::process_index(pid)).and_then(|p| p.as_ref()).ok_or(Error::ProcessNotFound)
     }
 
     pub fn process_mut(&mut self, pid: PID) -> Result<&mut Process, Error> {
-        self.processes[Self::process_index(pid)].as_mut().ok_or(Error::ProcessNotFound)
+        self.processes
+            .get_mut(Self::process_index(pid))
+            .and_then(|p| p.as_mut())
+            .ok_or(Error::ProcessNotFound)
     }
 
     pub fn free_process(&mut self, pid: PID) { self.processes[Self::process_index(pid)] = None; }
@@ -342,7 +339,10 @@ impl SystemServices {
         if dest_virt as usize & 0xfff != 0 {
             return Err(Error::BadAddress);
         }
-        if (dest_virt as usize) + len > keyos::USER_AREA_END {
+        if (src_virt as usize).checked_add(len).is_none_or(|end| end > keyos::USER_AREA_END) {
+            return Err(Error::BadAddress);
+        }
+        if (dest_virt as usize).checked_add(len).is_none_or(|end| end > keyos::USER_AREA_END) {
             return Err(Error::BadAddress);
         }
 
@@ -355,12 +355,6 @@ impl SystemServices {
 
         // If the dest and src PID is the same, do nothing.
         if current_pid == dest_pid {
-            crate::mem::MemoryManager::with_mut(|mm| {
-                for offset in (0..usize_len).step_by(usize_page) {
-                    mm.ensure_page_exists(src_virt.wrapping_add(offset))?;
-                }
-                Ok(())
-            })?;
             return Ok(src_virt);
         }
 
@@ -670,6 +664,11 @@ impl SystemServices {
             return Err(Error::ThreadNotAvailable);
         }
 
+        // join_tid is caller-supplied and indexes a fixed-size thread array.
+        if join_tid >= MAX_THREAD_COUNT {
+            return Err(Error::ThreadNotAvailable);
+        }
+
         if process.thread_state(join_tid) != ThreadState::Free {
             process.set_thread_state(tid, ThreadState::WaitJoin { tid: join_tid });
             Scheduler::with_mut(|s| s.activate_current(self))
@@ -691,7 +690,7 @@ impl SystemServices {
     /// # Errors
     ///
     /// * **OutOfMemory**: A new page could not be assigned to store the server queue.
-    /// * **ServerNotFound**: The server queue was full and a free slot could not be found.
+    /// * **KernelTableFull**: The server table was full and a free slot could not be found.
     pub fn create_server_with_address(
         &mut self,
         sid: SID,
@@ -724,7 +723,7 @@ impl SystemServices {
                 return Ok(sid);
             }
         }
-        Err(Error::ServerNotFound)
+        Err(Error::KernelTableFull)
     }
 
     /// Generate a random server ID and return it to the caller. Doesn't create
@@ -755,7 +754,11 @@ impl SystemServices {
             .position(|s| s.as_ref().is_some_and(|s| s.sid == sid))
             .ok_or(Error::ServerNotFound)?;
         let permissions = self.server_from_sidx(sidx).unwrap().default_permissions.clone();
-        self.process_mut(pid)?.add_connection(sidx, permissions)
+        let (cid, new_connection) = self.process_mut(pid)?.add_connection(sidx, permissions)?;
+        if new_connection {
+            self.send_server_event(sidx, ServerEvent::NewConnection, Default::default())?;
+        }
+        Ok(cid)
     }
 
     /// Invalidate the provided connection ID.
@@ -771,8 +774,14 @@ impl SystemServices {
             {
                 *refcount -= 1
             }
-            ConnectionSlot::Tombstone { .. } | ConnectionSlot::Connected { .. } => {
+            ConnectionSlot::Tombstone { .. } => {
                 *connection_slot = ConnectionSlot::Free;
+                klog!("Removing server from connection map");
+            }
+            ConnectionSlot::Connected { sidx, .. } => {
+                let sidx = *sidx as usize;
+                *connection_slot = ConnectionSlot::Free;
+                self.send_server_event(sidx, ServerEvent::Disconnected, Default::default())?;
                 klog!("Removing server from connection map");
             }
         };
@@ -786,7 +795,7 @@ impl SystemServices {
 
     /// Return a server based on the connection id and the current process
     pub fn server_from_sidx(&self, sidx: usize) -> Option<&Server> {
-        if sidx > self.servers.len() {
+        if sidx >= self.servers.len() {
             None
         } else {
             self.servers[sidx].as_ref()
@@ -795,7 +804,7 @@ impl SystemServices {
 
     /// Return a server based on the connection id and the current process
     pub fn server_from_sidx_mut(&mut self, sidx: usize) -> Option<&mut Server> {
-        if sidx > self.servers.len() {
+        if sidx >= self.servers.len() {
             None
         } else {
             self.servers[sidx].as_mut()
@@ -854,17 +863,23 @@ impl SystemServices {
         if ret != 0 && self.current_process().ppid.map(|p| p.get() == 1).unwrap_or(false) {
             #[cfg(keyos)]
             {
+                crate::arch::backtrace::capture_current_process_backtrace();
                 #[cfg(not(feature = "production"))]
-                crate::debug::serial::with_output(|stream| self.print_current_process(stream, true).unwrap());
+                crate::debug::serial::with_output(|stream| self.print_current_process(stream).unwrap());
                 let process_name = self.current_process().name().unwrap_or("N/A");
                 panic!("System process PID={} (`{}`) terminated with code {}", pid, process_name, ret);
             }
 
             #[cfg(not(keyos))]
             {
-                let panic_message = self.get_panic_message(pid).cloned();
-                if let Some(panic_msg) = panic_message {
-                    panic!("System process PID={} terminated with code {}\n{}", pid, ret, panic_msg);
+                let (panic_pid, panic_message) = self.get_panic_message();
+                if panic_pid == Some(pid) {
+                    panic!(
+                        "System process PID={} terminated with code {}\n{}",
+                        pid,
+                        ret,
+                        str::from_utf8(panic_message).unwrap_or("non-utf8 panic")
+                    );
                 } else {
                     panic!("System process PID={} terminated with code {}\n= <NO PANIC> =", pid, ret);
                 }
@@ -886,13 +901,17 @@ impl SystemServices {
         }
 
         if let Some(ppid) = self.current_process().ppid {
-            self.send_event(ppid, SystemEvent::ChildTerminated, [ret as _, 0, 0, 0]).ok();
+            self.send_system_event(ppid, SystemEvent::ChildTerminated, [ret as _, 0, 0, 0]).ok();
+        }
+        for sidx in self.current_process().connected_sidxes() {
+            self.send_server_event(sidx, ServerEvent::Disconnected, Default::default()).ok();
         }
 
         #[cfg(keyos)]
         if ret != 0 {
+            crate::arch::backtrace::capture_current_process_backtrace();
             #[cfg(not(feature = "production"))]
-            crate::debug::serial::with_output(|stream| self.print_current_process(stream, true).unwrap());
+            crate::debug::serial::with_output(|stream| self.print_current_process(stream).unwrap());
         }
 
         self.process_mut(pid)?.terminate(ret)?;
@@ -919,12 +938,22 @@ impl SystemServices {
             let Some(process) = self.processes[pidx].as_mut() else { continue };
             if let Some(cid) = process.tombstone_connection_by_sidx(sidx) {
                 let pid = process.pid;
-                self.send_event(pid, SystemEvent::Disconnected, [cid as usize, 0, 0, 0]).ok();
+                self.send_system_event(pid, SystemEvent::Disconnected, [cid as usize, 0, 0, 0]).ok();
             }
         }
     }
 
-    fn send_event(&mut self, dst_pid: PID, event: SystemEvent, args: [usize; 4]) -> Result<(), Error> {
+    fn send_server_event(&mut self, sidx: usize, event: ServerEvent, args: [usize; 4]) -> Result<(), Error> {
+        if let Some(server) = self.server_from_sidx_mut(sidx) {
+            if let Some(id) = server.get_event_handler(event) {
+                let msg = Message::new_scalar(id, args[0], args[1], args[2], args[3]);
+                crate::syscall::send_message_inner(self, 0, sidx, msg)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn send_system_event(&mut self, dst_pid: PID, event: SystemEvent, args: [usize; 4]) -> Result<(), Error> {
         if let Some((sid, id)) = self.process(dst_pid)?.get_event_handler(event) {
             if let Some(sidx) = self.sidx_from_sid(sid, dst_pid) {
                 let msg = Message::new_scalar(id, args[0], args[1], args[2], args[3]);
@@ -939,7 +968,7 @@ impl SystemServices {
         for pid in 1..=MAX_PROCESS_COUNT as u8 {
             let pid = PID::new(pid).unwrap();
             if self.process(pid).is_ok() {
-                self.send_event(pid, event, args)?;
+                self.send_system_event(pid, event, args)?;
             }
         }
         Ok(())
@@ -980,14 +1009,7 @@ impl SystemServices {
     }
 
     #[cfg(all(keyos, any(not(feature = "production"), feature = "log-serial")))]
-    pub fn print_current_process(
-        &self,
-        mut output: impl core::fmt::Write,
-        with_backtrace: bool,
-    ) -> Result<(), Error> {
-        if with_backtrace {
-            crate::arch::backtrace::print_current_process_backtrace();
-        }
+    pub fn print_current_process(&self, mut output: impl core::fmt::Write) -> Result<(), Error> {
         let process = self.current_process();
         writeln!(output, "{:x?} [{}]", process, process.name().unwrap_or("")).ok();
         crate::arch::process::Process::with_current(|arch_process| {
@@ -1030,6 +1052,7 @@ impl SystemServices {
                     }
                     ThreadState::WaitFutex { addr: _addr } => writeln!(output, "WaitFutex({_addr:08x})").ok(),
                 };
+                writeln!(output, "\tASLR:  {:08x}", process.aslr_slide).ok();
                 write!(output, "{:?}", arch_process.thread(tid)).ok();
             }
         });

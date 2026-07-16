@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { DropdownModel } from "@ui/widgets.slint";
+
 export struct HiddenApp {
     label: string,
     app-id: string,
@@ -9,6 +11,9 @@ export struct HiddenApp {
 export global LauncherCallbacks {
     callback app-clicked(length, length, string);
     callback scan-clicked(bool);
+    callback bitcoin-scrub-update(length, length);
+    callback bitcoin-scrub-end();
+    callback universal-qr-continue(string);
     pure callback app-id-to-title(string) -> string;
 }
 
@@ -24,6 +29,17 @@ export global State {
     in property <image> bitcoin-graph-image;
     in property <string> bitcoin-price: "";
     in property <string> bitcoin-price-change-percent: "";
+    in property <string> bitcoin-currency-code: "USD";
+    in property <bool> bitcoin-scrub-active: false;
+    in property <bool> bitcoin-scrub-enabled: false;
+    in property <string> bitcoin-scrub-price: "";
+    in property <length> bitcoin-scrub-marker-x: 0px;
+    in property <length> bitcoin-scrub-marker-y: 0px;
+    in property <string> bitcoin-point-date: "";
+    in property <string> bitcoin-point-time: "";
 
     in property <[HiddenApp]> hidden-apps: [];
+    in-out property <[DropdownModel]> dropdown-model;
 }
+
+export { DropdownModel }

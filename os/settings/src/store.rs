@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    io::{Seek, Write},
+    io::{BufReader, BufWriter},
     time::{Duration, Instant},
 };
 
@@ -91,21 +91,20 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned + Default,
 {
     pub fn new(fs: &FileSystem, path: String, location: fs::Location) -> Result<Self, fs::Error> {
-        let mut file =
-            fs.open_file(&path, location, fs::OpenFlags { read: true, write: true, create: true })?;
-        let settings: T = serde_json::from_reader(&mut file).unwrap_or_default();
+        let file = fs.open_file(&path, location, fs::OpenFlags { read: true, write: true, create: true })?;
+        let mut reader = BufReader::with_capacity(fs::FILE_BUFFER_SIZE, file);
+        let settings: T = serde_json::from_reader(&mut reader).unwrap_or_default();
         Ok(Self { path, location, settings, dirty: None })
     }
 }
 
 impl<T: serde::Serialize> SettingFile<T> {
     pub fn flush_settings(&mut self, fs: &FileSystem) -> Result<(), fs::Error> {
-        let mut file =
+        let file =
             fs.open_file(&self.path, self.location, fs::OpenFlags { read: true, write: true, create: true })?;
-        file.seek(std::io::SeekFrom::Start(0))?;
-        serde_json::to_writer(&mut file, &self.settings).map_err(|_| fs::Error::Io)?;
-        file.truncate()?;
-        file.flush()?;
+        let mut writer = BufWriter::with_capacity(fs::FILE_BUFFER_SIZE, file);
+        serde_json::to_writer(&mut writer, &self.settings).map_err(|_| fs::Error::Io)?;
+        writer.into_inner().map_err(|e| e.into_error())?.truncate()?;
         self.dirty = None;
         Ok(())
     }

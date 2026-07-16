@@ -71,9 +71,16 @@
           gnumake
           just
           openssl
+          protobuf
           pkg-config
           reuse
           unixtools.xxd
+
+          clang
+          gcc
+          llvmPackages.libclang
+          llvmPackages.libcxxClang
+          llvmPackages.llvm
         ]
         ++ (with customPackages; [
           cosign2
@@ -90,65 +97,53 @@
         ])
         ++ (
           with pkgs;
-            [minicom]
-            ++ lib.optionals stdenv.isLinux [
+            lib.optionals stdenv.isLinux [
               segger-jlink
             ]
         );
 
-      darwinPackages = let
-        xcodeenv = import (nixpkgs + "/pkgs/development/mobile/xcodeenv") {inherit (pkgs) callPackage;};
-      in
-        lib.optionals pkgs.stdenv.isDarwin [
-          (xcodeenv.composeXcodeWrapper {versions = ["16.0"];})
-        ];
-
-      linuxPackages = with pkgs;
-        lib.optionals stdenv.isLinux [
-          clang
-          gcc
-          llvmPackages.libclang
-          llvmPackages.libcxxClang
-          llvmPackages.llvm
-          udev
-        ];
-
-      linuxAttrs = lib.optionalAttrs pkgs.stdenv.isLinux {
+      clangAttrs = {
         # for bindgen in c++ libs
-        # macos already has xcode clang
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
+
+      darwinPkgs = with pkgs;
+        lib.optionals stdenv.isDarwin [
+          libiconv
+        ];
 
       mkShell = packages:
         pkgs.mkShellNoCC (
           {
             strictDeps = true;
-            packages = packages ++ linuxPackages ++ darwinPackages;
+            packages = packages;
             hardeningDisable = ["all"];
             buildInputs = with pkgs;
               [
                 pcsclite
+                libusb1
               ]
-              ++ lib.optionals stdenv.isLinux [
-                udev
-              ];
+              ++ darwinPkgs
+              ++ lib.optionals stdenv.isLinux [udev];
 
             LD_LIBRARY_PATH = with pkgs;
               lib.makeLibraryPath (
                 [
                   fontconfig
                   pcsclite
+                  libusb1
                   # slint sim
                   libxkbcommon
-                ]
-                ++ lib.optionals stdenv.isLinux [
-                  udev
                   llvmPackages.libclang.lib
+                ]
+                ++ darwinPkgs
+                ++ lib.optionals stdenv.isLinux [
                   # slint sim
                   xorg.libX11
                   xorg.libXcursor
                   xorg.libXi
                   wayland
+                  udev
                 ]
               );
 
@@ -164,7 +159,10 @@
               unset RANLIB
             '';
           }
-          // linuxAttrs
+          // clangAttrs
+          // lib.optionalAttrs pkgs.stdenv.isDarwin {
+            LIBRARY_PATH = lib.makeLibraryPath darwinPkgs;
+          }
         );
     in {
       packages = customPackages;

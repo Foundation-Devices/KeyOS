@@ -5,7 +5,7 @@ import { SecurityKeyCallbacks as CB } from "../../security-key-callbacks.slint";
 import { AuthenticatingState, EditCaller } from "../../security-key-types.slint";
 import { Palette, Importance, Size, Images, IconSize, Utils } from "@ui/theme.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
-import { HeadingMd, TextMd, BasePage, NavHeader, Shield, Pagination, WrappedIcon, Button, TimerCircularProgress, Icon, Dropdown, DropdownModel, DropdownOverlay, ErrorModal } from "@ui/widgets.slint";
+import { HeadingMd, TextMd, BasePage, NavHeader, Shield, Pagination, WrappedIcon, Button, TimerCircularProgress, Icon, Dropdown, DropdownModel, DropdownOverlay } from "@ui/widgets.slint";
 import { CardPageVersion, EditPageVersion } from "@ui/pages.slint";
 import { AuthenticateProps } from "./props.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
@@ -18,6 +18,12 @@ component WaitPage inherits VerticalLayout {
     property <duration> tick-duration: 1400ms;
     property <duration> animation-duration: 600ms;
 
+    property <bool> is-usb-on: false;
+
+    init => {
+        is-usb-on = CB.is-usb-on();
+    }
+
     Timer {
         interval: tick-duration;
         running: true;
@@ -28,7 +34,7 @@ component WaitPage inherits VerticalLayout {
 
     Pagination {
         total-pages: 2;
-        current-page: CB.is-usb-on() ? 1 : 0;
+        current-page: is-usb-on ? 1 : 0;
 
         VerticalLayout {
             width: root.width;
@@ -238,7 +244,7 @@ component RegistrationConfirmPage inherits Rectangle {
 
             key-picker := Dropdown {
                 placeholder: TR2.lookup(TrId.RegistrationUSBSelectKeyToRegister);
-                selected-index: CB.entries.length == 0 ? -1 : CB.get-dropdown-index(CB.dropdown-model, CB.selected-index);
+                selected-index: CB.selected-index < 0 ? -1 : CB.get-dropdown-index(CB.dropdown-model, CB.selected-index);
                 model: CB.dropdown-model;
             }
         }
@@ -249,6 +255,9 @@ component RegistrationConfirmPage inherits Rectangle {
             Button {
                 label: TR2.lookup(TrId.CommonButtonConfirm);
                 importance: primary;
+                // Disabled when no key is selected — can happen on first launch of a fresh
+                // device where the only dropdown entry is "Create a new key".
+                enabled: CB.selected-index >= 0;
 
                 clicked => {
                     CB.user-presence-check(true);
@@ -265,13 +274,21 @@ component RegistrationConfirmPage inherits Rectangle {
         model: key-picker.model;
         selected-index: key-picker.selected-index;
         scrollable: true;
-        scrollable-window-size: 3;
+        scrollable-window-size: 6;
         open-above: true;
 
         item-selected(index, value) => {
-            key-picker.selected-index = index;
-            key-picker.selected-value = value;
-            CB.select-key(value.to-float());
+            if (value == "") {
+                // Trailing "Create a new key" entry — sentinel value "" distinguishes it
+                // from real FIDO key entries (which carry stringified indices). Guarded
+                // before `select-key` since "".to-float() == 0 would select the key at
+                // FIDO index 0.
+                CB.create-new-key();
+            } else {
+                key-picker.selected-index = index;
+                key-picker.selected-value = value;
+                CB.select-key(value.to-float());
+            }
             key-picker.showing = false;
         }
 
@@ -420,19 +437,6 @@ export component AuthenticatePage inherits BasePage {
                     }
                 }
             }
-        }
-    }
-
-    if CB.show-no-keys-modal: ErrorModal {
-        icon: "alert";
-        icon-color: Palette.content-notice;
-        title: TR2.lookup(TrId.RegisteringModalRegistrationFailedHeader);
-        text: TR2.lookup(TrId.RegisteringModalRegistrationFailedContent);
-        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
-
-        confirm-clicked => {
-            CB.show-no-keys-modal = false;
-            back();
         }
     }
 }

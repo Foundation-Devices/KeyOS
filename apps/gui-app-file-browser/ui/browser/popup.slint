@@ -24,7 +24,7 @@ export component SelectModePopupMenu inherits PopupMenu {
 
     PopupMenuItem {
         label: TR2.lookup(TrId.MainMove);
-        icon: "arrow-right";
+        icon: "cut";
         enabled: has-any-selected;
         clicked => {
             BrowserGlobal.is-file-menu-open = false;
@@ -90,6 +90,7 @@ export component FilePopupMenu inherits PopupMenu {
         icon: BrowserGlobal.show-hidden-files ? "eye-off" : "eye";
         clicked => {
             BrowserGlobal.show-hidden-files = !BrowserGlobal.show-hidden-files;
+            BrowserGlobal.hidden-files-toggled(BrowserGlobal.show-hidden-files);
             BrowserGlobal.reload-files();
             BrowserGlobal.is-file-menu-open = false;
         }
@@ -98,7 +99,7 @@ export component FilePopupMenu inherits PopupMenu {
     PopupMenuItem {
         label: TR2.lookup(TrId.MenuSearchSort);
         icon: "search";
-        last: !BrowserGlobal.is-airlock-selected && !BrowserGlobal.show-quick-tip;
+        last: !BrowserGlobal.active-list.is-airlock && !BrowserGlobal.show-quick-tip;
         clicked => {
             BrowserGlobal.is-search-mode = !BrowserGlobal.is-search-mode;
             BrowserGlobal.is-file-menu-open = false;
@@ -112,7 +113,7 @@ export component FilePopupMenu inherits PopupMenu {
         }
     }
 
-    if BrowserGlobal.is-airlock-selected: PopupMenuItem {
+    if BrowserGlobal.active-list.is-airlock: PopupMenuItem {
         label: TR2.lookup(TrId.AirlockMenuAirlockReadOnly);
         icon: BrowserGlobal.airlock-mode == AirlockMode.ReadOnly ? "check" : "";
         divider: false;
@@ -120,7 +121,7 @@ export component FilePopupMenu inherits PopupMenu {
             BrowserGlobal.airlock-mode-changed(AirlockMode.ReadOnly);
         }
     }
-    if BrowserGlobal.is-airlock-selected: PopupMenuItem {
+    if BrowserGlobal.active-list.is-airlock: PopupMenuItem {
         label: TR2.lookup(TrId.AirlockMenuAirlockReadWrite);
         icon: BrowserGlobal.airlock-mode == AirlockMode.ReadWrite ? "check" : "";
         last: !BrowserGlobal.show-quick-tip;
@@ -161,6 +162,7 @@ export component FilePopupMenu inherits PopupMenu {
                 importance: Importance.tertiary;
                 clicked => {
                     BrowserGlobal.show-quick-tip = false;
+                    BrowserGlobal.quick-tip-dismissed();
                 }
             }
         }

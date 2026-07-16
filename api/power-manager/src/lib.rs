@@ -21,20 +21,63 @@ macro_rules! use_api {
     };
 }
 
+#[macro_export]
+macro_rules! use_ext_api {
+    () => {
+        mod power_manager_ext_permissions {
+            use power_manager::messages::*;
+            #[derive(Clone, Default, server::Permissions)]
+            #[server_name = "os/power-manager-ext"]
+            pub struct PowerManagerExtPermissions;
+        }
+        type PowerManagerExtApi =
+            power_manager::PowerManagerExtApi<power_manager_ext_permissions::PowerManagerExtPermissions>;
+    };
+}
+
 #[derive(Clone, Default)]
 pub struct PowerManagerApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
 }
 
 impl<P: CheckedPermissions> PowerManagerApi<P> {
-    pub fn reboot(&self) -> Result<(), xous::Error>
+    pub fn reboot(&self)
     where
         P: MessageAllowed<Reboot>,
     {
-        self.conn.try_send_blocking_scalar(Reboot)?;
-        Ok(())
+        self.conn.send_blocking_scalar(Reboot)
     }
 
+    pub fn shutdown(&self)
+    where
+        P: MessageAllowed<Shutdown>,
+    {
+        self.conn.send_blocking_scalar(Shutdown)
+    }
+
+    #[cfg(keyos)]
+    pub fn enable_peripheral(&self, peripheral: atsama5d27::pmc::PeripheralId) -> Result<(), xous::Error>
+    where
+        P: MessageAllowed<SetPeripheralEnabled>,
+    {
+        self.conn.try_send_blocking_scalar(SetPeripheralEnabled { peripheral, enabled: true })
+    }
+
+    #[cfg(keyos)]
+    pub fn disable_peripheral(&self, peripheral: atsama5d27::pmc::PeripheralId) -> Result<(), xous::Error>
+    where
+        P: MessageAllowed<SetPeripheralEnabled>,
+    {
+        self.conn.try_send_blocking_scalar(SetPeripheralEnabled { peripheral, enabled: false })
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct PowerManagerExtApi<P: CheckedPermissions> {
+    conn: CheckedConn<P>,
+}
+
+impl<P: CheckedPermissions> PowerManagerExtApi<P> {
     pub fn status(&self) -> Result<Status, xous::Error>
     where
         P: MessageAllowed<GetStatus>,
@@ -46,7 +89,7 @@ impl<P: CheckedPermissions> PowerManagerApi<P> {
     where
         P: MessageAllowed<GetExtendedStatus>,
     {
-        self.conn.send_archive(GetExtendedStatus)
+        self.conn.send_blocking_archive(GetExtendedStatus)
     }
 
     pub fn set_usb_boost(&self, enabled: bool) -> Result<SetUsbBoostResponse, xous::Error>
@@ -66,41 +109,12 @@ impl<P: CheckedPermissions> PowerManagerApi<P> {
     }
 
     #[cfg(keyos)]
-    pub fn enable_peripheral(&self, peripheral: atsama5d27::pmc::PeripheralId) -> Result<(), xous::Error>
-    where
-        P: MessageAllowed<SetPeripheralEnabled>,
-    {
-        self.conn.try_send_blocking_scalar(SetPeripheralEnabled { peripheral, enabled: true })
-    }
-
-    #[cfg(keyos)]
-    pub fn disable_peripheral(&self, peripheral: atsama5d27::pmc::PeripheralId) -> Result<(), xous::Error>
-    where
-        P: MessageAllowed<SetPeripheralEnabled>,
-    {
-        self.conn.try_send_blocking_scalar(SetPeripheralEnabled { peripheral, enabled: false })
-    }
-
-    #[cfg(keyos)]
     pub fn set_otg_priority(&self, priority: OtgPriority) -> Result<(), xous::Error>
     where
         P: MessageAllowed<SetOtgPriority>,
     {
         self.conn.try_send_scalar(SetOtgPriority(priority))?;
         Ok(())
-    }
-
-    /// Temporarily set the USB OTG mode to allow host mode for the duration of the closure.
-    #[cfg(keyos)]
-    pub fn with_otg_allowed<F, R>(&self, f: F) -> Result<R, xous::Error>
-    where
-        F: FnOnce() -> R,
-        P: MessageAllowed<SetOtgPriority>,
-    {
-        self.set_otg_priority(OtgPriority::Automatic)?;
-        let result = f();
-        self.set_otg_priority(OtgPriority::Never)?;
-        Ok(result)
     }
 
     #[cfg(keyos)]

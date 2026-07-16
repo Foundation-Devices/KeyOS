@@ -7,45 +7,49 @@ use fs::messages::SetLen;
 
 use crate::{Error, Server};
 
-impl server::ArchiveHandler<SetLen> for Server {
+impl server::BlockingArchiveHandler<SetLen> for Server {
     fn handle(
         &mut self,
         msg: SetLen,
         sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetLen as server::Archive>::Response {
-        let open = self
-            .files
-            .get_mut(&sender)
-            .ok_or(Error::FileNotOpen)?
-            .open
-            .get_mut(&msg.handle)
-            .ok_or(Error::FileNotOpen)?;
+    ) -> <SetLen as server::BlockingArchive>::Response {
+        let mount = self.mount_mut(msg.handle.location()?).ok_or(Error::NoMedia)?;
+        let open = mount.file_mut(sender, msg.handle).ok_or(Error::FileNotOpen)?;
         if !open.flags.write {
             return Err(Error::InvalidOperation);
         }
 
-        let current_pos = open.file.seek(std::io::SeekFrom::Current(0))?;
+        let current_size =
+            open.file.entry().and_then(|e| e.size()).ok_or(Error::InvalidOperation)? as u64;
+        let file_id = open.file_id();
 
-        let current_size = open.file.seek(std::io::SeekFrom::End(0))?;
+        if msg.len < current_size && mount.has_other_handle(file_id, sender, msg.handle) {
+            return Err(Error::FileInUse);
+        }
+
+        // has_other_handle reborrowed mount, ending `open`'s borrow; re-borrow.
+        let file = &mut mount.file_mut(sender, msg.handle).ok_or(Error::FileNotOpen)?.file;
+        let current_pos = file.stream_position()?;
 
         if msg.len > current_size {
             // extend the file
+            file.seek(std::io::SeekFrom::End(0))?;
             let mut remaining = (msg.len - current_size) as usize;
             let zeros = [0u8; ZERO_BUF_SIZE];
             while remaining > 0 {
                 let write_size = std::cmp::min(remaining, ZERO_BUF_SIZE);
-                open.file.write_all(&zeros[..write_size])?;
+                file.write_all(&zeros[..write_size])?;
                 remaining -= write_size;
             }
         } else if msg.len < current_size {
             // truncate the file
-            open.file.seek(std::io::SeekFrom::Start(msg.len))?;
-            open.file.truncate()?;
+            file.seek(std::io::SeekFrom::Start(msg.len))?;
+            file.truncate()?;
         }
 
         // restore original position
-        open.file.seek(std::io::SeekFrom::Start(current_pos))?;
+        file.seek(std::io::SeekFrom::Start(current_pos))?;
         Ok(())
     }
 }

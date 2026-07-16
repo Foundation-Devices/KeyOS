@@ -3,7 +3,9 @@
 
 use std::time::Duration;
 
-use crate::{error::NfcError, NfcImpl, NfcServer};
+use nfc::error::NfcError;
+
+use crate::{NfcImpl, NfcServer};
 
 pub struct Implementation;
 

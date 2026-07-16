@@ -1,3 +1,4 @@
+manifestVersion = "0"
 [servers."os/rgb-server"]
 SetTo = { id = 1, type = "scalar" }
 SetAllTo = { id = 0, type = "scalar" }

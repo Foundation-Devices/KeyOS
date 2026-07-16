@@ -86,7 +86,7 @@ export component ScanConnectPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonContinue);
                     clicked => {
                         ExportAccount.state = ExportAccountState.Idle;
-                        CreateAccount.import-multisig();
+                        CreateAccount.import-multisig(true);
                     }
                 }
 
@@ -94,7 +94,11 @@ export component ScanConnectPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonVerifyAddress);
                     clicked => {
                         ExportAccount.state = ExportAccountState.Idle;
-                        VerifyAddress.verify-address({ account-id: acct-props.account-id, show-skip-button: true, show-view-all: false });
+                        VerifyAddress.verify-address({
+                            account-id: acct-props.account-id,
+                            show-skip-button: true,
+                            show-view-all: false,
+                        });
                     }
                 }
             }
@@ -137,6 +141,27 @@ export component ScanConnectPage inherits BasePage {
 
         confirm-clicked => {
             ExportAccount.state = ExportAccountState.Idle;
+        }
+    }
+
+    if ExportAccount.skip-multisig-import: ConfirmationModal {
+        icon: "info";
+        icon-color: Palette.content-brand;
+        title: TR2.lookup(TrId.ImportConfigMenuModalSkipTitle);
+        text: TR2.lookup(TrId.ImportConfigMenuModalSkipContent);
+        cancel-button-label: TR2.lookup(TrId.ImportConfigMenuModalSkipSkipImport);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonBack);
+
+        cancel-clicked => {
+            ExportAccount.skip-multisig-import = false;
+            ExportAccount.state = ExportAccountState.Idle;
+            Navigate.return-home();
+        }
+
+        confirm-clicked => {
+            ExportAccount.skip-multisig-import = false;
+            ExportAccount.state = ExportAccountState.Idle;
+            CreateAccount.import-multisig(true);
         }
     }
 }

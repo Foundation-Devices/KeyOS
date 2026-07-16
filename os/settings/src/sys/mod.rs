@@ -90,7 +90,12 @@ impl LoadDefault for settings::global::AirlockMode {
 }
 
 impl LoadDefault for settings::global::TouchOffset {
-    fn load_default() -> Self { Self(-30) } // See SFT-5550
+    #[cfg(keyos)]
+    fn load_default() -> Self { Self(-30) }
+
+    // See SFT-5550
+    #[cfg(not(keyos))]
+    fn load_default() -> Self { Self(0) } // simulator is touch perfect
 }
 
 impl LoadDefault for settings::global::MagicBackupEnabled {

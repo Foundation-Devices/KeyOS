@@ -39,31 +39,11 @@ enum ClaimReleaseMove {
 }
 
 #[cfg(keyos)]
-#[repr(C)]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MemoryRangeExtra {
-    mem_start: u32,
-    mem_size: u32,
-    mem_tag: u32,
-    _padding: u32,
-}
-
-#[cfg(keyos)]
-impl core::fmt::Display for MemoryRangeExtra {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{}{}{}{} - ({:08x}) {:08x} - {:08x} {} bytes",
-            ((self.mem_tag) & 0xff) as u8 as char,
-            ((self.mem_tag >> 8) & 0xff) as u8 as char,
-            ((self.mem_tag >> 16) & 0xff) as u8 as char,
-            ((self.mem_tag >> 24) & 0xff) as u8 as char,
-            self.mem_tag,
-            self.mem_start,
-            self.mem_start + self.mem_size,
-            self.mem_size
-        )
-    }
+fn additional_regions() -> impl Iterator<Item = (&'static str, &'static core::ops::Range<usize>)> {
+    utralib::map::MEMORY_REGIONS
+        .iter()
+        .filter(|(name, _)| *name != "DDR_RAM" && *name != "ENCRYPTED_RAM")
+        .map(|(name, range)| (*name, range))
 }
 
 #[cfg(not(keyos))]
@@ -73,7 +53,6 @@ pub struct MemoryManager {}
 #[cfg(keyos)]
 pub struct MemoryManager {
     allocations: &'static mut [Option<PID>],
-    extra_regions: [MemoryRangeExtra; 11],
     /// Bitmap of pages that have been freed but not yet zeroed
     free_pages_dirty: BitArray<[u32; RAM_PAGES / 32]>,
     /// Probable index of the next dirty page, if there is one.
@@ -112,7 +91,6 @@ impl MemoryManager {
     const fn default_hack() -> Self {
         MemoryManager {
             allocations: &mut [],
-            extra_regions: [MemoryRangeExtra { mem_start: 0, mem_size: 0, mem_tag: 0, _padding: 0 }; 11],
             free_pages_dirty: BitArray::ZERO,
             next_dirty_page_hint: None,
             free_pages_zeroed: BitArray::ZERO,
@@ -149,23 +127,11 @@ impl MemoryManager {
     }
 
     #[cfg(keyos)]
-    pub fn init_from_memory(
-        &mut self,
-        base: *mut u32,
-        args: &crate::args::KernelArguments,
-    ) -> Result<(), Error> {
+    pub fn init_from_memory(&mut self, base: *mut u32) {
         use core::slice;
-        for tag in args.iter().filter(|tag| tag.name == u32::from_le_bytes(*b"MREx")) {
-            let num_regions = tag.data.len() * 4 / core::mem::size_of::<MemoryRangeExtra>();
-            assert!(num_regions < self.extra_regions.len(), "Too many extra regions");
-            self.extra_regions[..num_regions].copy_from_slice(unsafe {
-                slice::from_raw_parts(tag.data.as_ptr() as *const MemoryRangeExtra, num_regions)
-            });
-        }
-
         let mut mem_pages = RAM_PAGES;
-        for range in &self.extra_regions {
-            mem_pages += range.mem_size as usize / PAGE_SIZE;
+        for (_, range) in additional_regions() {
+            mem_pages += (range.end - range.start) / PAGE_SIZE;
         }
         self.allocations = unsafe { slice::from_raw_parts_mut(base as *mut Option<PID>, mem_pages) };
         for (offset, allocation) in self.allocations[..RAM_PAGES].iter().enumerate() {
@@ -174,7 +140,6 @@ impl MemoryManager {
                 self.num_free_pages += 1;
             }
         }
-        Ok(())
     }
 
     /// Print the number of RAM bytes used by the specified process.
@@ -245,13 +210,19 @@ impl MemoryManager {
 
         // Go through additional regions looking for this address, and claim it
         // if it's not in use.
-        for region in &self.extra_regions {
+        for (name, range) in additional_regions() {
             let mut previous = None;
-            if region.mem_size == 0 {
+            let region_size = range.end - range.start;
+            if region_size == 0 {
                 continue;
             }
-            writeln!(output, "    Region {}:", region).ok();
-            for o in 0..(region.mem_size as usize) / PAGE_SIZE {
+            writeln!(
+                output,
+                "    Region {} {:08x} - {:08x} {} bytes:",
+                name, range.start, range.end, region_size
+            )
+            .ok();
+            for o in 0..region_size / PAGE_SIZE {
                 if self.allocations[offset + o] == previous {
                     continue;
                 }
@@ -262,19 +233,18 @@ impl MemoryManager {
                         writeln!(
                             output,
                             "        {:08x} => {} `{}`",
-                            (region.mem_start as usize) + o * PAGE_SIZE,
+                            range.start + o * PAGE_SIZE,
                             _allocation.get(),
                             _process_name,
                         )
                         .ok()
                     });
                 } else {
-                    writeln!(output, "        {:08x} => <free>", (region.mem_start as usize) + o * PAGE_SIZE)
-                        .ok();
+                    writeln!(output, "        {:08x} => <free>", range.start + o * PAGE_SIZE).ok();
                 }
                 previous = self.allocations[offset + o];
             }
-            offset += region.mem_size as usize / PAGE_SIZE;
+            offset += region_size / PAGE_SIZE;
         }
     }
 
@@ -346,6 +316,12 @@ impl MemoryManager {
         num_pages: usize,
         pid: PID,
     ) -> Result<(usize, bool), Error> {
+        if num_pages == 0 {
+            return Err(Error::InvalidArguments);
+        }
+        if num_pages > RAM_PAGES {
+            return Err(Error::OutOfMemory);
+        }
         let end = RAM_PAGES - num_pages + 1;
         // Note that the bitmap is 4096 bytes for 128MB of RAM, and `iter_ones` scans the bitmap
         // 32 bits at a time, so it's a relatively fast linear search
@@ -428,6 +404,10 @@ impl MemoryManager {
             return Ok(virt_ptr);
         }
 
+        if size > MMAP_AREA_VIRT_END - MMAP_AREA_VIRT {
+            return Err(Error::OutOfMemory);
+        }
+
         SystemServices::with_mut(|ss| {
             let process = &mut ss.current_process_mut();
 
@@ -440,7 +420,7 @@ impl MemoryManager {
                     .step_by(PAGE_SIZE)
                     .all(|page| mapping.address_available(page as *const usize));
                 if all_free {
-                    process.allocation_hint = potential_start;
+                    process.allocation_hint = (potential_start + size).min(MMAP_AREA_VIRT_END);
                     return Ok(potential_start as *mut usize);
                 }
             }
@@ -493,8 +473,11 @@ impl MemoryManager {
                 }
             }
         } else if phys != 0 {
+            // A wrapping range would leave the claim loop empty, mapping pages below
+            // without an ownership check, so reject it.
+            let phys_end = phys.checked_add(size).ok_or(Error::BadAddress)?;
             // 1. Attempt to claim all physical pages in the range
-            for claim_phys in (phys..(phys + size)).step_by(PAGE_SIZE) {
+            for claim_phys in (phys..phys_end).step_by(PAGE_SIZE) {
                 if let Err(err) = self.claim_page(claim_phys, current_mapping.get_pid()) {
                     // If we were unable to claim one or more pages, release everything and return
                     for rel_phys in (phys..claim_phys).step_by(PAGE_SIZE) {
@@ -627,7 +610,10 @@ impl MemoryManager {
         {
             let mapping = crate::arch::mem::MemoryMapping::current();
             let start = (range.as_ptr() as usize) & !(PAGE_SIZE - 1);
-            let end = ((range.as_ptr() as usize) + range.len()).next_multiple_of(PAGE_SIZE);
+            let end = (range.as_ptr() as usize)
+                .checked_add(range.len())
+                .and_then(|e| e.checked_next_multiple_of(PAGE_SIZE))
+                .ok_or(Error::BadAddress)?;
             for addr in (start..end).step_by(PAGE_SIZE) {
                 if addr > keyos::USER_AREA_END || !mapping.address_user_accessible(addr as *const usize) {
                     return Err(Error::BadAddress);
@@ -648,13 +634,15 @@ impl MemoryManager {
         dest_mapping: &mut MemoryMapping,
         dest_addr: *mut usize,
     ) -> Result<(), Error> {
-        let phys_addr = src_mapping.virt_to_phys(src_addr)?;
-        src_mapping.move_page(self, src_addr, dest_mapping, dest_addr)?;
-        self.claim_release_move(
-            phys_addr,
-            dest_mapping.get_pid(),
-            ClaimReleaseMove::Move(src_mapping.get_pid()),
-        )
+        let phys_addr = src_mapping.move_page(self, src_addr, dest_mapping, dest_addr)?;
+        if phys_addr != 0 {
+            self.claim_release_move(
+                phys_addr,
+                dest_mapping.get_pid(),
+                ClaimReleaseMove::Move(src_mapping.get_pid()),
+            )?
+        };
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -684,7 +672,17 @@ impl MemoryManager {
         // If this page is to be writable, detach it from this process.
         // Otherwise, mark it as read-only to prevent a process from modifying
         // the page while it's borrowed.
-        src_mapping.lend_page(self, src_addr, dest_mapping, dest_addr, mutable)
+        let phys_addr = src_mapping.lend_page(self, src_addr, dest_mapping, dest_addr, mutable)?;
+        // Physical ownership follows the page to the borrower, so it survives the
+        // lender terminating mid-borrow, like a move.
+        if phys_addr != 0 {
+            self.claim_release_move(
+                phys_addr,
+                dest_mapping.get_pid(),
+                ClaimReleaseMove::Move(src_mapping.get_pid()),
+            )?
+        };
+        Ok(())
     }
 
     /// Return the range from `src_mapping` back to `dest_mapping`
@@ -696,10 +694,16 @@ impl MemoryManager {
         dest_mapping: &mut MemoryMapping,
         dest_addr: *mut usize,
     ) -> Result<(), Error> {
-        // If this page is to be writable, detach it from this process.
-        // Otherwise, mark it as read-only to prevent a process from modifying
-        // the page while it's borrowed.
-        src_mapping.return_page(src_addr, dest_mapping, dest_addr)
+        let phys_addr = src_mapping.return_page(src_addr, dest_mapping, dest_addr)?;
+        // Hand physical ownership back to the process the page is returned to.
+        if phys_addr != 0 {
+            self.claim_release_move(
+                phys_addr,
+                dest_mapping.get_pid(),
+                ClaimReleaseMove::Move(src_mapping.get_pid()),
+            )?
+        };
+        Ok(())
     }
 
     /// Allocate a backing page for a page that was mapped on-demand beforehand.
@@ -821,12 +825,12 @@ impl MemoryManager {
 
         offset += RAM_PAGES;
         // Go through additional regions looking for this address
-        for region in &self.extra_regions {
-            if addr >= (region.mem_start as usize) && addr < (region.mem_start + region.mem_size) as usize {
-                offset += (addr - (region.mem_start as usize)) / PAGE_SIZE;
+        for (_, range) in additional_regions() {
+            if range.contains(&addr) {
+                offset += (addr - range.start) / PAGE_SIZE;
                 return Some(offset);
             }
-            offset += region.mem_size as usize / PAGE_SIZE;
+            offset += (range.end - range.start) / PAGE_SIZE;
         }
         None
     }
@@ -895,6 +899,6 @@ impl MemoryManager {
     /// Adjust the flags on the given memory range. This allows for stripping flags from a memory
     /// range but does not allow adding flags. The memory range must exist, and the flags must be valid.
     pub fn update_memory_flags(&mut self, _range: MemoryRange, _flags: MemoryFlags) -> Result<(), Error> {
-        todo!()
+        Err(Error::UnhandledSyscall)
     }
 }

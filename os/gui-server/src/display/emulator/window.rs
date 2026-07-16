@@ -24,8 +24,9 @@ use {
     winit::{
         application::ApplicationHandler,
         dpi::{LogicalPosition, PhysicalPosition, PhysicalSize},
-        event::{ElementState, MouseButton, WindowEvent},
+        event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         event_loop::EventLoop,
+        keyboard::{Key as WinitKey, NamedKey},
         window::{Window, WindowButtons},
     },
 };
@@ -39,6 +40,7 @@ impl<T> server::MessageAllowed<T> for AllSimulatorPermissions {}
 
 struct EmulatorApp {
     simulator_api: gui_server_api::simulator::SimulatorApi<AllSimulatorPermissions>,
+    capture_api: gui_server_api::GuiApiLight<AllSimulatorPermissions>,
     window: Option<Arc<Window>>,
     window_size: PhysicalSize<u32>,
     scale_factor: f64,
@@ -185,7 +187,7 @@ impl ApplicationHandler for EmulatorApp {
                     }
 
                     let touch = Touch { kind: TouchKind::Drag, id: 0, x: x as usize, y: y as usize };
-                    self.simulator_api.simulate_touch(touch).expect("send touch");
+                    self.capture_api.inject_touch(touch).expect("send touch");
                 }
             }
 
@@ -249,12 +251,58 @@ impl ApplicationHandler for EmulatorApp {
                     let kind = if self.last_pressed { TouchKind::Press } else { TouchKind::Release };
                     let touch = Touch { kind, id: 0, x: x as usize, y: y as usize };
 
-                    self.simulator_api.simulate_touch(touch).expect("send touch");
+                    self.capture_api.inject_touch(touch).expect("send touch");
+                }
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                if is_within_area(
+                    self.last_cursor_pos,
+                    TOUCH_AREA_X,
+                    TOUCH_AREA_Y,
+                    TOUCH_AREA_W,
+                    TOUCH_AREA_H,
+                ) {
+                    // Both deltas are normalised to logical (device-space) units so they match
+                    // the x/y position coordinates (which come from last_cursor_pos, already
+                    // converted to logical via to_logical(scale_factor)).
+                    let (delta_x, delta_y) = match delta {
+                        // LineDelta is already scale-independent (line counts); multiply by a
+                        // fixed pixel-per-line constant to get logical pixels.
+                        MouseScrollDelta::LineDelta(x, y) => (x * 40.0, y * 40.0),
+                        // PixelDelta is in physical pixels — divide by scale_factor to get
+                        // logical pixels matching the rest of the coordinate system.
+                        MouseScrollDelta::PixelDelta(pos) => {
+                            let sf = self.scale_factor as f32;
+                            (pos.x as f32 / sf, pos.y as f32 / sf)
+                        }
+                    };
+                    let x = (self.last_cursor_pos.x as u32).saturating_sub(TOUCH_AREA_X as u32);
+                    let y = (self.last_cursor_pos.y as u32).saturating_sub(TOUCH_AREA_Y as u32);
+                    self.simulator_api.simulate_scroll(x, y, delta_x, delta_y).expect("simulate scroll");
                 }
             }
 
             WindowEvent::CloseRequested => {
                 gui_server_api::GuiApiLight::<AllSimulatorPermissions>::default().shutdown().ok();
+            }
+
+            WindowEvent::KeyboardInput { event, .. } => {
+                let is_pressed = event.state == ElementState::Pressed;
+                let key = match &event.logical_key {
+                    WinitKey::Named(NamedKey::Backspace) => Some(gui_server_api::Key::Backspace),
+                    WinitKey::Named(NamedKey::Delete) => Some(gui_server_api::Key::Delete),
+                    WinitKey::Named(NamedKey::ArrowLeft) => Some(gui_server_api::Key::CursorLeft),
+                    WinitKey::Named(NamedKey::ArrowRight) => Some(gui_server_api::Key::CursorRight),
+                    WinitKey::Named(NamedKey::Enter) => Some(gui_server_api::Key::Enter),
+                    WinitKey::Named(NamedKey::Tab) => Some(gui_server_api::Key::Tab),
+                    WinitKey::Named(NamedKey::Space) => Some(gui_server_api::Key::Char(' ' as usize)),
+                    WinitKey::Character(s) => s.chars().next().map(|c| gui_server_api::Key::Char(c as usize)),
+                    _ => None,
+                };
+                if let Some(key) = key {
+                    self.simulator_api.simulate_key(key, is_pressed).expect("simulate key");
+                }
             }
 
             _ => (),
@@ -267,6 +315,7 @@ pub(crate) fn run_window() {
 
     let mut app = EmulatorApp {
         simulator_api: Default::default(),
+        capture_api: Default::default(),
         window: None,
         window_size: PhysicalSize::new(DEVICE_WIDTH, DEVICE_HEIGHT),
         scale_factor: 1.0,
@@ -292,10 +341,13 @@ fn save_window_pos(pos: PhysicalPosition<i32>) {
 }
 
 fn read_window_pos() -> Option<PhysicalPosition<i32>> {
-    std::fs::read_to_string(".last_pos").ok().map(|s| {
+    std::fs::read_to_string(".last_pos").ok().and_then(|s| {
         let lines = s.lines().collect::<Vec<_>>();
-        let x = lines[0].parse::<i32>().expect("read x coord");
-        let y = lines[1].parse::<i32>().expect("read y coord");
-        PhysicalPosition::new(x, y)
+        if lines.len() < 2 {
+            return None;
+        }
+        let x = lines[0].parse::<i32>().ok()?;
+        let y = lines[1].parse::<i32>().ok()?;
+        Some(PhysicalPosition::new(x, y))
     })
 }

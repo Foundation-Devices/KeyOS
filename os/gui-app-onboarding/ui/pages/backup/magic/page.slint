@@ -5,7 +5,7 @@ import { MagicBackupProps } from "props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
 import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
 import { OnboardingShieldPage, ShieldContent, ShieldSection, OverlayImage } from "../../../widgets/shield-page.slint";
-import { Size } from "@ui/theme.slint";
+import { Size, Palette } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import { NavHeader, AppHeader, HeadingMd, TextMd, ButtonSection, Button } from "@ui/widgets.slint";
 
@@ -54,6 +54,7 @@ export component MagicBackupPage inherits OnboardingShieldPage {
 
             TextMd {
                 text: first-page ? TR2.lookup(TrId.BackupMagicMain1Subheader) : TR2.lookup(TrId.KeycardBackupMagicCreateContent);
+                color: Palette.content-secondary;
                 horizontal-alignment: center;
             }
         }

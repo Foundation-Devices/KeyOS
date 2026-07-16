@@ -1,7 +1,8 @@
+manifestVersion = "0"
 appId = "0x6970632d746573740000000000000000"
 
 [appName]
 en = "IPC test"
 
 [servers."test/buffer-server"]
-StructWithVec = { id = 0, type = "archive" }
+StructWithVec = { id = 0, type = "blockingArchive" }

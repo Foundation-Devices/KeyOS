@@ -3,7 +3,6 @@
 
 use crypto::{error::CryptoError, SHA256_HASH_SIZE};
 use security::{PinError, Seed, MIN_PIN_LENGTH};
-use xous::DropDeallocate;
 
 #[cfg(keyos)]
 mod atsama5d2;
@@ -40,38 +39,16 @@ pub(crate) fn sha256_batch(
     crypto: &CryptoApi,
     batch: &[&[u8]],
 ) -> Result<[u8; SHA256_HASH_SIZE], CryptoError> {
-    let input_size: usize = batch.iter().map(|b| b.len()).sum();
-    let mut buf = DropDeallocate::new(
-        xous::map_memory(
-            None,
-            None,
-            input_size.next_multiple_of(0x1000),
-            xous::MemoryFlags::W | xous::MemoryFlags::POPULATE,
-        )
-        .unwrap(),
-    );
-
-    let mut start = 0;
+    let mut ctx = crypto.sha256_init();
     for slice in batch {
-        let end = start + slice.len();
-        buf.as_slice_mut()[start..end].copy_from_slice(slice);
-        start = end;
+        ctx.update(slice)?;
     }
-
-    crypto.sha256(*buf, 0, input_size)
+    ctx.finalize()?.try_into().map_err(|_| CryptoError::InvalidDataLength)
 }
 
 #[allow(dead_code)]
 pub(crate) fn sha256(crypto: &CryptoApi, input: &[u8]) -> Result<[u8; SHA256_HASH_SIZE], CryptoError> {
-    let mut buf = DropDeallocate::new(xous::map_memory(
-        None,
-        None,
-        input.len().next_multiple_of(0x1000),
-        xous::MemoryFlags::W | xous::MemoryFlags::POPULATE,
-    )?);
-    buf.as_slice_mut()[..input.len()].copy_from_slice(input);
-
-    crypto.sha256(*buf, 0, input.len())
+    crypto.sha256(input)
 }
 
 fn main() {

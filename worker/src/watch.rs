@@ -1,17 +1,14 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::sync::Arc;
+use futures_lite::{future, Stream, StreamExt};
 
-use futures_lite::{Stream, StreamExt};
-
-use crate::{TaskHandle, WorkerHandle};
+use crate::WorkerHandle;
 
 /// a clonable handle to a stream that retains the latest value
 #[derive(Clone)]
 pub struct StreamWatch<T> {
-    rx: async_watch::Receiver<T>,
-    _handle: Arc<TaskHandle<()>>,
+    rx: crate::async_watch::Receiver<T>,
 }
 
 impl<T> StreamWatch<T>
@@ -23,14 +20,32 @@ where
         S: Stream + Send + 'static,
         S::Item: Into<T> + Send + 'static,
     {
-        let (tx, rx) = async_watch::channel(initial);
-        let handle = worker.spawn(async move {
-            let mut sub = std::pin::pin!(sub);
-            while let Some(event) = sub.next().await {
-                let _ = tx.send(event.into());
-            }
-        });
-        Self { rx, _handle: Arc::new(handle) }
+        let (tx, rx) = crate::async_watch::channel(initial);
+        worker
+            .spawn(async move {
+                let mut sub = std::pin::pin!(sub);
+                loop {
+                    let next = future::or(
+                        async {
+                            tx.closed().await;
+                            None
+                        },
+                        sub.next(),
+                    )
+                    .await;
+
+                    match next {
+                        Some(event) => {
+                            if tx.send(event.into()).is_err() {
+                                return;
+                            }
+                        }
+                        None => return,
+                    }
+                }
+            })
+            .detach();
+        Self { rx }
     }
 
     /// wait until a predicate is satisfied.
@@ -54,15 +69,13 @@ where
 
     /// borrow the current value
     #[inline]
-    pub fn borrow(&self) -> async_watch::Ref<'_, T> { self.rx.borrow() }
+    pub fn borrow(&self) -> crate::async_watch::Ref<'_, T> { self.rx.borrow() }
 
     /// wait for the next event
     #[inline]
     pub async fn next(&mut self) -> Option<T> { self.rx.recv().await.ok() }
 
     pub fn into_stream(self) -> impl Stream<Item = T> {
-        futures_lite::stream::unfold((self.rx, self._handle), |(mut rx, handle)| async move {
-            rx.recv().await.ok().map(|v| (v, (rx, handle)))
-        })
+        futures_lite::stream::unfold(self.rx, |mut rx| async move { rx.recv().await.ok().map(|v| (v, rx)) })
     }
 }

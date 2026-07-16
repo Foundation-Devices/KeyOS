@@ -185,176 +185,100 @@ where
     handle::global::handle().timeout(future, duration)
 }
 
-/// Subscribe to scalar events from a server.
-///
-/// Returns a [`Subscription`] that implements [`futures_lite::Stream`] and can be used to receive events
-///
-/// # Example
-///
-/// ```rust no_run
-/// 
-/// #  struct Server;
-///
-/// #  impl server::ServerMessages for Server {
-/// #      const NAME: &str = "";
-/// #      fn messages() -> &'static [server::MessageDef<Self>] { &[] }
-/// #  }
-/// #  impl server::Server for Server { }
-///
-/// # #[derive(Debug, Default, Clone)]
-/// # struct Permissions;
-///
-/// # impl server::CheckedPermissions for Permissions {
-/// #      const NAME: &str = "";
-/// # }
-/// # impl server::MessageAllowed<NumSub> for Permissions {};
-///
-/// #  #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-/// #  struct NumSub;
-/// #  struct NumEvent(u32);
-///
-/// #  server::wrapped_scalar!(NumEvent);
-///
-/// #  impl server::MessageId for NumSub {
-/// #      const ID: xous::MessageId = 0;
-/// #      const SERVER: &str = "Server";
-/// #  }
-///
-/// #  impl server::ScalarSubscription for NumSub {
-/// #      type Event = NumEvent;
-/// #      type Error = server::Infallible;
-/// #  }
-///
-/// #  impl server::ScalarEventSubscriptionHandler<NumSub> for Server {
-/// #      fn handle(
-/// #          &mut self,
-/// #          _msg: NumSub,
-/// #          _subscriber: server::ScalarEventSubscriber<NumEvent>,
-/// #          _context: &mut server::ServerContext<Self>,
-/// #      ) -> Result<(), server::Infallible> {
-/// #          todo!()
-/// #      }
-/// #  }
-///
-/// let mut subscription = slint_keyos_platform::subscribe_scalar::<Permissions, _>(NumSub);
-/// let task = slint_keyos_platform::spawn(async move {
-///     while let Some(event) = subscription.next().await {
-///         // Handle event
-///     }
-/// });
-/// task.detach();
-/// ```
+/// See [`WorkerHandle::subscribe_scalar`].
 pub fn subscribe_scalar<P, M>(sub: M) -> Subscription<M::Event>
 where
     M: server::ScalarSubscription<Error = server::Infallible> + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.subscribe_scalar::<P, M>(sub)
+    handle::global::handle().worker().subscribe_scalar::<P, M>(sub)
 }
 
-/// Subscribe to archive events from a server.
-///
-/// Returns a [`Subscription`] that implements [`futures_lite::Stream`] and can be used to receive events
-///
-/// # Example
-///
-/// ```rust no_run
-/// 
-/// #  struct Server;
-///
-/// #  impl server::ServerMessages for Server {
-/// #      const NAME: &str = "";
-/// #      fn messages() -> &'static [server::MessageDef<Self>] { &[] }
-/// #  }
-/// #  impl server::Server for Server { }
-///
-/// # #[derive(Debug, Default, Clone)]
-/// # struct Permissions;
-///
-/// # impl server::CheckedPermissions for Permissions {
-/// #      const NAME: &str = "";
-/// # }
-/// # impl server::MessageAllowed<StringSub> for Permissions {};
-///
-/// #  #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-/// #  struct StringSub;
-/// #  #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-/// #  struct StringEvent(String);
-///
-/// #  impl server::MessageId for StringSub {
-/// #      const ID: xous::MessageId = 0;
-/// #      const SERVER: &str = "Server";
-/// #  }
-/// #  impl server::ArchiveSubscription for StringSub {
-/// #      type Event = StringEvent;
-/// #      type Error = server::Infallible;
-/// #  }
-///
-/// #  impl server::ArchiveEventSubscriptionHandler<StringSub> for Server {
-/// #      fn handle(
-/// #          &mut self,
-/// #          _msg: StringSub,
-/// #          _subscriber: server::ArchiveEventSubscriber<StringEvent>,
-/// #          _context: &mut server::ServerContext<Self>,
-/// #      ) -> Result<(), server::Infallible> {
-/// #          todo!()
-/// #      }
-/// #  }
-///
-/// let mut subscription = slint_keyos_platform::subscribe_archive::<Permissions, _>(StringSub);
-/// let task = slint_keyos_platform::spawn(async move {
-///     while let Some(event) = subscription.next().await {
-///         // Handle event
-///     }
-/// });
-/// task.detach();
-/// ```
+/// See [`WorkerHandle::try_subscribe_scalar`].
+pub fn try_subscribe_scalar<P, M>(sub: M) -> TaskHandle<Result<Subscription<M::Event>, M::Error>>
+where
+    M: server::ScalarSubscription + Send + 'static,
+    M::Error: Send + 'static,
+    M::Event: Send + 'static,
+    P: server::MessageAllowed<M>,
+{
+    handle::global::handle().worker().try_subscribe_scalar::<P, M>(sub)
+}
+
+/// See [`WorkerHandle::subscribe_archive`].
 pub fn subscribe_archive<P, M>(sub: M) -> Subscription<M::Event>
 where
     M: server::ArchiveSubscription<Error = server::Infallible> + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.subscribe_archive::<P, M>(sub)
+    handle::global::handle().worker().subscribe_archive::<P, M>(sub)
 }
 
+/// See [`WorkerHandle::async_archive`].
 #[track_caller]
 pub fn async_archive<P, M>(msg: M) -> Response<M::Response>
 where
-    M: server::Archive + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    M: server::BlockingArchive + Send + 'static,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.async_archive::<P, M>(msg)
+    handle::global::handle().worker().async_archive::<P, M>(msg)
 }
 
+/// See [`WorkerHandle::try_async_archive`].
 pub fn try_async_archive<P, M>(msg: M) -> Response<Result<M::Response, xous::Error>>
 where
-    M: server::Archive + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    M: server::BlockingArchive + Send + 'static,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.try_async_archive::<P, M>(msg)
+    handle::global::handle().worker().try_async_archive::<P, M>(msg)
 }
 
+/// See [`WorkerHandle::async_scalar`].
 #[track_caller]
 pub fn async_scalar<P, M>(msg: M) -> Response<M::Response>
 where
     M: server::BlockingScalar + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.async_scalar::<P, M>(msg)
+    handle::global::handle().worker().async_scalar::<P, M>(msg)
 }
 
+/// See [`WorkerHandle::try_async_scalar`].
 pub fn try_async_scalar<P, M>(msg: M) -> Response<Result<M::Response, xous::Error>>
 where
     M: server::BlockingScalar + Send + 'static,
-    P: server::CheckedPermissions + server::MessageAllowed<M>,
+    P: server::MessageAllowed<M>,
 {
-    handle::global::handle().inner.worker.try_async_scalar::<P, M>(msg)
+    handle::global::handle().worker().try_async_scalar::<P, M>(msg)
 }
 
-/// Force the runtime to wake up.
+/// Wake up the runtime.
+///
+/// # Example
+///
+/// ```rust no_run
+/// # slint_keyos_platform::Runtime::unsafe_init(|| ());
+/// std::thread::spawn(move || {
+///     // wake up the runtime from a worker thread
+///     slint_keyos_platform::wake_runtime();
+/// })
+/// .join()
+/// .unwrap();
+/// ```
 pub fn wake_runtime() { handle::global::handle().wake(); }
 
 /// Shutdown the runtime on the next event loop tick.
+///
+/// # Example
+///
+/// ```rust no_run
+/// # slint_keyos_platform::Runtime::unsafe_init(|| ());
+/// std::thread::spawn(move || {
+///     slint_keyos_platform::quit_runtime();
+/// })
+/// .join()
+/// .unwrap();
+/// ```
 pub fn quit_runtime() { handle::global::handle().quit(); }
 
 /// Returns `true` if the current thread is the main runtime thread
@@ -362,4 +286,4 @@ pub fn is_main_thread() -> bool { core::is_main_thread() }
 
 /// Returns a handle to the worker runtime
 #[inline]
-pub fn worker() -> &'static WorkerHandle { &handle::global::handle().inner.worker }
+pub fn worker() -> &'static WorkerHandle { handle::global::handle().worker() }

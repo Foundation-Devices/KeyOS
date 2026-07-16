@@ -179,7 +179,7 @@ fn start_sign_message(state: StoredValue<AppState>, account_id: String) -> anyho
     };
 
     let string = match scan {
-        ScanQrResult::Qr(data) => String::from_utf8(data).context("invalid qr utf8")?,
+        ScanQrResult::Qr { data, .. } => String::from_utf8(data).context("invalid qr utf8")?,
         ScanQrResult::ButtonClicked => {
             // sleep to avoid the OOM killer closing the bitcoin app
             thread::sleep(Duration::from_millis(500));
@@ -192,7 +192,7 @@ fn start_sign_message(state: StoredValue<AppState>, account_id: String) -> anyho
             }
         }
         ScanQrResult::RightClicked => return Ok(()),
-        ScanQrResult::Ur2(_ur_type, _data) => {
+        ScanQrResult::Ur2 { .. } => {
             bail!("UR2 not supported for message signing");
         }
         action => {

@@ -14,4 +14,5 @@ log-server = { workspace = true }
 rkyv = { workspace = true }
 server = { workspace = true }
 worker = { path = "../../worker", features = ["integration_test", "test_executor"] }
+worker-test-disposable = { path = "disposable" }
 xous-ticktimer = { workspace = true }

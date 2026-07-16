@@ -1,6 +1,16 @@
+manifestVersion = "0"
 appId = "0x7469636b74696d657200000000000000"
 memory = ["TC1", "RSTC"]
 syscall = ["ClaimInterrupt", "SetThreadPriority"]
 
 [appName]
 en = "Ticktimer"
+
+# Not all messages are listed since `ticktimer` goes around the manifest and Server
+# infrastructure for much of its work; so these are just the privileged messages
+# for permission purposes.
+[servers."os/ticktimer"]
+SetSystemTime = { id = 20, type = "blockingScalar" }
+
+[fixedSids]
+"os/ticktimer" = "ticktimer-server"

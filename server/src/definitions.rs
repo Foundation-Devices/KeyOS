@@ -20,10 +20,10 @@ pub struct AsyncMessageInit<T> {
 
 impl<T> AsyncMessageInit<T>
 where
-    T: crate::Archive,
+    T: crate::BlockingArchive,
 {
     #[inline]
-    pub fn send_archive(self, cid: xous::CID) -> whence::Result<(), crate::Error> {
+    pub fn send_blocking_archive(self, cid: xous::CID) -> whence::Result<(), crate::Error> {
         let buf = xous_ipc::Buffer::into_buf(&self).whence()?;
         buf.send(cid, T::ID as u32).whence()?;
         Ok(())

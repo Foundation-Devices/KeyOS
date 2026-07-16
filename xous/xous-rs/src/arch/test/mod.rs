@@ -737,7 +737,7 @@ fn _xous_syscall_result(ret: &mut Result, thread_id: TID, server_connection: &Se
                 // In a hosted environment, the message contents are leaked when
                 // it gets converted into a MemoryMessage. Now that the call is
                 // complete, free the memory.
-                mem::unmap_memory_post(mem).unwrap();
+                mem::free_message_buf(mem).unwrap();
             }
 
             // If we're returning memory to the Server, then reconstitute the buffer we just passed,

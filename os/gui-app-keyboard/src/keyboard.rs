@@ -5,18 +5,23 @@ pub mod assets {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
-use std::{rc::Rc, time::Instant};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use assets::{BG_IMAGE_HEIGHT, BG_IMAGE_WIDTH};
 use gui_server_api::{
-    consts::{DEFAULT_KEYBOARD_HEIGHT, KEYBOARD_TOP_BAR_MARGIN, SCREEN_HEIGHT, SCREEN_WIDTH},
+    consts::{DEFAULT_KEYBOARD_HEIGHT, FPS, KEYBOARD_TOP_BAR_MARGIN, SCREEN_HEIGHT, SCREEN_WIDTH},
     InputMessage, Key, KeyboardKind,
 };
-use tiny_skia::{Pixmap, PixmapMut, Rect, Transform};
-use xous_api_ticktimer::TicktimerCallback;
+use tiny_skia::{IntRect, Pixmap, PixmapMut, Rect, Transform};
+use xous::MemoryRange;
+use xous_api_ticktimer::{Ticktimer, TicktimerCallback};
 
 use crate::{
     cache::with_cached_pixmap,
+    drawing::blit,
     keys::{KeyAction, KeyDef},
     layout::{
         alpha::{
@@ -29,7 +34,7 @@ use crate::{
     },
     overlay::OverlayCache,
     sliding::{CursorSliding, SlideEvent},
-    HapticsApi,
+    GuiApi, HapticsApi,
 };
 
 pub const KEY_DEFAULT_WIDTH: f32 = 40.0;
@@ -50,6 +55,16 @@ pub struct KeyboardState {
     layout_type: LayoutType,
     layout: &'static Layout,
 
+    /// Custom label for the Return ("Done") key, supplied via Slint's
+    /// `accept-button-text` property. Empty means use the default "Done".
+    accept_button_text: String,
+    /// Whether the Return ("Done") key is enabled. When false, render it
+    /// disabled and ignore presses.
+    accept_button_enabled: bool,
+    /// Whether the Backspace ("Delete") key is enabled. When false, render
+    /// it disabled and ignore presses.
+    delete_button_enabled: bool,
+
     overlay_cache: OverlayCache,
 
     show_overlay_long: bool,
@@ -63,6 +78,21 @@ pub struct KeyboardState {
     long_press_callback: TicktimerCallback,
 
     sliding: CursorSliding,
+
+    redraw_requested: bool,
+
+    ticktimer: Ticktimer,
+
+    previous_buffers: [FrameBufferState; 2],
+}
+
+#[derive(Clone)]
+struct FrameBufferState {
+    layout: &'static Layout,
+    dirty: Option<IntRect>,
+    accept_button_text: String,
+    accept_button_enabled: bool,
+    delete_button_enabled: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +138,10 @@ impl KeyboardState {
             layout_type: Default::default(),
             layout: &LAYOUT_ALPHA_LOWER,
 
+            accept_button_text: String::new(),
+            accept_button_enabled: true,
+            delete_button_enabled: true,
+
             key_pressed: None,
             key_pressed_pixmap: None,
 
@@ -122,10 +156,26 @@ impl KeyboardState {
             long_press_callback,
 
             sliding: CursorSliding::new(),
+
+            // GUI server sends us a buffer at start
+            redraw_requested: true,
+
+            ticktimer: Ticktimer::default(),
+
+            previous_buffers: Default::default(),
         };
         result.refresh_layout();
         result
     }
+
+    pub fn request_redraw(&mut self, gui: &GuiApi) {
+        if !self.redraw_requested {
+            self.redraw_requested = true;
+            gui.request_redraw().ok();
+        }
+    }
+
+    pub fn kind(&self) -> KeyboardKind { self.kind }
 
     pub fn set_kind(&mut self, kind: KeyboardKind) {
         self.kind = kind;
@@ -134,6 +184,16 @@ impl KeyboardState {
         self.layout_type = Default::default();
         self.refresh_layout();
     }
+
+    pub fn set_accept_button_text(&mut self, text: &str) {
+        if self.accept_button_text != text {
+            self.accept_button_text = text.into();
+        }
+    }
+
+    pub fn set_accept_button_enabled(&mut self, enabled: bool) { self.accept_button_enabled = enabled; }
+
+    pub fn set_delete_button_enabled(&mut self, enabled: bool) { self.delete_button_enabled = enabled; }
 
     pub fn get_key(&self, click_x: f32, click_y: f32) -> Option<(&KeyDef, f32, f32)> {
         let (y, row) = space_filling_find(
@@ -183,7 +243,13 @@ impl KeyboardState {
     }
 
     pub fn on_pressed(&mut self, x: f32, y: f32) {
+        let (touch_x, touch_y) = (x, y);
         let Some((key, x, y)) = self.get_key(x, y) else { return };
+        match key.on_released {
+            KeyAction::Return if !self.accept_button_enabled => return,
+            KeyAction::Backspace if !self.delete_button_enabled => return,
+            _ => {}
+        }
         let key = key.clone();
         let id = key.id();
 
@@ -194,7 +260,7 @@ impl KeyboardState {
         }
 
         if key.on_released == KeyAction::Space {
-            self.sliding.start(x, y);
+            self.sliding.start(touch_x, touch_y);
         }
 
         self.haptics_api.vibrate(haptics::HapticPattern::SharpClick100);
@@ -268,10 +334,7 @@ impl KeyboardState {
                     self.haptics_api.click();
                     None
                 }
-                SlideEvent::EmitKey(key) => {
-                    self.haptics_api.click();
-                    Some(key)
-                }
+                SlideEvent::EmitKey(key) => Some(key),
                 SlideEvent::Idle => None,
             };
         }
@@ -298,51 +361,161 @@ impl KeyboardState {
         self.show_overlay_long = true;
     }
 
-    pub fn draw(&mut self, target: &mut PixmapMut<'_>) {
-        while with_cached_pixmap(&self.layout, |layout_image| {
-            target.data_mut().copy_from_slice(layout_image.data());
-        })
-        .is_none()
-        {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        self.draw_overlay(target);
+    fn full_rect() -> IntRect {
+        IntRect::from_xywh(0, 0, SCREEN_WIDTH as u32, DEFAULT_KEYBOARD_HEIGHT as u32).unwrap()
     }
 
-    fn draw_overlay(&mut self, pixmap: &mut PixmapMut) {
+    pub fn draw(&mut self, vsync_time: usize, full_redraw: bool, mut framebuffer: MemoryRange) {
+        self.redraw_requested = false;
+        // If we got a "hot" buffer that's still used by the LCDC, wait until we
+        // can be sure it's not used anymore.
+        let lcdc_estimated_render_tick = vsync_time + 1000 / FPS;
+        let current_tick = self.ticktimer.elapsed_ms() as usize;
+        if lcdc_estimated_render_tick > current_tick {
+            let diff = lcdc_estimated_render_tick - current_tick;
+            // If the difference is too large, we probably wrapped on 32 bit,
+            // or there was some other issue with the calculation.
+            // In this case just let it glitch visually. It will resolve in 1-2 frames.
+            if diff < 100 {
+                log::trace!("Sleeping {diff}");
+                std::thread::sleep(Duration::from_millis(diff as u64));
+            }
+        }
+
+        let mut target = PixmapMut::from_bytes(
+            framebuffer.as_slice_mut(),
+            SCREEN_WIDTH as u32,
+            DEFAULT_KEYBOARD_HEIGHT as u32,
+        )
+        .unwrap();
+
+        let prev = self.previous_buffers[1].clone();
+        with_cached_pixmap(&self.layout, |layout_image| {
+            if full_redraw || !core::ptr::eq(self.layout, prev.layout) {
+                blit(&mut target, layout_image, Self::full_rect());
+            } else {
+                if let Some(d) = prev.dirty {
+                    blit(&mut target, layout_image, d);
+                }
+                if prev.accept_button_text != self.accept_button_text
+                    || prev.accept_button_enabled != self.accept_button_enabled
+                {
+                    if let Some(region) = self.key_region(crate::keys::KeyAction::Return) {
+                        blit(&mut target, layout_image, region);
+                    }
+                }
+                if prev.delete_button_enabled != self.delete_button_enabled {
+                    if let Some(region) = self.key_region(crate::keys::KeyAction::Backspace) {
+                        blit(&mut target, layout_image, region);
+                    }
+                }
+            }
+        });
+
+        self.draw_button_overrides(&mut target);
+        let new_dirty = self.draw_overlay(&mut target);
+        let new_state = FrameBufferState {
+            layout: self.layout,
+            dirty: new_dirty,
+            accept_button_text: self.accept_button_text.clone(),
+            accept_button_enabled: self.accept_button_enabled,
+            delete_button_enabled: self.delete_button_enabled,
+        };
+        self.previous_buffers = [new_state, self.previous_buffers[0].clone()];
+    }
+
+    /// Bounding rect of the (at most one) key in the current layout whose
+    /// action matches `action`, inflated to cover the drop shadow drawn
+    /// around it.
+    fn key_region(&self, action: crate::keys::KeyAction) -> Option<IntRect> {
+        use crate::colors::{SHADOW_OFFSET_Y, SHADOW_RADIUS};
+        let pad = SHADOW_RADIUS as i32;
+        let pad_bottom = pad + SHADOW_OFFSET_Y as i32;
+        for (y_range, row) in self.layout.rows_with_coords() {
+            for (x_range, slot) in row.keys_with_coords() {
+                if slot.key.on_released != action {
+                    continue;
+                }
+                let l = x_range.start.floor() as i32 - pad;
+                let t = y_range.start.floor() as i32 - pad;
+                let r = (x_range.start + slot.width).ceil() as i32 + pad;
+                let b = (y_range.start + slot.height).ceil() as i32 + pad_bottom;
+                return IntRect::from_ltrb(l, t, r, b);
+            }
+        }
+        None
+    }
+
+    /// Re-render the Return-action and Backspace-action keys in the current
+    /// layout to apply `accept_button_text`, `accept_button_enabled`, and
+    /// `delete_button_enabled` if needed
+    fn draw_button_overrides(&self, pixmap: &mut PixmapMut) {
+        if self.accept_button_text.is_empty() && self.accept_button_enabled && self.delete_button_enabled {
+            return;
+        }
+        let accept_label = (!self.accept_button_text.is_empty()).then(|| self.accept_button_text.as_str());
+        let accept_style = (!self.accept_button_enabled).then_some(crate::colors::KeyStyle::Disabled);
+        let delete_style = (!self.delete_button_enabled).then_some(crate::colors::KeyStyle::Disabled);
+        for (y_range, row) in self.layout.rows_with_coords() {
+            for (x_range, slot) in row.keys_with_coords() {
+                let (label_override, style_override) = match slot.key.on_released {
+                    crate::keys::KeyAction::Return => (accept_label, accept_style),
+                    crate::keys::KeyAction::Backspace => (None, delete_style),
+                    _ => (None, None),
+                };
+                if label_override.is_none() && style_override.is_none() {
+                    continue;
+                }
+                slot.draw(x_range.start, y_range.start, pixmap, false, label_override, style_override);
+            }
+        }
+    }
+
+    fn draw_overlay(&mut self, pixmap: &mut PixmapMut) -> Option<IntRect> {
         // Don't draw any key overlay while cursor sliding is active.
         if self.sliding.is_active() {
-            return;
+            return None;
         }
 
         let Some(key_pressed) = self.key_pressed else {
-            return;
+            return None;
         };
         // render overlay if necessary
-        let Some(slot) = self.layout.get_key(key_pressed.id) else { return };
+        let Some(slot) = self.layout.get_key(key_pressed.id) else {
+            return None;
+        };
 
         let x = key_pressed.x;
         let y = key_pressed.y;
         let rect = &Rect::from_xywh(x, y, slot.width, KEY_HEIGHT).unwrap();
 
         let Some(mouse_x) = self.overlay_x else {
-            return;
+            return None;
         };
 
         if slot.key.overlay == "" {
+            let label_override = match slot.key.on_released {
+                KeyAction::Return if !self.accept_button_text.is_empty() => {
+                    Some(self.accept_button_text.as_str())
+                }
+                _ => None,
+            };
             let pressed = self.key_pressed_pixmap.get_or_insert_with(|| {
                 let mut pressed = Pixmap::new(slot.width.ceil() as u32 + 2, KEY_HEIGHT as u32 + 2).unwrap();
-                slot.draw(x.fract() + 1.0, y.fract() + 1.0, &mut pressed.as_mut(), true);
+                slot.draw(
+                    x.fract() + 1.0,
+                    y.fract() + 1.0,
+                    &mut pressed.as_mut(),
+                    true,
+                    label_override,
+                    None,
+                );
                 pressed
             });
-            pixmap.draw_pixmap(
-                x as i32 - 1,
-                y as i32 - 1,
-                pressed.as_ref(),
-                &Default::default(),
-                Transform::identity(),
-                None,
-            );
+            let x = x as i32 - 1;
+            let y = y as i32 - 1;
+            pixmap.draw_pixmap(x, y, pressed.as_ref(), &Default::default(), Transform::identity(), None);
+            IntRect::from_xywh(x, y, pressed.width(), pressed.height())
         } else {
             let text = if self.show_overlay_long {
                 slot.key.overlay
@@ -353,10 +526,23 @@ impl KeyboardState {
                     "?"
                 }
             };
-            let ch = crate::overlay::draw(&mut self.overlay_cache, &text, pixmap, rect, mouse_x);
+            let (dirty, ch) = crate::overlay::draw(&mut self.overlay_cache, &text, pixmap, rect, mouse_x);
             if let Some(ch) = ch {
                 self.overlay_char = Some(ch);
             }
+            Some(dirty)
+        }
+    }
+}
+
+impl Default for FrameBufferState {
+    fn default() -> Self {
+        Self {
+            layout: &LAYOUT_ALPHA_LOWER,
+            dirty: Some(KeyboardState::full_rect()),
+            accept_button_text: String::new(),
+            accept_button_enabled: true,
+            delete_button_enabled: true,
         }
     }
 }

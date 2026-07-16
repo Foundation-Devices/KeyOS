@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 async-channel = { workspace = true }
+fiat-symbols = { workspace = true }
 foundation-ur = { workspace = true }
 foundation-urtypes = { workspace = true }
 fs = { workspace = true }

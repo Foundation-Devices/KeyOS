@@ -9,7 +9,7 @@ use {
         fs_permissions::FileSystemPermissions,
         load::{self},
         psbt_signing::PendingPsbt,
-        store::{AccountStore, CreateMultiSigAccount, CreateSingleSigAccount},
+        store::{fingerprint_for_passphrase, AccountStore, CreateMultiSigAccount, CreateSingleSigAccount},
         AccountView, AddressType, AppWindow, Callbacks, CardColor, KeychainKind, MultiSigSignerView,
         MultiSigView, Network, NetworkKind, QlStatus, SettingsApi, SingleSigView,
     },
@@ -26,7 +26,7 @@ use {
     },
     quantum_link::{
         foundation_api::bitcoin::AccountUpdate,
-        messages::{SendAccountUpdate, SendApplyPassphrase},
+        messages::{SendAccountUpdate, SendApplyPassphrase, SendPrimeFiatPreference},
     },
     slint_keyos_platform::{
         file_backed::JsonBacked,
@@ -57,7 +57,11 @@ pub struct AppState {
     pub pending_psbt: PendingPsbt,
     pub pending_archived_account_id: Option<AccountId>,
     pub archive_mode: bool,
+    pub pending_passphrase_task: Option<TaskHandle<()>>,
     pub pending_send_apply_passphrase: Option<TaskHandle<()>>,
+    pub pending_send_fiat_preference: Option<TaskHandle<()>>,
+    pub skeleton_count: usize,
+    pub pending_try_passphrase: Option<TaskHandle<()>>,
 }
 
 impl AppState {
@@ -77,7 +81,11 @@ impl AppState {
             pending_psbt: PendingPsbt::None,
             pending_archived_account_id: None,
             archive_mode: false,
+            pending_passphrase_task: None,
             pending_send_apply_passphrase: None,
+            pending_send_fiat_preference: None,
+            skeleton_count: 1,
+            pending_try_passphrase: None,
         }
     }
 
@@ -112,6 +120,13 @@ impl AppState {
             Some(convert_account(id, &*config))
         });
         self.model.extend(accounts);
+
+        if !self.archive_mode {
+            for _ in 0..self.skeleton_count {
+                self.model.push(AccountView { skeleton: true, ..Default::default() });
+            }
+        }
+
         let ui = self.ui();
         let cb = ui.global::<Callbacks>();
         cb.set_accounts(ModelRc::from(self.model.clone()));
@@ -169,12 +184,10 @@ impl AppState {
         Ok(addresses)
     }
 
-    pub fn parse_multisig(&mut self, multisig: &str) -> anyhow::Result<&MultiSigDetails> {
-        let (multisig, _label) =
-            MultiSigDetails::from_config(multisig).or_else(|_| MultiSigDetails::from_descriptor(multisig))?;
+    pub fn set_pending_multisig(&mut self, multisig: MultiSigDetails) -> anyhow::Result<()> {
         self.store.validate_multisig_account(&multisig, None, None)?;
         self.pending_multisig = Some(multisig);
-        Ok(self.pending_multisig.as_ref().unwrap())
+        Ok(())
     }
 }
 
@@ -254,25 +267,63 @@ impl AppState {
         Ok(account_id)
     }
 
-    pub async fn apply_passphrase(state: StoredValue<Self>, passphrase: String) {
+    /// SE read + fingerprint application. Called inside spawned tasks; never call
+    /// directly from sync code. Stores handle in `pending_passphrase_task` via the
+    /// callers (`apply_passphrase`, `create_initial_account`).
+    pub async fn apply_passphrase_inner(state: StoredValue<Self>, passphrase: String) {
+        let fingerprint = spawn_worker({
+            let passphrase = passphrase.clone();
+            async move { fingerprint_for_passphrase(&passphrase) }
+        })
+        .await
+        .inspect_err(|e| log::error!("failed to compute fingerprint for passphrase: {e:?}"))
+        .unwrap_or_default();
+
+        let mut s = state.borrow_mut();
+        s.store.apply_fingerprint(passphrase, fingerprint);
+        if s.store.active_accounts().next().is_some() {
+            s.skeleton_count = 0;
+        }
+        s.refresh_slint_accounts();
+        if s.skeleton_count == 0 {
+            s.ui().global::<Callbacks>().set_accounts_loading(false);
+        }
+    }
+
+    pub fn apply_passphrase(state: StoredValue<Self>, passphrase: String) {
         {
-            let mut state = state.borrow_mut();
-            state.store.set_passphrase(passphrase);
-            state.refresh_slint_accounts();
+            let mut s = state.borrow_mut();
+            let ui = s.ui();
+            let cb = ui.global::<Callbacks>();
+            cb.set_accounts_loading(true);
+            // Skeleton only belongs in the non-archive account list.
+            if !s.archive_mode {
+                s.skeleton_count = 1;
+                s.model.clear();
+                s.model.push(AccountView { skeleton: true, ..Default::default() });
+                cb.set_accounts(ModelRc::from(s.model.clone()));
+            }
         }
 
-        let (fingerprint, bt_state) = {
+        let handle = spawn_local(async move {
+            Self::apply_passphrase_inner(state, passphrase).await;
+            Self::publish_accounts_and_passphrase(state);
+        });
+        state.borrow_mut().pending_passphrase_task = Some(handle);
+    }
+
+    pub fn publish_accounts_and_passphrase(state: StoredValue<Self>) {
+        let (fingerprint, ql_status) = {
             let state = state.borrow();
             (state.store.fingerprint, state.ql_status.clone())
         };
-
-        let apply_passphrase_handle = spawn_local(async move {
+        let handle = spawn_local(async move {
             let fingerprint_str = fingerprint.to_string();
             let message = SendApplyPassphrase {
                 fingerprint: if fingerprint == Fingerprint::default() { None } else { Some(fingerprint_str) },
             };
 
-            bt_state
+            ql_status
                 .send_ql_archive_retry(message, |e| {
                     log::error!("faled to send apply passphrase {e:?}, retrying...");
                 })
@@ -280,11 +331,26 @@ impl AppState {
 
             log::info!("successfully sent apply passphrase");
 
-            // Reveal the accounts to Envoy
             Self::publish_accounts(state);
         });
 
-        state.borrow_mut().pending_send_apply_passphrase = Some(apply_passphrase_handle);
+        state.borrow_mut().pending_send_apply_passphrase = Some(handle);
+    }
+
+    pub fn publish_fiat_preference(state: StoredValue<Self>) {
+        let (currency_code, ql_status) = {
+            let state = state.borrow();
+            (state.settings.show_fiat_value.code().to_string(), state.ql_status.clone())
+        };
+        let handle = spawn_local(async move {
+            ql_status
+                .send_ql_archive_retry(SendPrimeFiatPreference { currency_code }, |e| {
+                    log::warn!("failed to publish fiat preference {e:?}")
+                })
+                .await;
+        });
+        // Drop any in-flight earlier send so a stale retry can't overwrite a newer one.
+        state.borrow_mut().pending_send_fiat_preference = Some(handle);
     }
 
     /// Switches between Default and Passphrase views locally without notifying Envoy.
@@ -292,11 +358,20 @@ impl AppState {
     /// Unlike `apply_passphrase`, this does NOT send any message to Envoy.
     pub fn switch_view_locally(state: StoredValue<Self>, passphrase: String) {
         let mut state = state.borrow_mut();
-        state.store.set_passphrase(passphrase);
+        state.skeleton_count = 0;
+        state.store.switch_fingerprint(passphrase);
         state.refresh_slint_accounts();
     }
 
     pub async fn load_active_accounts(state: StoredValue<Self>) -> anyhow::Result<()> {
+        {
+            let mut state = state.borrow_mut();
+            state.skeleton_count = 1;
+            state.refresh_slint_accounts();
+            let ui = state.ui();
+            ui.global::<Callbacks>().set_accounts_loading(true);
+        }
+
         let (tx, rx) = async_channel::bounded(1);
         let _worker = spawn_worker(async move {
             load::load_account_configs(tx)
@@ -306,28 +381,47 @@ impl AppState {
         });
 
         while let Ok((id, account, storage)) = rx.recv().await {
-            let mut state = state.borrow_mut();
-            state.store.insert_account_config(id, account, storage);
-            state.refresh_slint_accounts();
+            let mut s = state.borrow_mut();
+            s.store.insert_account_config(id, account, storage);
+            s.skeleton_count = 0;
+            s.refresh_slint_accounts();
         }
 
         // create initial account, if needed
-        if state.borrow().store.num_single_accounts(None) == 0 && !state.borrow().store.has_passphrase() {
+        let create_result = if state.borrow().store.num_single_accounts(None) == 0
+            && !state.borrow().store.has_passphrase()
+        {
             let start = std::time::Instant::now();
-            AppState::create_singlesig_account(
+            let r = AppState::create_singlesig_account(
                 state,
                 CreateSingleSigAccount {
                     label: String::from("Passport Prime"),
-                    color: AccountColor::LightCopper,
                     network: ngwallet::bdk_wallet::bitcoin::Network::Bitcoin,
                     index: 0,
                 },
             )
             .await
-            .context("failed to create single sig account")?;
-            log::info!("created account in {}ms", start.elapsed().as_millis());
+            .context("failed to create single sig account");
+            if r.is_ok() {
+                log::info!("created account in {}ms", start.elapsed().as_millis());
+            }
+            Some(r)
+        } else {
+            None
+        };
+
+        // Always clear loading state, even when account creation fails.
+        {
+            let mut s = state.borrow_mut();
+            if s.skeleton_count > 0 {
+                s.skeleton_count = 0;
+                s.refresh_slint_accounts();
+            }
+            let ui = s.ui();
+            ui.global::<Callbacks>().set_accounts_loading(false);
         }
 
+        create_result.transpose()?;
         Ok(())
     }
 
@@ -429,8 +523,10 @@ impl AppState {
 }
 
 fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountView {
+    // Single-sig: derive from index so it cycles like Core/Envoy.
     let color: CardColor = match config.archived {
         true => CardColor::DarkGrey,
+        false if config.multisig.is_none() => AccountColor::for_account_index(config.index).into(),
         false => AccountColor::from_hex(&config.color).into(),
     };
 
@@ -444,6 +540,7 @@ fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountV
             archived: config.archived,
             single: SingleSigView::default(),
             multi: MultiSigView::from(multisig),
+            skeleton: false,
         },
         None => {
             let fingerprint = hex::encode_upper(account_id.fingerprint().copied().unwrap_or_default());
@@ -462,6 +559,7 @@ fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountV
                     ..Default::default()
                 },
                 multi: MultiSigView::default(),
+                skeleton: false,
             }
         }
     }
@@ -527,6 +625,18 @@ impl AccountColor {
             "#00a5b2" => AccountColor::Teal,
             "#009db9" => AccountColor::Blue,
             _ => AccountColor::LightCopper,
+        }
+    }
+
+    // Match Core/Envoy's acct_num % 6 cycling. Single-sig only; multisig keeps stored color.
+    pub fn for_account_index(index: u32) -> Self {
+        match index % 6 {
+            0 => AccountColor::DarkCopper,
+            1 => AccountColor::Blue,
+            2 => AccountColor::Pine,
+            3 => AccountColor::LightCopper,
+            4 => AccountColor::Teal,
+            _ => AccountColor::Green,
         }
     }
 }

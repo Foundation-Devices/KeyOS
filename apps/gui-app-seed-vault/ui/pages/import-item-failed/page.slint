@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Callbacks as CB } from "../../callbacks.slint";
+import { Palette, Size } from "@ui/theme.slint";
+import { Button, TextMd, HeadingMd, BasePage, ButtonSection, WrappedIcon, NavHeader, PageBody, ContentSection } from "@ui/widgets.slint";
+import { ImportItemFailedProps } from "./props.slint";
+import { Navigate, Animate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component ImportItemFailedPage inherits BasePage {
+    in property <ImportItemFailedProps> props;
+
+    VerticalLayout {
+        NavHeader {
+            left-icon: "chevron-left";
+
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        PageBody {
+            padding-top: Size.sz4;
+
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        inner-icon: "close";
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: Size.sz5;
+                    padding-left: Size.sz1;
+                    padding-right: Size.sz1;
+
+                    HeadingMd {
+                        horizontal-alignment: center;
+                        text: TR2.lookup(TrId.ImportItemFailedHeader);
+                        color: Palette.content-primary;
+                    }
+
+                    TextMd {
+                        horizontal-alignment: center;
+                        text: TR2.lookup(TrId.ImportItemFailedContent);
+                        color: Palette.content-secondary;
+                    }
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonRetry);
+                    importance: secondary;
+                    clicked => {
+                        Navigate.backward-animate(Animate.None);
+                        CB.scan-qr();
+                    }
+                }
+            }
+        }
+    }
+}

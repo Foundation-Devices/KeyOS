@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "nfc"
+version = "0.1.0"
+edition = "2021"
+description = "NFC server API crate"
+publish = false
+
+[dependencies]
+num-derive = { workspace = true }
+num-traits = { workspace = true }
+rkyv = { workspace = true }
+server = { workspace = true }
+thiserror = { workspace = true }
+xous = { workspace = true }
+xous-ipc = { workspace = true }
+
+[target.'cfg(keyos)'.dependencies]
+gpio = { workspace = true }
+spi = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

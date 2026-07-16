@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { CallbackResult } from "@ui/theme.slint";
-import { SeedView, SeedViewType } from "./types.slint";
+import { ImportedSeedInfo, SeedView, SeedViewType } from "./types.slint";
 import { TR2, TrId } from "./gen/tr.slint";
 
 export global Callbacks {
@@ -20,22 +20,73 @@ export global Callbacks {
     callback edit-indexed(int, string, int) -> CallbackResult;
     callback edit-password(int, string, string, string, int) -> CallbackResult;
     callback delete(int);
-    pure callback get-words(int) -> [string];
-    pure callback get-standard-seed-qr(int) -> image;
-    pure callback get-compact-seed-qr(int) -> image;
-    pure callback get-npub-qr(int) -> image;
-    pure callback get-npub(int) -> string;
-    pure callback get-nsec-qr(int) -> image;
-    pure callback get-nsec(int) -> string;
+    callback scan-qr();
+    callback generate-password(string, string) -> string;
+    callback import-nsec(SeedView, string) -> CallbackResult;
+    callback import-seed-entropy(SeedView, string) -> CallbackResult;
+    callback get-words(int) -> [string];
+    callback get-standard-seed-qr(int) -> image;
+    callback get-compact-seed-qr(int) -> image;
+    callback get-npub(int) -> string;
+    callback get-nsec(int) -> string;
+    callback get-fingerprint(int) -> string;
+    pure callback entropy-to-words(string) -> [string];
+    pure callback words-to-entropy([string]) -> string;
+    pure callback nsec-to-npub(string) -> string;
+    pure callback validate-seed-word(string) -> bool;
+    pure callback validate-full-seed([string]) -> bool;
+    pure callback get-seed-fingerprint([string]) -> string;
+    callback get-pending-nostr-key() -> string;
+    callback get-pending-imported-seed() -> ImportedSeedInfo;
+    callback get-seed-details(int) -> SeedView;
+    callback set-pending-imported-seed(string, string);
+    callback clear-pending-import();
 
     in-out property <[SeedView]> entries: [];
     in-out property <int> sort-mode: 0;
     in-out property <string> search-text: "";
 
-    pure public function is-indexed-seed(seed-type: SeedViewType) -> bool {
+    pure public function index-required(seed-type: SeedViewType) -> bool {
         // Do this by inclusion rather than exclusion to avoid
         // a mess if/when adding more non-indexed types
-        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.nostr-key) {
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.password-generated) {
+            return true;
+        }
+        return false;
+    }
+
+    pure public function supports-qr(seed-type: SeedViewType) -> bool {
+        // Do this by inclusion rather than exclusion to avoid
+        // a mess if/when adding more non-indexed types
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.nostr-key-import || seed-type == SeedViewType.bitcoin-import-12 || seed-type == SeedViewType.bitcoin-import-24) {
+            return true;
+        }
+        return false;
+    }
+
+    pure public function is-nostr(seed-type: SeedViewType) -> bool {
+        if (seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.nostr-key-import) {
+            return true;
+        }
+        return false;
+    }
+
+    pure public function is-bitcoin(seed-type: SeedViewType) -> bool {
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.bitcoin-import-12 || seed-type == SeedViewType.bitcoin-import-24) {
+            return true;
+        }
+        return false;
+    }
+
+    pure public function is-password(seed-type: SeedViewType) -> bool {
+        if (seed-type == SeedViewType.password || seed-type == SeedViewType.password-generated) {
+            return true;
+        }
+        return false;
+    }
+
+    pure public function is-import(seed-type: SeedViewType) -> bool {
+        if (seed-type == SeedViewType.password || seed-type == SeedViewType.nostr-key-import || seed-type == SeedViewType.bitcoin-import-12 || seed-type == SeedViewType.bitcoin-import-24) {
             return true;
         }
         return false;
@@ -43,37 +94,37 @@ export global Callbacks {
 
     pure public function get-default-color(seed-type: SeedViewType) -> int {
         // Each of these is an index in ui/ui/theme.slint card-color-picker-model.
-        if (seed-type == SeedViewType.bitcoin-12) {
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-import-12) {
             return 0;  // teal
-        } else if (seed-type == SeedViewType.bitcoin-24) {
+        } else if (seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.bitcoin-import-24) {
             return 1;  // light-copper
-        } else if (seed-type == SeedViewType.password) {
+        } else if (seed-type == SeedViewType.password || seed-type == SeedViewType.password-generated) {
             return 5;  // dark-grey
-        } else if (seed-type == SeedViewType.nostr-key) {
+        } else if (seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.nostr-key-import) {
             return 3;  // purple
         }
         return 0;
     }
 
     pure public function get-seed-name(seed-type: SeedViewType) -> string {
-        if (seed-type == SeedViewType.bitcoin-12) {
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-import-12) {
             return TR2.lookup(TrId.CreateItem12WordSeed);
-        } else if (seed-type == SeedViewType.bitcoin-24) {
+        } else if (seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.bitcoin-import-24) {
             return TR2.lookup(TrId.CreateItem24WordSeed);
-        } else if (seed-type == SeedViewType.password) {
+        } else if (seed-type == SeedViewType.password || seed-type == SeedViewType.password-generated) {
             return TR2.lookup(TrId.CreateItemPassword);
-        } else if (seed-type == SeedViewType.nostr-key) {
+        } else if (seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.nostr-key-import) {
             return TR2.lookup(TrId.CreateItemNostrKey);
         }
         return TR2.lookup(TrId.CreateItem12WordSeed);
     }
 
     pure public function get-icon(seed-type: SeedViewType) -> string {
-        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24) {
+        if (seed-type == SeedViewType.bitcoin-12 || seed-type == SeedViewType.bitcoin-24 || seed-type == SeedViewType.bitcoin-import-12 || seed-type == SeedViewType.bitcoin-import-24) {
             return "acorn";
-        } else if (seed-type == SeedViewType.password) {
+        } else if (seed-type == SeedViewType.password || seed-type == SeedViewType.password-generated) {
             return "pin";
-        } else if (seed-type == SeedViewType.nostr-key) {
+        } else if (seed-type == SeedViewType.nostr-key || seed-type == SeedViewType.nostr-key-import) {
             return "nostr";
         }
         return "acorn";

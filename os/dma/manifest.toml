@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x646d612d736572766572000000000000"
 memory = ["XDMAC0"]
 syscall = ["ClaimInterrupt", "VirtToPhysPid", "VirtToPhys", "SetThreadPriority"]
@@ -8,6 +9,7 @@ en = "Generic DMA server"
 
 [servers."os/dma"]
 TransferCompleteMsg = { id = 31, type = "scalar" }
+SubscriberDisconnected = { id = 64, type = "scalar" }
 
 [permissions]
 "os/power-manager" = ["SetPeripheralEnabled"]

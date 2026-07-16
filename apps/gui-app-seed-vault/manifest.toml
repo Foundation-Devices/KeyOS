@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x53656564205661756c74000000000000"
 
 [appName]
@@ -6,3 +7,34 @@ en = "Vault"
 [permissions]
 template = ["gui-app", "fs-generic"]
 "os/security" = ["GetSeed"]
+"os/gui-server" = ["GetPendingNavRequest"]
+
+# Nostr secret key (bech32 nsec)
+[[qrMatchRules]]
+id = "nsec"
+idLocalizations = { en = "Nostr Secret Key" }
+subRules = { qr = { QR = { regex_pattern = "^nsec1[a-z0-9]+$" } } }
+
+# Compact SeedQR: raw entropy bytes (12-word = 16 bytes, 24-word = 32 bytes)
+[[qrMatchRules]]
+id = "compact-seed"
+idLocalizations = { en = "Compact SeedQR" }
+[qrMatchRules.subRules]
+words-12 = { QR = { min_len = 16, max_len = 16 } }
+words-24 = { QR = { min_len = 32, max_len = 32 } }
+
+# Standard SeedQR: 4-digit decimal word indices (12-word = 48 digits, 24-word = 96 digits)
+[[qrMatchRules]]
+id = "standard-seed"
+idLocalizations = { en = "Standard SeedQR" }
+[qrMatchRules.subRules]
+words-12 = { QR = { min_len = 48, max_len = 48, regex_pattern = "^\\d{48}$" } }
+words-24 = { QR = { min_len = 96, max_len = 96, regex_pattern = "^\\d{96}$" } }
+
+# Plaintext space-separated BIP39 seed words
+[[qrMatchRules]]
+id = "seed-words"
+idLocalizations = { en = "Seed Words" }
+[qrMatchRules.subRules]
+words-12 = { QR = { regex_pattern = "^[a-z]+(?: [a-z]+){11}$" } }
+words-24 = { QR = { regex_pattern = "^[a-z]+(?: [a-z]+){23}$" } }

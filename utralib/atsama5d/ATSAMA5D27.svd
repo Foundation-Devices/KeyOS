@@ -62,6 +62,11 @@
         <size>0x1000</size> <!-- 4K size -->
       </memoryRegion>
       <memoryRegion>
+        <name>BUREG</name>
+        <baseAddress>0xf8045000</baseAddress> <!-- BUREG/SECURAM second page; contains BUREG0..BUREG255 starting at offset 0x400 -->
+        <size>0x1000</size>
+      </memoryRegion>
+      <memoryRegion>
         <name>SRAM0</name>
         <baseAddress>0x00200000</baseAddress> <!-- SRAM0 base -->
         <size>0x20000</size> <!-- 128K size -->

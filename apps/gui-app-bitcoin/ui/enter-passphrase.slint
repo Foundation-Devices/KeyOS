@@ -14,6 +14,7 @@ export global EnterPassphrase {
     in-out property <string> fingerprint;
     in-out property <int> slider-index;
     in property <bool> no-accounts;
+    in-out property <bool> fingerprint-loading: false;
 
     callback try(string);
     callback confirm(string);
@@ -38,5 +39,6 @@ export global EnterPassphrase {
     public function clear-state() {
         self.passphrase = "";
         self.fingerprint = "";
+        self.fingerprint-loading = false;
     }
 }

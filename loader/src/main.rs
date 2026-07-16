@@ -34,12 +34,11 @@ pub const PAGE_SIZE: usize = 4096;
 const VDBG: bool = false; // verbose debug
 const VVDBG: bool = false; // very verbose debug
 
-#[repr(C)]
-pub struct MemoryRegionExtra {
-    start: u32,
-    length: u32,
-    name: u32,
-    padding: u32,
+pub fn additional_regions() -> impl Iterator<Item = &'static core::ops::Range<usize>> {
+    utralib::map::MEMORY_REGIONS
+        .iter()
+        .filter(|(name, _)| *name != "DDR_RAM" && *name != "ENCRYPTED_RAM")
+        .map(|(_, range)| range)
 }
 
 /// Entrypoint
@@ -60,7 +59,7 @@ pub unsafe extern "C" fn rust_entry(arg_buffer: *const usize) -> ! {
     init_aesb();
 
     let mut cfg = BootConfig { args: KernelArguments::new(arg_buffer), ..Default::default() };
-    read_initial_config(&mut cfg);
+    read_initial_config(&cfg);
 
     // The first region is defined as being "main RAM", which will be used
     // to keep track of allocations.
@@ -108,17 +107,10 @@ pub unsafe extern "C" fn rust_entry(arg_buffer: *const usize) -> ! {
     unsafe { start_kernel(cfg.pid1.sp, cfg.pid1.ttbr0, cfg.pid1.entrypoint, KERNEL_ARGUMENT_OFFSET) }
 }
 
-pub fn read_initial_config(cfg: &mut BootConfig) {
+pub fn read_initial_config(cfg: &BootConfig) {
     let mut kernel_seen = false;
     for tag in cfg.args.iter() {
-        if tag.name == u32::from_le_bytes(*b"MREx") {
-            cfg.regions = unsafe {
-                slice::from_raw_parts(
-                    tag.data.as_ptr() as *const MemoryRegionExtra,
-                    tag.size as usize / mem::size_of::<MemoryRegionExtra>(),
-                )
-            };
-        } else if tag.name == u32::from_le_bytes(*b"XKrn") {
+        if tag.name == u32::from_le_bytes(*b"XKrn") {
             assert!(!kernel_seen, "kernel appears twice");
             assert!(tag.size as usize == mem::size_of::<ProgramDescription>(), "invalid XKrn size");
             kernel_seen = true;
@@ -134,15 +126,8 @@ pub fn allocate_page_tracker(cfg: &mut BootConfig) {
     // Number of individual pages in the system
     let mut rpt_pages = RAM_PAGES;
 
-    for region in cfg.regions.iter() {
-        println!(
-            "Discovered memory region {} ({:08x} - {:08x}) -- {} bytes",
-            core::str::from_utf8(&region.name.to_le_bytes()).unwrap(),
-            region.start,
-            region.start + region.length,
-            region.length
-        );
-        let region_length_rounded = (region.length as usize + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    for range in additional_regions() {
+        let region_length_rounded = (range.end - range.start).next_multiple_of(PAGE_SIZE);
         rpt_pages += region_length_rounded / PAGE_SIZE;
     }
 

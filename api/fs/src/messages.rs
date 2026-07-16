@@ -45,9 +45,6 @@ pub struct CloseDir(pub DirHandle);
 pub struct SubscribeFilesystemEvent(pub Location);
 
 #[derive(Debug, server::Message)]
-pub struct DiskEncryptionKeysReady;
-
-#[derive(Debug, server::Message)]
 #[response(())]
 pub struct FormatEncryptedVolume;
 
@@ -193,6 +190,10 @@ pub struct MountAirlock(pub bool);
 #[derive(Debug, server::Message)]
 #[response(Result<(), Error>)]
 pub struct FormatAirlock;
+
+#[derive(Debug, server::Message)]
+#[response(Result<(), Error>)]
+pub struct FormatUsb;
 
 macro_rules! declare_msg {
     ($name:ident) => {

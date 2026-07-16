@@ -1,12 +1,20 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::ops::Deref;
+
 use server::{
     listen_and_connect, wrapped_scalar, xous, ArchiveEventSubscriber, ArchiveRequest, BlockingScalarRequest,
     CheckedConn, ScalarEventSubscriber, Server, ServerContext,
 };
 
 pub struct TestServerHandle(CheckedConn<TestPermissions>);
+
+impl Deref for TestServerHandle {
+    type Target = CheckedConn<TestPermissions>;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
 
 impl Drop for TestServerHandle {
     fn drop(&mut self) {
@@ -120,6 +128,18 @@ pub mod api {
     #[derive(server::Message)]
     #[response(usize)]
     pub struct ScalarInterval;
+
+    #[derive(server::Message)]
+    #[response(usize)]
+    pub struct HoldScalar;
+
+    #[derive(server::Message)]
+    #[response(usize)]
+    pub struct HeldScalarCount;
+
+    #[derive(server::Message)]
+    #[response(usize)]
+    pub struct ReleaseHeldScalars(pub usize);
 }
 
 #[derive(Debug, Default, Clone, server::Permissions)]
@@ -135,7 +155,7 @@ pub struct TestServer {
     archive_subscriptions: Vec<ArchiveEventSubscriber<ArchiveTickEvent>>,
 
     archive_requests: Vec<ArchiveRequest<ArchiveTick>>,
-    scalar_requests: Vec<BlockingScalarRequest<ScalarInterval>>,
+    held_scalar_requests: Vec<BlockingScalarRequest<HoldScalar>>,
 }
 
 impl TestServer {
@@ -165,7 +185,7 @@ impl TestServer {
 
 impl Server for TestServer {}
 
-impl server::ArchiveHandler<ArchiveIncrementTick> for TestServer {
+impl server::BlockingArchiveHandler<ArchiveIncrementTick> for TestServer {
     fn handle(
         &mut self,
         _msg: ArchiveIncrementTick,
@@ -201,7 +221,7 @@ impl server::ArchiveEventSubscriptionHandler<ArchiveTickSub> for TestServer {
     }
 }
 
-impl server::ArchiveHandler<ArchiveDropAllSubs> for TestServer {
+impl server::BlockingArchiveHandler<ArchiveDropAllSubs> for TestServer {
     fn handle(
         &mut self,
         _msg: ArchiveDropAllSubs,
@@ -231,7 +251,7 @@ impl server::ScalarHandler<Shutdown> for TestServer {
 
 // Archive test messages
 
-impl server::ArchiveAsyncHandler<ArchiveTick> for TestServer {
+impl server::BlockingArchiveAsyncHandler<ArchiveTick> for TestServer {
     fn handle(&mut self, request: ArchiveRequest<ArchiveTick>, _context: &mut server::ServerContext<Self>) {
         self.archive_requests.push(request);
     }
@@ -239,7 +259,7 @@ impl server::ArchiveAsyncHandler<ArchiveTick> for TestServer {
     fn default_response() -> TickResponse { TickResponse { tick: 0 } }
 }
 
-impl server::ArchiveAsyncHandler<ArchiveDrop> for TestServer {
+impl server::BlockingArchiveAsyncHandler<ArchiveDrop> for TestServer {
     fn handle(&mut self, _request: ArchiveRequest<ArchiveDrop>, _context: &mut server::ServerContext<Self>) {
         // Intentionally drop the request without responding
         log::info!("Dropping Archive request without responding");
@@ -266,15 +286,44 @@ impl server::BlockingScalarHandler<ScalarDoubleData> for TestServer {
 
 impl server::BlockingScalarAsyncHandler<ScalarInterval> for TestServer {
     fn handle(&mut self, request: BlockingScalarRequest<ScalarInterval>, _context: &mut ServerContext<Self>) {
-        self.scalar_requests.push(request);
-        if self.scalar_requests.len() == 10 {
-            for scalar in self.scalar_requests.drain(..) {
-                let _ = scalar.response.respond(1);
-            }
-        }
+        let _ = request.response.respond(1);
     }
 
     fn default_response() -> <ScalarInterval as server::BlockingScalar>::Response { 0 }
+}
+
+impl server::BlockingScalarAsyncHandler<HoldScalar> for TestServer {
+    fn handle(&mut self, request: BlockingScalarRequest<HoldScalar>, _context: &mut ServerContext<Self>) {
+        self.held_scalar_requests.push(request);
+    }
+
+    fn default_response() -> <HoldScalar as server::BlockingScalar>::Response { 0 }
+}
+
+impl server::BlockingScalarHandler<HeldScalarCount> for TestServer {
+    fn handle(
+        &mut self,
+        _msg: HeldScalarCount,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) -> usize {
+        self.held_scalar_requests.len()
+    }
+}
+
+impl server::BlockingScalarHandler<ReleaseHeldScalars> for TestServer {
+    fn handle(
+        &mut self,
+        ReleaseHeldScalars(count): ReleaseHeldScalars,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) -> usize {
+        let count = count.min(self.held_scalar_requests.len());
+        for request in self.held_scalar_requests.drain(..count) {
+            let _ = request.response.respond(1);
+        }
+        count
+    }
 }
 
 // Handler that drops request

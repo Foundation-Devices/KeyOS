@@ -16,12 +16,11 @@ mod sliding;
 use std::{rc::Rc, sync::atomic::AtomicBool};
 
 use gui_server_api::{
-    consts::{DEFAULT_KEYBOARD_HEIGHT, SCREEN_WIDTH},
+    consts::DEFAULT_KEYBOARD_HEIGHT,
+    msg::UpdateKeyboard,
     touch::{Touch, TouchKind},
-    InputMessage, KeyboardKind, Vsync,
+    InputMessage, KeyboardKind,
 };
-use num_traits::FromPrimitive;
-use tiny_skia::PixmapMut;
 use worker::WorkerHandle;
 use xous::MessageEnvelope;
 use xous_api_ticktimer::TicktimerCallback;
@@ -35,17 +34,13 @@ settings::use_api!();
 
 static IS_DARK: AtomicBool = AtomicBool::new(true);
 
-const WIDTH: usize = SCREEN_WIDTH;
-const HEIGHT: usize = DEFAULT_KEYBOARD_HEIGHT;
 fn main() -> ! {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    let (gui, framebuffer) =
-        GuiApi::register(gui_server_api::AppKind::Keyboard, "keyboard", WIDTH * HEIGHT * 4)
-            .expect("can't register app UI");
+    let gui = GuiApi::register(gui_server_api::AppKind::Keyboard, "keyboard", DEFAULT_KEYBOARD_HEIGHT)
+        .expect("can't register app UI");
 
-    let mut bufs = framebuffer.into_bufs().expect("init app framebuffer");
     let haptics_api = Rc::new(HapticsApi::default());
     let long_press_callback = TicktimerCallback::new(gui.sid()).unwrap();
     let mut state =
@@ -62,32 +57,8 @@ fn main() -> ! {
     background_worker.spawn(async { refresh_cache() }).detach();
 
     loop {
-        // Process all other pending messages first
-        while let Some((event, msg)) = gui.try_receive_input() {
-            process_input(event, msg, &mut state, &gui);
-        }
-
-        let work_fb = bufs.work_buf as *mut u8;
-        let work_fb = unsafe { std::slice::from_raw_parts_mut(work_fb, WIDTH * HEIGHT * 4) };
-        state.draw(&mut PixmapMut::from_bytes(work_fb, WIDTH as u32, HEIGHT as u32).unwrap());
-
-        #[cfg(keyos)]
-        xous::syscall::flush_cache(
-            unsafe { xous::MemoryRange::new(bufs.work_buf, WIDTH * HEIGHT * 4).unwrap() },
-            xous::CacheOperation::Clean,
-        )
-        .expect("clean cache");
-
-        if let Some(_swap_time) = gui.swap_buffers(Vsync::Wait).expect("swap buffers") {
-            bufs.swap();
-        } else {
-            log::warn!("swap_buffers() was unsuccessful");
-        }
-
-        // Block until next message
-        if let Ok((event, msg)) = gui.receive_input() {
-            process_input(event, msg, &mut state, &gui);
-        }
+        let (event, msg) = gui.receive_input().unwrap();
+        process_input(event, msg, &mut state, &gui);
     }
 }
 
@@ -129,27 +100,46 @@ fn process_input(event: InputMessage, msg: MessageEnvelope, state: &mut Keyboard
                         }
                     }
                 };
+                state.request_redraw(gui);
             }
         }
         InputMessage::Hidden => {
             state.shift_state_request(false);
+            state.request_redraw(gui);
         }
         InputMessage::Custom1 => {
-            if let Some(xous::ScalarMessage { arg1, .. }) = msg.body.scalar_message() {
-                log::debug!("Got request to set caps for next character: {arg1:?}");
-                state.shift_state_request(*arg1 != 0);
-            }
-        }
-        InputMessage::Custom3 => {
-            if let Some(xous::ScalarMessage { arg1, .. }) = msg.body.scalar_message() {
-                if let Some(input_type) = KeyboardKind::from_usize(*arg1) {
-                    log::info!("changing input type to {input_type:?}");
-                    state.set_kind(input_type)
+            let owned = match server::Owned::<UpdateKeyboard>::new(msg) {
+                Ok(o) => o,
+                Err(e) => {
+                    log::warn!("Custom1 was not a valid UpdateKeyboard archive: {e:?}");
+                    return;
                 }
+            };
+            log::debug!("Got keyboard update: {owned:?}");
+            let kind = KeyboardKind::from(&owned.kind);
+            if state.kind() != kind {
+                state.set_kind(kind);
             }
+            state.shift_state_request(owned.request_caps);
+            state.set_accept_button_text(owned.accept_button_text.as_str());
+            state.set_accept_button_enabled(owned.accept_button_enabled);
+            state.set_delete_button_enabled(owned.delete_button_enabled);
+            state.request_redraw(gui);
         }
         InputMessage::Custom4 => {
             state.on_long_press();
+            state.request_redraw(gui);
+        }
+        InputMessage::FrameBuffer => {
+            let msg = msg.take_message();
+            if let Some(mem) = msg.memory_message() {
+                let vsync_time = mem.offset.map(|o| o.get()).unwrap_or(0);
+                let is_new = mem.valid.is_some();
+                state.draw(vsync_time, is_new, mem.buf);
+                #[cfg(keyos)]
+                xous::syscall::flush_cache(mem.buf, xous::CacheOperation::Clean).expect("clean cache");
+                gui.submit_frame(mem.buf).unwrap();
+            }
         }
         _ => (),
     }

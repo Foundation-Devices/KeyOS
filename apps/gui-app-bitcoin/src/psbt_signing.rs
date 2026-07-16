@@ -33,7 +33,7 @@ use crate::{
     quantum_link_permissions::QuantumLinkPermissions,
     state::{AccountColor, AppState, PendingSingleSig},
     CreateAccount, CreateAccountState, DisplayAmount, FileSaveState, MultiSigView, Navigate, NavigateOptions,
-    PsbtOutputKind, PsbtOutputView, PsbtView, SignPsbt, SignPsbtState,
+    PsbtOutputKind, PsbtOutputView, PsbtView, ShowFiatValue, SignPsbt, SignPsbtState,
 };
 
 const FEE_WARNING_THRESHOLD: i32 = 25;
@@ -577,10 +577,11 @@ pub mod verify {
         let psbt_view = {
             let state = state.borrow();
             let display_amount = state.settings.display_amount.clone();
+            let show_fiat_value = state.settings.show_fiat_value;
             let exchange_rate = state.settings.exchange_rate.clone();
             let locale = state.system_settings.get_locale().lang().to_string();
 
-            PsbtView::from_details(&acct, &details, display_amount, exchange_rate, &locale)
+            PsbtView::from_details(&acct, &details, display_amount, show_fiat_value, exchange_rate, &locale)
         };
 
         global.set_pending_psbt(psbt_view);
@@ -612,6 +613,7 @@ impl PsbtView {
         acct: &NgAccountConfig,
         details: &TransactionDetails,
         display_amount: DisplayAmount,
+        show_fiat_value: ShowFiatValue,
         exchange_rate: ExchangeRate,
         locale: &str,
     ) -> Self {
@@ -628,7 +630,8 @@ impl PsbtView {
             .iter()
             .map(|out| {
                 let amount_btc: SharedString = format_btc(out.amount, display_amount, locale);
-                let amount_currency = format_currency(out.amount, &exchange_rate, acct.network, locale);
+                let amount_currency =
+                    format_currency(out.amount, &exchange_rate, show_fiat_value, acct.network, locale);
 
                 let (kind, address, message, transfer_index) = match &out.kind {
                     OutputKind::Change(address) => (
@@ -677,8 +680,9 @@ impl PsbtView {
         let fee_btc = format_btc(details.fee, display_amount, locale);
         let total_btc = format_btc(total, display_amount, locale);
 
-        let fee_currency = format_currency(details.fee, &exchange_rate, acct.network, locale);
-        let total_currency = format_currency(total, &exchange_rate, acct.network, locale);
+        let fee_currency =
+            format_currency(details.fee, &exchange_rate, show_fiat_value, acct.network, locale);
+        let total_currency = format_currency(total, &exchange_rate, show_fiat_value, acct.network, locale);
 
         let crypto_icon = match display_amount {
             DisplayAmount::Btc => "bitcoin-b",
@@ -692,7 +696,11 @@ impl PsbtView {
             account_name: acct.name.to_shared_string(),
             is_multisig: acct.multisig.is_some(),
             account_index: acct.index.to_shared_string(),
-            card_color: AccountColor::from_hex(&acct.color).into(),
+            card_color: if acct.multisig.is_some() {
+                AccountColor::from_hex(&acct.color).into()
+            } else {
+                AccountColor::for_account_index(acct.index).into()
+            },
             outputs: ModelRc::new(VecModel::from(outputs)),
             fee_btc,
             fee_currency,
@@ -719,9 +727,20 @@ fn get_locale_separators(locale: &str) -> (&'static str, &'static str) {
 fn format_currency(
     amount: Amount,
     exchange_rate: &ExchangeRate,
+    show_fiat_value: ShowFiatValue,
     network: NgNetwork,
     locale: &str,
 ) -> SharedString {
+    if show_fiat_value == ShowFiatValue::Disabled {
+        return SharedString::new();
+    }
+
+    // Suppress fiat when Envoy's rate currency doesn't match the user's pick;
+    // showing a non-USD symbol with a USD-derived value would be wrong.
+    if exchange_rate.currency_code != show_fiat_value.code() {
+        return SharedString::new();
+    }
+
     match network {
         NgNetwork::Bitcoin => {
             let (thousands_sep, decimal_sep) = get_locale_separators(locale);
@@ -731,7 +750,13 @@ fn format_currency(
             let fractional_part = (total_cents % 100) as i32;
 
             let whole_str = whole_part.to_string();
-            let mut result = String::from("$");
+            // Symbols containing any letter (e.g. `CHF`, `Kč`, `Bs.`, `zł`, `ден`, `C$`) get a
+            // separating space so they don't read as `Kč45,000.00`. Pure glyphs (`€`, `$`, ...) stay glued.
+            let symbol = show_fiat_value.symbol();
+            let mut result = String::from(symbol);
+            if symbol.chars().any(|c| c.is_alphabetic()) {
+                result.push(' ');
+            }
 
             for (i, ch) in whole_str.chars().enumerate() {
                 result.push(ch);
@@ -812,14 +837,6 @@ fn format_btc_amount(sats: u64, locale: &str) -> String {
         }
     }
 
-    while result.ends_with('0') && result.contains(decimal_sep) {
-        result.pop();
-    }
-
-    if result.ends_with(decimal_sep) {
-        result.pop();
-    }
-
     result
 }
 
@@ -861,25 +878,29 @@ mod tests {
     #[test]
     fn test_format_btc_amount_en() {
         // 1.5 BTC = 150,000,000 sats
-        assert_eq!(format_btc_amount(150000000, "en"), "1.5");
+        assert_eq!(format_btc_amount(150000000, "en"), "1.50000000");
         // 0.00012345 BTC = 12345 sats
         assert_eq!(format_btc_amount(12345, "en"), "0.00012345");
-        // Large amount: 1,234.56789012 BTC, truncated at 9 digits (1,234.56789) then strip trailing zeros
+        // Large amount: 1,234.56789012 BTC, truncated at 9 digits (1,234.56789)
         assert_eq!(format_btc_amount(123456789012, "en"), "1,234.56789");
         // Zero
         assert_eq!(format_btc_amount(0, "en"), "0");
         // Exactly 1 BTC
         assert_eq!(format_btc_amount(100000000, "en"), "1");
         // 0.1 BTC
-        assert_eq!(format_btc_amount(10000000, "en"), "0.1");
+        assert_eq!(format_btc_amount(10000000, "en"), "0.10000000");
+        // Preserve trailing zeroes for sub-BTC values
+        assert_eq!(format_btc_amount(110, "en"), "0.00000110");
     }
 
     #[test]
     fn test_format_btc_amount_es() {
         // 1.5 BTC with European formatting (comma as decimal separator)
-        assert_eq!(format_btc_amount(150000000, "es"), "1,5");
+        assert_eq!(format_btc_amount(150000000, "es"), "1,50000000");
         // Large amount with European thousands separator (period for thousands, comma for decimal)
         assert_eq!(format_btc_amount(123456789012, "es"), "1.234,56789");
+        // Preserve trailing zeroes for sub-BTC values
+        assert_eq!(format_btc_amount(110, "es"), "0,00000110");
     }
 
     #[test]
@@ -888,23 +909,44 @@ mod tests {
 
         // 1 BTC at $50,000
         let amount = Amount::from_sat(100_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "en"), "$50,000.00");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "en"),
+            "$50,000.00"
+        );
 
         // 0.5 BTC at $50,000 = $25,000
         let amount = Amount::from_sat(50_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "en"), "$25,000.00");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "en"),
+            "$25,000.00"
+        );
 
         // Large amount: 100 BTC = $5,000,000
         let amount = Amount::from_sat(10_000_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "en"), "$5,000,000.00");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "en"),
+            "$5,000,000.00"
+        );
 
         // Small amount with cents
         let amount = Amount::from_sat(12_345);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "en"), "$6.17");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "en"),
+            "$6.17"
+        );
 
         // Testnet should return empty string
         let amount = Amount::from_sat(100_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Testnet4, "en"), "");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Testnet4, "en"),
+            ""
+        );
+
+        // Disabled fiat display should return empty string even for mainnet.
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::Disabled, NgNetwork::Bitcoin, "en"),
+            ""
+        );
     }
 
     #[test]
@@ -913,14 +955,74 @@ mod tests {
 
         // 1 BTC at $50,000 with European formatting
         let amount = Amount::from_sat(100_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "es"), "$50.000,00");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "es"),
+            "$50.000,00"
+        );
 
         // Large amount: 100 BTC = $5,000,000 with European formatting
         let amount = Amount::from_sat(10_000_000_000);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "es"), "$5.000.000,00");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "es"),
+            "$5.000.000,00"
+        );
 
         // Small amount with cents
         let amount = Amount::from_sat(12_345);
-        assert_eq!(format_currency(amount, &exchange_rate, NgNetwork::Bitcoin, "es"), "$6,17");
+        assert_eq!(
+            format_currency(amount, &exchange_rate, ShowFiatValue::USD, NgNetwork::Bitcoin, "es"),
+            "$6,17"
+        );
+    }
+
+    #[test]
+    fn test_format_currency_uses_selected_symbol() {
+        let amount = Amount::from_sat(100_000_000);
+
+        // Matching code → uses the selected currency's symbol.
+        let eur_rate = ExchangeRate { currency_code: "EUR".into(), rate: 45000.0 };
+        assert_eq!(
+            format_currency(amount, &eur_rate, ShowFiatValue::EUR, NgNetwork::Bitcoin, "en"),
+            "€45,000.00"
+        );
+
+        // Pure-letter symbol → space inserted so it doesn't read glued.
+        let chf_rate = ExchangeRate { currency_code: "CHF".into(), rate: 40000.0 };
+        assert_eq!(
+            format_currency(amount, &chf_rate, ShowFiatValue::CHF, NgNetwork::Bitcoin, "en"),
+            "CHF 40,000.00"
+        );
+
+        // Non-ASCII letter symbol → also gets a space.
+        let czk_rate = ExchangeRate { currency_code: "CZK".into(), rate: 1_000_000.0 };
+        assert_eq!(
+            format_currency(amount, &czk_rate, ShowFiatValue::CZK, NgNetwork::Bitcoin, "en"),
+            "Kč 1,000,000.00"
+        );
+
+        // Mixed letter+glyph symbol (CAD's `C$`) — has a letter, so gets the same space treatment.
+        let cad_rate = ExchangeRate { currency_code: "CAD".into(), rate: 60000.0 };
+        assert_eq!(
+            format_currency(amount, &cad_rate, ShowFiatValue::CAD, NgNetwork::Bitcoin, "en"),
+            "C$ 60,000.00"
+        );
+
+        // Pure-glyph symbol stays glued.
+        let jpy_rate = ExchangeRate { currency_code: "JPY".into(), rate: 7_500_000.0 };
+        assert_eq!(
+            format_currency(amount, &jpy_rate, ShowFiatValue::JPY, NgNetwork::Bitcoin, "en"),
+            "¥7,500,000.00"
+        );
+
+        // PAB's symbol ends in a period (no embedded whitespace anymore); single space inserted.
+        let pab_rate = ExchangeRate { currency_code: "PAB".into(), rate: 50000.0 };
+        assert_eq!(
+            format_currency(amount, &pab_rate, ShowFiatValue::PAB, NgNetwork::Bitcoin, "en"),
+            "B/. 50,000.00"
+        );
+
+        // Mismatched code → suppress fiat rather than show wrong-units value.
+        let usd_rate = ExchangeRate { currency_code: "USD".into(), rate: 50000.0 };
+        assert_eq!(format_currency(amount, &usd_rate, ShowFiatValue::EUR, NgNetwork::Bitcoin, "en"), "");
     }
 }

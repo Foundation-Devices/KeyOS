@@ -4,7 +4,7 @@
 import { ManualBackupProps } from "props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
 import { Dialog, ButtonSection, Button, HeadingMd, NavHeader, TextMd } from "@ui/widgets.slint";
-import { Palette } from "@ui/theme.slint";
+import { Palette, UISize } from "@ui/theme.slint";
 import { OnboardingShieldPage, ShieldSection, ShieldContent, OverlayImage } from "../../../widgets/shield-page.slint";
 import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
@@ -34,6 +34,7 @@ export component ManualBackupPage inherits OnboardingShieldPage {
 
             TextMd {
                 text: TR2.format(TrId.BackupManualMainSubheader, ["2", "3"]);
+                color: Palette.content-secondary;
                 horizontal-alignment: center;
             }
         }
@@ -48,7 +49,7 @@ export component ManualBackupPage inherits OnboardingShieldPage {
             }
 
             Button {
-                label: TR2.lookup(TrId.BackupManualMainManualSeedBackup);
+                label: TR2.lookup(TrId.BackupManualMainViewSeedWords);
                 importance: primary;
                 clicked => {
                     show-dialog = true;
@@ -72,7 +73,7 @@ export component ManualBackupPage inherits OnboardingShieldPage {
             cancel-text: TR2.lookup(TrId.CommonButtonCancel);
             show-cancel: true;
             show-close-button: true;
-            width: 352px;
+            width: UISize.modal-width;
             on-cancel => {
                 show-dialog = false;
             }

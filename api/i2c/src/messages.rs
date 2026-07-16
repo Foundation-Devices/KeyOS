@@ -23,5 +23,5 @@ impl FromScalar<1> for Peripheral {
 pub struct SingleTransfer {
     pub peripheral: Peripheral,
     pub write_data: Vec<u8>,
-    pub read_len: u8,
+    pub read_len: usize,
 }

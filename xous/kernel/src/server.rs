@@ -5,7 +5,7 @@ use core::mem;
 
 use xous::{
     Error, MemoryAddress, MemoryMessage, MemoryRange, MemorySize, Message, MessageEnvelope, MessageId,
-    MessageSender, ScalarMessage, PID, SID, TID,
+    MessageSender, ScalarMessage, ServerEvent, NUM_SERVER_EVENTS, PID, SID, TID,
 };
 
 use crate::{
@@ -54,6 +54,8 @@ pub struct Server {
     ready_threads: usize,
 
     pub default_permissions: MessagePermissions,
+
+    event_handlers: [Option<MessageId>; NUM_SERVER_EVENTS],
 }
 
 pub struct SenderID {
@@ -257,7 +259,7 @@ impl MessagePermissions {
                 return Ok(xous::Result::Ok);
             }
         }
-        Err(Error::OutOfMemory)
+        Err(Error::KernelTableFull)
     }
 
     pub fn is_permitted(&self, message_id: MessageId) -> bool {
@@ -320,6 +322,7 @@ impl Server {
             queue,
             ready_threads: 0,
             default_permissions,
+            event_handlers: [None; NUM_SERVER_EVENTS],
         });
         Ok(())
     }
@@ -878,5 +881,19 @@ impl Server {
         assert!(self.ready_threads & (1 << tid) == 0);
         self.ready_threads |= 1 << tid;
         klog!("ready threads now: {:08b}", self.ready_threads);
+    }
+
+    pub fn set_event_handler(&mut self, event: ServerEvent, id: MessageId) -> Result<(), Error> {
+        if let Some(_existing) = &self.event_handlers[event as usize] {
+            return Err(Error::MemoryInUse);
+        }
+
+        self.event_handlers[event as usize] = Some(id);
+
+        Ok(())
+    }
+
+    pub fn get_event_handler(&self, event: ServerEvent) -> Option<MessageId> {
+        self.event_handlers[event as usize].clone()
     }
 }

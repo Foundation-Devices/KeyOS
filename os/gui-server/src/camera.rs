@@ -2,22 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use {
-    crate::{AppWindow, DoubleBufferVMA, Gui},
+    crate::{AppWindow, Gui},
     log::{info, warn},
-    std::time::Duration,
-    xous::{CID, PID},
+    xous::PID,
 };
 
 camera::use_api!();
 
-const CAMERA_CONNECTION_TIMEOUT_MS: u64 = 1000;
-
+#[derive(Default)]
 pub(crate) struct CameraWindow {
     #[allow(dead_code)]
-    pub(crate) input_cid: CID,
-    pub(crate) pid: PID,
-    pub(crate) bufs: DoubleBufferVMA,
+    pub(crate) latest_frame: Option<camera::Frame>,
     pub(crate) notified_visible: bool,
+    pub(crate) api: CameraApi,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,46 +61,19 @@ impl Gui {
 
     pub(crate) fn update_camera_window(&mut self) {
         let Some(pid) = self.active_app_pid() else { return };
-        let Some(camera_api) = self.camera_server_connection() else { return };
         let Some(window) = self.windows.get_mut(&pid) else { return };
-        let Some(camera_window) = &mut self.camera_window else { return };
 
         let visible = window.is_camera_visible();
-        if visible != camera_window.notified_visible {
-            if let Err(e) = camera_api.notify_visible(visible) {
-                log::error!("Couln't notify camera of visible={visible:?}: {e:?}");
-            } else {
-                camera_window.notified_visible = visible;
-            }
+        if visible != self.camera_window.notified_visible {
+            self.camera_window.api.notify_visible(visible);
+            self.camera_window.notified_visible = visible;
         }
     }
 
     pub(crate) fn camera_window_notify_hidden(&mut self) {
-        let Some(camera_api) = self.camera_server_connection() else { return };
-        let Some(camera_window) = &mut self.camera_window else { return };
-        if camera_window.notified_visible {
-            if let Err(e) = camera_api.notify_visible(false) {
-                log::error!("Couln't notify camera that it's hidden: {e:?}");
-            } else {
-                camera_window.notified_visible = false;
-            }
+        if self.camera_window.notified_visible {
+            self.camera_window.api.notify_visible(false);
+            self.camera_window.notified_visible = false;
         }
-    }
-
-    pub(crate) fn swap_camera_bufs(&mut self, pid: PID) -> bool {
-        let camera_visible = self.with_active_app_mut(|app| app.is_camera_visible()).unwrap_or(false);
-
-        if let Some(camera_window) = &mut self.camera_window {
-            if camera_visible && camera_window.pid == pid {
-                camera_window.bufs.swap();
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn camera_server_connection(&mut self) -> Option<CameraApi> {
-        CameraApi::try_new_with_timeout(Duration::from_millis(CAMERA_CONNECTION_TIMEOUT_MS))
     }
 }

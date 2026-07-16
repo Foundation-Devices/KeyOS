@@ -14,6 +14,7 @@ spi = { workspace = true }
 [target.'cfg(keyos)'.dependencies]
 atsama5d27 = { workspace = true }
 dma = { workspace = true }
+gpio = { workspace = true }
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 power-manager = { workspace = true }
 st25r95 = { workspace = true }

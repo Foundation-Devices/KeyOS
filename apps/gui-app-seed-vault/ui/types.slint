@@ -1,33 +1,37 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export enum SeedViewType {
     bitcoin-12,
     bitcoin-24,
     password,
     nostr-key,
+    nostr-key-import,
+    password-generated,
+    bitcoin-import-12,
+    bitcoin-import-24,
 }
 
 // This handles all bitcoin seeds and nostr keys
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct IndexedSeedView {
     index: string,  // Uses a string to represent u32, since slint ints are i32
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PasswordView {
     account: string,
     password: string,
 }
 
-@rust-attr(derive(serde::Serialize, serde::Deserialize))
+export struct ImportedSeedInfo {
+    entropy: string,
+    fingerprint: string,
+}
+
 export struct SeedView {
     label: string,
     color: int,
     seed-type: SeedViewType,
     indexed-seed: IndexedSeedView,
     password: PasswordView,
-    // TODO: determine if view index is necessary
     index: int,
 }

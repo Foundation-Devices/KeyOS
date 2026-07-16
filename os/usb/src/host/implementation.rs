@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::time::{Duration, Instant};
+
 use server::{
     ArchiveEventSubscriptionHandler, BlockingScalarHandler, DeferredLendMut, DeferredLendMutHandler,
     MessageId as _, ScalarHandler,
@@ -11,8 +13,7 @@ use xous::{arch::irq::IrqNumber, keyos::PAGE_SIZE, MemoryRange};
 use xous_ticktimer::{Ticktimer, TicktimerCallback};
 
 use super::messages::*;
-
-power_manager::use_api!();
+use crate::{PowerManagerApi, PowerManagerExtApi};
 
 #[derive(server::Server)]
 #[name = "os/usb"]
@@ -27,8 +28,10 @@ pub struct UsbHostServer {
     devices: Vec<Device>,
     statistics: Statistics,
     power_manager: PowerManagerApi,
+    power_manager_ext: PowerManagerExtApi,
     work_callback: Option<TicktimerCallback>,
     enabled: bool,
+    otg_watch_since: Option<Instant>,
 }
 
 #[derive(Debug, Default, Clone, server::Permissions)]
@@ -77,6 +80,7 @@ struct Device {
     handle: usize,
     claimed: Option<xous::PID>,
     address: u8,
+    descriptors: ehci::descriptors::DescriptorSet,
 }
 
 struct InterruptContext<'a> {
@@ -106,6 +110,7 @@ impl server::Server for UsbHostServer {
 
 impl UsbHostServer {
     const BUFFER_POOL_SIZE: usize = 8;
+    const DEVICE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
     const QH_POOL_SIZE: usize = 16;
     const QTD_POOL_SIZE: usize = 128;
     pub const WORK_PERIOD_MS: usize = 100;
@@ -180,7 +185,7 @@ impl UsbHostServer {
             .disable_peripheral(atsama5d27::pmc::PeripheralId::Uhphs)
             .expect("Could not disable Usb host clock");
         Self {
-            ticktimer: Ticktimer::new().unwrap(),
+            ticktimer: Ticktimer::default(),
             ehci_memory,
             ehci,
             qh_backing,
@@ -190,8 +195,10 @@ impl UsbHostServer {
             devices: Vec::new(),
             statistics: Default::default(),
             power_manager,
+            power_manager_ext: Default::default(),
             work_callback: None,
             enabled: false,
+            otg_watch_since: None,
         }
     }
 
@@ -212,9 +219,19 @@ impl UsbHostServer {
                 devices: &mut self.devices,
                 next_device_handle: &mut self.next_device_handle,
                 event_subscribers: &mut self.event_subscribers,
+                power_manager_ext: &self.power_manager_ext,
+                otg_watch_since: &mut self.otg_watch_since,
             },
         ) {
             log::warn!("Error during ehci work(): {e:?}");
+        }
+        if self.otg_watch_since.is_some_and(|since| since.elapsed() >= Self::DEVICE_CONNECTION_TIMEOUT) {
+            log::info!(
+                "No device after {:?} of host-mode activation, backing off OTG",
+                Self::DEVICE_CONNECTION_TIMEOUT
+            );
+            self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
+            self.otg_watch_since = None;
         }
         self.work_callback.as_ref().unwrap().request(Self::WORK_PERIOD_MS, DoWork::ID, 0);
     }
@@ -240,6 +257,8 @@ impl UsbHostServer {
             devices: &mut self.devices,
             next_device_handle: &mut self.next_device_handle,
             event_subscribers: &mut self.event_subscribers,
+            power_manager_ext: &self.power_manager_ext,
+            otg_watch_since: &mut self.otg_watch_since,
         })?;
         self.power_manager.disable_peripheral(atsama5d27::pmc::PeripheralId::Uhphs)?;
         self.enabled = false;
@@ -257,12 +276,13 @@ impl DeferredLendMutHandler<BulkIn> for UsbHostServer {
             msg.set_response(Err(UsbError::NotClaimed));
             return;
         }
-        let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
-            msg.set_response(Err(UsbError::InvalidParameter));
-            return;
-        };
-
-        xous::flush_cache(buffer, xous::CacheOperation::Invalidate).ok();
+        if msg.body().length > 0 {
+            let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
+                msg.set_response(Err(UsbError::InvalidParameter));
+                return;
+            };
+            xous::flush_cache(buffer, xous::CacheOperation::Invalidate).ok();
+        }
 
         self.statistics.transfers += 1;
 
@@ -286,12 +306,13 @@ impl DeferredLendMutHandler<BulkOut> for UsbHostServer {
             msg.set_response(Err(UsbError::NotClaimed));
             return;
         }
-        let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
-            msg.set_response(Err(UsbError::InvalidParameter));
-            return;
-        };
-
-        xous::flush_cache(buffer, xous::CacheOperation::Clean).ok();
+        if msg.body().length > 0 {
+            let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
+                msg.set_response(Err(UsbError::InvalidParameter));
+                return;
+            };
+            xous::flush_cache(buffer, xous::CacheOperation::Clean).ok();
+        }
 
         self.statistics.transfers += 1;
 
@@ -309,6 +330,8 @@ struct EhciEventHandler<'a> {
     next_device_handle: &'a mut usize,
     event_subscribers: &'a mut Vec<server::ArchiveEventSubscriber<UsbEvent>>,
     devices: &'a mut Vec<Device>,
+    power_manager_ext: &'a PowerManagerExtApi,
+    otg_watch_since: &'a mut Option<Instant>,
 }
 
 impl server::ScalarHandler<DoWork> for UsbHostServer {
@@ -330,10 +353,22 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         address: u8,
         descriptors: ehci::descriptors::DescriptorSet,
     ) {
+        // Reject self-powered devices; only accept bus-powered devices
+        const SELF_POWERED_BIT: u8 = 1 << 6; // D6: self-powered
+
+        let is_self_powered =
+            descriptors.configurations().any(|config| (config.attributes & SELF_POWERED_BIT) != 0);
+
+        if is_self_powered {
+            log::info!("Device is self-powered, disabling OTG and not connecting: {descriptors:?}");
+            self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
+            return;
+        }
+
         log::info!("Device connected and configured: {descriptors:?}");
         let handle = *self.next_device_handle;
         *self.next_device_handle += 1;
-        self.devices.push(Device { handle, claimed: None, address });
+        self.devices.push(Device { handle, claimed: None, address, descriptors: descriptors.clone() });
         self.send_event(&UsbEvent::Connect { handle, descriptors });
     }
 
@@ -343,7 +378,7 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
             self.send_event(&UsbEvent::Disconnect { handle: self.devices[index].handle });
             self.devices.remove(index);
         } else {
-            log::warn!("Could not find device entry to disconnect (address: {address})");
+            log::debug!("No device entry found for address {address} (may have been rejected)");
         }
     }
 
@@ -354,6 +389,10 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         context: EhciMessageContext,
     ) {
         context.respond(result.map_err(From::from));
+    }
+
+    fn port_connected(&mut self, _controller: &mut ehci::Controller<EhciMessageContext>) {
+        *self.otg_watch_since = None;
     }
 }
 
@@ -372,6 +411,11 @@ impl ArchiveEventSubscriptionHandler<Subscribe> for UsbHostServer {
         subscriber: server::ArchiveEventSubscriber<UsbEvent>,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), server::Infallible> {
+        for device in &self.devices {
+            subscriber
+                .send(&UsbEvent::Connect { handle: device.handle, descriptors: device.descriptors.clone() })
+                .ok();
+        }
         self.event_subscribers.push(subscriber);
         Ok(())
     }
@@ -414,6 +458,16 @@ impl ScalarHandler<SetEnabled> for UsbHostServer {
             }
         } else if let Err(e) = self.disable() {
             log::warn!("Error during ehci host disable: {e:?}");
+        }
+    }
+}
+
+impl ScalarHandler<HostOtgMode> for UsbHostServer {
+    fn handle(&mut self, msg: HostOtgMode, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        if msg.0 {
+            self.otg_watch_since = Some(Instant::now());
+        } else {
+            self.otg_watch_since = None;
         }
     }
 }

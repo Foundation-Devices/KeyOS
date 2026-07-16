@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6c6f672d66696c650000000000000000"
 syscall = [ "SetThreadPriority",]
 
@@ -10,3 +11,4 @@ template = [ "fs-generic" ]
     "GetUserReadAccess",
     "GetUserWriteAccess",
 ]
+"os/log" = ["ReadLogs"]

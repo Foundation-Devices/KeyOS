@@ -50,8 +50,6 @@ const UPD_MAX_WRITE_RETRY_COUNT: usize = 10;
 const BT_CHALLENGE_PERIOD_SECS: u64 = 60;
 
 const BACKGROUND_POLL_MS: usize = 1000;
-const COMM_FAILURE_RETRY_MS: usize = 10;
-const COMM_FAILURE_THRESHOLD: usize = 3;
 
 const STATS_PRINT_PERIOD_MS: u64 = 3000;
 
@@ -83,8 +81,6 @@ pub struct BluetoothServer {
     device_id_sent: bool,
     is_challenge_ok: bool,
     challenge_last_check: Instant,
-    rssi_comm_failure_tries: usize,
-    recv_comm_failure_tries: usize,
     stats: Stats,
     device_name: String,
 }
@@ -104,10 +100,12 @@ macro_rules! send_protocol_msg_wrapper {
             Ok(unexpected) => {
                 log::error!("Got unexpected response to {}", stringify!($msg));
                 log::debug!("{unexpected:?}");
+                $self.reset();
                 Err(BluetoothError::SpiProtocolError)
             }
             Err(e) => {
                 log::error!("Got error to {}: {e:?}", stringify!($msg));
+                $self.reset();
                 Err(e)
             }
         }
@@ -191,8 +189,6 @@ impl Default for BluetoothServer {
             challenge_secret,
             is_challenge_ok: false,
             challenge_last_check: Instant::now(),
-            rssi_comm_failure_tries: 0,
-            recv_comm_failure_tries: 0,
             stats: Stats { rx_packets: 0, rx_size: 0, tx_packets: 0, tx_size: 0, since: Instant::now() },
             device_name: String::new(),
         }
@@ -200,13 +196,6 @@ impl Default for BluetoothServer {
 }
 
 impl BluetoothServer {
-    fn is_communication_failure(error: &BluetoothError) -> bool {
-        matches!(
-            error,
-            BluetoothError::SpiTimeout | BluetoothError::SpiError(_) | BluetoothError::SpiProtocolError
-        )
-    }
-
     pub(crate) fn set_state(&mut self, new_state: State) {
         if self.state != new_state {
             self.state = new_state;
@@ -219,44 +208,15 @@ impl BluetoothServer {
     }
 
     pub fn refresh_connection(&mut self) -> Result<(), BluetoothError> {
-        match self.get_bluetooth_status() {
-            Ok(status) => {
-                self.rssi_comm_failure_tries = 0;
-                if status.queue_overflow {
-                    log::error!("RX Queue overflowed on BLE chip (will cause packet loss)");
-                }
-                self.set_state(match status.connection {
-                    host_protocol::ConnectionStatus::Disabled => State::Disabled,
-                    host_protocol::ConnectionStatus::WaitingForConnection => State::WaitingForConnection,
-                    host_protocol::ConnectionStatus::Connected { rssi } => State::Connected { rssi },
-                })
-            }
-            Err(e) => {
-                if Self::is_communication_failure(&e) {
-                    self.rssi_comm_failure_tries = self.rssi_comm_failure_tries.saturating_add(1);
-                    if self.rssi_comm_failure_tries >= COMM_FAILURE_THRESHOLD {
-                        log::warn!(
-                            "GetSignalStrength communication failed {}/{} times, resetting BLE chip: {e:?}",
-                            self.rssi_comm_failure_tries,
-                            COMM_FAILURE_THRESHOLD
-                        );
-                        self.reset();
-                        self.rssi_comm_failure_tries = 0;
-                        return Err(e);
-                    }
-                    log::warn!(
-                        "GetSignalStrength communication failed ({}/{}), retrying without reset: {e:?}",
-                        self.rssi_comm_failure_tries,
-                        COMM_FAILURE_THRESHOLD
-                    );
-                } else {
-                    self.rssi_comm_failure_tries = 0;
-                    log::warn!(
-                        "GetSignalStrength failed but BLE is still communicating; not resetting: {e:?}"
-                    );
-                }
-            }
+        let status = self.get_bluetooth_status()?;
+        if status.queue_overflow {
+            log::error!("RX Queue overflowed on BLE chip (will cause packet loss)");
         }
+        self.set_state(match status.connection {
+            host_protocol::ConnectionStatus::Disabled => State::Disabled,
+            host_protocol::ConnectionStatus::WaitingForConnection => State::WaitingForConnection,
+            host_protocol::ConnectionStatus::Connected { rssi } => State::Connected { rssi },
+        });
         Ok(())
     }
 
@@ -463,18 +423,11 @@ impl BluetoothServer {
         if !self.state.is_booted() {
             return Err(BluetoothError::InvalidState);
         }
-        match self.send_protocol_msg(HostProtocolMessage::Bluetooth(Bluetooth::GetStatus), GENERAL_TIMEOUT) {
-            Ok(HostProtocolMessage::Bluetooth(Bluetooth::Status(status))) => Ok(status),
-            Ok(unexpected) => {
-                log::error!("Got unexpected response to GetStatus");
-                log::error!("{unexpected:?}");
-                Err(BluetoothError::SpiProtocolError)
-            }
-            Err(e) => {
-                log::error!("Got error to GetStatus: {e:?}");
-                Err(e)
-            }
-        }
+        send_protocol_msg_wrapper!(
+            self,
+            Bluetooth::GetStatus,
+            Bluetooth::Status(status) => Ok(status)
+        )
     }
 
     pub fn send(&mut self, data: &[u8]) -> Result<(), BluetoothError> {
@@ -503,8 +456,6 @@ impl BluetoothServer {
         std::thread::sleep(Duration::from_millis(10));
         self.gpio_api.set_pin(GpioPin::BtRst, true).expect("Could not set reset pin to high");
         self.get_state_tries = 0;
-        self.rssi_comm_failure_tries = 0;
-        self.recv_comm_failure_tries = 0;
         self.set_state(State::Booting);
         self.request_poll(INITIAL_BOOT_TIME);
     }
@@ -979,41 +930,16 @@ impl BluetoothServer {
             }
 
             State::WaitingForConnection | State::Connected { .. } => {
-                match self.recv_messages() {
-                    Ok(()) => {
-                        self.recv_comm_failure_tries = 0;
-                    }
-                    Err(e) => {
-                        if Self::is_communication_failure(&e) {
-                            self.recv_comm_failure_tries = self.recv_comm_failure_tries.saturating_add(1);
-                            log::error!(
-                                "Error receiving packets ({}/{}) ({e:?}).",
-                                self.recv_comm_failure_tries,
-                                COMM_FAILURE_THRESHOLD
-                            );
-                            if self.recv_comm_failure_tries >= COMM_FAILURE_THRESHOLD {
-                                self.reset();
-                            } else {
-                                self.request_poll(COMM_FAILURE_RETRY_MS);
-                            }
-                        } else {
-                            self.recv_comm_failure_tries = 0;
-                            log::warn!(
-                                "Error receiving packets but BLE is still communicating; not resetting: {e:?}"
-                            );
-                            self.request_poll(COMM_FAILURE_RETRY_MS);
-                        }
-                        return;
-                    }
-                }
+                if let Err(e) = self.recv_messages() {
+                    log::error!("Error receiving packets ({e:?}).");
+                    self.reset();
+                };
                 if self.challenge_last_check.elapsed().as_secs() > BT_CHALLENGE_PERIOD_SECS {
                     self.is_challenge_ok =
                         self.challenge().inspect_err(|e| log::error!("Error challenge ({e:?})")).is_ok();
                 }
                 self.stats.print();
-                if let Err(e) = self.refresh_connection() {
-                    log::warn!("Connection refresh error: {e:?}");
-                }
+                self.refresh_connection().ok();
             }
             State::Disabled => {
                 if self.challenge_last_check.elapsed().as_secs() > BT_CHALLENGE_PERIOD_SECS {

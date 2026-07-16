@@ -12,7 +12,7 @@ import {
     PinEntry,
     TextSm
 } from "@ui/widgets.slint";
-import { Palette, Size, Importance } from "@ui/theme.slint";
+import { Palette, Size, Importance, Utils } from "@ui/theme.slint";
 
 import { Navigate, Animate } from "../../../gen/navigate.slint";
 import { SeedGlobal } from "../../../onboarding-callbacks.slint";
@@ -61,6 +61,7 @@ component SetPin inherits Rectangle {
 
         LoginLayout {
             pin-entry := PinEntry {
+                accept-button-enabled: self.pin-length >= root.minimum-length;
                 accepted => {
                     if (root.is-confirming) {
                         if (self.pin == root.new-pin) {
@@ -113,12 +114,14 @@ component SetPin inherits Rectangle {
 }
 
 component SetPassword inherits Rectangle {
+    in property <int> minimum-length: 6;
     callback change-pin(string);
     callback switch-to-pin();
 
     private property <string> new-pin: "";
     private property <bool> is-confirming: false;
     private property <bool> verification-failed: false;
+    private property <int> password-length: Utils.string-length(password-entry.password);
 
     init => {
         password-entry.focus();
@@ -141,6 +144,7 @@ component SetPassword inherits Rectangle {
 
         LoginLayout {
             password-entry := PasswordEntry {
+                accept-button-enabled: root.password-length >= root.minimum-length;
                 accepted => {
                     if (root.is-confirming) {
                         if (self.password == root.new-pin) {
@@ -149,7 +153,7 @@ component SetPassword inherits Rectangle {
                             root.verification-failed = true;
                             self.password = "";
                         }
-                    } else {
+                    } else if (root.password-length >= root.minimum-length) {
                         root.is-confirming = true;
                         root.new-pin = self.password;
                         self.password = "";

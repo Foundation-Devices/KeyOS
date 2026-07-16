@@ -22,13 +22,13 @@ struct StructWithVec {
     b: usize,
 }
 
-impl server::ArchiveHandler<StructWithVec> for BufferServer {
+impl server::BlockingArchiveHandler<StructWithVec> for BufferServer {
     fn handle(
         &mut self,
         mut msg: StructWithVec,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <StructWithVec as server::Archive>::Response {
+    ) -> <StructWithVec as server::BlockingArchive>::Response {
         log::info!("Got: {}, {:?} (last: {}), {}", msg.a, &msg.v[0..10], msg.v.last().unwrap(), msg.b);
         msg.a += 1;
         msg.b += 1;
@@ -47,7 +47,7 @@ pub fn main() -> () {
         server::listen_and_connect(BufferServer, xous::current_pid().unwrap()).into();
     let mut msg = StructWithVec { a: 123, v: (0..16000).map(|a| a as u8).collect(), b: 456 };
     msg.v.push(255);
-    let result = conn.send_archive(msg);
+    let result = conn.send_blocking_archive(msg);
 
     log::info!(
         "Result: {}, {:?} (last: {}), {}",

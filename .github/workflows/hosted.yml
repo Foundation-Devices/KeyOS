@@ -13,6 +13,9 @@ jobs:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/setup-nix-rust
 
+      - run: sed -i 's/rustflags = \[/rustflags = ["-D", "warnings", /g' .cargo/config.toml
+        name: Disallow warnings
+
       - name: Build KeyOS in hosted mode
         run: nix develop .#build --command cargo xtask build --hosted --dont-sign --ci
 

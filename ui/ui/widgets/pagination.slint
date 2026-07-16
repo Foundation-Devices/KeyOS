@@ -69,7 +69,8 @@ export component Pagination inherits Rectangle {
     in property <int> total-pages: 1;
     in-out property <int> current-page: 0;
     in property <length> page-spacing: Size.zero;
-    in property <length> vertical-spacing: Size.sz4;
+    in property <length> dots-padding-top: Size.sz4;
+    in property <length> dots-padding-bottom: Size.zero;
 
     VerticalLayout {
         alignment: stretch;
@@ -118,7 +119,8 @@ export component Pagination inherits Rectangle {
         if total-pages > 1: HorizontalLayout {
             alignment: center;
             spacing: Size.sz3;
-            padding-top: vertical-spacing;
+            padding-top: dots-padding-bottom;
+            padding-bottom: dots-padding-bottom;
 
             for page in Math.min(total-pages, 10): Dot {
                 page-index: page;

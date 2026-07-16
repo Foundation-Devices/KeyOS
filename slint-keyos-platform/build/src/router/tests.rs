@@ -96,6 +96,9 @@ fn single_dynamic() {
                     callback backward-animate(Animate);
                     callback forward-animate(Animate);
 
+                    callback return-home();
+                    callback return-home-animate(Animate);
+
                     callback debug();
 
                     callback navigate(string, NavigateOptions);
@@ -229,6 +232,9 @@ fn single_static() {
 
                     callback backward-animate(Animate);
                     callback forward-animate(Animate);
+
+                    callback return-home();
+                    callback return-home-animate(Animate);
 
                     callback debug();
 
@@ -414,6 +420,9 @@ fn two_with_navigate() {
                     callback backward-animate(Animate);
                     callback forward-animate(Animate);
 
+                    callback return-home();
+                    callback return-home-animate(Animate);
+
                     callback debug();
 
                     callback navigate(string, NavigateOptions);
@@ -585,6 +594,9 @@ fn nested_params() {
                     callback backward-animate(Animate);
                     callback forward-animate(Animate);
 
+                    callback return-home();
+                    callback return-home-animate(Animate);
+
                     callback debug();
 
                     callback navigate(string, NavigateOptions);
@@ -741,6 +753,9 @@ fn complex_types() {
 
                     callback backward-animate(Animate);
                     callback forward-animate(Animate);
+
+                    callback return-home();
+                    callback return-home-animate(Animate);
 
                     callback debug();
 

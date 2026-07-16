@@ -3,7 +3,7 @@
 
 use bt::{messages::*, BluetoothError, State};
 use server::{
-    ArchiveEventSubscriber, ArchiveEventSubscriptionHandler, ArchiveHandler, BlockingScalarHandler,
+    ArchiveEventSubscriber, ArchiveEventSubscriptionHandler, BlockingArchiveHandler, BlockingScalarHandler,
     MessageId as _, ScalarEventSubscriber, ScalarEventSubscriptionHandler, ScalarHandler, Server,
 };
 
@@ -58,13 +58,13 @@ impl server::ScalarEventHandler<settings::global::BluetoothEnabled> for Bluetoot
     }
 }
 
-impl ArchiveHandler<GetBtAddr> for BluetoothServer {
+impl BlockingArchiveHandler<GetBtAddr> for BluetoothServer {
     fn handle(
         &mut self,
         _msg: GetBtAddr,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetBtAddr as server::Archive>::Response {
+    ) -> <GetBtAddr as server::BlockingArchive>::Response {
         self.get_bt_addr()
     }
 }
@@ -165,7 +165,7 @@ impl BlockingScalarHandler<DisableAdvChannels> for BluetoothServer {
     }
 }
 
-impl ArchiveHandler<SendBle> for BluetoothServer {
+impl BlockingArchiveHandler<SendBle> for BluetoothServer {
     fn handle(
         &mut self,
         msg: SendBle,
@@ -194,7 +194,7 @@ impl ScalarHandler<SubscriberDisconnected> for BluetoothServer {
     }
 }
 
-impl ArchiveHandler<TestEcho> for BluetoothServer {
+impl BlockingArchiveHandler<TestEcho> for BluetoothServer {
     fn handle(
         &mut self,
         msg: TestEcho,
@@ -205,13 +205,13 @@ impl ArchiveHandler<TestEcho> for BluetoothServer {
     }
 }
 
-impl ArchiveHandler<GetBleVersionInfo> for BluetoothServer {
+impl BlockingArchiveHandler<GetBleVersionInfo> for BluetoothServer {
     fn handle(
         &mut self,
         _msg: GetBleVersionInfo,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetBleVersionInfo as server::Archive>::Response {
+    ) -> <GetBleVersionInfo as server::BlockingArchive>::Response {
         self.get_version_info()
     }
 }

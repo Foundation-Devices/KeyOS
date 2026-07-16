@@ -83,7 +83,7 @@ pub fn run(config: Config) -> ! {
     let fs = FileSystem::default();
     let log_buffer = xous::map_memory(None, None, LOG_BUFFER_SIZE, xous::MemoryFlags::W)
         .expect("Could not allocate buffer");
-    let log_reader = log_server::LogReader::default();
+    let log_reader = log_server::reader::LogReader::default();
     let mut sum_len = 0;
     let mut log_file = open_log_file(&fs, config);
 

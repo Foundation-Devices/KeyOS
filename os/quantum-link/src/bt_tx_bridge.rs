@@ -50,9 +50,11 @@ pub struct QuantumLinkSender {
 }
 
 impl QuantumLinkSender {
-    pub fn send(&self, failure: BtSendFailure) { self.conn.try_send_move(failure).ok(); }
+    pub fn send(&self, failure: BtSendFailure) { self.conn.try_send_archive(failure).ok(); }
 
-    pub fn send_heartbeat_result(&self, result: HeartbeatSendResult) { self.conn.try_send_move(result).ok(); }
+    pub fn send_heartbeat_result(&self, result: HeartbeatSendResult) {
+        self.conn.try_send_archive(result).ok();
+    }
 }
 
 pub fn start_ble_send_thread() -> mpsc::Sender<BtSend> {

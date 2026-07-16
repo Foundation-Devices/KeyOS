@@ -3,12 +3,12 @@
 
 use std::{
     io::Write,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 use fs::Location;
 use mass_storage::{BlockDeviceCommands, MassStorageEmulation, UsbEmulationCommands};
-use server::{ArchiveHandler, MessageId as _, Server, ServerMessages};
+use server::{BlockingArchiveHandler, MessageId as _, Server, ServerMessages};
 use settings::global::AirlockMode;
 use usb::device::{
     api::{EndpointDirection, EndpointType},
@@ -46,16 +46,16 @@ const ENDPOINTS: [EndpointProperties; 2] = [
         ep_direction: EndpointDirection::In,
         max_packet_len: 512,
         interval: 0,
+        use_dma: true,
     },
     EndpointProperties {
         ep_type: EndpointType::Bulk,
         ep_direction: EndpointDirection::Out,
         max_packet_len: 512,
         interval: 0,
+        use_dma: true,
     },
 ];
-
-static AIRLOCK_MOUNTED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Default)]
 pub(crate) struct SetupResponder {
@@ -65,12 +65,12 @@ impl ServerMessages for SetupResponder {
     const NAME: &'static str = "";
 
     fn messages() -> &'static [server::MessageDef<Self>] {
-        &[(SetupPacketCallback::ID, server::handle_archive_message::<SetupPacketCallback, _>)]
+        &[(SetupPacketCallback::ID, server::handle_blocking_archive_message::<SetupPacketCallback, _>)]
     }
 }
 impl Server for SetupResponder {}
 
-impl ArchiveHandler<SetupPacketCallback> for SetupResponder {
+impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
     fn handle(
         &mut self,
         SetupPacketCallback(msg): SetupPacketCallback,
@@ -132,7 +132,7 @@ impl<'a> UsbEmulationCommands<BufferWrapper> for UsbWrapper<'a> {
         buffer: &BufferWrapper,
         len: usize,
     ) -> core::result::Result<usize, mass_storage::UsbError> {
-        self.ep_in.write_buf(buffer.0, len as u16).map_err(|e| {
+        self.ep_in.write_buf(buffer.0, len).map_err(|e| {
             log::debug!("Error while writing {len} bytes: {e:?}");
             match e {
                 usb::error::UsbError::HostDisconnected => mass_storage::UsbError::Disconnected,
@@ -344,17 +344,14 @@ pub fn start() -> Result<(), crate::error::MassStorageEmulationError> {
             }
             AirlockMode::ReadOnly | AirlockMode::ReadWrite => {
                 _umount_task = None;
-                if AIRLOCK_MOUNTED.load(Ordering::Relaxed) {
-                    if let Err(e) = fs.unmount_airlock() {
-                        log::error!("Couldn't unmount airlock: {e:?}");
-                        // There was a problem setting up airlock.
-                        // Let's wait for a disconnection before retrying.
-                        while usb_api.is_connected()? {
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                        continue;
+                if let Err(e) = fs.unmount_airlock() {
+                    log::error!("Couldn't unmount airlock: {e:?}");
+                    // There was a problem setting up airlock.
+                    // Let's wait for a disconnection before retrying.
+                    while usb_api.is_connected()? {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
                     }
-                    AIRLOCK_MOUNTED.store(false, Ordering::Relaxed)
+                    continue;
                 }
                 run_emulation(
                     &mut ep_in,
@@ -367,7 +364,6 @@ pub fn start() -> Result<(), crate::error::MassStorageEmulationError> {
                     async move {
                         sleep.await;
                         fs.mount_airlock().ok();
-                        AIRLOCK_MOUNTED.store(true, Ordering::Relaxed);
                     }
                 }))
             }

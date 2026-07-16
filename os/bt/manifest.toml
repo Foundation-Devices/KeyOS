@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0xe704b7547cb840965eea399a11c2f20f"
 syscall = ["SetThreadPriority"]
 extends = "../../api/bt"

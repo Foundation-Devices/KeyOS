@@ -168,14 +168,17 @@ impl<BD: BlockDevice> Read for Disk<BD> {
             return Ok(0);
         }
 
+        let remaining = usize::try_from(len_bytes - pos).unwrap_or(usize::MAX);
+        let buf_len = buf.len().min(remaining);
+
         let offset = (pos % BLOCK_SIZE) as usize;
         let block_idx = start + (pos / BLOCK_SIZE) as u32;
         let len;
-        if offset == 0 && buf.len() >= BLOCK_SIZE as usize {
-            len = buf.len() & !(BLOCK_SIZE as usize - 1);
+        if offset == 0 && buf_len >= BLOCK_SIZE as usize {
+            len = buf_len & !(BLOCK_SIZE as usize - 1);
             self.read_blocks(block_idx, &mut buf[0..len])?;
         } else {
-            len = buf.len().min(BLOCK_SIZE as usize - offset);
+            len = buf_len.min(BLOCK_SIZE as usize - offset);
             let block = self.cached_block(block_idx, true)?;
             buf[0..len].copy_from_slice(&block.data[offset..(offset + len)]);
         }
@@ -194,15 +197,18 @@ impl<BD: BlockDevice> Write for Disk<BD> {
             return Ok(0);
         }
 
+        let remaining = usize::try_from(len_bytes - pos).unwrap_or(usize::MAX);
+        let buf_len = buf.len().min(remaining);
+
         let offset = (pos % BLOCK_SIZE) as usize;
         let block_idx = start + (pos / BLOCK_SIZE) as u32;
         let len;
-        if offset == 0 && buf.len() >= BLOCK_SIZE as usize {
+        if offset == 0 && buf_len >= BLOCK_SIZE as usize {
             // Fast path
-            len = buf.len() & !(BLOCK_SIZE as usize - 1);
+            len = buf_len & !(BLOCK_SIZE as usize - 1);
             self.write_blocks(block_idx, &buf[0..len])?;
         } else {
-            len = buf.len().min(BLOCK_SIZE as usize - offset);
+            len = buf_len.min(BLOCK_SIZE as usize - offset);
 
             let block = self.cached_block(block_idx, offset != 0 || len != BLOCK_SIZE as usize)?;
             block.data[offset..(offset + len)].copy_from_slice(&buf[0..len]);

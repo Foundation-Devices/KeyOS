@@ -22,6 +22,9 @@ export global Utils {
     // returns the length of a string
     pure callback string-length(string) -> int;
 
+    // ISO-4217 currency code → display glyph (e.g. "EUR" → "€"). Empty string for unknown codes.
+    pure callback currency-symbol(string) -> string;
+
     // parameters: string_to_split, delimeter
     // return value: array of strings
     pure callback split(string, string) -> [string];

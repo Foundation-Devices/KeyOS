@@ -1,99 +1,82 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crypto::{
-    error::CryptoError, messages::*, Direction, AES_BLOCK_SIZE, SHA224_HASH_SIZE, SHA256_HASH_SIZE,
-    SHA384_HASH_SIZE, SHA512_HASH_SIZE, SHA_DMA_ALIGNMENT,
-};
+use crypto::{error::CryptoError, messages::*, Direction, AES_BLOCK_SIZE};
 use {
     atsama5d27::{
-        aes::{Aes, AesMode, Iv},
+        aes::{Aes, Iv},
         pmc::PeripheralId,
         sha::{Algorithm, Sha, Sha224, Sha256, Sha384, Sha512, ShaHwContext},
     },
     dma::error::DmaError,
     securam_manager::SecuramManager,
-    server::xous::{flush_cache, syscall, CacheOperation, MemoryAddress, MemoryFlags, MemoryRange, PID},
-    sha2::{Digest, Sha224 as SwSha224, Sha256 as SwSha256, Sha384 as SwSha384, Sha512 as SwSha512},
+    server::{
+        xous::{flush_cache, syscall, CacheOperation, MemoryAddress, MemoryFlags, MemoryRange, PID},
+        ScalarEventSubscriber, ServerContext,
+    },
     std::collections::BTreeMap,
 };
-
-use crate::CryptoServer;
 
 dma::use_api!();
 power_manager::use_api!();
 
-/// Maximum number of concurrent SHA contexts per process
-const MAX_SHA_CONTEXTS_PER_PROCESS: usize = 4;
-
-pub(crate) struct Inner {
+#[derive(server::Server)]
+#[name = "os/crypto"]
+pub(crate) struct CryptoServer {
     aes_contexts: BTreeMap<(PID, u8), AesContext>,
     next_context_id: u8,
     aes: Aes,
     sha: Sha,
     dma_aes_tx: DmaTransfer,
     dma_aes_rx: DmaTransfer,
+    dma_disk_encrypt_tx: DmaTransfer,
+    dma_disk_encrypt_rx: DmaTransfer,
     dma_sha: DmaTransfer,
     power_manager: PowerManagerApi,
     securam_manager: SecuramManager,
     securam_slot_occupied: [bool; securam_manager::NUM_SECURAM_AES_KEYS],
-    sha_contexts: BTreeMap<(PID, u8), ShaContext>,
+    sha_contexts: BTreeMap<(PID, usize), ShaContext>,
+    last_sha_context_id: usize,
+    disk_encrypt_subscriber: Option<ScalarEventSubscriber<DiskEncryptComplete>>,
+    disk_encrypt_in_flight: bool,
 }
 
 #[derive(Clone)]
 struct ShaContext {
-    bytes_processed: usize,
-    hw_context: ShaHwContext,
+    algo: ShaAlgo,
+    hash_state: [u8; 64],
+}
 
-    // Software fallback for the final unaligned chunk if the total length isn't a multiple of 4 bytes.
-    // This is needed because the hardware requires 32-bit aligned data, but the final chunk may be smaller
-    // and unaligned.
-    sw_hasher: Option<SwHasher>,
-    sw_final_hash: Option<Vec<u8>>,
+struct AesContext {
+    key_slot: usize,
+    finalized: bool,
+    mode: AesContextMode,
 }
 
 #[derive(Debug, Clone)]
-enum AesContext {
-    Ecb { key_slot: usize },
+enum AesContextMode {
+    Ecb,
 
-    Cbc { key_slot: usize, iv: atsama5d27::aes::Iv },
+    Cbc {
+        iv: atsama5d27::aes::Iv,
+    },
+    Gcm {
+        aadlen: usize,  // aad length processed so far
+        datalen: usize, // data length processed so far
+        iv: [u32; 3],
+        ctr: u32,
+        ghash: [u32; 4], // intermediate hash
+    },
+    Ctr {
+        ctr: atsama5d27::aes::Iv,
+    },
 }
 
-#[derive(Clone)]
-enum SwHasher {
-    Sha224(SwSha224),
-    Sha256(SwSha256),
-    Sha384(SwSha384),
-    Sha512(SwSha512),
-}
-
-impl SwHasher {
-    fn new(algo: Algorithm) -> Result<Self, CryptoError> {
-        match algo {
-            Algorithm::Sha224 => Ok(SwHasher::Sha224(SwSha224::new())),
-            Algorithm::Sha256 => Ok(SwHasher::Sha256(SwSha256::new())),
-            Algorithm::Sha384 => Ok(SwHasher::Sha384(SwSha384::new())),
-            Algorithm::Sha512 => Ok(SwHasher::Sha512(SwSha512::new())),
-            _ => Err(CryptoError::InvalidParameter),
-        }
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        match self {
-            SwHasher::Sha224(h) => h.update(data),
-            SwHasher::Sha256(h) => h.update(data),
-            SwHasher::Sha384(h) => h.update(data),
-            SwHasher::Sha512(h) => h.update(data),
-        }
-    }
-
-    fn finalize_to_vec(self) -> Vec<u8> {
-        match self {
-            SwHasher::Sha224(h) => h.finalize().to_vec(),
-            SwHasher::Sha256(h) => h.finalize().to_vec(),
-            SwHasher::Sha384(h) => h.finalize().to_vec(),
-            SwHasher::Sha512(h) => h.finalize().to_vec(),
-        }
+impl server::Server for CryptoServer {
+    fn on_start(&mut self, context: &mut ServerContext<Self>) {
+        self.dma_disk_encrypt_rx
+            .subscribe_transfer_complete(context)
+            .expect("subscribe to os/dma TransferComplete");
     }
 }
 
@@ -123,15 +106,19 @@ impl CryptoServer {
         )
         .unwrap();
 
-        let aes = Aes::with_alt_base_addr(aes_csr.as_ptr() as u32);
+        let aes = Aes::with_alt_base_addr(aes_csr.as_ptr() as usize);
         let sha = Sha::with_alt_base_addr(sha_csr.as_ptr() as u32);
         let dma = Dma::default();
 
         let dma_aes_tx = dma.peripheral_transfer(aes.dma_tx_addr() as _, Aes::TX_DMA_CONFIG).unwrap();
         let dma_aes_rx = dma.peripheral_transfer(aes.dma_rx_addr() as _, Aes::RX_DMA_CONFIG).unwrap();
+        let dma_disk_encrypt_tx =
+            dma.peripheral_transfer(aes.dma_tx_addr() as _, Aes::TX_DMA_CONFIG).unwrap();
+        let dma_disk_encrypt_rx =
+            dma.peripheral_transfer(aes.dma_rx_addr() as _, Aes::RX_DMA_CONFIG).unwrap();
         let dma_sha = dma.peripheral_transfer(sha.dma_in_address() as _, Sha::DMA_CONFIG).unwrap();
 
-        Self(Inner {
+        Self {
             aes_contexts: Default::default(),
             next_context_id: 1,
             power_manager: Default::default(),
@@ -139,44 +126,66 @@ impl CryptoServer {
             sha,
             dma_aes_tx,
             dma_aes_rx,
+            dma_disk_encrypt_tx,
+            dma_disk_encrypt_rx,
             dma_sha,
             securam_manager: unsafe { SecuramManager::new(securam.as_mut_ptr()).unwrap() },
             securam_slot_occupied: Default::default(),
             sha_contexts: Default::default(),
-        })
+            last_sha_context_id: 0,
+            disk_encrypt_subscriber: None,
+            disk_encrypt_in_flight: false,
+        }
+    }
+
+    /// Block until any in-flight disk-encrypt DMA finishes. Other AES requests share the
+    /// single AES peripheral, so they must wait here before reconfiguring the registers.
+    fn ensure_aes_idle(&mut self) {
+        if self.disk_encrypt_in_flight {
+            self.dma_disk_encrypt_rx.wait().ok();
+        }
     }
 
     pub fn aes_setup(&mut self, msg: AesSetup, sender: PID) -> Result<usize, CryptoError> {
         for _ in 0..255 {
-            let id = self.0.next_context_id;
-            self.0.next_context_id += 1;
+            let id = self.next_context_id;
+            self.next_context_id += 1;
 
             // Sorry Clippy, we use a &mut self method in the body of this if.
             #[allow(clippy::map_entry)]
-            if !self.0.aes_contexts.contains_key(&(sender, id)) {
-                let context = match msg {
-                    AesSetup::Ecb { key_buf, key_len } => {
-                        let key_slot = self.allocate_securam_slot(key_buf, key_len)?;
-                        AesContext::Ecb { key_slot }
-                    }
-                    AesSetup::Cbc { key_buf, key_len } => {
-                        let key_slot = self.allocate_securam_slot(key_buf, key_len)?;
-                        let iv = Iv::try_from_slice(&key_buf.as_slice()[key_len..key_len + 32]).unwrap();
-                        AesContext::Cbc { key_slot, iv }
+            if !self.aes_contexts.contains_key(&(sender, id)) {
+                let key_slot = self.allocate_securam_slot(&msg.key)?;
+                let mode = match &msg.mode {
+                    AesMode::Ecb => AesContextMode::Ecb,
+                    AesMode::Cbc { iv } => AesContextMode::Cbc { iv: Iv::try_from_slice(iv).unwrap() },
+                    AesMode::Ctr { iv } => AesContextMode::Ctr { ctr: Iv::try_from_slice(iv).unwrap() },
+                    AesMode::Gcm { iv } => {
+                        let mut iv32 = [0; 3];
+                        for (i, chunk) in iv.chunks_exact(4).enumerate() {
+                            iv32[i] = u32::from_le_bytes(chunk.try_into().unwrap());
+                        }
+
+                        AesContextMode::Gcm {
+                            aadlen: 0,
+                            datalen: 0,
+                            iv: iv32,
+                            ctr: 2, // J0 starts at 1, and is incremented before the first block
+                            ghash: Default::default(),
+                        }
                     }
                 };
 
-                self.0.aes_contexts.insert((sender, id), context);
+                self.aes_contexts.insert((sender, id), AesContext { key_slot, finalized: false, mode });
                 return Ok(id as usize);
             }
         }
         Err(CryptoError::TooManyAesContexts)
     }
 
-    fn allocate_securam_slot(&mut self, key_buf: MemoryRange, key_len: usize) -> Result<usize, CryptoError> {
+    fn allocate_securam_slot(&mut self, key: &[u8]) -> Result<usize, CryptoError> {
         let key_slot =
-            self.0.securam_slot_occupied.iter().position(|s| !*s).ok_or(CryptoError::TooManySecuramKeys)?;
-        if let Err(e) = self.0.securam_manager.set_aes_key(key_slot, &key_buf.as_slice()[..key_len]) {
+            self.securam_slot_occupied.iter().position(|s| !*s).ok_or(CryptoError::TooManySecuramKeys)?;
+        if let Err(e) = self.securam_manager.set_aes_key(key_slot, key) {
             match e {
                 securam_manager::Error::WrongKeySize => return Err(CryptoError::InvalidKeyLength),
                 securam_manager::Error::MagicMismatch | securam_manager::Error::ChecksumMismatch => {
@@ -184,291 +193,319 @@ impl CryptoServer {
                 }
             }
         }
-        self.0.securam_slot_occupied[key_slot] = true;
-        log::info!("Allocated slot {key_slot}");
+        self.securam_slot_occupied[key_slot] = true;
+        log::trace!("Allocated slot {key_slot}");
         Ok(key_slot)
     }
 
     fn deallocate_securam_slot(&mut self, key_slot: usize) {
-        log::info!("Deallocated slot {key_slot}");
-        self.0.securam_manager.set_aes_key(key_slot, &[0; 32]).expect("SECURAM is corrupted");
-        self.0.securam_slot_occupied[key_slot] = false;
+        log::trace!("Deallocated slot {key_slot}");
+        self.securam_manager.set_aes_key(key_slot, &[0; 32]).expect("SECURAM is corrupted");
+        self.securam_slot_occupied[key_slot] = false;
     }
 
     pub fn aes_execute(&mut self, msg: AesExecute, sender: PID) -> Result<usize, CryptoError> {
-        if (msg.offset + msg.blocks * AES_BLOCK_SIZE) > msg.buf.len() || msg.blocks == 0 {
+        if (msg.offset + msg.len) > msg.buf.len() || msg.len == 0 {
             return Err(CryptoError::InvalidDataLength);
         }
+        self.ensure_aes_idle();
+
         let context =
-            self.0.aes_contexts.get(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
+            self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
 
-        let mode = match context {
-            AesContext::Ecb { key_slot } => {
-                AesMode::Ecb { key: self.0.securam_manager.aes_key(*key_slot).expect("SECURAM is corrupted") }
+        if context.finalized {
+            return Err(CryptoError::InvalidState);
+        }
+
+        if !matches!(context.mode, AesContextMode::Gcm { .. } | AesContextMode::Ctr { .. })
+            && (msg.len % AES_BLOCK_SIZE) != 0
+        {
+            return Err(CryptoError::UnalignedDataLength);
+        }
+
+        let mut buf_part = msg.buf.subrange(msg.offset, msg.len).ok_or(CryptoError::InvalidParameter)?;
+
+        let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
+        let mode = match &mut context.mode {
+            AesContextMode::Ecb => atsama5d27::aes::AesMode::Ecb { key },
+            AesContextMode::Cbc { iv } => {
+                let original_iv = iv.clone();
+                if msg.direction == Direction::Decrypt {
+                    *iv = Iv::try_from_slice(
+                        &buf_part.as_slice()[buf_part.len() - AES_BLOCK_SIZE..buf_part.len()],
+                    )
+                    .unwrap();
+                }
+                atsama5d27::aes::AesMode::Cbc { key, iv: original_iv }
             }
-            AesContext::Cbc { key_slot, iv } => AesMode::Cbc {
-                key: self.0.securam_manager.aes_key(*key_slot).expect("SECURAM is corrupted"),
-                iv: iv.clone(),
-            },
+            AesContextMode::Gcm { iv, ctr, ghash, .. } => {
+                atsama5d27::aes::AesMode::Gcm { key, iv: iv.clone(), ctr: *ctr, ghash: *ghash }
+            }
+            AesContextMode::Ctr { ctr } => {
+                if ctr.is_ctr_rollover(msg.len / AES_BLOCK_SIZE) {
+                    log::error!("Unsupported buffer size for CTR mode. Split the transfer up");
+                    return Err(CryptoError::InvalidDataLength);
+                }
+                atsama5d27::aes::AesMode::Counter { key, ctr_value: ctr.clone() }
+            }
         };
 
-        self.0.power_manager.enable_peripheral(PeripheralId::Aes)?;
+        self.power_manager.enable_peripheral(PeripheralId::Aes)?;
         match msg.direction {
-            Direction::Encrypt => self.0.aes.init_encrypt(mode),
-            Direction::Decrypt => self.0.aes.init_decrypt(mode),
+            Direction::Encrypt => self.aes.init_encrypt(mode),
+            Direction::Decrypt => self.aes.init_decrypt(mode),
         };
-        self.0.aes.setup_for_dma();
+        self.aes.setup_for_dma(msg.len);
 
-        let buf_part =
-            msg.buf.subrange(msg.offset, msg.blocks * AES_BLOCK_SIZE).ok_or(CryptoError::InvalidParameter)?;
-        flush_cache(buf_part, CacheOperation::CleanAndInvalidate).ok();
-        unsafe {
-            self.0.dma_aes_tx.execute(buf_part).map_err(convert_dma_error)?;
-            self.0.dma_aes_rx.execute(buf_part).map_err(convert_dma_error)?;
+        let aligned_len = msg.len & !(AES_BLOCK_SIZE - 1);
+        if aligned_len > 0 {
+            let aligned_part = buf_part.subrange(0, aligned_len).ok_or(CryptoError::InvalidParameter)?;
+            flush_cache(aligned_part, CacheOperation::CleanAndInvalidate).ok();
+            unsafe {
+                self.dma_aes_tx.execute(aligned_part).map_err(convert_dma_error)?;
+                self.dma_aes_rx.execute(aligned_part).map_err(convert_dma_error)?;
+            }
+            self.dma_aes_rx.wait().map_err(convert_dma_error)?;
         }
-        self.0.dma_aes_rx.wait().map_err(convert_dma_error)?;
 
-        self.0.power_manager.disable_peripheral(PeripheralId::Aes)?;
-
-        Ok(msg.blocks)
-    }
-
-    // TODO (SFT-5088): If the keys are all zero, this should return an error
-    pub fn disk_encrypt(&mut self, msg: DiskEncryptUnsafe, sender: PID) -> Result<usize, CryptoError> {
-        if (msg.len % AES_BLOCK_SIZE) != 0 || msg.len == 0 {
-            return Err(CryptoError::InvalidDataLength);
+        if aligned_len != msg.len {
+            let mut padded_in = [0; AES_BLOCK_SIZE];
+            let mut padded_out = [0x0; AES_BLOCK_SIZE];
+            padded_in[..msg.len - aligned_len].copy_from_slice(&buf_part.as_slice()[aligned_len..]);
+            self.aes.process(&padded_in, &mut padded_out);
+            buf_part.as_slice_mut()[aligned_len..].copy_from_slice(&padded_out[..msg.len - aligned_len]);
+            context.finalized = true;
         }
-        self.0.power_manager.enable_peripheral(PeripheralId::Aes)?;
 
-        let keys = self.0.securam_manager.disk_encryption_keys().expect("SECURAM is corrupted");
-        let mode = AesMode::Xts { key1: keys.0, key2: keys.1, tweak: msg.tweak, j: msg.j };
-
-        match msg.direction {
-            Direction::Encrypt => self.0.aes.init_encrypt(mode),
-            Direction::Decrypt => self.0.aes.init_decrypt(mode),
-        };
-        self.0.aes.setup_for_dma();
-
-        unsafe {
-            self.0
-                .dma_aes_tx
-                .execute_for_pid(MemoryRange::new(msg.src, msg.len)?, sender)
-                .map_err(convert_dma_error)?;
-            self.0
-                .dma_aes_rx
-                .execute_for_pid(MemoryRange::new(msg.dst, msg.len)?, sender)
-                .map_err(convert_dma_error)?;
+        match &mut context.mode {
+            AesContextMode::Ecb => {}
+            AesContextMode::Cbc { iv, .. } => {
+                if msg.direction == Direction::Encrypt {
+                    *iv = Iv::try_from_slice(
+                        &buf_part.as_slice()[buf_part.len() - AES_BLOCK_SIZE..buf_part.len()],
+                    )
+                    .unwrap();
+                }
+            }
+            AesContextMode::Gcm { ctr, ghash, datalen, .. } => {
+                *ctr += (msg.len / AES_BLOCK_SIZE) as u32;
+                *ghash = self.aes.get_ghash();
+                *datalen += msg.len;
+            }
+            AesContextMode::Ctr { ctr } => {
+                ctr.add(msg.len / AES_BLOCK_SIZE);
+            }
         }
-        self.0.dma_aes_rx.wait().map_err(convert_dma_error)?;
 
-        self.0.power_manager.disable_peripheral(PeripheralId::Aes)?;
+        self.power_manager.disable_peripheral(PeripheralId::Aes)?;
 
         Ok(msg.len)
     }
 
-    pub fn aes_clear(&mut self, msg: AesClear, sender: PID) {
-        if let Some(context) = self.0.aes_contexts.remove(&(sender, msg.0)) {
-            match context {
-                AesContext::Ecb { key_slot } => self.deallocate_securam_slot(key_slot),
-                AesContext::Cbc { key_slot, .. } => self.deallocate_securam_slot(key_slot),
+    pub fn aes_aad(&mut self, msg: AesAad, sender: PID) -> Result<usize, CryptoError> {
+        self.ensure_aes_idle();
+        let context =
+            self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
+        if context.finalized {
+            return Err(CryptoError::InvalidState);
+        }
+        let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
+        let AesContextMode::Gcm { iv, ctr, ghash, aadlen, datalen } = &mut context.mode else {
+            return Err(CryptoError::InvalidMode);
+        };
+        // GCM tag formula is GHASH(AAD || pad || C || pad || lengths); all AAD must precede
+        // ciphertext or the tag won't be interoperable.
+        if *datalen != 0 {
+            return Err(CryptoError::InvalidState);
+        }
+        self.power_manager.enable_peripheral(PeripheralId::Aes)?;
+        self.aes.init_encrypt(atsama5d27::aes::AesMode::Gcm {
+            key,
+            iv: iv.clone(),
+            ctr: *ctr,
+            ghash: *ghash,
+        });
+        self.aes.process_aad(&msg.aad);
+        *ghash = self.aes.get_ghash();
+        *aadlen += msg.aad.len();
+        self.power_manager.disable_peripheral(PeripheralId::Aes)?;
+        Ok(msg.aad.len())
+    }
+
+    pub fn aes_get_tag(&mut self, msg: AesGcmTag, sender: PID) -> Result<[u8; 16], CryptoError> {
+        self.ensure_aes_idle();
+        let context =
+            self.aes_contexts.get_mut(&(sender, msg.transfer_id)).ok_or(CryptoError::InvalidParameter)?;
+        let (iv, ctr, ghash, aadlen, datalen) = match &context.mode {
+            AesContextMode::Gcm { iv, ctr, ghash, aadlen, datalen } => (*iv, *ctr, *ghash, *aadlen, *datalen),
+            _ => return Err(CryptoError::InvalidMode),
+        };
+        // Seal the context: a second tag under the same nonce would leak the GHASH key (the GCM
+        // "forbidden attack") and let an attacker forge tags.
+        context.finalized = true;
+        let key = self.securam_manager.aes_key(context.key_slot).expect("SECURAM is corrupted");
+        self.power_manager.enable_peripheral(PeripheralId::Aes)?;
+        self.aes.init_encrypt(atsama5d27::aes::AesMode::Gcm { key: key.clone(), iv, ctr, ghash });
+        let mut postfix = [0; 16];
+        postfix[4..8].copy_from_slice(&(aadlen * 8).to_be_bytes());
+        postfix[12..16].copy_from_slice(&(datalen * 8).to_be_bytes());
+        self.aes.process_aad(&postfix);
+        let s = self.aes.get_ghash();
+        let mut s_bytes = [0; 16];
+        for (i, v) in s.iter().enumerate() {
+            s_bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        self.aes
+            .init_encrypt(atsama5d27::aes::AesMode::Counter { key, ctr_value: Iv::from_gcm_params(iv, 1) });
+        let mut tag = [0; 16];
+        self.aes.process(&s_bytes, &mut tag);
+        Ok(tag)
+    }
+
+    pub fn set_disk_encrypt_subscriber(&mut self, sub: ScalarEventSubscriber<DiskEncryptComplete>) {
+        self.disk_encrypt_subscriber = Some(sub);
+    }
+
+    // TODO (SFT-5088): If the keys are all zero, this should return an error
+    pub fn disk_encrypt_start(&mut self, msg: DiskEncryptUnsafe, sender: PID) -> Result<(), CryptoError> {
+        if (msg.len % AES_BLOCK_SIZE) != 0 || msg.len == 0 {
+            return Err(CryptoError::InvalidDataLength);
+        }
+        self.power_manager.enable_peripheral(PeripheralId::Aes)?;
+        self.ensure_aes_idle();
+
+        match self.start_disk_encrypt_dmas(msg, sender) {
+            Ok(()) => {
+                self.disk_encrypt_in_flight = true;
+                Ok(())
+            }
+            Err(e) => {
+                self.power_manager.disable_peripheral(PeripheralId::Aes).ok();
+                Err(e)
             }
         }
     }
 
-    pub fn hmac(&self, algo: ShaAlgo, key: &[u8], msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        self.0.power_manager.enable_peripheral(PeripheralId::Sha)?;
-        let hash = match algo {
-            ShaAlgo::Sha224 => self.0.sha.hmac::<Sha224>(key, msg).to_vec(),
-            ShaAlgo::Sha256 => self.0.sha.hmac::<Sha256>(key, msg).to_vec(),
-            ShaAlgo::Sha384 => self.0.sha.hmac::<Sha384>(key, msg).to_vec(),
-            ShaAlgo::Sha512 => self.0.sha.hmac::<Sha512>(key, msg).to_vec(),
+    fn start_disk_encrypt_dmas(&mut self, msg: DiskEncryptUnsafe, sender: PID) -> Result<(), CryptoError> {
+        let keys = self.securam_manager.disk_encryption_keys().expect("SECURAM is corrupted");
+        if keys.0.is_zero() || keys.1.is_zero() {
+            log::error!("start_disk_encrypt_dmas called before disk encryption keys were set");
+            return Err(CryptoError::InvalidKeyLength);
+        }
+        let mode = atsama5d27::aes::AesMode::Xts { key1: keys.0, key2: keys.1, tweak: msg.tweak, j: msg.j };
+
+        match msg.direction {
+            Direction::Encrypt => self.aes.init_encrypt(mode),
+            Direction::Decrypt => self.aes.init_decrypt(mode),
         };
-        self.0.power_manager.disable_peripheral(PeripheralId::Sha)?;
+        self.aes.setup_for_dma(msg.len);
+
+        let src = unsafe { MemoryRange::new(msg.src, msg.len) }.map_err(|_| CryptoError::InvalidAddress)?;
+        let dst = unsafe { MemoryRange::new(msg.dst, msg.len) }.map_err(|_| CryptoError::InvalidAddress)?;
+
+        unsafe { self.dma_disk_encrypt_tx.execute_for_pid(src, sender) }
+            .map_err(|_| CryptoError::DmaError)?;
+        unsafe { self.dma_disk_encrypt_rx.execute_for_pid(dst, sender) }
+            .map_err(|_| CryptoError::DmaError)?;
+        Ok(())
+    }
+
+    pub fn on_dma_transfer_complete(&mut self, transfer_id: u32) {
+        if !self.disk_encrypt_in_flight || transfer_id != self.dma_disk_encrypt_rx.id() as u32 {
+            return;
+        }
+        self.disk_encrypt_in_flight = false;
+        self.power_manager.disable_peripheral(PeripheralId::Aes).ok();
+        if let Some(sub) = &self.disk_encrypt_subscriber {
+            if let Err(e) = sub.send(&DiskEncryptComplete) {
+                log::warn!("DiskEncryptComplete send failed: {e:?}");
+            }
+        }
+    }
+
+    pub fn aes_clear(&mut self, msg: AesClear, sender: PID) {
+        if let Some(context) = self.aes_contexts.remove(&(sender, msg.0)) {
+            self.deallocate_securam_slot(context.key_slot);
+        }
+    }
+
+    pub fn hmac(&mut self, algo: ShaAlgo, key: &[u8], msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let needs_power = self.sha_contexts.is_empty();
+        if needs_power {
+            self.power_manager.enable_peripheral(PeripheralId::Sha)?;
+        }
+        let hash = match algo {
+            ShaAlgo::Sha224 => self.sha.hmac::<Sha224>(key, msg).to_vec(),
+            ShaAlgo::Sha256 => self.sha.hmac::<Sha256>(key, msg).to_vec(),
+            ShaAlgo::Sha384 => self.sha.hmac::<Sha384>(key, msg).to_vec(),
+            ShaAlgo::Sha512 => self.sha.hmac::<Sha512>(key, msg).to_vec(),
+        };
+        if needs_power {
+            self.power_manager.disable_peripheral(PeripheralId::Sha)?;
+        }
         Ok(hash)
     }
 
-    /// Initializes a streaming SHA context
-    ///
-    /// Returns a context ID for use with [`sha_update`](Self::sha_update) and
-    /// [`sha_finalize`](Self::sha_finalize) Multiple contexts can exist concurrently; context state is
-    /// preserved on each operation
-    pub fn sha_init(&mut self, sender: PID, algo: ShaAlgo, total_len: usize) -> Result<u8, CryptoError> {
-        // Check if this process has too many contexts
-        let process_context_count = self.0.sha_contexts.keys().filter(|(pid, _)| *pid == sender).count();
-        if process_context_count >= MAX_SHA_CONTEXTS_PER_PROCESS {
-            return Err(CryptoError::TooManyShaContexts);
-        }
-
-        // Find an available context ID for this process (must be 0-3 due to message encoding)
-        // The ShaUpdate message only uses 2 bits for context_id, so IDs must be in range 0-3
-        let id = (0..MAX_SHA_CONTEXTS_PER_PROCESS as u8)
-            .find(|&id| !self.0.sha_contexts.contains_key(&(sender, id)))
-            .ok_or(CryptoError::TooManyShaContexts)?;
-
-        let algo = convert_sha_algo(algo);
-        let needs_sw_hasher = (total_len % 4) != 0;
-        let context = ShaContext {
-            bytes_processed: 0,
-            hw_context: ShaHwContext::new(algo, total_len),
-            sw_hasher: if needs_sw_hasher { Some(SwHasher::new(algo)?) } else { None },
-            sw_final_hash: None,
-        };
-
-        self.0.sha_contexts.insert((sender, id), context);
-        Ok(id)
-    }
-
-    /// Update the streaming SHA hash with more data via DMA
-    /// Hardware context is restored before processing and saved after
-    pub fn sha_update(
-        &mut self,
-        sender: PID,
-        context_id: u8,
-        buf: MemoryRange,
-        offset: usize,
-        length: usize,
-    ) -> Result<usize, CryptoError> {
-        if !offset.is_multiple_of(SHA_DMA_ALIGNMENT) {
+    pub fn sha_set_context(&mut self, sender: PID, msg: ShaSetContext) -> Result<usize, CryptoError> {
+        if let Some(existing_id) = msg.context_id {
+            if let Some(ctx) = self.sha_contexts.get_mut(&(sender, existing_id)) {
+                ctx.hash_state = msg.hash_state;
+                return Ok(existing_id);
+            }
             return Err(CryptoError::InvalidParameter);
         }
 
+        if self.sha_contexts.is_empty() {
+            self.power_manager.enable_peripheral(PeripheralId::Sha)?;
+        }
+        self.last_sha_context_id += 1;
+        let id = self.last_sha_context_id;
+        self.sha_contexts.insert((sender, id), ShaContext { algo: msg.algo, hash_state: msg.hash_state });
+        Ok(id)
+    }
+
+    pub fn sha_update(
+        &mut self,
+        sender: PID,
+        context_id: usize,
+        buf: MemoryRange,
+        length: usize,
+    ) -> Result<usize, CryptoError> {
         let context =
-            self.0.sha_contexts.get_mut(&(sender, context_id)).ok_or(CryptoError::InvalidParameter)?;
+            self.sha_contexts.get(&(sender, context_id)).ok_or(CryptoError::InvalidParameter)?.clone();
 
-        // Check it doesn't exceed the total length
-        if context.bytes_processed + length > context.hw_context.total_len {
-            return Err(CryptoError::InvalidDataLength);
-        }
+        let mut hw_ctx = ShaHwContext::new(convert_sha_algo(context.algo), 0);
+        hw_ctx.hash_state = context.hash_state;
 
-        let is_final = context.bytes_processed + length == context.hw_context.total_len;
-        let data = buf.subrange(offset, length).ok_or(CryptoError::InvalidParameter)?;
+        self.sha.restore_context(&hw_ctx);
 
-        if length % 4 != 0 {
-            let is_single_shot = context.bytes_processed == 0 && length == context.hw_context.total_len;
-            if !is_single_shot {
-                if !is_final {
-                    return Err(CryptoError::InvalidDataLength);
-                }
-
-                if let Some(hasher) = context.sw_hasher.as_mut() {
-                    hasher.update(data.as_slice());
-                }
-
-                // Finalize software hash for unaligned final chunk and store for finalize().
-                let hash = context.sw_hasher.take().ok_or(CryptoError::InvalidParameter)?.finalize_to_vec();
-                let hash_len = hash_size_hw(context.hw_context.algorithm);
-                context.hw_context.hash_state[..hash_len].copy_from_slice(&hash[..hash_len]);
-                context.hw_context.bytes_remaining = 0;
-                context.bytes_processed += length;
-                context.sw_final_hash = Some(hash);
-                return Ok(length);
-            }
-
-            let (block_size, length_field_bytes) = match context.hw_context.algorithm {
-                Algorithm::Sha224 | Algorithm::Sha256 => (64usize, 8usize),
-                Algorithm::Sha384 | Algorithm::Sha512 => (128usize, 16usize),
-                _ => return Err(CryptoError::InvalidParameter),
-            };
-            let padded = sha_pad(data.as_slice(), block_size, length_field_bytes);
-
-            self.0.power_manager.enable_peripheral(PeripheralId::Sha)?;
-            let hash = match context.hw_context.algorithm {
-                Algorithm::Sha224 => self.0.sha.hash_padded::<Sha224>(&padded).to_vec(),
-                Algorithm::Sha256 => self.0.sha.hash_padded::<Sha256>(&padded).to_vec(),
-                Algorithm::Sha384 => self.0.sha.hash_padded::<Sha384>(&padded).to_vec(),
-                Algorithm::Sha512 => self.0.sha.hash_padded::<Sha512>(&padded).to_vec(),
-                _ => {
-                    self.0.power_manager.disable_peripheral(PeripheralId::Sha)?;
-                    return Err(CryptoError::InvalidParameter);
-                }
-            };
-            self.0.power_manager.disable_peripheral(PeripheralId::Sha)?;
-
-            let hash_len = hash_size_hw(context.hw_context.algorithm);
-            context.hw_context.hash_state[..hash_len].copy_from_slice(&hash[..hash_len]);
-            context.hw_context.bytes_remaining = 0;
-            context.bytes_processed += length;
-            return Ok(length);
-        }
-
-        if let Some(hasher) = context.sw_hasher.as_mut() {
-            hasher.update(data.as_slice());
-        }
-
-        let dma_range = buf.subrange(offset, length).ok_or(CryptoError::InvalidParameter)?;
-
-        self.0.power_manager.enable_peripheral(PeripheralId::Sha)?;
-
-        let is_first_update = context.bytes_processed == 0;
-        if is_first_update {
-            match context.hw_context.algorithm {
-                Algorithm::Sha224 => self.0.sha.init_streaming::<Sha224>(context.hw_context.total_len),
-                Algorithm::Sha256 => self.0.sha.init_streaming::<Sha256>(context.hw_context.total_len),
-                Algorithm::Sha384 => self.0.sha.init_streaming::<Sha384>(context.hw_context.total_len),
-                Algorithm::Sha512 => self.0.sha.init_streaming::<Sha512>(context.hw_context.total_len),
-                _ => return Err(CryptoError::InvalidParameter),
-            }
-        } else {
-            self.0.sha.restore_context(&context.hw_context);
-        }
-
+        let dma_range = buf.subrange(0, length).ok_or(CryptoError::InvalidParameter)?;
         flush_cache(dma_range, CacheOperation::Clean)?;
 
-        if is_final {
-            self.0.sha.update_dma_final(|| -> Result<(), CryptoError> {
-                unsafe { self.0.dma_sha.execute(dma_range).map_err(convert_dma_error)? };
-                self.0.dma_sha.wait().map_err(convert_dma_error)?;
-                Ok(())
-            })?;
-        } else {
-            self.0.sha.update_dma(|| -> Result<(), CryptoError> {
-                unsafe { self.0.dma_sha.execute(dma_range).map_err(convert_dma_error)? };
-                self.0.dma_sha.wait().map_err(convert_dma_error)?;
-                Ok(())
-            })?;
-        }
+        unsafe { self.dma_sha.execute(dma_range).map_err(convert_dma_error)? };
+        self.dma_sha.wait().map_err(convert_dma_error)?;
 
-        self.0.sha.save_context(&mut context.hw_context);
-        context.bytes_processed += length;
+        self.sha.save_context(&mut hw_ctx);
+
+        if let Some(ctx) = self.sha_contexts.get_mut(&(sender, context_id)) {
+            ctx.hash_state = hw_ctx.hash_state;
+        }
 
         Ok(length)
     }
 
-    /// Finalize the streaming SHA hash and return the result.
-    /// The context is removed after finalization.
-    pub fn sha_finalize(&mut self, sender: PID, context_id: u8) -> Result<Vec<u8>, CryptoError> {
-        // Check if all the data was processed before removing context
-        {
-            let context =
-                self.0.sha_contexts.get(&(sender, context_id)).ok_or(CryptoError::InvalidParameter)?;
-            if context.bytes_processed != context.hw_context.total_len {
-                return Err(CryptoError::InvalidDataLength);
-            }
-        }
-
-        let context = self.0.sha_contexts.remove(&(sender, context_id)).unwrap();
-
-        let hash = match context.sw_final_hash {
-            Some(hash) => hash,
-            None => context.hw_context.hash_state[..hash_size_hw(context.hw_context.algorithm)].to_vec(),
-        };
-
-        // Disable SHA peripheral if no more contexts are active
-        if self.0.sha_contexts.is_empty() {
-            self.0.power_manager.disable_peripheral(PeripheralId::Sha).ok();
-        }
-
-        Ok(hash)
+    pub fn sha_get_context(
+        &mut self,
+        sender: PID,
+        context_id: usize,
+    ) -> Result<ShaContextSnapshot, CryptoError> {
+        let context = self.sha_contexts.get(&(sender, context_id)).ok_or(CryptoError::InvalidParameter)?;
+        Ok(ShaContextSnapshot { algo: context.algo, hash_state: context.hash_state })
     }
 
-    /// Abort/cleanup a streaming SHA context without finalizing.
-    /// Used when a context needs to be cleaned up on error paths or early exit.
-    pub fn sha_abort(&mut self, sender: PID, context_id: u8) {
-        if self.0.sha_contexts.remove(&(sender, context_id)).is_some() {
-            // Disable SHA peripheral if no more contexts are active
-            if self.0.sha_contexts.is_empty() {
-                self.0.power_manager.disable_peripheral(PeripheralId::Sha).ok();
-            }
+    pub fn sha_drop(&mut self, sender: PID, context_id: usize) {
+        if self.sha_contexts.remove(&(sender, context_id)).is_some() && self.sha_contexts.is_empty() {
+            self.power_manager.disable_peripheral(PeripheralId::Sha).ok();
         }
     }
 }
@@ -480,35 +517,6 @@ fn convert_sha_algo(value: ShaAlgo) -> Algorithm {
         ShaAlgo::Sha384 => Algorithm::Sha384,
         ShaAlgo::Sha512 => Algorithm::Sha512,
     }
-}
-
-fn hash_size_hw(algo: Algorithm) -> usize {
-    match algo {
-        Algorithm::Sha224 => SHA224_HASH_SIZE,
-        Algorithm::Sha256 => SHA256_HASH_SIZE,
-        Algorithm::Sha384 => SHA384_HASH_SIZE,
-        Algorithm::Sha512 => SHA512_HASH_SIZE,
-        _ => 0,
-    }
-}
-
-fn sha_pad(data: &[u8], block_size: usize, length_field_bytes: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len() + block_size);
-    out.extend_from_slice(data);
-    out.push(0x80);
-
-    let len_mod = (out.len() + length_field_bytes) % block_size;
-    let zero_len = if len_mod == 0 { 0 } else { block_size - len_mod };
-    out.extend(core::iter::repeat(0).take(zero_len));
-
-    let bit_len = (data.len() as u128) * 8;
-    if length_field_bytes == 8 {
-        out.extend_from_slice(&(bit_len as u64).to_be_bytes());
-    } else {
-        out.extend_from_slice(&bit_len.to_be_bytes());
-    }
-
-    out
 }
 
 fn convert_dma_error(value: DmaError) -> CryptoError {

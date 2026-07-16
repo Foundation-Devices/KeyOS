@@ -22,7 +22,7 @@ export component CreateFolderModal inherits Rectangle {
                 alignment: center;
                 Icon {
                     name: "info";
-                    size: Size.sz12;
+                    size: Size.sz16;
                     color: Palette.content-brand;
                 }
             }
@@ -43,6 +43,8 @@ export component CreateFolderModal inherits Rectangle {
 
             input := Input {
                 show-clear-btn: true;
+                accept-button-text: TR2.lookup(TrId.CommonKeyboardAdd);
+                accept-button-enabled: self.text != "";
                 accepted => {
                     ModalGlobal.create-folder-confirmed(input.text);
                 }

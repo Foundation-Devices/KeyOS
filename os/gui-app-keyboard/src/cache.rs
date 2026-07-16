@@ -42,14 +42,20 @@ pub fn refresh_cache() {
     log::info!("Done rendering");
 }
 
-pub fn with_cached_pixmap<R>(layout: &'static Layout, f: impl FnOnce(PixmapRef) -> R) -> Option<R> {
-    let cache = KEYBOARD_CACHE.lock().unwrap();
-    for (cached_layout, pixmap) in &*cache {
-        if core::ptr::eq(*cached_layout, layout) {
-            return Some(f(pixmap.as_ref()));
+pub fn with_cached_pixmap<R>(layout: &'static Layout, f: impl FnOnce(PixmapRef) -> R) -> R {
+    loop {
+        {
+            let cache = KEYBOARD_CACHE.lock().unwrap();
+            for (cached_layout, pixmap) in &*cache {
+                if core::ptr::eq(*cached_layout, layout) {
+                    return f(pixmap.as_ref());
+                }
+            }
         }
+        // Lock dropped before sleeping so other threads can populate the
+        // cache while we wait.
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    None
 }
 
 fn render_background(layout: &'static Layout) -> Pixmap {
@@ -57,7 +63,7 @@ fn render_background(layout: &'static Layout) -> Pixmap {
     let is_dark = IS_DARK.load(std::sync::atomic::Ordering::SeqCst);
     for (y_range, row) in layout.rows_with_coords() {
         for (x_range, key) in row.keys_with_coords() {
-            key.draw(x_range.start, y_range.start, &mut pixmap.as_mut(), false);
+            key.draw(x_range.start, y_range.start, &mut pixmap.as_mut(), false, None, None);
         }
     }
     drop_shadow(

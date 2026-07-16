@@ -57,38 +57,35 @@ component SuccessPage inherits JumboIconPageBody {
 }
 
 component ErrorPage inherits JumboIconPageBody {
-    PageBody {
-        padding-top: 0;
-        ContentSection {
-            HorizontalLayout {
-                alignment: center;
-                WrappedIcon {
-                    inner-icon: "close";
-                }
-            }
-
-            VerticalLayout {
-                spacing: Size.sz6;
-                HeadingMd {
-                    horizontal-alignment: center;
-                    text: TR2.lookup(TrId.CreatingAccountFailedHeader);
-                }
-
-                TextMd {
-                    horizontal-alignment: center;
-                    text: TR2.lookup(TrId.CreatingAccountFailedSubheader);
-                    color: Palette.content-tertiary;
-                }
+    ContentSection {
+        HorizontalLayout {
+            alignment: center;
+            WrappedIcon {
+                inner-icon: "close";
             }
         }
 
-        ButtonSection {
-            Button {
-                label: TR2.lookup(TrId.CommonButtonRetry);
-                importance: Importance.primary;
-                clicked => {
-                    CreateAccount.state = CreateAccountState.Idle;
-                }
+        VerticalLayout {
+            spacing: Size.sz6;
+            HeadingMd {
+                horizontal-alignment: center;
+                text: TR2.lookup(TrId.CreatingAccountFailedHeader);
+            }
+
+            TextMd {
+                horizontal-alignment: center;
+                text: TR2.lookup(TrId.CreatingAccountFailedSubheader);
+                color: Palette.content-tertiary;
+            }
+        }
+    }
+
+    ButtonSection {
+        Button {
+            label: TR2.lookup(TrId.CommonButtonRetry);
+            importance: Importance.primary;
+            clicked => {
+                CreateAccount.state = CreateAccountState.Idle;
             }
         }
     }
@@ -171,7 +168,7 @@ export component CreateAccountPage inherits BasePage {
                             input-type: InputType.number;
                             bounded-number: true;
                             minimum: "0";
-                            maximum: "4294967295";  // Bitcoin indices are u32s, so bound to u32 max
+                            maximum: "2147483647";  // BIP32 hardened indices use bit 31 as flag, so max is 2^31-1
                             enabled: !prefilled;
                             show-clear-btn: !prefilled;
 
@@ -218,7 +215,6 @@ export component CreateAccountPage inherits BasePage {
                             label: new-label,
                             network: new-network,
                             index: new-index,
-                            color: CardColor.light-copper
                         });
                     }
                 }

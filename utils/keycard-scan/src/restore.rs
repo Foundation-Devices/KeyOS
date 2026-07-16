@@ -19,6 +19,7 @@ pub enum GetRemoteShardError {
 
 pub async fn get_remote_shard<P>(
     seed_fingerprint: [u8; 32],
+    timestamp: u32,
     mut predicate: impl FnMut(&quantum_link::SendMessageError) -> bool,
 ) -> Result<Option<backup_shard::Shard>, GetRemoteShardError>
 where
@@ -27,6 +28,7 @@ where
     let shard = loop {
         let response = async_archive::<P, _>(quantum_link::messages::RestoreShard {
             seed_fingerprint: quantum_link::foundation_api::backup::SeedFingerprint(seed_fingerprint),
+            timestamp,
         })
         .await;
         match response {

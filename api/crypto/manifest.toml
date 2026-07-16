@@ -1,13 +1,16 @@
+manifestVersion = "0"
 [servers."os/crypto"]
-AesSetup = { id = 1, type = "lendMut", cfg = "keyos" }
-AesExecute = { id = 2, type = "lendMut", cfg = "keyos" }
-DiskEncryptUnsafe = { id = 3, type = "archive", cfg = "keyos" }
-AesClear = { id = 4, type = "scalar", cfg = "keyos" }
-# id 5 is unused
-Hmac = { id = 6, type = "archive" }
-ShamirSplit = { id = 7, type = "archive" }
-ShamirRecover = { id = 8, type = "archive" }
-ShaInit = { id = 9, type = "archive" }
-ShaUpdate = { id = 10, type = "lendMut" }
-ShaFinalize = { id = 11, type = "archive" }
-ShaAbort = { id = 12, type = "scalar" }
+AesSetup = { id = 1, type = "blockingArchive" }
+AesExecute = { id = 2, type = "lendMut" }
+AesAad = { id = 3, type = "blockingArchive" }
+AesGcmTag = { id = 4, type = "blockingArchive" }
+AesClear = { id = 5, type = "scalar" }
+Hmac = { id = 6, type = "blockingArchive" }
+ShamirSplit = { id = 7, type = "blockingArchive" }
+ShamirRecover = { id = 8, type = "blockingArchive" }
+ShaSetContext = { id = 9, type = "blockingArchive", cfg = "keyos" }
+ShaUpdate = { id = 10, type = "lendMut", cfg = "keyos" }
+ShaGetContext = { id = 11, type = "blockingArchive", cfg = "keyos" }
+ShaDrop = { id = 12, type = "scalar", cfg = "keyos" }
+DiskEncryptUnsafe = { id = 31, type = "blockingArchive", cfg = "keyos" }
+SubscribeDiskEncryptComplete = { id = 32, type = "scalarEvent", cfg = "keyos" }

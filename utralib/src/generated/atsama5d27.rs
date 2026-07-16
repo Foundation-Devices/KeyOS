@@ -280,6 +280,8 @@ pub const HW_L2CC_MEM:     usize = 0x00a00000;
 pub const HW_L2CC_MEM_LEN: usize = 16384;
 pub const HW_SECURAM_MEM:     usize = 0xf8044000;
 pub const HW_SECURAM_MEM_LEN: usize = 4096;
+pub const HW_BUREG_MEM:     usize = 0xf8045000;
+pub const HW_BUREG_MEM_LEN: usize = 4096;
 pub const HW_SRAM0_MEM:     usize = 0x00200000;
 pub const HW_SRAM0_MEM_LEN: usize = 131072;
 pub const HW_UDPHS_RAM_MEM:     usize = 0x00300000;
@@ -20380,6 +20382,7 @@ pub mod map {
     ("CSR3", 0xfc000000..0xfc070000), // Size: 0x70000 bytes
     ("L2CC", 0x00a00000..0x00a04000), // Size: 0x4000 bytes
     ("SECURAM", 0xf8044000..0xf8045000), // Size: 0x1000 bytes
+    ("BUREG", 0xf8045000..0xf8046000), // Size: 0x1000 bytes
     ("SRAM0", 0x00200000..0x00220000), // Size: 0x20000 bytes
     ("UDPHS_RAM", 0x00300000..0x00400000), // Size: 0x100000 bytes
     ("UHPHS_OHCI", 0x00400000..0x00401000), // Size: 0x1000 bytes

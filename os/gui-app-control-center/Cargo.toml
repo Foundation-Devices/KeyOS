@@ -33,8 +33,8 @@ xous-ipc = { workspace = true }
 xous-names = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
-camera = { path = "../camera" }
-nfc = { path = "../nfc" }
+camera = { workspace = true }
+nfc = { workspace = true }
 usb = { workspace = true }
 
 [build-dependencies]

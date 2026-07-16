@@ -4,13 +4,14 @@ use core::sync::atomic::AtomicUsize;
 
 #[cfg(feature = "processes-as-threads")]
 pub use crate::arch::ProcessArgsAsThread;
-use crate::{
-    definitions::MessageId, AppId, DramIdleMode, Error, MemoryAddress, MemoryFlags, MemoryMessage,
-    MemoryRange, MemorySize, Message, MessageEnvelope, MessageSender, ProcessArgs, ProcessInit, Result,
-    ScalarMessage, SysCallResult, SystemEvent, SystemStat, ThreadInit, ThreadPriority, CID, PID, SID, TID,
-};
 #[cfg(keyos)]
-use crate::{pid_from_usize, CacheOperation};
+use crate::pid_from_usize;
+use crate::{
+    definitions::MessageId, AppId, CacheOperation, DramIdleMode, Error, MemoryAddress, MemoryFlags,
+    MemoryMessage, MemoryRange, MemorySize, Message, MessageEnvelope, MessageSender, ProcessArgs,
+    ProcessInit, Result, ScalarMessage, ServerEvent, SysCallResult, SystemEvent, SystemStat, ThreadInit,
+    ThreadPriority, CID, PID, SID, TID,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum SysCall {
@@ -171,7 +172,7 @@ pub enum SysCall {
     ///
     /// # Errors
     ///
-    /// * **OutOfMemory**: The server table was full and a new server couldn't be created.
+    /// * **KernelTableFull**: The server table was full and a new server couldn't be created.
     /// * **ServerExists**: The server hash is already in use.
     CreateServerWithAddress(
         SID,                         /* server hash */
@@ -281,7 +282,7 @@ pub enum SysCall {
     ///
     /// # Errors
     ///
-    /// * **OutOfMemory**: The server table was full and a new server couldn't be created.
+    /// * **KernelTableFull**: The server table was full and a new server couldn't be created.
     CreateServer,
 
     /// Returns a 128-bit server ID, but does not create the server itself.
@@ -372,6 +373,10 @@ pub enum SysCall {
     /// Looks up for the PID of a given app ID if the app is currently running.
     AppIdToPid(AppId),
 
+    /// Register a server to receive a notification message on various server-specific events
+    /// Only one handler per event per servere can be set.
+    ServerEventHandler(ServerEvent, SID, MessageId),
+
     /// Create a mirror of the memory of the current process in another process.
     ///
     /// ## Returns
@@ -390,8 +395,9 @@ pub enum SysCall {
     /// Get a system statistic (e.g. free memory available)
     GetSystemStats(SystemStat),
 
-    /// Register a server to receive a notification message when a child process crashes.
-    RegisterEventHandler(SystemEvent, SID, MessageId),
+    /// Register a server to receive a notification message on various system events
+    /// Only one handler per event per process can be set.
+    SystemEventHandler(SystemEvent, SID, MessageId),
 
     /// Saves this PID's panic message to be shown when the process terminates
     AppendPanicMessage(usize, usize, usize, usize, usize, usize, usize),
@@ -453,12 +459,12 @@ pub enum SysCallNumber {
     InvalidateCache = 46,
     PowerManagement = 47,
     AppIdToPid = 48,
-    // 49 is unused
+    ServerEventHandler = 49,
     MirrorMemoryToPid = 50,
     DebugCommand = 51,
     GetSystemStats = 52,
     TerminatePid = 53,
-    RegisterEventHandler = 54,
+    SystemEventHandler = 54,
     AppendPanicMessage = 55,
     GetPanicMessage = 56,
 
@@ -516,12 +522,12 @@ impl SysCallNumber {
             46 => InvalidateCache,
             47 => PowerManagement,
             48 => AppIdToPid,
-            // 49 is unused
+            49 => ServerEventHandler,
             50 => MirrorMemoryToPid,
             51 => DebugCommand,
             52 => GetSystemStats,
             53 => TerminatePid,
-            54 => RegisterEventHandler,
+            54 => SystemEventHandler,
             55 => AppendPanicMessage,
             56 => GetPanicMessage,
             _ => Invalid,
@@ -735,6 +741,19 @@ impl SysCall {
             SysCall::GetAppId(pid) => {
                 [SysCallNumber::GetAppId as usize, pid.get() as usize, 0, 0, 0, 0, 0, 0]
             }
+            SysCall::ServerEventHandler(event, sid, id) => {
+                let s = sid.to_u32();
+                [
+                    SysCallNumber::ServerEventHandler as usize,
+                    *event as usize,
+                    s.0 as _,
+                    s.1 as _,
+                    s.2 as _,
+                    s.3 as _,
+                    *id as _,
+                    0,
+                ]
+            }
             SysCall::AllowMessagesSID(sid, messages) => {
                 let s = sid.to_u32();
                 [
@@ -813,10 +832,10 @@ impl SysCall {
                 [SysCallNumber::GetSystemStats as usize, *stat as usize, 0, 0, 0, 0, 0, 0]
             }
 
-            SysCall::RegisterEventHandler(event, sid, id) => {
+            SysCall::SystemEventHandler(event, sid, id) => {
                 let s = sid.to_u32();
                 [
-                    SysCallNumber::RegisterEventHandler as usize,
+                    SysCallNumber::SystemEventHandler as usize,
                     *event as usize,
                     s.0 as _,
                     s.1 as _,
@@ -988,6 +1007,11 @@ impl SysCall {
             SysCallNumber::AppIdToPid => {
                 SysCall::AppIdToPid(AppId::from([a1 as u32, a2 as u32, a3 as u32, a4 as u32]))
             }
+            SysCallNumber::ServerEventHandler => SysCall::ServerEventHandler(
+                a1.into(),
+                SID::from_u32(a2 as _, a3 as _, a4 as _, a5 as _),
+                a6 as _,
+            ),
             SysCallNumber::MirrorMemoryToPid => SysCall::MirrorMemoryToPid(
                 unsafe { MemoryRange::new(a1, a2) }?,
                 PID::new(a3 as _).ok_or(Error::InvalidSyscall)?,
@@ -999,7 +1023,7 @@ impl SysCall {
             }
             SysCallNumber::GetSystemStats => SysCall::GetSystemStats(SystemStat::from(a1)),
 
-            SysCallNumber::RegisterEventHandler => SysCall::RegisterEventHandler(
+            SysCallNumber::SystemEventHandler => SysCall::SystemEventHandler(
                 a1.into(),
                 SID::from_u32(a2 as _, a3 as _, a4 as _, a5 as _),
                 a6 as _,
@@ -1135,6 +1159,7 @@ impl SysCall {
 
 /// Map the given physical address to the given virtual address.
 /// The `size` field must be page-aligned.
+#[cfg(keyos)]
 #[inline]
 pub fn map_memory(
     phys: Option<MemoryAddress>,
@@ -1142,32 +1167,63 @@ pub fn map_memory(
     size: usize,
     flags: MemoryFlags,
 ) -> core::result::Result<MemoryRange, Error> {
-    crate::arch::map_memory_pre(&phys, &virt, size, flags)?;
     let result =
         rsyscall(SysCall::MapMemory(phys, virt, MemorySize::new(size).ok_or(Error::InvalidSyscall)?, flags))?;
-    if let Result::MemoryRange(range) = result {
-        Ok(crate::arch::map_memory_post(phys, virt, size, flags, range)?)
-    } else if let Result::Error(e) = result {
-        Err(e)
-    } else {
-        Err(Error::InternalError)
+    match result {
+        Result::MemoryRange(range) => Ok(range),
+        Result::Error(e) => Err(e),
+        _ => Err(Error::InternalError),
     }
+}
+
+/// Hosted `map_memory` is a plain `alloc_zeroed`. The kernel emulator's `MapMemory`
+/// handler is a no-op in hosted mode (its `map_page` returns `Ok(())` without backing
+/// any storage), so going over TCP would just round-trip a useless syscall. Allocate
+/// directly here.
+#[cfg(not(keyos))]
+#[inline]
+pub fn map_memory(
+    _phys: Option<MemoryAddress>,
+    _virt: Option<MemoryAddress>,
+    size: usize,
+    _flags: MemoryFlags,
+) -> core::result::Result<MemoryRange, Error> {
+    use core::alloc::Layout;
+    extern crate alloc;
+    let layout =
+        Layout::from_size_align(size, crate::PAGE_SIZE).map_err(|_| Error::InvalidSyscall)?.pad_to_align();
+    let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    if ptr.is_null() {
+        return Err(Error::OutOfMemory);
+    }
+    unsafe { MemoryRange::new(ptr as usize, size) }
 }
 
 /// Map the given physical address to the given virtual address.
 /// The `size` field must be page-aligned.
+#[cfg(keyos)]
 #[inline]
 pub fn unmap_memory(range: MemoryRange) -> core::result::Result<(), Error> {
-    crate::arch::unmap_memory_pre(&range)?;
     let result = rsyscall(SysCall::UnmapMemory(range))?;
-    if let crate::Result::Ok = result {
-        crate::arch::unmap_memory_post(range)?;
-        Ok(())
-    } else if let Result::Error(e) = result {
-        Err(e)
-    } else {
-        Err(Error::InternalError)
+    match result {
+        crate::Result::Ok => Ok(()),
+        Result::Error(e) => Err(e),
+        _ => Err(Error::InternalError),
     }
+}
+
+/// Hosted `unmap_memory` mirrors the alloc above: free the memory directly without
+/// going through the no-op kernel-emulator syscall.
+#[cfg(not(keyos))]
+#[inline]
+pub fn unmap_memory(range: MemoryRange) -> core::result::Result<(), Error> {
+    use core::alloc::Layout;
+    extern crate alloc;
+    let layout = Layout::from_size_align(range.len(), crate::PAGE_SIZE)
+        .map_err(|_| Error::InvalidSyscall)?
+        .pad_to_align();
+    unsafe { alloc::alloc::dealloc(range.as_mut_ptr(), layout) };
+    Ok(())
 }
 
 /// Update the permissions on the given memory range. Note that permissions may
@@ -1904,10 +1960,10 @@ pub fn allow_messages_on_connection(
     Ok(())
 }
 
-#[cfg(keyos)]
 #[inline]
-pub fn flush_cache(mem: MemoryRange, operation: CacheOperation) -> core::result::Result<(), Error> {
-    crate::arch::syscall(SysCall::FlushCache(mem, operation))?;
+pub fn flush_cache(_mem: MemoryRange, _operation: CacheOperation) -> core::result::Result<(), Error> {
+    #[cfg(keyos)]
+    crate::arch::syscall(SysCall::FlushCache(_mem, _operation))?;
     Ok(())
 }
 
@@ -1955,6 +2011,21 @@ pub fn get_system_stat(stat: SystemStat) -> core::result::Result<usize, Error> {
     })
 }
 
+/// Registers a message ID that will be received when the specified event happens on the server.
+/// See the docs of [`ServerEvent`] for the parameters of the sent message.
+#[inline]
+pub fn register_server_event_handler(
+    event: ServerEvent,
+    sid: SID,
+    id: MessageId,
+) -> core::result::Result<(), Error> {
+    crate::arch::syscall(SysCall::ServerEventHandler(event, sid, id)).and_then(|result| match result {
+        Result::Ok => Ok(()),
+        Result::Error(e) => Err(e),
+        _ => Err(Error::InternalError),
+    })
+}
+
 /// Registers a SID that will receive a message when the specified event happens.
 /// See the docs of [`SystemEvent`] for the parameters of the sent message.
 #[inline]
@@ -1963,7 +2034,7 @@ pub fn register_system_event_handler(
     sid: SID,
     id: MessageId,
 ) -> core::result::Result<(), Error> {
-    crate::arch::syscall(SysCall::RegisterEventHandler(event, sid, id)).and_then(|result| match result {
+    crate::arch::syscall(SysCall::SystemEventHandler(event, sid, id)).and_then(|result| match result {
         Result::Ok => Ok(()),
         Result::Error(e) => Err(e),
         _ => Err(Error::InternalError),

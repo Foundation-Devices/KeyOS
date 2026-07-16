@@ -1,23 +1,20 @@
-// SPDX-FileCopyrightText: 2024-2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-FileCopyrightText: 2024-2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Security Keys navigation request and response formats.
 //!
-//! This module contains types for:
-//! - User presence verification requests
-//! - Operation outcome notifications (registration/authentication success/failure)
+//! Currently the only navigation request is the user-presence prompt. Operation outcome
+//! notifications used to be a navigation request too, but were moved to a fido subscription
+//! event (`SubscribeOperationOutcomes`) since the Security Keys app is guaranteed to be
+//! running by the time an outcome fires.
 
 /// Unified navigation request enum for the Security Keys app.
 ///
-/// This enum wraps all possible navigation request types, providing explicit
-/// type discrimination during deserialization. This avoids ambiguity that could
-/// arise from deserializing raw bytes as multiple different struct types.
+/// Kept as an enum (rather than a bare struct) so future nav variants can be added
+/// without breaking the wire format.
 #[derive(Debug, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 pub enum SecurityKeysNavRequest {
     UserPresence(UserPresenceOptions),
-    OperationOutcome(OperationOutcomeOptions),
-    /// Fire-and-forget notification when no security keys are available for registration.
-    NoKeysWarning,
 }
 
 impl SecurityKeysNavRequest {
@@ -39,7 +36,7 @@ impl SecurityKeysNavRequest {
 /// # use gui_server_api::navigation::securitykeys::{UserPresenceOptions};
 /// let options = UserPresenceOptions::authentication(Some(0)).with_rp_id("foundation.xyz".to_string());
 /// ```
-#[derive(Debug, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[derive(Debug, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 pub struct UserPresenceOptions {
     /// The security key index to use, or None to allow the user to select one.
     pub security_key_index: Option<usize>,
@@ -115,95 +112,6 @@ impl UserPresenceResult {
 
     pub fn from_slice(data: &[u8]) -> Option<Self> {
         let Ok(archived) = rkyv::access::<ArchivedUserPresenceResult, rkyv::rancor::Error>(data) else {
-            return None;
-        };
-        rkyv::deserialize::<Self, rkyv::rancor::Error>(archived).ok()
-    }
-
-    pub fn serialize(&self) -> Vec<u8> { rkyv::to_bytes::<rkyv::rancor::Error>(self).unwrap().to_vec() }
-}
-
-/// The type of FIDO operation that completed.
-#[derive(Debug, Clone, Copy, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
-pub enum OperationType {
-    Registration,
-    Authentication,
-}
-
-/// Options for the Operation Outcome navigation request.
-///
-/// Used to inform the user about the result of a registration or authentication operation.
-/// This is a "fire and forget" notification - the FIDO server does not wait for user acknowledgment.
-///
-/// ```rust,ignore
-/// # use gui_server_api::navigation::securitykeys::{OperationOutcomeOptions, OperationType};
-/// let options = OperationOutcomeOptions::registration_success(0)
-///     .with_rp_id("example.com".to_string())
-///     .with_rp_name("Example Site".to_string());
-/// ```
-#[derive(Debug, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
-pub struct OperationOutcomeOptions {
-    pub security_key_index: usize,
-    pub operation: OperationType,
-    pub success: bool,
-    pub rp_id: Option<String>,
-    pub rp_name: Option<String>,
-    pub user_name: Option<String>,
-    pub user_display_name: Option<String>,
-    /// Optional error message when success is false.
-    pub error_message: Option<String>,
-}
-
-impl OperationOutcomeOptions {
-    fn new(security_key_index: usize, operation: OperationType, success: bool) -> Self {
-        Self {
-            security_key_index,
-            operation,
-            success,
-            rp_id: None,
-            rp_name: None,
-            user_name: None,
-            user_display_name: None,
-            error_message: None,
-        }
-    }
-
-    /// Creates options for a successful registration outcome.
-    pub fn registration_success(security_key_index: usize) -> Self {
-        Self::new(security_key_index, OperationType::Registration, true)
-    }
-
-    /// Creates options for a failed registration outcome.
-    pub fn registration_failure(security_key_index: usize) -> Self {
-        Self::new(security_key_index, OperationType::Registration, false)
-    }
-
-    /// Creates options for a successful authentication outcome.
-    pub fn authentication_success(security_key_index: usize) -> Self {
-        Self::new(security_key_index, OperationType::Authentication, true)
-    }
-
-    /// Creates options for a failed authentication outcome.
-    pub fn authentication_failure(security_key_index: usize) -> Self {
-        Self::new(security_key_index, OperationType::Authentication, false)
-    }
-
-    pub fn with_rp_id(self, rp_id: String) -> Self { Self { rp_id: Some(rp_id), ..self } }
-
-    pub fn with_rp_name(self, rp_name: String) -> Self { Self { rp_name: Some(rp_name), ..self } }
-
-    pub fn with_user_name(self, user_name: String) -> Self { Self { user_name: Some(user_name), ..self } }
-
-    pub fn with_user_display_name(self, user_display_name: String) -> Self {
-        Self { user_display_name: Some(user_display_name), ..self }
-    }
-
-    pub fn with_error_message(self, error_message: String) -> Self {
-        Self { error_message: Some(error_message), ..self }
-    }
-
-    pub fn from_slice(data: &[u8]) -> Option<Self> {
-        let Ok(archived) = rkyv::access::<ArchivedOperationOutcomeOptions, rkyv::rancor::Error>(data) else {
             return None;
         };
         rkyv::deserialize::<Self, rkyv::rancor::Error>(archived).ok()

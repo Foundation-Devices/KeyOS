@@ -9,7 +9,7 @@ edition = "2024"
 [dependencies]
 async-channel = { workspace = true }
 async-task = { workspace = true }
-async-watch = { workspace = true }
+event-listener = { workspace = true }
 futures-lite = { workspace = true }
 log = { workspace = true }
 oneshot = { workspace = true }
@@ -22,3 +22,10 @@ xous-ticktimer = { workspace = true }
 [features]
 test_executor = []
 integration_test = []
+
+[target.'cfg(loom)'.dev-dependencies]
+event-listener = { workspace = true, features = ["loom"] }
+loom = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

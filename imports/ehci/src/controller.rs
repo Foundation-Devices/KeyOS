@@ -45,6 +45,10 @@ pub trait EventHandler<CT> {
         result: Result<usize, EhciError>,
         context: CT,
     );
+
+    /// Fires when a port's `connected` bit goes high, before reset and
+    /// enumeration. Indicates a peripheral has electrically attached.
+    fn port_connected(&mut self, _controller: &mut Controller<CT>) {}
 }
 
 enum BuiltinTransfer<CT> {
@@ -383,6 +387,7 @@ impl<CT: TransferContext> Controller<CT> {
     ) -> Result<(), EhciError> {
         let mut disconnects = Vec::new();
         let mut connects = Vec::new();
+        let mut any_port_connected = false;
         for (port_number, port) in self.ports.iter_mut().enumerate() {
             let mut port_status = unsafe { (*self.opregs).ports[port_number].get() };
             match *port {
@@ -395,6 +400,7 @@ impl<CT: TransferContext> Controller<CT> {
                         port_status.set_reset(true);
                         unsafe { (*self.opregs).ports[port_number].set(port_status) };
                         *port = PortStatus::Resetting { since: tick_count };
+                        any_port_connected = true;
                     }
                 }
                 PortStatus::Resetting { since } => {
@@ -446,6 +452,9 @@ impl<CT: TransferContext> Controller<CT> {
             let transfer = self.set_address_transfer(port_number)?;
             self.async_queue.schedule_transfer(0, transfer).map_err(|(_, e)| e)?;
             self.ports[port_number] = PortStatus::WaitingForSetAddress { since: tick_count };
+        }
+        if any_port_connected {
+            handler.port_connected(self);
         }
         Ok(())
     }

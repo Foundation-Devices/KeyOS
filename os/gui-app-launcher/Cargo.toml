@@ -13,11 +13,13 @@ production = []
 [dependencies]
 anyhow = { workspace = true }
 app-manager = { workspace = true }
+app-manifest = { path = "../app-manifest" }
 fs = { workspace = true }
 gui-server-api = { workspace = true }
 haptics = { workspace = true }
 hex = { workspace = true }
 i18n = { path = "../../i18n" }
+jiff = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
 quantum-link = { workspace = true }

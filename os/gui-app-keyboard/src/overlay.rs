@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use tiny_skia::{
-    ColorU8, FillRule, GradientStop, LinearGradient, Paint, Path, PathBuilder, Pixmap, PixmapMut, Point,
-    Rect, Stroke, Transform,
+    ColorU8, FillRule, GradientStop, IntRect, LinearGradient, Paint, Path, PathBuilder, Pixmap, PixmapMut,
+    Point, Rect, Stroke, Transform,
 };
 
 use crate::{
@@ -173,7 +173,7 @@ pub fn draw(
     pixmap: &mut PixmapMut,
     key_rect: &Rect,
     mouse_x: i32,
-) -> Option<char> {
+) -> (IntRect, Option<char>) {
     let text_len = text.chars().count();
     let slot_width = key_rect.width() + BUBBLE_SLOT_PLUS_WIDTH;
     let blob_width: f32 = slot_width * (text_len as f32) + MARGIN * 2.0; // n chars + margins for left and right
@@ -273,9 +273,13 @@ pub fn draw(
         cache.cache_key = cache_key;
     }
 
+    let bubble_left = key_rect.x() as i32 - cache.offset_x;
+    let bubble_top = key_rect.y() as i32 - cache.offset_y;
+    let bubble_right = bubble_left + cache.bubble_pixmap.width() as i32;
+    let bubble_bottom = bubble_top + cache.bubble_pixmap.height() as i32;
     pixmap.draw_pixmap(
-        key_rect.x() as i32 - cache.offset_x,
-        key_rect.y() as i32 - cache.offset_y,
+        bubble_left,
+        bubble_top,
         cache.bubble_pixmap.as_ref(),
         &Default::default(),
         Transform::identity(),
@@ -284,9 +288,14 @@ pub fn draw(
 
     let key_index = ((mouse_x as f32 - x).clamp(0.0, blob_width - MARGIN * 2.0 - 1.0) / slot_width) as usize;
 
+    let key_shadow_left =
+        (x + MARGIN - KEY_SHADOW_RADIUS as f32 + slot_width * key_index as f32).round() as i32;
+    let key_shadow_top = (y + MARGIN - KEY_SHADOW_RADIUS as f32 + KEY_SHADOW_OFFSET as f32).round() as i32;
+    let key_shadow_right = key_shadow_left + cache.selected_key_pixmap.width() as i32;
+    let key_shadow_bottom = key_shadow_top + cache.selected_key_pixmap.height() as i32;
     pixmap.draw_pixmap(
-        (x + MARGIN - KEY_SHADOW_RADIUS as f32 + slot_width * key_index as f32).round() as i32,
-        (y + MARGIN - KEY_SHADOW_RADIUS as f32 + KEY_SHADOW_OFFSET as f32).round() as i32,
+        key_shadow_left,
+        key_shadow_top,
         cache.selected_key_pixmap.as_ref(),
         &Default::default(),
         Transform::identity(),
@@ -303,5 +312,13 @@ pub fn draw(
         .unwrap();
         draw_text(&ch.to_string(), FONT_SCALE, pixmap, &ch_rect, cta_colors.text);
     }
-    text.chars().skip(key_index).next()
+    let selected = text.chars().skip(key_index).next();
+    let dirty = IntRect::from_ltrb(
+        bubble_left.min(key_shadow_left),
+        bubble_top.min(key_shadow_top),
+        bubble_right.max(key_shadow_right),
+        bubble_bottom.max(key_shadow_bottom),
+    )
+    .unwrap();
+    (dirty, selected)
 }

@@ -6,9 +6,8 @@ pub use messages::*;
 pub mod error;
 pub mod messages;
 
-use anyhow::bail;
 use server::{CheckedConn, CheckedPermissions, MessageAllowed};
-use xous::{AppId, APP_ID_SIZE, PID};
+use xous::{AppId, PID};
 
 #[macro_export]
 macro_rules! use_api {
@@ -48,26 +47,24 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
     where
         P: MessageAllowed<GetAppName>,
     {
-        self.0.send_archive(GetAppName::new_by_app_id(id, locale))
+        self.0.send_blocking_archive(GetAppName::new_by_app_id(id, locale))
     }
 
     pub fn app_name_by_pid(&self, pid: PID, locale: &str) -> Option<String>
     where
         P: MessageAllowed<GetAppName>,
     {
-        self.0.send_archive(GetAppName::new_by_pid(pid, locale))
+        self.0.send_blocking_archive(GetAppName::new_by_pid(pid, locale))
+    }
+
+    pub fn get_qr_match_rules(&self) -> Vec<AppQrMatchRules>
+    where
+        P: MessageAllowed<GetQrMatchRules>,
+    {
+        self.0.send_blocking_archive(GetQrMatchRules)
     }
 }
 
 pub fn decode_app_id_str(id: &str) -> anyhow::Result<AppId> {
-    let id = id.strip_prefix("0x").unwrap_or(id);
-
-    if id.len() != APP_ID_SIZE * 2 {
-        bail!("Invalid hex AppId length: {}, expected {} hex characters", id.len(), APP_ID_SIZE * 2);
-    }
-
-    let mut id_bytes = [0u8; APP_ID_SIZE];
-    hex::decode_to_slice(id, &mut id_bytes)?;
-
-    Ok(AppId(id_bytes))
+    Ok(AppId(app_manifest::parse_app_id_bytes(id)?))
 }

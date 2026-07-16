@@ -16,11 +16,13 @@ default = []    # "debugprint"
 # Dependency versions enforced by Cargo.lock.
 [dependencies]
 app-manifest = { path = "../../os/app-manifest" }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../api/log" }
 num-derive = "0.4.2"
 num-traits = "0.2.18"
 once_cell = "1.20.3"
+system-manifests = { path = "../../os/system-manifests" }
 xous = { path = "../xous-rs" }
 xous-api-names = { path = "../api/names" }
 xous-ipc = { path = "../ipc" }

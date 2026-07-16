@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use nfc::listen;
+use nfc_server::listen;
 
 pub fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();

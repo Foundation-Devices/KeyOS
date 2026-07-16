@@ -1,14 +1,15 @@
+manifestVersion = "0"
 [servers."os/bt"]
-GetBtAddr = { id = 0, type = "archive" }
+GetBtAddr = { id = 0, type = "blockingArchive" }
 EnableBle = { id = 1, type = "blockingScalar" }
 DisableBle = { id = 2, type = "blockingScalar" }
 Reset = { id = 3, type = "blockingScalar" }
 GetState = { id = 4, type = "blockingScalar" }
 SubscribeBle = { id = 5, type = "archiveEvent" }
-SendBle = { id = 6, type = "archive" }
+SendBle = { id = 6, type = "blockingArchive" }
 SubscribeBleState = { id = 7, type = "scalarEvent" }
 Poll = { id = 8, type = "scalar" }
 DisableAdvChannels = { id = 9, type = "blockingScalar" }
 Disconnect = { id = 10, type = "blockingScalar" }
-GetBleVersionInfo = { id = 31, type = "archive" }
-TestEcho = { id = 32, type = "archive" }
+GetBleVersionInfo = { id = 31, type = "blockingArchive" }
+TestEcho = { id = 32, type = "blockingArchive" }

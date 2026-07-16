@@ -15,6 +15,8 @@ power_manager::use_api!();
 
 dma::use_api!();
 
+gpio::use_api!();
+
 #[derive(server::Server)]
 #[name = "os/spi"]
 pub struct SpiServer {
@@ -26,6 +28,9 @@ pub struct SpiServer {
 impl SpiServer {
     pub fn init() -> Self {
         log::debug!("Initializing SPI0");
+
+        // Wait for gpio server to mux SPI0 pins.
+        let _gpio = GpioApi::default();
 
         PowerManagerApi::default()
             .enable_peripheral(atsama5d27::pmc::PeripheralId::Spi0)
@@ -79,6 +84,7 @@ impl SpiServer {
             };
             let bytes = dma_rx.wait()?;
             dma_tx.wait()?;
+            xous::flush_cache(buffer, xous::CacheOperation::Invalidate)?;
             log::trace!("Result (bytes={bytes}): {:02x?}", buffer.as_slice::<u8>());
             Ok(bytes)
         } else {

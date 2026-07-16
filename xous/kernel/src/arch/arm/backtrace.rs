@@ -153,21 +153,20 @@ fn is_range_accessible(range: Range<usize>, allow_kernel_addrs: bool) -> bool {
 }
 
 /// Prints a backtrace for the current (crashing) process
-pub fn print_current_process_backtrace() {
+pub fn capture_current_process_backtrace() {
     let aslr_slide =
         crate::SystemServices::with(|ss| ss.process(current_pid()).map(|p| p.aslr_slide).unwrap_or(0));
 
     ArchProcess::with_current(|process| {
-        print_backtrace_from_thread(process.current_thread(), aslr_slide);
+        capture_backtrace_from_thread(process.current_thread(), aslr_slide);
     });
 }
 
-fn print_backtrace_from_thread(thread: &Thread, aslr_slide: usize) {
+fn capture_backtrace_from_thread(thread: &Thread, aslr_slide: usize) {
     let is_thumb = thread.is_in_thumb_mode();
     let frame_pointer = if is_thumb { thread.r7 } else { thread.fp };
 
     let Some(stack) = thread.stack else {
-        println!("Backtrace: <stack bounds unknown>");
         append_to_panic_message(b"\nBacktrace: <stack bounds unknown>");
         return;
     };
@@ -181,7 +180,6 @@ fn print_backtrace_from_thread(thread: &Thread, aslr_slide: usize) {
         let mut writer = crate::debug::BufStr::from(&mut buf[..]);
         let _ = write!(writer, "\nBacktrace:\n  {:07x} {:07x}", pc_file, lr_file);
         let msg = writer.as_slice();
-        println!("{}", core::str::from_utf8(msg).unwrap_or(""));
         append_to_panic_message(msg);
         return;
     }
@@ -195,12 +193,11 @@ fn print_backtrace_from_thread(thread: &Thread, aslr_slide: usize) {
         false, // kernel addresses are not allowed in backtraces
     );
 
-    print_and_append_backtrace(&backtrace, aslr_slide);
+    append_backtrace(&backtrace, aslr_slide);
 }
 
-fn print_and_append_backtrace(backtrace: &Backtrace, aslr_slide: usize) {
+fn append_backtrace(backtrace: &Backtrace, aslr_slide: usize) {
     if backtrace.depth() == 0 {
-        println!("Backtrace: <empty>");
         append_to_panic_message(b"\nBacktrace: <empty>");
         return;
     }
@@ -221,9 +218,6 @@ fn print_and_append_backtrace(backtrace: &Backtrace, aslr_slide: usize) {
     }
 
     let msg = writer.as_slice();
-    if let Ok(s) = core::str::from_utf8(msg) {
-        println!("{}", s);
-    }
     append_to_panic_message(msg);
 }
 

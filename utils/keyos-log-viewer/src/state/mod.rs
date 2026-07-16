@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::io::Write;
-use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
@@ -11,19 +9,18 @@ use ratatui::widgets::{ListState, TableState};
 
 use self::log::LogViewState;
 use self::process::ProcessViewState;
-use crate::serial::SerialCommand;
+use crate::transport::TransportCommand;
 
 pub mod log;
 pub mod process;
 
 pub struct State {
-    pub port: String,
     pub log: LogViewState,
     pub process: ProcessViewState,
     pub view_mode: ViewMode,
     pub help_open: bool,
     pub status_text: String,
-    serial_tx: Sender<SerialCommand>,
+    transport_tx: Sender<TransportCommand>,
     pub notifications: Vec<Notification>,
 }
 
@@ -45,9 +42,7 @@ impl Notification {
         Self::new(false, message.into(), ttl)
     }
 
-    pub fn error(message: impl Into<String>, ttl: Duration) -> Self {
-        Self::new(true, message.into(), ttl)
-    }
+    pub fn error(message: impl Into<String>, ttl: Duration) -> Self { Self::new(true, message.into(), ttl) }
 
     fn new(error: bool, message: String, ttl: Duration) -> Self {
         Self { error, message, expiration: Instant::now() + ttl }
@@ -58,33 +53,32 @@ impl Notification {
 pub struct KeyResult {
     consumed: bool,
     notify: Option<Notification>,
-    serial: Option<SerialCommand>,
+    transport: Option<TransportCommand>,
 }
 
 impl KeyResult {
-    pub fn ignore() -> Self { Self { consumed: false, notify: None, serial: None } }
+    pub fn ignore() -> Self { Self { consumed: false, notify: None, transport: None } }
 
-    pub fn consumed() -> Self { Self { consumed: true, notify: None, serial: None } }
+    pub fn consumed() -> Self { Self { consumed: true, notify: None, transport: None } }
 
     pub fn set_notify(self, notification: Notification) -> Self {
-        Self { consumed: self.consumed, serial: self.serial, notify: Some(notification) }
+        Self { consumed: self.consumed, transport: self.transport, notify: Some(notification) }
     }
 
-    pub fn set_serial(self, cmd: SerialCommand) -> Self {
-        Self { consumed: self.consumed, serial: Some(cmd), notify: self.notify }
+    pub fn set_transport(self, cmd: TransportCommand) -> Self {
+        Self { consumed: self.consumed, transport: Some(cmd), notify: self.notify }
     }
 }
 
 impl State {
-    pub fn new(serial_tx: Sender<SerialCommand>, port: String) -> Self {
+    pub fn new(transport_tx: Sender<TransportCommand>) -> Self {
         Self {
-            port,
             log: LogViewState::new(),
             process: ProcessViewState::new(),
             view_mode: ViewMode::Logs,
             help_open: false,
             status_text: String::new(),
-            serial_tx,
+            transport_tx,
             notifications: Vec::new(),
         }
     }
@@ -109,7 +103,7 @@ impl State {
         if matches!(key.kind, KeyEventKind::Release) {
             return false;
         }
-        if key.code == KeyCode::Char('?') {
+        if matches!(key.code, KeyCode::Char('?') | KeyCode::Char('h')) {
             self.help_open = !self.help_open;
             return false;
         }
@@ -125,8 +119,8 @@ impl State {
             ViewMode::ProcessList => self.process.handle_key(key.code),
         };
 
-        if let Some(command) = key_result.serial.take() {
-            let _ = self.serial_tx.send(command);
+        if let Some(command) = key_result.transport.take() {
+            let _ = self.transport_tx.send(command);
         }
 
         if let Some(notification) = key_result.notify.take() {
@@ -152,7 +146,7 @@ impl State {
         self.notifications.retain(|notification| now < notification.expiration);
 
         if let Some(command) = self.process.handle_tick(now) {
-            let _ = self.serial_tx.send(command);
+            let _ = self.transport_tx.send(command);
         }
     }
 
@@ -203,21 +197,6 @@ fn copy_to_clipboard(text: &str, success_message: &str) -> Notification {
 }
 
 fn exec_copy_to_clipboard(text: &str) -> Result<(), String> {
-    let cmd = if cfg!(target_os = "macos") { "pbcopy" } else { "wl-copy" };
-    let mut child = Command::new(cmd)
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|err| format!("Failed to run {}: {}", cmd, err))?;
-
-    {
-        let stdin = child.stdin.as_mut().ok_or("Failed to open clipboard stdin")?;
-        stdin.write_all(text.as_bytes()).map_err(|err| format!("Clipboard write failed: {}", err))?;
-    }
-
-    let status = child.wait().map_err(|err| format!("Clipboard command failed: {}", err))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("Clipboard command exited with {}", status))
-    }
+    let mut clipboard = arboard::Clipboard::new().map_err(|err| format!("Clipboard init failed: {err}"))?;
+    clipboard.set_text(text).map_err(|err| format!("Clipboard write failed: {err}"))
 }

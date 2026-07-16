@@ -67,8 +67,6 @@ pub fn build_keyos_boot(args: BootloaderBuildArgs) {
 }
 
 pub fn build_at91bootstrap(args: BootloaderBuildArgs, bl_type: BootloaderType) -> Vec<u8> {
-    let (dl_path_env, dl_path_value) = get_dl_path().expect("cannot find dynamic libraries path");
-
     // Check that armv7a-none-eabi target is installed
     if !is_target_installed("armv7a-none-eabi") {
         eprintln!("Target armv7a-none-eabi is not installed.");
@@ -83,7 +81,6 @@ pub fn build_at91bootstrap(args: BootloaderBuildArgs, bl_type: BootloaderType) -
     // 0. Make the rust part of the bootloader
 
     let mut command = Command::new(cargo());
-    command.env(&dl_path_env, &dl_path_value);
     let package_name = match bl_type {
         BootloaderType::KeyOs => "keyos-boot",
         BootloaderType::Charge => "charge-boot",
@@ -128,6 +125,7 @@ pub fn build_at91bootstrap(args: BootloaderBuildArgs, bl_type: BootloaderType) -
     // 3. Configure the at91bootstrap
     let status = Command::new("make")
         .current_dir(&at91bootstrap_dir)
+        .env("HOSTCC", "cc")
         .args(["sama5d27_som1_sd_image_defconfig"])
         .status()
         .expect("run make sama5d27_som1_sd_image_defconfig at at91bootstrap");
@@ -137,10 +135,8 @@ pub fn build_at91bootstrap(args: BootloaderBuildArgs, bl_type: BootloaderType) -
 
     // 4. make (builds at91bootstrap binary)
     let mut command = Command::new("make");
-
-    command.env(&dl_path_env, &dl_path_value);
-    command.env("LIB_PATH", &dl_path_value);
     command.env("CROSS_COMPILE", "arm-none-eabi-");
+    command.env("HOSTCC", "cc");
     command.env("SOURCE_DATE_EPOCH", GIT_TIMESTAMP.clone());
     command.env("FFI_LIB", package_name.replace('-', "_"));
     command.current_dir(&at91bootstrap_dir);

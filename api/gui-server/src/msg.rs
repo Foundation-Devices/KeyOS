@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod camera;
+mod capture;
+mod framebuffer;
 mod keyboard;
 mod navigation;
 mod register;
@@ -10,6 +12,8 @@ mod scalar;
 mod simulator;
 
 pub use camera::*;
+pub use capture::*;
+pub use framebuffer::*;
 pub use keyboard::*;
 pub use navigation::*;
 pub use register::*;

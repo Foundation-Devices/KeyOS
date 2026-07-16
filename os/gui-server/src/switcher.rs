@@ -5,7 +5,7 @@
 
 use gui_server_api::{
     consts::{
-        FB_SIZE_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH, VIRT_BUTTON_PHYS_HEIGHT, VIRT_BUTTON_PHYS_ORIGIN_X,
+        SCREEN_HEIGHT, SCREEN_WIDTH, VIRT_BUTTON_PHYS_HEIGHT, VIRT_BUTTON_PHYS_ORIGIN_X,
         VIRT_BUTTON_PHYS_ORIGIN_Y, VIRT_BUTTON_PHYS_WIDTH,
     },
     touch::{Touch, TouchKind},
@@ -189,19 +189,20 @@ impl Gui {
     }
 
     pub(crate) fn notify_switcher_update_app_fb(&self, pid: xous::PID) {
+        // 4 bytes per pixel, but half width and half height.
+        const BUFFER_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT;
         self.send_switcher_message(pid, |pid| {
             let app_window = self.windows.get(&pid)?;
-            let Ok(mut fb) = xous::map_memory(
-                None,
-                None,
-                (FB_SIZE_BYTES / 4).next_multiple_of(0x1000),
-                xous::MemoryFlags::W,
-            ) else {
+            let Ok(mut fb) =
+                xous::map_memory(None, None, BUFFER_SIZE.next_multiple_of(0x1000), xous::MemoryFlags::W)
+            else {
                 log::error!("Couldn't allocate switcher app fb message");
                 return None;
             };
-            let display_buffer =
-                unsafe { xous::MemoryRange::new(app_window.bufs.disp_buf.virt_addr, FB_SIZE_BYTES).unwrap() };
+            let Some(display_buffer) = app_window.buffers.most_recent_buffer() else {
+                log::error!("App window doesn't have buffers for switcher");
+                return None;
+            };
 
             // Resize to 0.5x in both directions
             for y in 0..SCREEN_HEIGHT / 2 {

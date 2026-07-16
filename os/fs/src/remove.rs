@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use fs::messages::Remove;
-use server::ArchiveHandler;
+use server::BlockingArchiveHandler;
 use {
     crate::{Error, Location, Server},
     server::xous,
@@ -11,7 +11,7 @@ use {
 impl Server {
     /// Removes a file or directory (recursively if it's a directory)
     fn remove_recursive(&self, path: &str, location: Location) -> Result<(), Error> {
-        let root_dir = self.root_dir(location)?;
+        let root_dir = self.mount(location).ok_or(Error::NoMedia)?.root_dir();
 
         // Try to open as directory first
         match root_dir.open_dir(path) {
@@ -31,7 +31,7 @@ impl Server {
     }
 }
 
-pub(crate) fn recursively_remove_contents<D: fatfs::ReadWriteSeek>(
+pub fn recursively_remove_contents<D: fatfs::ReadWriteSeek>(
     dir: &fatfs::Dir<'_, D>,
 ) -> std::io::Result<()> {
     for entry in dir.iter() {
@@ -49,21 +49,16 @@ pub(crate) fn recursively_remove_contents<D: fatfs::ReadWriteSeek>(
     Ok(())
 }
 
-impl ArchiveHandler<Remove> for Server {
+impl BlockingArchiveHandler<Remove> for Server {
     fn handle(
         &mut self,
         msg: Remove,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Remove as server::Archive>::Response {
+    ) -> <Remove as server::BlockingArchive>::Response {
         self.check_write_access(sender, msg.location)?;
         let path = crate::path_of(msg.location, &msg.path, sender);
-        let mut open_paths = self
-            .files
-            .iter()
-            .flat_map(|(_, files)| files.open.values().map(|open| &open.path))
-            .chain(self.dirs.iter().flat_map(|(_, dirs)| dirs.open.values().map(|open| &open.path)));
-        if open_paths.any(|p| p == &path) {
+        if self.mount(msg.location).ok_or(Error::NoMedia)?.path_in_use(&path)? {
             return Err(Error::FileInUse);
         }
 

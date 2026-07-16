@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { AccountCard, BasePage, Button, Icon, IconButton, NavHeader, OverlayMenu, PopupMenuItem, Shadow, Shield, TextSm, Modal, Checkbox, SegmentedControl, PageBody } from "@ui/widgets.slint";
+import { AccountCard, BasePage, Button, CardCircle, Icon, IconButton, LineCard, NavHeader, OverlayMenu, PopupMenuItem, Shadow, Shield, TextSm, Modal, Checkbox, SegmentedControl, PageBody, Shimmer, TimerLoader, HeadingSm } from "@ui/widgets.slint";
 import { Importance, CurrentTheme, UISize, Palette, Size, CardColor, Timings, ResultLevel } from "@ui/theme.slint";
 import { TR2, TrId } from "../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
@@ -130,10 +130,10 @@ component SingleSigActions inherits HorizontalLayout {
     alignment: space-between;
 
     ActionItem {
-        icon: "envelope";
-        text: TR2.lookup(TrId.AccountsSignMessage);
+        icon: "chain";
+        text: TR2.lookup(TrId.AccountsConnectWallet);
         clicked => {
-            SignMessage.start-sign-message(account-id);
+            Navigate.account-connect({ account-id: account-id }, { });
         }
     }
 
@@ -199,6 +199,73 @@ component AccountViewCard inherits AccountCollapsible {
     }
 }
 
+component SkeletonAccountCard inherits Rectangle {
+    height: 100px;
+
+    Shadow { }
+
+    LineCard {
+        width: 100%;
+        height: 100%;
+        card-color: CardColor.dark-grey;
+
+        VerticalLayout {
+            alignment: stretch;
+
+            HorizontalLayout {
+                alignment: space-between;
+                vertical-stretch: 1;
+                padding-left: Size.sz6;
+                padding-right: Size.sz4;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    Shimmer {
+                        base-color: Palette.white;
+                        height: 28px;
+                        border-radius: Size.sz2;
+
+                        Rectangle {
+                            background: Palette.white.transparentize(0.75);
+                            border-radius: parent.border-radius;
+                            height: 100%;
+
+                            // An invisible text label to define the width of the skeleton
+                            HeadingSm {
+                                text: "Passport Prime";
+                                color: Palette.white;
+                                visible: false;
+                            }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+
+                    CardCircle {
+                        size: Size.sz16;
+                        line-color: CardColor.dark-grey;
+
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                TimerLoader {
+                                    size: Size.sz10;
+                                    loader-color: Palette.white.transparentize(0.6);
+                                    active-color: Palette.white;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 component AccountsPage inherits BasePage {
     property <bool> menu-open: false;
     property <bool> passphrase-modal-open: false;
@@ -235,6 +302,8 @@ component AccountsPage inherits BasePage {
                     labels: [TR2.lookup(TrId.PassphraseDefault), TR2.lookup(TrId.PassphrasePassphrase)];
                     icons: ["", "shield-passphrase"];
                     selected-index: EnterPassphrase.slider-index;
+                    touch-factor: 1.5;
+                    enabled: !Callbacks.accounts-loading;
 
                     changed(label, index) => {
                         EnterPassphrase.slider-index = index;
@@ -243,16 +312,19 @@ component AccountsPage inherits BasePage {
                     }
                 }
 
-                for acct[index] in Callbacks.accounts: AccountViewCard {
-                    acct: acct;
-                    icon: acct.is-multisig ? "keys" : "device";
-                    card-color: acct.color;
-                    open: selected == self.account-id;
-                    clicked => {
-                        if self.open {
-                            selected = "";
-                        } else {
-                            selected = self.account-id;
+                for acct[index] in Callbacks.accounts: VerticalLayout {
+                    if acct.skeleton: SkeletonAccountCard { }
+                    if !acct.skeleton: AccountViewCard {
+                        acct: acct;
+                        icon: acct.is-multisig ? "keys" : "device";
+                        card-color: acct.color;
+                        open: selected == acct.id;
+                        clicked => {
+                            if (selected == acct.id) {
+                                selected = "";
+                            } else {
+                                selected = acct.id;
+                            }
                         }
                     }
                 }
@@ -322,7 +394,7 @@ component AccountsPage inherits BasePage {
             icon: "import";
             clicked => {
                 menu-open = false;
-                CreateAccount.import-multisig();
+                CreateAccount.import-multisig(false);
             }
         }
 
@@ -357,8 +429,9 @@ component AccountsPage inherits BasePage {
         text: TR2.lookup(TrId.PassphraseModalContent);
         button-spacing: Size.sz2;
 
+        // Slightly shorter than the typical row height to keep this checkbox row visually distinct from the Confirm button below.
         Rectangle {
-            height: Size.sz15;
+            height: Size.sz15 - 2px;
 
             VerticalLayout {
                 alignment: center;
@@ -385,13 +458,25 @@ component AccountsPage inherits BasePage {
             }
         }
 
-        Button {
-            label: TR2.lookup(TrId.CommonButtonConfirm);
-            importance: Importance.primary;
+        // Outer Rectangle + sibling TouchArea give the Confirm button a 10 px hit-area extension above and below.
+        Rectangle {
+            height: Size.sz15 + 20px;
 
-            clicked => {
-                passphrase-modal-open = false;
-                Navigate.enter-passphrase({ });
+            VerticalLayout {
+                alignment: center;
+
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonConfirm);
+                    importance: Importance.primary;
+                    force-pressed: confirm-touch.pressed;
+                }
+            }
+
+            confirm-touch := TouchArea {
+                clicked => {
+                    passphrase-modal-open = false;
+                    Navigate.enter-passphrase({ });
+                }
             }
         }
     }
@@ -466,6 +551,8 @@ component ArchivePage inherits BasePage {
                         labels: [TR2.lookup(TrId.PassphraseDefault), TR2.lookup(TrId.PassphrasePassphrase)];
                         icons: ["", "shield-passphrase"];
                         selected-index: EnterPassphrase.slider-index;
+                        touch-factor: 1.5;
+                        enabled: !Callbacks.accounts-loading;
 
                         changed(label, index) => {
                             EnterPassphrase.slider-index = index;

@@ -77,7 +77,7 @@ pub(crate) fn init_erase_callbacks(state: StoredValue<AppState>) {
 
             log::info!("Rebooting");
             let power_manager_api = PowerManagerApi::default();
-            power_manager_api.reboot().ok();
+            power_manager_api.reboot();
         })
         .detach();
     });

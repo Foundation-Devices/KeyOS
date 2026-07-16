@@ -1,22 +1,17 @@
+manifestVersion = "0"
 appId = "0x6775692d6170702d63616d6572610000"
 memory = ["ISC"]
-syscall = ["ClaimInterrupt", "VirtToPhys"]
+syscall = ["ClaimInterrupt", "VirtToPhys", "MirrorMemoryToPid"]
+extends = "../../api/camera"
 
 [appName]
 en = "Camera"
 
 [servers."os/camera"]
-IsReady = { id = 0, type = "blockingScalar" }
-GetFrameMemoryMirror = { id = 1, type = "blockingScalar" }
-FrameCaptured = { id = 2, type = "scalar" }
-SetEnabled = { id = 3, type = "scalar" }
-NotifyVisible = { id = 4, type = "scalar" }
-IsEnabled = { id = 5, type = "blockingScalar" }
-IsInUse = { id = 6, type = "blockingScalar" }
-GetFrameBufId = { id = 7, type = "archive", cfg = "not(keyos)" }
+SubscriberDisconnected = { id = 30, type = "scalar", cfg = "keyos" }
+FrameCaptured = { id = 31, type = "scalar", cfg = "keyos" }
 
 [permissions]
 "template" = ["i2c", "gpio"]
 "os/power-manager" = ["SetPeripheralEnabled"]
-"os/gui-server" = ["RegisterAppMessage", "SwapBuffers"]
 "os/settings" = ["SubscribeCameraEnabled"]

@@ -3,13 +3,12 @@
 //
 use gui_server_api::{
     error::NavigationError,
-    msg::{NavigateTo, ShowModal},
+    msg::ShowModal,
     navigation::{
-        bitcoin::OpenBitcoinOptions,
         filepicker::{SelectFileOptions, SelectFileResult},
         lockscreen::{VerifyPinOptions, VerifyPinResult},
         qrscanner::{ScanQrOptions, ScanQrResult},
-        BITCOIN_APP_ID, FILE_BROWSER_APP_ID, LOCK_SCREEN_APP_ID, QR_SCANNER_APP_ID,
+        FILE_BROWSER_APP_ID, LOCK_SCREEN_APP_ID, QR_SCANNER_APP_ID,
     },
     GuiServerError, ModalStyle,
 };
@@ -77,20 +76,6 @@ where
         Err(NavigationError::CanceledBySystem) | Err(NavigationError::CanceledByUser) => {
             Ok(VerifyPinResult { success: false, security_words: None })
         }
-        Err(e) => Err(GuiServerError::Navigation(e)),
-    }
-}
-
-pub fn open_bitcoin_app<P>(options: OpenBitcoinOptions) -> Result<(), GuiServerError>
-where
-    P: CheckedPermissions + MessageAllowed<NavigateTo>,
-{
-    let msg = NavigateTo { app_id: BITCOIN_APP_ID.0, args: options.serialize() };
-
-    let res = async_archive::<P, _>(msg).block_on();
-
-    match res {
-        Ok(_) => Ok(()),
         Err(e) => Err(GuiServerError::Navigation(e)),
     }
 }

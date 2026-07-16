@@ -56,6 +56,7 @@ const _: () = assert!(USER_PARTITION_START_SECTOR + USER_PARTITION_SIZE_SECTORS 
 const DEFAULT_ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
 const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
     ("alert", &[64]),
+    ("decline-circle", &[64]),
     ("bitcoin", &[64]),
     ("plus", &[96]),
     ("acorn", &[96]),
@@ -70,7 +71,9 @@ const ADDITIONAL_ICON_SIZES: &'static [(&str, &'static [usize])] = &[
     ("device", &[128]),
     ("nfc-1-card-horiz", &[104]),
     ("nfc-1-card-vert", &[96]),
+    ("info", &[64]),
     ("info2", &[96]),
+    ("question-circle", &[64]),
     ("master-key", &[96]),
     ("device-nfc", &[96]),
     ("smartphone-2", &[128]),
@@ -498,8 +501,9 @@ pub(crate) fn print_hashes() {
     print_digest_of_cosigned_file("recovery image", &images_path.join(RECOVERY_IMAGE));
     let apps_dir_local = project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join("apps");
     if apps_dir_local.exists() {
-        for app_dir in fs::read_dir(apps_dir_local).unwrap() {
-            let app_dir_local = app_dir.unwrap();
+        let mut app_dirs: Vec<_> = fs::read_dir(apps_dir_local).unwrap().collect::<Result<_, _>>().unwrap();
+        app_dirs.sort_by_key(|entry| entry.file_name());
+        for app_dir_local in app_dirs {
             let app_name = app_dir_local.file_name().into_string().unwrap();
             print_digest_of_cosigned_file(&app_name, &app_dir_local.path().join("app.elf"));
         }

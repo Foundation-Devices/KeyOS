@@ -6,7 +6,7 @@ pub mod messages;
 
 pub const MAJ_DEV_VERSION: u8 = 1;
 pub const MIN_DEV_VERSION: u8 = 0;
-pub const BLD_DEV_VERSION: u8 = 0;
+pub const BLD_DEV_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SetupPacket {

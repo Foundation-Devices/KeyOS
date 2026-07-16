@@ -5,8 +5,10 @@ use crypto::error::{CryptoError, ShamirError};
 use crypto::messages::*;
 use server::{
     xous::{self},
-    ArchiveHandler, LendMutHandler, ScalarHandler, Server,
+    BlockingArchiveHandler, LendMutHandler, ScalarHandler,
 };
+#[cfg(keyos)]
+use server::{ScalarEventHandler, ScalarEventSubscriber, ScalarEventSubscriptionHandler};
 
 #[cfg(keyos)]
 mod atsama5d2;
@@ -14,26 +16,20 @@ mod atsama5d2;
 mod hosted;
 
 #[cfg(keyos)]
-use atsama5d2::Inner;
+use atsama5d2::CryptoServer;
 #[cfg(not(keyos))]
-use hosted::Inner;
+use hosted::CryptoServer;
 
 #[cfg(keyos)]
 power_manager::use_api!();
 
-#[derive(server::Server)]
-#[name = "os/crypto"]
-pub(crate) struct CryptoServer(Inner);
-
-impl Server for CryptoServer {}
-
-impl LendMutHandler<AesSetup> for CryptoServer {
+impl BlockingArchiveHandler<AesSetup> for CryptoServer {
     fn handle(
         &mut self,
         msg: AesSetup,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <AesSetup as server::LendMut>::Response {
+    ) -> <AesSetup as server::BlockingArchive>::Response {
         self.aes_setup(msg, sender)
     }
 }
@@ -49,15 +45,62 @@ impl LendMutHandler<AesExecute> for CryptoServer {
     }
 }
 
+impl BlockingArchiveHandler<AesAad> for CryptoServer {
+    fn handle(
+        &mut self,
+        msg: AesAad,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<usize, CryptoError> {
+        self.aes_aad(msg, sender)
+    }
+}
+
+impl BlockingArchiveHandler<AesGcmTag> for CryptoServer {
+    fn handle(
+        &mut self,
+        msg: AesGcmTag,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<[u8; 16], CryptoError> {
+        self.aes_get_tag(msg, sender)
+    }
+}
+
 #[cfg(keyos)]
-impl ArchiveHandler<DiskEncryptUnsafe> for CryptoServer {
+impl BlockingArchiveHandler<DiskEncryptUnsafe> for CryptoServer {
     fn handle(
         &mut self,
         msg: DiskEncryptUnsafe,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> Result<usize, CryptoError> {
-        self.disk_encrypt(msg, sender)
+    ) -> Result<(), CryptoError> {
+        self.disk_encrypt_start(msg, sender)
+    }
+}
+
+#[cfg(keyos)]
+impl ScalarEventSubscriptionHandler<SubscribeDiskEncryptComplete> for CryptoServer {
+    fn handle(
+        &mut self,
+        _msg: SubscribeDiskEncryptComplete,
+        subscriber: ScalarEventSubscriber<DiskEncryptComplete>,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<(), CryptoError> {
+        self.set_disk_encrypt_subscriber(subscriber);
+        Ok(())
+    }
+}
+
+#[cfg(keyos)]
+impl ScalarEventHandler<dma::messages::TransferComplete> for CryptoServer {
+    fn handle(
+        &mut self,
+        msg: dma::messages::TransferComplete,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.on_dma_transfer_complete(msg.transfer_id);
     }
 }
 
@@ -67,17 +110,19 @@ impl ScalarHandler<AesClear> for CryptoServer {
     }
 }
 
-impl ArchiveHandler<ShaInit> for CryptoServer {
+#[cfg(keyos)]
+impl BlockingArchiveHandler<ShaSetContext> for CryptoServer {
     fn handle(
         &mut self,
-        msg: ShaInit,
+        msg: ShaSetContext,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<usize, CryptoError> {
-        self.sha_init(sender, msg.algo, msg.total_len).map(|id| id as usize)
+        self.sha_set_context(sender, msg)
     }
 }
 
+#[cfg(keyos)]
 impl LendMutHandler<ShaUpdate> for CryptoServer {
     fn handle(
         &mut self,
@@ -85,45 +130,47 @@ impl LendMutHandler<ShaUpdate> for CryptoServer {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<usize, CryptoError> {
-        self.sha_update(sender, msg.context_id, msg.buf, msg.offset, msg.length)
+        self.sha_update(sender, msg.context_id, msg.buf, msg.length)
     }
 }
 
-impl ArchiveHandler<ShaFinalize> for CryptoServer {
+#[cfg(keyos)]
+impl BlockingArchiveHandler<ShaGetContext> for CryptoServer {
     fn handle(
         &mut self,
-        msg: ShaFinalize,
+        msg: ShaGetContext,
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> Result<Vec<u8>, CryptoError> {
-        self.sha_finalize(sender, msg.context_id)
+    ) -> Result<ShaContextSnapshot, CryptoError> {
+        self.sha_get_context(sender, msg.context_id)
     }
 }
 
-impl ScalarHandler<ShaAbort> for CryptoServer {
-    fn handle(&mut self, msg: ShaAbort, sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        self.sha_abort(sender, msg.0);
+#[cfg(keyos)]
+impl ScalarHandler<ShaDrop> for CryptoServer {
+    fn handle(&mut self, msg: ShaDrop, sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        self.sha_drop(sender, msg.0);
     }
 }
 
-impl ArchiveHandler<Hmac> for CryptoServer {
+impl BlockingArchiveHandler<Hmac> for CryptoServer {
     fn handle(
         &mut self,
         msg: Hmac,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Hmac as server::Archive>::Response {
+    ) -> <Hmac as server::BlockingArchive>::Response {
         self.hmac(msg.algo, &msg.key, &msg.data)
     }
 }
 
-impl ArchiveHandler<ShamirSplit> for CryptoServer {
+impl BlockingArchiveHandler<ShamirSplit> for CryptoServer {
     fn handle(
         &mut self,
         msg: ShamirSplit,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ShamirSplit as server::Archive>::Response {
+    ) -> <ShamirSplit as server::BlockingArchive>::Response {
         bc_shamir::split_secret(
             msg.threshold,
             msg.num_shares,
@@ -134,13 +181,13 @@ impl ArchiveHandler<ShamirSplit> for CryptoServer {
     }
 }
 
-impl ArchiveHandler<ShamirRecover> for CryptoServer {
+impl BlockingArchiveHandler<ShamirRecover> for CryptoServer {
     fn handle(
         &mut self,
         msg: ShamirRecover,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <ShamirRecover as server::Archive>::Response {
+    ) -> <ShamirRecover as server::BlockingArchive>::Response {
         bc_shamir::recover_secret(&msg.indexes, &msg.shares).map_err(convert_shamir_error)
     }
 }

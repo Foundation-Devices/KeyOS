@@ -1,15 +1,13 @@
+manifestVersion = "0"
 appId = "0x6165732d636c69656e74000000000000"
 
 [appName]
 en = "Crypto Client Demo"
 
 [permissions]
-template = ["fs-generic", "crypto-sha"]
+template = ["fs-generic", "crypto-sha", "crypto-aes"]
 "os/fs" = ["GetSystemReadAccess", "GetSystemWriteAccess"]
 "os/crypto" = [
-    "AesSetup",
-    "AesClear",
-    "AesExecute",
     "Hmac",
     "DiskEncryptUnsafe",
 ]

@@ -120,17 +120,17 @@ component ConfirmPage inherits BasePage {
 
             ButtonSection {
                 Button {
-                    enabled: !label-error;
+                    enabled: !label-error && !EnterPassphrase.fingerprint-loading;
                     label: TR2.lookup(TrId.CommonButtonConfirm);
                     importance: Importance.primary;
 
                     clicked => {
-                        EnterPassphrase.confirm-passphrase();
                         EnterPassphrase.slider-index = 1;
-
                         if (new-label != "") {
                             EnterPassphrase.create-initial-account(new-label);
                             new-label = "";
+                        } else {
+                            EnterPassphrase.confirm-passphrase();
                         }
                     }
                 }

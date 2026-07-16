@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 [package]
-name = "camera"
+name = "camera-server"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-gui-server-api = { workspace = true }
+camera = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
 num-derive = { workspace = true }

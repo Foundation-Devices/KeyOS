@@ -1,3 +1,4 @@
+manifestVersion = "0"
 [servers."os/usb"]
 Subscribe = { id = 1, type = "archiveEvent" }
 Claim = { id = 2, type = "blockingScalar" }
@@ -9,17 +10,16 @@ IsEnabled = { id = 7, type = "blockingScalar" }
 IsConnected = { id = 8, type = "blockingScalar" }
 
 [servers."os/usbdev"]
-RegisterInterface = { id = 0, type = "archive" }
+RegisterInterface = { id = 0, type = "blockingArchive" }
 WaitForConnection = { id = 1, type = "blockingScalar" }
 SetEndpointStalled = { id = 2, type = "scalar" }
 ReadEndpoint = { id = 3, type = "deferredLendMut" }
 WriteEndpoint = { id = 4, type = "deferredLendMut" }
-SetDeviceEmulationEnabled = { id = 6, type = "scalar" }
 NumInterfaces = { id = 7, type = "blockingScalar" }
 RegisterSetupResponder = { id = 8, type = "blockingScalar" }
 IsDeviceEmulationEnabled = { id = 9, type = "blockingScalar" }
 IsDeviceEmulationConnected = { id = 10, type = "blockingScalar" }
-RegisterCapability = { id = 11, type = "archive" }
+RegisterCapability = { id = 11, type = "blockingArchive" }
 SetVidPid = { id = 12, type = "scalar" }
 ResetController = { id = 13, type = "blockingScalar" }
 IsCableConnected = { id = 14, type = "blockingScalar" }

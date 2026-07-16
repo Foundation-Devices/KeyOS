@@ -59,6 +59,117 @@ impl<I2C: embedded_hal::i2c::I2c> Ovm7690<I2C> {
         Ok(())
     }
 
+    /// Set brightness (Ybright register). Range: 0-255, default: 0
+    pub fn set_brightness(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        self.write_reg(Register::REGD3, value)
+    }
+
+    /// Get current brightness value
+    pub fn brightness(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REGD3)
+    }
+
+    /// Set contrast (Ygain register). Range: 0-255, default: 0x28 (>0x20 increases contrast)
+    pub fn set_contrast(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        self.write_reg(Register::REGD4, value)
+    }
+
+    /// Get current contrast value
+    pub fn contrast(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REGD4)
+    }
+
+    /// Set saturation (Sat_u and Sat_v registers). Range: 0-255, default: 0x50
+    pub fn set_saturation(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        self.write_reg(Register::REGD8, value)?;
+        self.write_reg(Register::REGD9, value)
+    }
+
+    /// Get current saturation value (returns Sat_u)
+    pub fn saturation(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REGD8)
+    }
+
+    /// Set sharpness magnitude (REGB6). Range: 0-31, default: 0x04
+    /// Higher values = more edge enhancement (sharper image)
+    /// Only effective when auto sharpness is disabled
+    pub fn set_sharpness(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        // REGB6 bits[4:0] = sharpening magnitude
+        let current = self.read_reg(Register::REGB6)?;
+        let new_value = (current & 0xE0) | (value & 0x1F);
+        self.write_reg(Register::REGB6, new_value)
+    }
+
+    /// Get current sharpness value
+    pub fn sharpness(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REGB6).map(|v| v & 0x1F)
+    }
+
+    /// Set denoise magnitude (REGB5). Range: 0-255, default: 0x08
+    /// Higher values = more aggressive noise reduction (may lose detail)
+    /// Only effective when auto denoise is disabled
+    pub fn set_denoise(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        // REGB5 bits[7:0] = de-noise magnitude
+        self.write_reg(Register::REGB5, value)
+    }
+
+    /// Get current denoise value
+    pub fn denoise(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REGB5)
+    }
+
+    /// Set auto edge/denoise controls (REGB4)
+    /// Bit[5] = sharpening mode (0=Manual, 1=Auto)
+    /// Bit[4] = de-noise mode (0=Manual, 1=Auto)
+    pub fn set_auto_edge_denoise(&mut self, auto_sharpness: bool, auto_denoise: bool) -> Result<(), Ovm7690Error<I2C::Error>> {
+        let current = self.read_reg(Register::REGB4)?;
+        let mut value = current & !0x30; // Clear bits 4 and 5
+        if auto_denoise {
+            value |= 0x10; // Bit 4
+        }
+        if auto_sharpness {
+            value |= 0x20; // Bit 5
+        }
+        self.write_reg(Register::REGB4, value)
+    }
+
+    /// Get auto edge/denoise settings
+    /// Returns (auto_sharpness, auto_denoise)
+    pub fn auto_edge_denoise(&mut self) -> Result<(bool, bool), Ovm7690Error<I2C::Error>> {
+        let value = self.read_reg(Register::REGB4)?;
+        Ok(((value & 0x20) != 0, (value & 0x10) != 0))
+    }
+
+    /// Set auto control features (REG13)
+    /// Bits: 0 = AEC, 1 = AWB, 2 = AGC
+    /// Other bits (5,7) are preserved from default 0xe0
+    pub fn set_auto_controls(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        // Combine with base value 0xe0 (fast AEC, banding filter bits)
+        let reg_value = 0xe0 | (value & 0x07);
+        self.write_reg(Register::REG13, reg_value)
+    }
+
+    /// Get current auto control settings
+    pub fn auto_controls(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REG13).map(|v| v & 0x07)
+    }
+
+    /// Set AGC ceiling (maximum gain)
+    /// Values: 0=2x, 1=4x, 2=8x, 3=16x, 4=32x, 5=64x, 6=128x
+    pub fn set_agc_ceiling(&mut self, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {
+        // Read current REG14 value to preserve other bits
+        let current = self.read_reg(Register::REG14)?;
+        // Clear bits[6:4] and set new ceiling value
+        let new_value = (current & 0x8F) | ((value & 0x07) << 4);
+        self.write_reg(Register::REG14, new_value)
+    }
+
+    /// Get current AGC ceiling
+    pub fn agc_ceiling(&mut self) -> Result<u8, Ovm7690Error<I2C::Error>> {
+        self.read_reg(Register::REG14).map(|v| (v >> 4) & 0x07)
+    }
+
+
     pub fn release_i2c(self) -> I2C { self.i2c }
 
     fn write_reg(&mut self, reg: Register, value: u8) -> Result<(), Ovm7690Error<I2C::Error>> {

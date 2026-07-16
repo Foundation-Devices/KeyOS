@@ -5,19 +5,17 @@ use fs::messages::SetMtime;
 
 use crate::{Error, Server};
 
-impl server::ArchiveHandler<SetMtime> for Server {
+impl server::BlockingArchiveHandler<SetMtime> for Server {
     fn handle(
         &mut self,
         msg: SetMtime,
         sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <SetMtime as server::Archive>::Response {
+    ) -> <SetMtime as server::BlockingArchive>::Response {
         let open = self
-            .files
-            .get_mut(&sender)
-            .ok_or(Error::FileNotOpen)?
-            .open
-            .get_mut(&msg.handle)
+            .mount_mut(msg.handle.location()?)
+            .ok_or(Error::NoMedia)?
+            .file_mut(sender, msg.handle)
             .ok_or(Error::FileNotOpen)?;
         if !open.flags.write {
             return Err(Error::InvalidOperation);

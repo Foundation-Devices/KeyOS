@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "@ui/theme.slint";
+import { IconButton } from "./icon-button.slint";
+import { Panel } from "./panel.slint";
+import { HeadingMd, TextSm } from "./txt.slint";
+import { Qrcode } from "./qrcode.slint";
+
+component QrOverlayPanel inherits Panel {
+    in-out property <string> url;
+    in property <string> title;
+
+    level: 4;
+    padding: Size.sz6;
+    width: 400px;
+
+    TouchArea { /* prevent clicks from reaching the overlay */ }
+
+    VerticalLayout {
+        padding: Size.sz6;
+        spacing: Size.sz2;
+
+        HorizontalLayout {
+            alignment: end;
+
+            VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    icon: "close";
+                    size: Size.sz6;
+                    touch-factor: 4;
+
+                    clicked => {
+                        root.url = "";
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: Size.sz8;
+
+            VerticalLayout {
+                spacing: Size.sz4;
+
+                HeadingMd {
+                    text: root.title;
+                    color: Palette.content-primary;
+                    horizontal-alignment: center;
+                }
+
+                TextSm {
+                    text: root.url;
+                    color: Palette.content-primary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+
+                Qrcode {
+                    width: 351px;
+                    height: 351px;
+                    data: root.url;
+                }
+            }
+        }
+    }
+}
+
+export component QrOverlay inherits Rectangle {
+    background: Palette.overlay;
+
+    in-out property <string> url;
+    in property <string> title;
+
+    TouchArea {
+        clicked => {
+            url = "";
+        }
+    }
+
+    QrOverlayPanel {
+        url <=> root.url;
+        title: root.title;
+    }
+}

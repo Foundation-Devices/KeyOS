@@ -8,7 +8,7 @@ use xous::PID;
 
 use crate::{
     handlers::{CloseAppTimeout, ForceShutdownTimeout},
-    AppState, AppWindow, Gui, GuiState,
+    AppCloseState, AppWindow, Gui, GuiState,
 };
 
 const GRACEFUL_CLOSE_TIMEOUT_MS: usize = 1000;
@@ -19,20 +19,37 @@ impl Gui {
     pub(crate) fn on_app_disconnected(&mut self, pid: PID) {
         info!("App with PID={pid} disconnected");
 
-        if !self.windows.contains_key(&pid) {
+        let Some(window) = self.windows.remove(&pid) else {
             debug!("No app with PID={pid} is registered");
             return;
+        };
+
+        if matches!(self.notified_nav_request, Some((p, _)) if p == pid) {
+            self.notified_nav_request = None;
+        }
+        if matches!(self.waiting_for_pid, Some((p, _)) if p == pid) {
+            self.waiting_for_pid = None;
         }
 
-        self.kiosk_policies.remove(&pid);
+        if !window.kiosk_policy.auto_lock_enabled {
+            self.reset_auto_lock();
+        }
 
         if self.shutting_down.is_none() {
-            // If the app was a modal, collapse it
+            // If the modal app died, collapse back to its background; if the background
+            // died, exit the modal and go to the launcher (the modal's requestor is gone).
             if let GuiState::Modal(modal_state) = &mut self.state {
                 if pid == modal_state.modal_pid() {
                     modal_state.respond(Err(NavigationError::ModalExited));
                     let change_to_pid = modal_state.background_pid();
                     self.change_state_single_window(change_to_pid, None);
+                } else if pid == modal_state.background_pid() {
+                    self.change_state_single_window(
+                        self.app_registry
+                            .launcher_app_pid()
+                            .expect("Closed an app when the launcher has not even started"),
+                        None,
+                    );
                 }
             }
 
@@ -47,12 +64,7 @@ impl Gui {
             }
         }
 
-        if let Some(window) = self.windows.remove(&pid) {
-            // Drain the refcount from the actual connection
-            while xous::disconnect(window.input_cid).is_ok() {}
-        }
-
-        if !self.windows.values().any(|w| matches!(w.state, AppState::Closing)) {
+        if !self.windows.values().any(|w| matches!(w.close_state, AppCloseState::Closing)) {
             match &mut self.close_app_callback {
                 Some(cb) => {
                     cb.cancel(CloseAppTimeout::ID);
@@ -78,15 +90,15 @@ impl Gui {
 
     pub(crate) fn close_app(&mut self, pid: PID) {
         let Some(window) = self.windows.get_mut(&pid) else {
-            error!("Can't close app with pid {pid}: there is no associated window.");
+            error!("close_app: no window registered for pid {pid}");
             return;
         };
-        if matches!(window.state, AppState::Closing | AppState::Terminating) {
+        if matches!(window.close_state, AppCloseState::Closing | AppCloseState::Terminating) {
             error!("Can't close app with pid {pid}: already closing.");
             return;
         }
         info!("Closing app {} (pid={pid})", window.name);
-        window.state = AppState::Closing;
+        window.close_state = AppCloseState::Closing;
         let msg = xous::Message::new_scalar(InputMessage::CloseRequested as usize, 0, 0, 0, 0);
         if let Err(e) = xous::send_message(window.input_cid, msg) {
             error!("Failed to notify the app (PID {pid}) about being closed: {e:?}");
@@ -98,16 +110,8 @@ impl Gui {
     }
 
     pub(crate) fn close_all_apps(&mut self) {
-        // Close the active app first
-        if let Some(active_pid) = self.active_app_pid() {
-            if let Some(window) = self.windows.get_mut(&active_pid) {
-                info!("Closing focused app `{}` (PID {active_pid})", window.name);
-                notify_close_app(window, active_pid);
-            }
-        }
-
         for (pid, window) in &mut self.windows {
-            if matches!(window.state, AppState::Closing | AppState::Terminating) {
+            if matches!(window.close_state, AppCloseState::Closing | AppCloseState::Terminating) {
                 continue;
             }
 
@@ -127,12 +131,13 @@ impl Gui {
             .windows
             .iter()
             .filter_map(|(pid, window)| {
-                if self.app_registry.is_essential_app(*pid) {
+                if self.app_registry.is_essential_app(*pid)
+                    || Some(*pid) == self.active_app_pid()
+                    || Some(*pid) == self.modal_background_pid()
+                {
                     None
-                } else if let AppState::Active { last_activated } = &window.state {
-                    Some((*last_activated, *pid))
                 } else {
-                    None
+                    Some((window.last_active, *pid))
                 }
             })
             .min()
@@ -152,7 +157,7 @@ impl Gui {
             }
         }
 
-        if should_force_shutdown {
+        if self.shutting_down.is_some() && should_force_shutdown {
             match &mut self.close_app_callback {
                 Some(cb) => cb.request(FORCE_SHUTDOWN_TIMEOUT_MS, ForceShutdownTimeout::ID, 0),
                 None => error!("Close app callback not initialized"),
@@ -167,9 +172,9 @@ impl Gui {
 }
 
 fn terminate_closing_app(window: &mut AppWindow, pid: PID) -> Result<(), xous::Error> {
-    if matches!(window.state, AppState::Closing) {
+    if matches!(window.close_state, AppCloseState::Closing) {
         warn!("Closing `{}` (PID {pid}) timed out, terminating", window.name);
-        window.state = AppState::Terminating;
+        window.close_state = AppCloseState::Terminating;
         return xous::terminate_pid(pid, CLOSE_TIMEOUT_EXIT_CODE);
     }
 
@@ -177,7 +182,7 @@ fn terminate_closing_app(window: &mut AppWindow, pid: PID) -> Result<(), xous::E
 }
 
 fn notify_close_app(window: &mut AppWindow, pid: PID) {
-    window.state = AppState::Closing;
+    window.close_state = AppCloseState::Closing;
     let msg = xous::Message::new_scalar(InputMessage::CloseRequested as usize, 0, 0, 0, 0);
     if let Err(e) = xous::send_message(window.input_cid, msg) {
         error!("Failed to notify the app `{}` (PID {pid}) about being closed: {e:?}", window.name);

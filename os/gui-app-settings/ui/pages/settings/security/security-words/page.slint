@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Size, Palette, Importance } from "@ui/theme.slint";
-import { Chip, TextSm, Link, Button, ButtonSection, TextMd, TextLg, LoginLayout, BasePage, PageBody, ContentSection, PinEntry } from "@ui/widgets.slint";
+import { Chip, TextSm, Link, Button, ButtonSection, TextMd, TextLg, LoginLayout, BasePage, PageBody, ContentSection, PinEntry, QrOverlay } from "@ui/widgets.slint";
 
 import { Animate, Navigate, RoutePath } from "../../../../gen/navigate.slint";
 import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
-import { QrOverlay } from "../../../../widgets/qr-code.slint";
 import { PinGlobal } from "../../../../globals/pin-global.slint";
 import { SettingGlobal } from "../../../../globals/setting-global.slint";
 import { Callbacks } from "../../../../callbacks.slint";
@@ -126,5 +125,6 @@ export component SecurityWordsPage inherits BasePage {
 
     if root.qr-url != "": QrOverlay {
         url <=> root.qr-url;
+        title: TR2.lookup(TrId.CommonSupportModalDocumentationHeader);
     }
 }

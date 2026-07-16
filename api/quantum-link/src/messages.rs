@@ -54,6 +54,7 @@ pub struct BackupShard {
 #[response(Result<RestoreShardResponse, SendMessageError>)]
 pub struct RestoreShard {
     pub seed_fingerprint: SeedFingerprint,
+    pub timestamp: u32,
 }
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -95,9 +96,12 @@ pub struct StartRestoreMagicBackup;
 #[response(Result<PrimeMagicBackupStatusResponse, SendMessageError>)]
 pub struct MagicBackupStatus;
 
+/// Send `UnpairingRequest` to Envoy as a courtesy "goodbye", flush over BLE,
+/// then tear down local pairing state. Use this from any happy-path unpair flow
+/// (settings disconnect, factory reset) so Envoy can transition to a clean "unpaired" state
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(())]
-pub struct ClearPairedDevice;
+#[response(Result<(), SendMessageError>)]
+pub struct UnpairFromEnvoy;
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<(), SendMessageError>)]
@@ -109,6 +113,12 @@ pub struct SendApplyPassphrase {
 #[response(Result<(), SendMessageError>)]
 pub struct SendPrimeMagicBackupEnabled {
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<(), SendMessageError>)]
+pub struct SendPrimeFiatPreference {
+    pub currency_code: String,
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

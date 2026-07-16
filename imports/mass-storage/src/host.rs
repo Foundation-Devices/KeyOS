@@ -54,7 +54,10 @@ impl<UsbHost: UsbHostCommands> MassStorageHost<UsbHost> {
         )?;
         let capacity = CapacityResponse::try_ref_from_bytes(&capacity_response)
             .map_err(|_| MassStorageError::OtherError)?;
-        this.block_size = u32::from(capacity.block_size) as u16;
+        this.block_size = u16::try_from(u32::from(capacity.block_size))
+            .ok()
+            .filter(|&size| size != 0)
+            .ok_or(MassStorageError::OtherError)?;
         this.block_count = capacity.last_block.into();
         debug!("Capacity is {} blocks with size={}", this.block_count, this.block_size);
         Ok(this)
@@ -66,10 +69,11 @@ impl<UsbHost: UsbHostCommands> MassStorageHost<UsbHost> {
         if data.len() % self.block_size as usize != 0 {
             return Err(MassStorageError::InvalidArgument);
         }
-        let blocks = (data.len() / self.block_size as usize) as u16;
+        let blocks = u16::try_from(data.len() / self.block_size as usize)
+            .map_err(|_| MassStorageError::InvalidArgument)?;
         self.send_in_command(
             Cbw::new(
-                (blocks * self.block_size) as u32,
+                blocks as u32 * self.block_size as u32,
                 0,
                 Command::Read10(Typical10 { lba: lba.into(), length: blocks.into(), ..Default::default() }),
             ),
@@ -83,11 +87,12 @@ impl<UsbHost: UsbHostCommands> MassStorageHost<UsbHost> {
         if data.len() % self.block_size as usize != 0 {
             return Err(MassStorageError::InvalidArgument);
         }
-        let blocks = (data.len() / self.block_size as usize) as u16;
+        let blocks = u16::try_from(data.len() / self.block_size as usize)
+            .map_err(|_| MassStorageError::InvalidArgument)?;
 
         self.send_out_command(
             Cbw::new(
-                (blocks * self.block_size) as u32,
+                blocks as u32 * self.block_size as u32,
                 0,
                 Command::Write10(Typical10 { lba: lba.into(), length: blocks.into(), ..Default::default() }),
             ),

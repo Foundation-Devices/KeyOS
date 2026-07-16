@@ -38,8 +38,6 @@ export global BrowserGlobal {
 
     pure callback build-breadcrumbs(int, string) -> [BreadCrumb];
 
-    in property <bool> is-airlock-selected: false;
-    in property <bool> is-airlock-mounted: false;
     in property <AirlockMode> airlock-mode: ReadWrite;
 
     in property <bool> is-file-menu-open: false;
@@ -56,6 +54,8 @@ export global BrowserGlobal {
     callback entry-pressed(string, bool);
     callback entry-long-pressed(string, bool);
     callback select-mode-toggled(bool);
+    callback hidden-files-toggled(bool);
+    callback quick-tip-dismissed();
     callback menu-done();
     callback menu-copy();
     callback menu-move();
@@ -63,6 +63,9 @@ export global BrowserGlobal {
     callback menu-create-folder();
     callback menu-delete();
     callback back();
+
+    callback format-clicked();
+    callback format-ok-acknowledged();
 
     out property <FileListData> active-list: BrowserGlobal.file-lists[BrowserGlobal.location-idx];
     out property <int> selected-count: files-selected-count(active-list.files);

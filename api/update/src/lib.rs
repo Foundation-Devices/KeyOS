@@ -52,7 +52,7 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     where
         P: server::MessageAllowed<messages::StartUpdate>,
     {
-        self.conn.send_move(messages::StartUpdate { release_paths })
+        self.conn.send_archive(messages::StartUpdate { release_paths })
     }
 
     /// Continue an update that was interrupted by a reboot. Make sure that this is called only if
@@ -61,7 +61,7 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     where
         P: server::MessageAllowed<messages::ContinueUpdate>,
     {
-        self.conn.send_move(messages::ContinueUpdate)
+        self.conn.send_archive(messages::ContinueUpdate)
     }
 
     /// Get the current firmware version.
@@ -69,7 +69,7 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     where
         P: server::MessageAllowed<messages::FirmwareVersion>,
     {
-        self.conn.send_archive(messages::FirmwareVersion)
+        self.conn.send_blocking_archive(messages::FirmwareVersion)
     }
 
     /// Apply the previously downloaded firmware update. This should be called after receiving a
@@ -78,7 +78,7 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     where
         P: server::MessageAllowed<messages::ApplyDownloadedUpdate>,
     {
-        self.conn.send_move(messages::ApplyDownloadedUpdate)
+        self.conn.send_archive(messages::ApplyDownloadedUpdate)
     }
 
     /// Check whether an update was applied and is awaiting acknowledgment after reboot.
@@ -104,6 +104,6 @@ impl<P: server::CheckedPermissions> UpdateApi<P> {
     where
         P: server::MessageAllowed<messages::GetUpdateStatus>,
     {
-        self.conn.send_archive(messages::GetUpdateStatus)
+        self.conn.send_blocking_archive(messages::GetUpdateStatus)
     }
 }

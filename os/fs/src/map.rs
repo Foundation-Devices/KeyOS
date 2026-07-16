@@ -11,7 +11,7 @@ use {
 
 use crate::MappedFile;
 
-impl server::ArchiveHandler<MapFileMessage> for Server {
+impl server::BlockingArchiveHandler<MapFileMessage> for Server {
     fn handle(
         &mut self,
         msg: MapFileMessage,
@@ -33,7 +33,7 @@ impl server::ArchiveHandler<MapFileMessage> for Server {
         self.check_read_access(sender, msg.location)?;
         let path = crate::path_of(msg.location, &msg.path, sender);
         if !self.mapped_files.contains_key(&path) {
-            let mut file = self.root_dir(msg.location)?.open_file(&path)?;
+            let mut file = self.mount(msg.location).ok_or(Error::NoMedia)?.root_dir().open_file(&path)?;
             let size = file.seek(SeekFrom::End(0))? as usize;
             if size == 0 {
                 return Err(Error::FileNotFound);
@@ -48,6 +48,7 @@ impl server::ArchiveHandler<MapFileMessage> for Server {
             .map_err(|_| Error::OutOfMemory)?;
             file.seek(SeekFrom::Start(0))?;
             file.read_exact(&mut buffer.as_slice_mut()[..size])?;
+            drop(file);
             self.mapped_files.insert(path.clone(), MappedFile { buffer, size });
         }
         let mirrored = server::xous::mirror_memory_to_pid(self.mapped_files[&path].buffer, sender)

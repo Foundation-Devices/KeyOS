@@ -3,7 +3,7 @@
 
 use crypto::{Direction, AES_BLOCK_SIZE};
 use hmac::{Hmac, Mac};
-use server::xous::{map_memory, MemoryFlags};
+use server::xous::{map_memory, DropDeallocate, MemoryFlags};
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
 
 crypto::use_api!();
@@ -17,16 +17,42 @@ fn main() {
     log::set_max_level(log::LevelFilter::Info);
 
     log::info!("AES client pid: {}", server::xous::current_pid().unwrap());
+    let crypto = CryptoApi::default();
 
-    // Allocate 4 megabytes
+    //  4 megabyte buffer
     let mut data = map_memory(None, None, 0x400000, MemoryFlags::W | MemoryFlags::POPULATE).unwrap();
 
+    test_aes_correctness(&crypto, data);
+    test_aes_cbc_multi_execute(&crypto, data);
+    test_gcm_correctness(&crypto, data);
+    test_unaligned_gcm_tag(&crypto, data);
+    test_large_gcm(&crypto);
+    test_aes_xts_correctness(&crypto, data);
+    test_aes_speed(&crypto, data);
+
+    log::info!("All AES tests done");
+    test_sha_correctness(&crypto, data.as_slice_mut());
+    test_sha_speed(&crypto, data);
+    test_sha_non_contiguous(&crypto);
+    test_hmac_correctness(&crypto);
+    log::info!("All SHA tests done");
+
+    test_cosign2(&crypto);
+
+    // Multi-context streaming SHA tests
+    test_streaming_sha_multi_context(&crypto, data.as_slice_mut());
+    test_streaming_sha_sw_hw_switching(&crypto, data.as_slice_mut());
+    log::info!("All tests done");
+}
+
+fn test_aes_speed(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
     let modes = &[
-        ("CBC", crypto::AesMode::Cbc { key: &[b'x'; 32], iv: &[b'z'; 16] }),
-        ("ECB", crypto::AesMode::Ecb { key: &[b'x'; 32] }),
+        ("CBC", crypto::AesMode::Cbc { iv: [b'z'; 16] }),
+        ("ECB", crypto::AesMode::Ecb),
+        ("GCM", crypto::AesMode::Gcm { iv: [b'z'; 12] }),
     ];
 
-    let crypto = CryptoApi::default();
+    let key = b"a1a2a3a4a5a6a7a8";
 
     for (mode_str, mode) in modes {
         data.as_slice_mut().fill(b'a');
@@ -34,30 +60,33 @@ fn main() {
         data.as_slice_mut()[1] = b'c';
         data.as_slice_mut()[2] = b'd';
 
-        log::info!("Testing {mode_str} AES mode...");
+        log::info!("Testing AES speed in {mode_str} mode...");
 
-        let aes_ctx = crypto.setup_aes(mode.clone()).unwrap();
         log::info!("Testing with small data");
         log::info!("original data: {:02x?}", &data.as_slice::<u8>()[..256]);
-        aes_ctx.execute(data, 0, 15, Direction::Encrypt).unwrap();
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        aes_ctx.execute(data, 0, 15 * AES_BLOCK_SIZE, Direction::Encrypt).unwrap();
         log::info!("encrypted: {:02x?}", &data.as_slice::<u8>()[..256]);
-        aes_ctx.execute(data, 0, 15, Direction::Decrypt).unwrap();
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        aes_ctx.execute(data, 0, 15 * AES_BLOCK_SIZE, Direction::Decrypt).unwrap();
         log::info!("decrypted: {:02x?}", &data.as_slice::<u8>()[..256]);
 
         log::info!("Testing with big data");
         log::info!("original data: {:02x?}", &data.as_slice::<u8>()[data.len() - 32..]);
-        aes_ctx.execute(data, 0, data.len() / AES_BLOCK_SIZE, Direction::Encrypt).unwrap();
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        aes_ctx.execute(data, 0, data.len(), Direction::Encrypt).unwrap();
         log::info!("encrypted: {:02x?}", &data.as_slice::<u8>()[data.len() - 32..]);
-        aes_ctx.execute(data, 0, data.len() / AES_BLOCK_SIZE, Direction::Decrypt).unwrap();
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        aes_ctx.execute(data, 0, data.len(), Direction::Decrypt).unwrap();
         log::info!("decrypted: {:02x?}", &data.as_slice::<u8>()[data.len() - 32..]);
 
-        log::info!("Proper load testing (should take around 5 seconds)");
+        log::info!("Proper load testing");
         let start = std::time::Instant::now();
-        for _ in 0..32 {
-            aes_ctx.execute(data, 0, data.len() / AES_BLOCK_SIZE, Direction::Encrypt).unwrap();
+        for _ in 0..8 {
+            aes_ctx.execute(data, 0, data.len(), Direction::Encrypt).unwrap();
         }
         let elapsed = start.elapsed().as_millis();
-        let mbps = 32.0 * data.len() as f64 / (1024.0 * 1024.0) / (elapsed as f64 / 1000.0);
+        let mbps = 8.0 * data.len() as f64 / (1024.0 * 1024.0) / (elapsed as f64 / 1000.0);
         log::info!("AES-{mode_str} encrypt speed: {mbps:.2} MB/s");
 
         const CHUNK_SIZE: usize = 32 * 1024;
@@ -66,12 +95,7 @@ fn main() {
         for _ in 0..16 {
             for offset in (0..data.len()).step_by(CHUNK_SIZE) {
                 aes_ctx
-                    .execute(
-                        data.subrange(offset, CHUNK_SIZE).unwrap(),
-                        0,
-                        CHUNK_SIZE / AES_BLOCK_SIZE,
-                        Direction::Encrypt,
-                    )
+                    .execute(data.subrange(offset, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE, Direction::Encrypt)
                     .unwrap();
             }
         }
@@ -79,7 +103,328 @@ fn main() {
         let mbps = 16.0 * data.len() as f64 / (1024.0 * 1024.0) / (elapsed as f64 / 1000.0);
         log::info!("AES-{mode_str} encrypt speed (chunked): {mbps:.2} MB/s");
     }
+}
 
+fn test_aes_correctness(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
+    log::info!("Testing AES correctness");
+    let test_vectors: &[(&[u8], crypto::AesMode, &[u8], &[u8])] = &[
+        (
+            &[b'x'; 16],
+            crypto::AesMode::Ecb,
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0xA9, 0xFC, 0x2E, 0x12, 0x35, 0xE1, 0xF1, 0x70, 0x86, 0x0A, 0x0F, 0x72, 0x3B, 0x0E, 0xD5,
+                0x5E, //
+                0xA9, 0xFC, 0x2E, 0x12, 0x35, 0xE1, 0xF1, 0x70, 0x86, 0x0A, 0x0F, 0x72, 0x3B, 0x0E, 0xD5,
+                0x5E, //
+                0x01, 0x3F, 0x50, 0xFB, 0x54, 0x51, 0x9C, 0xA9, 0xA4, 0x16, 0xF9, 0x1C, 0xB1, 0x7A, 0xEB,
+                0x50, //
+            ],
+        ),
+        (
+            b"abcdefgh12345678qwertyuilkjhgfds",
+            crypto::AesMode::Ecb,
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0xAF, 0x24, 0x03, 0x91, 0xC3, 0xB1, 0x2A, 0x97, 0xB2, 0xC8, 0x4E, 0x2D, 0x6A, 0xAC, 0x20,
+                0xBD, //
+                0xAF, 0x24, 0x03, 0x91, 0xC3, 0xB1, 0x2A, 0x97, 0xB2, 0xC8, 0x4E, 0x2D, 0x6A, 0xAC, 0x20,
+                0xBD, //
+                0x00, 0x1C, 0xBE, 0x28, 0x2A, 0xE8, 0x50, 0x5B, 0xB5, 0x8D, 0x00, 0x8D, 0xD8, 0x0C, 0x55,
+                0xDC,
+            ],
+        ),
+        (
+            b"abcdefgh12345678",
+            crypto::AesMode::Cbc { iv: *b"zxcvbnm,asdfghjk" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0xDA, 0xD1, 0xC0, 0x89, 0x6E, 0x42, 0xD0, 0x12, 0x8C, 0x62, 0xB4, 0x4E, 0xB4, 0x9F, 0xDD,
+                0xF8, 0xF7, 0x70, 0x65, 0x33, 0x98, 0x74, 0x54, 0x12, 0x3D, 0x3D, 0x6A, 0x8F, 0xCC, 0xF2,
+                0x30, 0x7D, 0x45, 0x3C, 0x83, 0x42, 0x85, 0x48, 0xA0, 0xCB, 0x5A, 0x65, 0x4C, 0x54, 0xFF,
+                0x47, 0x90, 0xBD,
+            ],
+        ),
+        (
+            b"abcdefgh12345678qwertyuilkjhgfds",
+            crypto::AesMode::Cbc { iv: *b"zxcvbnm,asdfghjk" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0x86, 0xE8, 0x93, 0xF1, 0x37, 0x57, 0x0C, 0xF0, 0x79, 0xDC, 0xB5, 0x43, 0x04, 0x11, 0xA9,
+                0x11, 0x16, 0xF5, 0x97, 0xE0, 0x3B, 0x10, 0xAD, 0xEE, 0xB3, 0xF1, 0x56, 0x65, 0x7E, 0xBA,
+                0x5A, 0x9E, 0xF6, 0x64, 0xF1, 0xD0, 0x27, 0x68, 0x7E, 0x76, 0xE8, 0x63, 0x62, 0xAB, 0x18,
+                0x55, 0x06, 0xB4,
+            ],
+        ),
+        (
+            b"abcdefgh12345678",
+            crypto::AesMode::Ctr { iv: *b"zxcvbnm,asdfghjk" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0xDA, 0xD1, 0xC0, 0x89, 0x6E, 0x42, 0xD0, 0x12, 0x8C, 0x62, 0xB4, 0x4E, 0xB4, 0x9F, 0xDD,
+                0xF8, 0x0A, 0xAA, 0x52, 0x86, 0x8A, 0xB9, 0xCE, 0xEE, 0x8B, 0x26, 0x68, 0x03, 0x93, 0x8E,
+                0x5D, 0x0A, 0xB4, 0x36, 0xF6, 0xCF, 0x47, 0x57, 0x1E, 0xC1, 0x16, 0x42, 0xE3, 0x4D, 0x87,
+                0xE4, 0xAC, 0x5E,
+            ],
+        ),
+        (
+            b"abcdefgh12345678qwertyuilkjhgfds",
+            crypto::AesMode::Ctr { iv: *b"zxcvbnm,asdfghjk" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0x86, 0xE8, 0x93, 0xF1, 0x37, 0x57, 0x0C, 0xF0, 0x79, 0xDC, 0xB5, 0x43, 0x04, 0x11, 0xA9,
+                0x11, 0x0F, 0xEC, 0x19, 0x8B, 0x8F, 0xD4, 0xD4, 0xBF, 0x9E, 0x60, 0x09, 0xB3, 0x19, 0x3B,
+                0x7F, 0x19, 0x53, 0x65, 0x03, 0x13, 0xE6, 0xE4, 0x9B, 0x87, 0xF2, 0xA3, 0x25, 0x64, 0xF3,
+                0xF9, 0x62, 0xC7,
+            ],
+        ),
+        (
+            b"abcdefgh12345678qwertyuilkjhgfds",
+            crypto::AesMode::Ctr { iv: *b"zxcvbnm,asdfghjk" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+            ],
+            &[
+                0x86, 0xE8, 0x93, 0xF1, 0x37, 0x57, 0x0C, 0xF0, 0x79, 0xDC, 0xB5, 0x43, 0x04, 0x11, 0xA9,
+                0x11, 0x0F, 0xEC, 0x19, 0x8B, 0x8F, 0xD4, 0xD4, 0xBF, 0x9E, 0x60, 0x09, 0xB3, 0x19, 0x3B,
+                0x7F, 0x19, 0x53, 0x65, 0x03, 0x13, 0xE6, 0xE4, 0x9B, 0x87, 0xF2, 0xA3, 0x25, 0x64, 0xF3,
+            ],
+        ),
+        (
+            b"abcdefgh12345678",
+            crypto::AesMode::Gcm { iv: *b"1234abcdGHJK" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                0x11,
+            ],
+            &[
+                0x32, 0x35, 0xA0, 0xD2, 0xB8, 0x38, 0x61, 0x09, 0x5C, 0x96, 0x90, 0x87, 0xFA, 0xDA, 0x34,
+                0x81, 0x51, 0x73, 0xD5, 0xF8, 0x70, 0xCC, 0xF7, 0x02, 0xAD, 0x27, 0xF3, 0xAE, 0x6A, 0x07,
+                0xD4, 0x3B, 0x7F, 0x5C, 0x0D, 0x64, 0x02, 0x63, 0xFD, 0x4C, 0xB2, 0xFB, 0x61, 0xCA, 0x80,
+                0x27, 0x6F, 0xC2,
+                //tag: C2E943D6B264914A20EB3E60F87698E3
+            ],
+        ),
+        (
+            b"abcdefgh12345678qwertyuilkjhgfds",
+            crypto::AesMode::Gcm { iv: *b"1234abcdGHJK" },
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+                0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+            ],
+            &[
+                0x1C, 0x41, 0x8E, 0xE5, 0x08, 0x75, 0xEE, 0x0C, 0xCF, 0x92, 0x3C, 0x8A, 0x40, 0xF2, 0x56,
+                0x33, 0x05, 0x75, 0x13, 0x6B, 0xE6, 0xE9, 0x8A, 0x6D, 0x68, 0x65, 0xFF, 0xBB, 0x19, 0x77,
+                0x7E, 0xAD, 0x53, 0x99, 0x8C, 0x73, 0x37, 0x98, 0xC5, 0x69, 0x6A, 0x59, 0x04, 0x56,
+                0x49,
+                //tag: 9504ca591555cdd213805cad769edef4
+            ],
+        ),
+    ];
+
+    for (i, (key, mode, pt, ct)) in test_vectors.iter().enumerate() {
+        log::info!("Testing {key:?} + {mode:?} (len={}", pt.len());
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        data.as_slice_mut()[..pt.len()].copy_from_slice(pt);
+        aes_ctx.execute(data, 0, pt.len(), Direction::Encrypt).unwrap();
+        assert!(
+            &data.as_slice::<u8>()[..ct.len()] == *ct,
+            "Wrong encryption result in test {i}: {:02x?}",
+            &data.as_slice::<u8>()[..ct.len()]
+        );
+        let aes_ctx = crypto.setup_aes(key, mode.clone()).unwrap();
+        aes_ctx.execute(data, 0, pt.len(), Direction::Decrypt).unwrap();
+        assert!(
+            &data.as_slice::<u8>()[..pt.len()] == *pt,
+            "Wrong decryption result in test {i}: {:02x?}",
+            &data.as_slice::<u8>()[..pt.len()]
+        );
+    }
+    log::info!("Done");
+}
+
+fn test_aes_cbc_multi_execute(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
+    log::info!("Testing AES CBC multi-execute correctness");
+    let aes_ctx = crypto.setup_aes(&[b'x'; 32], crypto::AesMode::Cbc { iv: [b'z'; 16] }).unwrap();
+    let pt = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+    ];
+    let ct = [
+        0xD8, 0x64, 0xB2, 0x2B, 0xC9, 0xEF, 0x09, 0x81, 0x4C, 0x18, 0x01, 0x27, 0x76, 0xF5, 0xF7, 0xCF, 0x4D,
+        0xBB, 0xD5, 0x91, 0xE0, 0xDD, 0xB4, 0x18, 0x24, 0xAB, 0xBC, 0x3F, 0xC7, 0x9B, 0x4E, 0x9F, 0xC5, 0xA4,
+        0x44, 0x1B, 0xDF, 0x6C, 0x02, 0xED, 0xC2, 0xC0, 0x2F, 0xBD, 0x59, 0x4E, 0x2D, 0x39,
+    ];
+    data.as_slice_mut()[..pt.len()].copy_from_slice(&pt);
+    aes_ctx.execute(data, 0, 32, Direction::Encrypt).unwrap();
+    aes_ctx.execute(data, 32, 16, Direction::Encrypt).unwrap();
+    assert!(
+        &data.as_slice::<u8>()[..ct.len()] == &ct,
+        "Wrong encryption result CBC multi-execute test: {:02x?}",
+        &data.as_slice::<u8>()[..ct.len()]
+    );
+    let aes_ctx = crypto.setup_aes(&[b'x'; 32], crypto::AesMode::Cbc { iv: [b'z'; 16] }).unwrap();
+    aes_ctx.execute(data, 0, 16, Direction::Decrypt).unwrap();
+    aes_ctx.execute(data, 16, 32, Direction::Decrypt).unwrap();
+    assert!(
+        &data.as_slice::<u8>()[..pt.len()] == &pt,
+        "Wrong decryption result CBC multi-execute test: {:02x?}",
+        &data.as_slice::<u8>()[..pt.len()]
+    );
+}
+
+fn test_gcm_correctness(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
+    log::info!("Testing GCM mode correctness");
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+    let pt = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+    ];
+    let ct = [
+        0x4B, 0x3D, 0xDB, 0x04, 0x5F, 0xC4, 0xD2, 0xFE, 0x76, 0x51, 0xC6, 0x74, 0xFA, 0x2C, 0xC4, 0x79, 0x92,
+        0x26, 0xB2, 0xED, 0xAD, 0xA9, 0x9F, 0x03, 0x83, 0xFB, 0x0E, 0xD3, 0xF1, 0x5E, 0xE0, 0x33, 0xBD, 0xDD,
+        0x48, 0x99, 0x49, 0x2B, 0x28, 0xCA, 0x69, 0x63, 0x1B, 0xD2, 0xFD, 0x51, 0xBD, 0x72,
+    ];
+    let expected_tag =
+        [0x0B, 0xE3, 0x06, 0x04, 0xF3, 0x69, 0xC2, 0xED, 0x99, 0xAE, 0xF4, 0x4D, 0x21, 0x4A, 0xB9, 0x6E];
+    let expected_tag_aad =
+        [0x8E, 0xF8, 0xED, 0x02, 0xA1, 0x38, 0x19, 0x23, 0x14, 0x79, 0x6B, 0x1F, 0x74, 0xE3, 0xB0, 0x8B];
+    data.as_slice_mut()[..pt.len()].copy_from_slice(&pt);
+
+    aes_ctx.add_aad(b"unaligned").unwrap();
+
+    // Check interrupted execution
+    aes_ctx.execute(data, 0, 16, Direction::Encrypt).unwrap();
+    aes_ctx.execute(data, 16, 32, Direction::Encrypt).unwrap();
+    assert!(
+        &data.as_slice::<u8>()[..ct.len()] == &ct,
+        "Wrong encryption result GCM multi-execute test: {:02x?}",
+        &data.as_slice::<u8>()[..ct.len()]
+    );
+    let tag = aes_ctx.gcm_tag().unwrap();
+    assert!(tag == expected_tag_aad, "Wrong tag in GCM test: {tag:02x?}");
+
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+    aes_ctx.execute(data, 0, 48, Direction::Decrypt).unwrap();
+    assert!(
+        &data.as_slice::<u8>()[..pt.len()] == &pt,
+        "Wrong decryption result GCM multi-execute test: {:02x?}",
+        &data.as_slice::<u8>()[..pt.len()]
+    );
+    let tag = aes_ctx.gcm_tag().unwrap();
+    assert!(tag == expected_tag, "Wrong tag in GCM test: {tag:02x?}");
+}
+
+fn test_unaligned_gcm_tag(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
+    log::info!("Testing GCM mode tag with unaligned length");
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+    let pt = [
+        0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+    ];
+    let ct = [
+        0x4B, 0x3D, 0xDB, 0x04, 0x5F, 0xC4, 0xD2, 0xFE, 0x76, 0x51, 0xC6, 0x74, 0xFA, 0x2C, 0xC4, 0x79, 0x92,
+        0x26, 0xB2, 0xED, 0xAD, 0xA9, 0x9F, 0x03, 0x83, 0xFB, 0x0E, 0xD3, 0xF1, 0x5E, 0xE0, 0x33, 0xBD, 0xDD,
+        0x48, 0x99, 0x49, 0x2B, 0x28, 0xCA, 0x69, 0x63, 0x1B, 0xD2, 0xFD,
+    ];
+    let expected_tag =
+        [0x1f, 0x88, 0x07, 0x49, 0x6c, 0xf4, 0x59, 0x89, 0xf1, 0x2f, 0xfe, 0x7a, 0x71, 0x2c, 0xef, 0x3e];
+    data.as_slice_mut()[..pt.len()].copy_from_slice(&pt);
+
+    aes_ctx.add_aad(b"unaligned, but long, maybe even multi block.").unwrap();
+    // Check interrupted execution and offset handling too
+    aes_ctx.execute(data, 0, 16, Direction::Encrypt).unwrap();
+    aes_ctx.execute(data, 16, pt.len() - 16, Direction::Encrypt).unwrap();
+    assert!(
+        aes_ctx.execute(data, 0, 16, Direction::Encrypt).is_err(),
+        "GCM execute after a partial block should fail"
+    );
+
+    assert!(
+        &data.as_slice::<u8>()[..ct.len()] == &ct,
+        "Wrong encryption result GCM unaligned len test: {:02x?}",
+        &data.as_slice::<u8>()[..ct.len()]
+    );
+    let tag = aes_ctx.gcm_tag().unwrap();
+    assert!(tag == expected_tag, "Wrong tag in GCM test: {tag:02x?}");
+
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+
+    aes_ctx.add_aad(b"unaligned, but long, maybe even multi block.").unwrap();
+    aes_ctx.execute(data, 0, ct.len(), Direction::Decrypt).unwrap();
+
+    assert!(
+        &data.as_slice::<u8>()[..pt.len()] == &pt,
+        "Wrong decryption result GCM unaligned len test: {:02x?}",
+        &data.as_slice::<u8>()[..pt.len()]
+    );
+    let tag = aes_ctx.gcm_tag().unwrap();
+    assert!(tag == expected_tag, "Wrong tag in GCM test: {tag:02x?}");
+}
+
+fn test_large_gcm(crypto: &CryptoApi) {
+    log::info!("Testing possible counter rollover in GCM mode");
+    let mut d1 = DropDeallocate::new(map_memory(None, None, 1024 * 1024 * 4, MemoryFlags::W).unwrap());
+    let mut d2 = DropDeallocate::new(map_memory(None, None, 1024 * 1024 * 4, MemoryFlags::W).unwrap());
+    d1.as_slice_mut::<u32>().fill(0xabcd1234);
+    d2.as_slice_mut::<u32>().fill(0xabcd1234);
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+    aes_ctx.execute(*d1, 0, 1024 * 1024, Direction::Encrypt).unwrap();
+    aes_ctx.execute(*d1, 1024 * 1024, 1024 * 1024, Direction::Encrypt).unwrap();
+    let tag = aes_ctx.gcm_tag().unwrap();
+
+    let aes_ctx =
+        crypto.setup_aes(b"12345678qwertyui", crypto::AesMode::Gcm { iv: *b"ijklmnopqrst" }).unwrap();
+    aes_ctx.execute(*d2, 0, 2 * 1024 * 1024, Direction::Encrypt).unwrap();
+    let tag2 = aes_ctx.gcm_tag().unwrap();
+    assert!(d1.as_slice::<u32>() == d2.as_slice::<u32>(), "GCM mode did not work for large chunks");
+    assert!(tag == tag2);
+}
+
+fn test_aes_xts_correctness(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
     log::info!("Testing XTS mode j correctness");
     data.as_slice_mut().fill(b'a');
     let tweak = [b'z'; 16];
@@ -115,60 +460,69 @@ fn main() {
             .unwrap();
     }
     log::info!("decrypted: {:02x?}", &data.as_slice::<u8>()[..256]);
-
-    log::info!("All AES tests done");
+}
+fn test_sha_correctness(crypto: &CryptoApi, data: &mut [u8]) {
     log::info!("Hashing correctness testing (SHA224, SHA256, SHA384, SHA512)");
 
-    for (i, d) in data.as_slice_mut()[..0x4000].iter_mut().enumerate() {
+    for (i, d) in data[..0x4000].iter_mut().enumerate() {
         *d = ((i % 123) * (i % 57)) as u8;
     }
 
-    for offset in [0, 0x40, 0x1000 - 0x40, 0x1000, 0x1040] {
+    for offset in [0, 0x40, 0x1000 - 0x40, 0xfff, 0x1000, 0x1040] {
         for len in [4, 5, 16, 17, 0x785, 0x1000 - 0x40, 0x1000, 0x1001, 0x14f6] {
-            let known_good: [u8; 28] = Sha224::digest(&data.as_slice()[offset..offset + len]).into();
-            let service_result = crypto.sha224(data.subrange(0, 0x4000).unwrap(), offset, len).unwrap();
+            let slice = &data[offset..offset + len];
+            let known_good: [u8; 28] = Sha224::digest(slice).into();
+            let service_result = crypto.sha224(slice).unwrap();
             assert_eq!(known_good, service_result, "Wrong result for SHA224 @ offset={offset} len={len}");
-            let known_good: [u8; 32] = Sha256::digest(&data.as_slice()[offset..offset + len]).into();
-            let service_result = crypto.sha256(data.subrange(0, 0x4000).unwrap(), offset, len).unwrap();
+            let known_good: [u8; 32] = Sha256::digest(slice).into();
+            let service_result = crypto.sha256(slice).unwrap();
             assert_eq!(known_good, service_result, "Wrong result for SHA256 @ offset={offset} len={len}");
-            let known_good: [u8; 48] = Sha384::digest(&data.as_slice()[offset..offset + len]).into();
-            let service_result = crypto.sha384(data.subrange(0, 0x4000).unwrap(), offset, len).unwrap();
+            let known_good: [u8; 48] = Sha384::digest(slice).into();
+            let service_result = crypto.sha384(slice).unwrap();
             assert_eq!(known_good, service_result, "Wrong result for SHA384 @ offset={offset} len={len}");
-            let known_good: [u8; 64] = Sha512::digest(&data.as_slice()[offset..offset + len]).into();
-            let service_result = crypto.sha512(data.subrange(0, 0x4000).unwrap(), offset, len).unwrap();
+            let known_good: [u8; 64] = Sha512::digest(slice).into();
+            let service_result = crypto.sha512(slice).unwrap();
             assert_eq!(known_good, service_result, "Wrong result for SHA512 @ offset={offset} len={len}");
         }
     }
+}
 
-    log::info!("Hashing load testing (SHA256)");
+fn sha_speed(crypto: &CryptoApi, data: &[u8], label: &str) {
     let start = std::time::Instant::now();
-    data.as_slice_mut().fill(0);
     for _ in 0..32 {
-        crypto.sha256(data, 0, data.len()).unwrap();
+        crypto.sha256(data).unwrap();
     }
     let elapsed = start.elapsed().as_millis();
-    log::info!("Hash: {:02x?}", crypto.sha256(data, 0, data.len()).unwrap());
     let mbps = 32.0 * data.len() as f64 / (1024.0 * 1024.0) / (elapsed as f64 / 1000.0);
-    log::info!("SHA256 speed: {mbps:.2} MB/s");
+    log::info!("SHA256 speed ({label}): {mbps:.2} MB/s");
+}
 
+fn test_sha_speed(crypto: &CryptoApi, mut data: server::xous::MemoryRange) {
+    log::info!("Hashing load testing (SHA256)");
+    data.as_slice_mut().fill(0);
+    sha_speed(crypto, data.as_slice(), "aligned");
+    sha_speed(crypto, &data.as_slice()[1..], "unaligned (+1)");
+}
+
+fn test_sha_non_contiguous(crypto: &CryptoApi) {
     log::info!("Hashing non-contiguous buffer");
-    let mut non_contiguous_buffer = map_memory(None, None, 0x4000, MemoryFlags::W).unwrap();
+    let mut buf = DropDeallocate::new(map_memory(None, None, 0x4000, MemoryFlags::W).unwrap());
 
     // We on-demand map these out of order to explicitly break contiguity
-    non_contiguous_buffer.as_slice_mut::<u8>()[0x2000] = 1;
-    non_contiguous_buffer.as_slice_mut::<u8>()[0x1000] = 2;
-    non_contiguous_buffer.as_slice_mut::<u8>()[0x3000] = 3;
-    non_contiguous_buffer.as_slice_mut::<u8>()[0x0000] = 0;
+    buf.as_slice_mut::<u8>()[0x2000] = 1;
+    buf.as_slice_mut::<u8>()[0x1000] = 2;
+    buf.as_slice_mut::<u8>()[0x3000] = 3;
+    buf.as_slice_mut::<u8>()[0x0000] = 0;
 
-    for (i, c) in non_contiguous_buffer.as_slice_mut::<usize>().iter_mut().enumerate() {
+    for (i, c) in buf.as_slice_mut::<usize>().iter_mut().enumerate() {
         *c = i;
     }
-    let known_good: [u8; 32] = Sha256::digest(&non_contiguous_buffer.as_slice()).into();
-    let service_result = crypto.sha256(non_contiguous_buffer, 0, non_contiguous_buffer.len()).unwrap();
-    assert_eq!(known_good, service_result, "Wrong result for non-contiguous SHA256");
+    let known_good: [u8; 32] = Sha256::digest(buf.as_slice::<u8>()).into();
+    let service_result = crypto.sha256(buf.as_slice::<u8>()).unwrap();
+    assert_eq!(known_good, service_result, "Wrong result for SHA256 on non-contiguous buffer");
+}
 
-    log::info!("All SHA tests done");
-
+fn test_hmac_correctness(crypto: &CryptoApi) {
     log::info!("Hashing correctness testing (HMAC-224, HMAC-256, HMAC-384, HMAC-512)");
     for key in [[b'k'; 0].to_vec(), [b'k'; 32].to_vec(), [b'k'; 48].to_vec(), [b'k'; 64].to_vec()] {
         for msg in [[b'm'; 0].to_vec(), [b'm'; 32].to_vec(), [b'm'; 48].to_vec(), [b'm'; 64].to_vec()] {
@@ -218,11 +572,9 @@ fn main() {
             );
         }
     }
-    log::info!("All HMAC tests done");
+}
 
-    // Multi-context streaming SHA tests
-    test_streaming_sha_multi_context(&crypto, &mut data);
-
+fn test_cosign2(crypto: &CryptoApi) {
     log::info!("cosign2 fw file verification test");
     let fs = FileSystem::default();
 
@@ -302,63 +654,42 @@ fn main() {
         // Clean up
         fs.remove(TEMP_FILE_PATH, fs::Location::System).ok();
     }
-
-    log::info!("All tests done");
 }
 
 /// Test streaming SHA multi-context handling
 /// Verifies:
-/// 1. Multiple contexts can be created (up to 4 per process)
-/// 2. Creating a 5th context fails with TooManyShaContexts
-/// 3. Multiple threads can use their contexts concurrently
-/// 4. Results are correct when contexts are used interleaved
-fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut server::xous::MemoryRange) {
+/// 1. Multiple contexts can be created concurrently
+/// 2. Multiple threads can use their contexts concurrently
+/// 3. Results are correct when contexts are used interleaved
+fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut [u8]) {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    use crypto::error::CryptoError;
-
     log::info!("Testing streaming SHA multi-context handling");
 
-    // Prepare test data
-    const CHUNK_SIZE: usize = 0x1000; // 4KB chunks, aligned to SHA_DMA_ALIGNMENT (64)
+    const CHUNK_SIZE: usize = 0x1000; // 4KB chunks
     const TOTAL_SIZE: usize = CHUNK_SIZE * 4; // 16KB total per context
 
-    for (i, d) in data.as_slice_mut()[..TOTAL_SIZE * 4].iter_mut().enumerate() {
+    for (i, d) in data[..TOTAL_SIZE * 4].iter_mut().enumerate() {
         *d = ((i * 17 + 31) % 256) as u8;
     }
 
-    log::info!("test 1: 4 streaming SHA contexts");
+    log::info!("test 1: 4 concurrent streaming SHA contexts");
     {
-        let ctx1 = crypto.sha256_init(TOTAL_SIZE).expect("Failed to create context 1");
-        let ctx2 = crypto.sha256_init(TOTAL_SIZE).expect("Failed to create context 2");
-        let ctx3 = crypto.sha256_init(TOTAL_SIZE).expect("Failed to create context 3");
-        let ctx4 = crypto.sha256_init(TOTAL_SIZE).expect("Failed to create context 4");
+        let mut ctx1 = crypto.sha256_init();
+        let mut ctx2 = crypto.sha256_init();
+        let mut ctx3 = crypto.sha256_init();
+        let mut ctx4 = crypto.sha256_init();
 
-        log::info!("test 2: verifying 5th context creation fails");
-        let result = crypto.sha256_init(TOTAL_SIZE);
-        match result {
-            Err(CryptoError::TooManyShaContexts) => {
-                log::info!("  5th context correctly rejected with TooManyShaContexts");
-            }
-            Ok(_) => {
-                panic!("5th context should have failed with TooManyShaContexts");
-            }
-            Err(e) => {
-                panic!("5th context failed with unexpected error: {:?}", e);
-            }
-        }
-
-        log::info!("test 3: interleaved contexts");
+        log::info!("test 2: interleaved contexts");
         for chunk_idx in 0..4 {
             let offset = chunk_idx * CHUNK_SIZE;
-            ctx1.update(data.subrange(0, TOTAL_SIZE).unwrap(), offset, CHUNK_SIZE)
-                .expect("ctx1 update failed");
-            ctx2.update(data.subrange(TOTAL_SIZE, TOTAL_SIZE).unwrap(), offset, CHUNK_SIZE)
+            ctx1.update(&data[offset..offset + CHUNK_SIZE]).expect("ctx1 update failed");
+            ctx2.update(&data[TOTAL_SIZE + offset..TOTAL_SIZE + offset + CHUNK_SIZE])
                 .expect("ctx2 update failed");
-            ctx3.update(data.subrange(TOTAL_SIZE * 2, TOTAL_SIZE).unwrap(), offset, CHUNK_SIZE)
+            ctx3.update(&data[TOTAL_SIZE * 2 + offset..TOTAL_SIZE * 2 + offset + CHUNK_SIZE])
                 .expect("ctx3 update failed");
-            ctx4.update(data.subrange(TOTAL_SIZE * 3, TOTAL_SIZE).unwrap(), offset, CHUNK_SIZE)
+            ctx4.update(&data[TOTAL_SIZE * 3 + offset..TOTAL_SIZE * 3 + offset + CHUNK_SIZE])
                 .expect("ctx4 update failed");
         }
 
@@ -367,10 +698,10 @@ fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut server::xous:
         let hash3 = ctx3.finalize().expect("ctx3 finalize failed");
         let hash4 = ctx4.finalize().expect("ctx4 finalize failed");
 
-        let expected1: [u8; 32] = Sha256::digest(&data.as_slice()[0..TOTAL_SIZE]).into();
-        let expected2: [u8; 32] = Sha256::digest(&data.as_slice()[TOTAL_SIZE..TOTAL_SIZE * 2]).into();
-        let expected3: [u8; 32] = Sha256::digest(&data.as_slice()[TOTAL_SIZE * 2..TOTAL_SIZE * 3]).into();
-        let expected4: [u8; 32] = Sha256::digest(&data.as_slice()[TOTAL_SIZE * 3..TOTAL_SIZE * 4]).into();
+        let expected1: [u8; 32] = Sha256::digest(&data[0..TOTAL_SIZE]).into();
+        let expected2: [u8; 32] = Sha256::digest(&data[TOTAL_SIZE..TOTAL_SIZE * 2]).into();
+        let expected3: [u8; 32] = Sha256::digest(&data[TOTAL_SIZE * 2..TOTAL_SIZE * 3]).into();
+        let expected4: [u8; 32] = Sha256::digest(&data[TOTAL_SIZE * 3..TOTAL_SIZE * 4]).into();
 
         assert_eq!(hash1.as_slice(), expected1.as_slice(), "context 1 hash mismatch");
         assert_eq!(hash2.as_slice(), expected2.as_slice(), "context 2 hash mismatch");
@@ -379,80 +710,62 @@ fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut server::xous:
         log::info!("  interleaved context usage: all hashes match");
     }
 
-    log::info!("test 4: verifying contexts can be reused after drop");
+    log::info!("test 3: verifying contexts can be reused after drop");
     {
-        let ctx = crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context after drop");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("update failed");
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..CHUNK_SIZE]).expect("update failed");
         let hash = ctx.finalize().expect("finalize failed");
-        let expected: [u8; 32] = Sha256::digest(&data.as_slice()[0..CHUNK_SIZE]).into();
+        let expected: [u8; 32] = Sha256::digest(&data[..CHUNK_SIZE]).into();
         assert_eq!(hash.as_slice(), expected.as_slice(), "reused context hash mismatch");
         log::info!("  context reuse after drop: OK");
     }
 
-    log::info!("test 4b: verifying context drop cleanup prevents TooManyShaContexts leak");
+    log::info!("test 4: verifying context drop cleanup");
     {
-        // This test verifies that dropping contexts without finalizing them
-        // properly cleans up server-side state, preventing context ID exhaustion.
-        // Without proper Drop cleanup, this would fail with TooManyShaContexts
-        // after 4 iterations since the limit is 4 contexts per process.
-
         for iteration in 0..8 {
-            // Create 4 contexts and drop them without finalizing
             {
-                let _ctx1 = crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context 1");
-                let _ctx2 = crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context 2");
-                let _ctx3 = crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context 3");
-                let _ctx4 = crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context 4");
+                let _ctx1 = crypto.sha256_init();
+                let _ctx2 = crypto.sha256_init();
+                let _ctx3 = crypto.sha256_init();
+                let _ctx4 = crypto.sha256_init();
                 // All 4 contexts are dropped here without being finalized
             }
             log::debug!("  iteration {}: dropped 4 contexts without finalizing", iteration);
         }
 
-        // After 8 iterations of creating and dropping 4 contexts each (32 total),
-        // we should still be able to create new contexts if Drop cleanup works
-        let ctx = crypto
-            .sha256_init(CHUNK_SIZE)
-            .expect("Failed to create context after multiple drop cycles - Drop cleanup may not be working");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("update failed");
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..CHUNK_SIZE]).expect("update failed");
         let hash = ctx.finalize().expect("finalize failed");
-        let expected: [u8; 32] = Sha256::digest(&data.as_slice()[0..CHUNK_SIZE]).into();
+        let expected: [u8; 32] = Sha256::digest(&data[..CHUNK_SIZE]).into();
         assert_eq!(hash.as_slice(), expected.as_slice(), "hash mismatch after drop cycles");
-
         log::info!("  context drop cleanup: OK (32 contexts dropped without leak)");
     }
 
-    log::info!("test 4c: verifying partial update followed by drop cleanup");
+    log::info!("test 5: partial update drop cleanup");
     {
-        // Test that contexts with partial updates are properly cleaned up on drop
         for _ in 0..4 {
-            let ctx = crypto.sha256_init(TOTAL_SIZE).expect("Failed to create context");
-            // Only do a partial update (not all data)
-            ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("update failed");
-            // Drop without finalizing - this simulates an error path where
-            // we bail out early with ? before calling finalize()
+            let mut ctx = crypto.sha256_init();
+            ctx.update(&data[..CHUNK_SIZE]).expect("update failed");
+            // Drop without finalizing
         }
 
-        // Should still be able to create contexts
-        let ctx =
-            crypto.sha256_init(CHUNK_SIZE).expect("Failed to create context after partial update drops");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("update failed");
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..CHUNK_SIZE]).expect("update failed");
         let _ = ctx.finalize().expect("finalize failed");
-
         log::info!("  partial update drop cleanup: OK");
     }
 
-    log::info!("test 5: multi-threaded concurrent sha contexts");
+    log::info!("test 6: multi-threaded concurrent sha contexts");
     {
         const NUM_THREADS: usize = 4;
         let barrier = Arc::new(Barrier::new(NUM_THREADS));
         let mut handles = Vec::new();
 
-        // pre-compute expected hashes for each thread's data region
         let mut expected_hashes: Vec<[u8; 32]> = Vec::new();
         for t in 0..NUM_THREADS {
             let start = t * TOTAL_SIZE;
             let end = start + TOTAL_SIZE;
-            let expected: [u8; 32] = Sha256::digest(&data.as_slice()[start..end]).into();
+            let expected: [u8; 32] = Sha256::digest(&data[start..end]).into();
             expected_hashes.push(expected);
         }
 
@@ -467,21 +780,17 @@ fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut server::xous:
                     map_memory(None, None, TOTAL_SIZE, MemoryFlags::W | MemoryFlags::POPULATE)
                         .expect("failed to allocate thread buffer");
 
-                // initialize with a thread-specific pattern
                 for (i, d) in thread_data.as_slice_mut().iter_mut().enumerate() {
                     *d = (data_start + i).wrapping_mul(17).wrapping_add(31) as u8;
                 }
 
-                // wait for all threads to be ready
                 barrier.wait();
 
-                let ctx = crypto
-                    .sha256_init(TOTAL_SIZE)
-                    .expect(&format!("thread {thread_id}: Failed to create context"));
+                let mut ctx = crypto.sha256_init();
 
                 for chunk_idx in 0..4 {
                     let offset = chunk_idx * CHUNK_SIZE;
-                    ctx.update(thread_data.subrange(offset, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE)
+                    ctx.update(&thread_data.as_slice()[offset..offset + CHUNK_SIZE])
                         .expect(&format!("thread {thread_id}: update failed at chunk {chunk_idx}"));
                 }
 
@@ -495,190 +804,170 @@ fn test_streaming_sha_multi_context(crypto: &CryptoApi, data: &mut server::xous:
             handles.push(handle);
         }
 
-        // wait for all threads to complete
         for handle in handles {
             handle.join().expect("thread panicked");
         }
         log::info!("  all {NUM_THREADS} threads completed successfully");
     }
 
-    log::info!("test 6: testing other SHA algorithms with streaming");
+    log::info!("test 7: testing other SHA algorithms with streaming");
     {
         use crypto::messages::ShaAlgo;
 
-        // SHA-224
-        let ctx = crypto.sha_init(ShaAlgo::Sha224, CHUNK_SIZE).expect("SHA224 init failed");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("SHA224 update failed");
+        let mut ctx = crypto.sha_init(ShaAlgo::Sha224);
+        ctx.update(&data[..CHUNK_SIZE]).expect("SHA224 update failed");
         let hash = ctx.finalize().expect("SHA224 finalize failed");
-        let expected: [u8; 28] = Sha224::digest(&data.as_slice()[0..CHUNK_SIZE]).into();
+        let expected: [u8; 28] = Sha224::digest(&data[..CHUNK_SIZE]).into();
         assert_eq!(hash.as_slice(), expected.as_slice(), "SHA224 streaming hash mismatch");
 
-        // SHA-384
-        let ctx = crypto.sha_init(ShaAlgo::Sha384, CHUNK_SIZE).expect("SHA384 init failed");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("SHA384 update failed");
+        let mut ctx = crypto.sha_init(ShaAlgo::Sha384);
+        ctx.update(&data[..CHUNK_SIZE]).expect("SHA384 update failed");
         let hash = ctx.finalize().expect("SHA384 finalize failed");
-        let expected: [u8; 48] = Sha384::digest(&data.as_slice()[0..CHUNK_SIZE]).into();
+        let expected: [u8; 48] = Sha384::digest(&data[..CHUNK_SIZE]).into();
         assert_eq!(hash.as_slice(), expected.as_slice(), "SHA384 streaming hash mismatch");
 
-        // SHA-512
-        let ctx = crypto.sha_init(ShaAlgo::Sha512, CHUNK_SIZE).expect("SHA512 init failed");
-        ctx.update(data.subrange(0, CHUNK_SIZE).unwrap(), 0, CHUNK_SIZE).expect("SHA512 update failed");
+        let mut ctx = crypto.sha_init(ShaAlgo::Sha512);
+        ctx.update(&data[..CHUNK_SIZE]).expect("SHA512 update failed");
         let hash = ctx.finalize().expect("SHA512 finalize failed");
-        let expected: [u8; 64] = Sha512::digest(&data.as_slice()[0..CHUNK_SIZE]).into();
+        let expected: [u8; 64] = Sha512::digest(&data[..CHUNK_SIZE]).into();
         assert_eq!(hash.as_slice(), expected.as_slice(), "SHA512 streaming hash mismatch");
 
         log::info!("  all SHA algorithms: OK");
     }
 
-    log::info!("test 7: testing non-word-aligned final chunk in multi-chunk streaming");
+    log::info!("test 8: testing various message sizes including non-aligned lengths");
     {
-        // Use a page-aligned buffer that's large enough for all test cases
-        let buf_size = CHUNK_SIZE * 4; // 16KB buffer, page-aligned
-
-        // Test various non-aligned final chunk sizes (1, 2, 3 bytes past word boundary)
-        for final_extra_bytes in 1..=3 {
-            let first_chunk_size = CHUNK_SIZE; // Word-aligned first chunk (4096 bytes = 1 page)
-            let final_chunk_size = CHUNK_SIZE + final_extra_bytes; // Non-word-aligned final chunk
-            let total_size = first_chunk_size + final_chunk_size;
-
-            // Prepare test data in a contiguous region
-            for (i, d) in data.as_slice_mut()[..total_size].iter_mut().enumerate() {
-                *d = ((i * 13 + 7) % 256) as u8;
-            }
-
-            // Compute expected hash using software implementation
-            let expected: [u8; 32] = Sha256::digest(&data.as_slice()[..total_size]).into();
-
-            // Test streaming with non-aligned final chunk
-            let ctx = crypto.sha256_init(total_size).expect("init failed");
-
-            // First chunk (word-aligned) - use offset 0 within page-aligned buffer
-            ctx.update(data.subrange(0, buf_size).unwrap(), 0, first_chunk_size)
-                .expect("first update failed");
-
-            // Final chunk (non-word-aligned) - use offset first_chunk_size
-            // The buffer is page-aligned, offset is 64-byte aligned (SHA_DMA_ALIGNMENT)
-            let final_update = ctx.update(
-                data.subrange(0, buf_size).unwrap(),
-                first_chunk_size, // offset within buffer
-                final_chunk_size,
-            );
-
-            match final_update {
-                Ok(_) => {
-                    let hash = ctx.finalize().expect("finalize failed");
-                    assert_eq!(
-                        hash.as_slice(),
-                        expected.as_slice(),
-                        "hash mismatch for non-aligned final chunk with {} extra bytes",
-                        final_extra_bytes
-                    );
-                }
-                Err(e) => {
-                    panic!(
-                        "final update failed with unexpected error for {} extra bytes: {:?}",
-                        final_extra_bytes, e
-                    );
-                }
-            }
-        }
-
-        log::info!("  non-word-aligned final chunk: OK");
-    }
-
-    log::info!("test 8: testing various total message sizes with non-aligned lengths");
-    {
-        // Test message sizes that are 1, 2, 3 bytes past various boundaries
-        // Note: For small sizes, we use single-shot (one update). For larger sizes,
-        // we use multi-chunk with a page-aligned first chunk.
         let test_sizes = [
-            17,   // Small non-aligned
-            63,   // Just under block size
-            65,   // Just over block size
-            127,  // Just under 2x block size
-            129,  // Just over 2x block size
-            1023, // Larger non-aligned
-            4097, // Just over page size
-            8193, // Two pages + 1
+            17usize, // Small non-aligned
+            63,      // Just under block size
+            65,      // Just over block size
+            127,     // Just under 2x block size
+            129,     // Just over 2x block size
+            1023,    // Larger non-aligned
+            4097,    // Just over page size
+            8193,    // Two pages + 1
         ];
 
-        // Use a page-aligned buffer large enough for all tests
-        let buf_size = CHUNK_SIZE * 4; // 16KB
-
         for &total_size in &test_sizes {
-            // Prepare test data
-            for (i, d) in data.as_slice_mut()[..total_size].iter_mut().enumerate() {
+            for (i, d) in data[..total_size].iter_mut().enumerate() {
                 *d = ((i * 31 + 17) % 256) as u8;
             }
 
-            // Compute expected hash
-            let expected: [u8; 32] = Sha256::digest(&data.as_slice()[..total_size]).into();
+            let expected: [u8; 32] = Sha256::digest(&data[..total_size]).into();
 
-            // For sizes >= 2 pages, test multi-chunk with non-aligned final
+            // Multi-chunk: split at CHUNK_SIZE boundary
             if total_size > CHUNK_SIZE {
-                // First chunk is one page, final chunk is the rest (non-aligned)
-                let first_chunk = CHUNK_SIZE;
-                let final_chunk = total_size - first_chunk;
-
-                let ctx = crypto.sha256_init(total_size).expect("init failed");
-
-                // First chunk at offset 0
-                ctx.update(data.subrange(0, buf_size).unwrap(), 0, first_chunk).expect("first update failed");
-
-                // Final chunk at offset first_chunk
-                let final_update = ctx.update(data.subrange(0, buf_size).unwrap(), first_chunk, final_chunk);
-
-                match final_update {
-                    Ok(_) => {
-                        let hash = ctx.finalize().expect("finalize failed");
-                        assert_eq!(
-                            hash.as_slice(),
-                            expected.as_slice(),
-                            "hash mismatch for multi-chunk total_size={}",
-                            total_size
-                        );
-                    }
-                    Err(e) => {
-                        panic!("final update failed for total_size={}: {:?}", total_size, e);
-                    }
-                }
-            } else {
-                // For small sizes, test single-shot non-aligned
-                let ctx = crypto.sha256_init(total_size).expect("init failed");
-
-                ctx.update(data.subrange(0, buf_size).unwrap(), 0, total_size)
-                    .expect(&format!("single update failed for total_size={}", total_size));
-
+                let mut ctx = crypto.sha256_init();
+                ctx.update(&data[..CHUNK_SIZE]).expect("first update failed");
+                ctx.update(&data[CHUNK_SIZE..total_size]).expect("final update failed");
                 let hash = ctx.finalize().expect("finalize failed");
                 assert_eq!(
                     hash.as_slice(),
                     expected.as_slice(),
-                    "hash mismatch for single-shot total_size={}",
-                    total_size
+                    "hash mismatch multi-chunk total={total_size}"
+                );
+            } else {
+                let mut ctx = crypto.sha256_init();
+                ctx.update(&data[..total_size]).expect("update failed");
+                let hash = ctx.finalize().expect("finalize failed");
+                assert_eq!(
+                    hash.as_slice(),
+                    expected.as_slice(),
+                    "hash mismatch single-shot total={total_size}"
                 );
             }
         }
 
-        log::info!("  various non-aligned message sizes: OK");
-    }
-
-    log::info!("test 9: invalid offset/length returns InvalidParameter");
-    {
-        let total_len = CHUNK_SIZE + 1;
-        let ctx = crypto.sha256_init(total_len).expect("init failed");
-        let buf = data.subrange(0, CHUNK_SIZE).unwrap();
-        match ctx.update(buf, 0, total_len) {
-            Err(CryptoError::InvalidParameter) => {
-                log::info!("  invalid offset/length: OK");
-            }
-            Err(e) => {
-                panic!("unexpected error for invalid offset/length: {:?}", e);
-            }
-            Ok(_) => {
-                panic!("invalid offset/length unexpectedly succeeded");
-            }
-        }
+        log::info!("  various message sizes: OK");
     }
 
     log::info!("all streaming SHA tests passed");
+}
+
+/// Test SW<->HW switching in the streaming SHA implementation.
+///
+/// SW_THRESHOLD = 0x1000: when accumulator + new data reaches this, the client
+/// pushes hash state to the server and switches to HW DMA. On the next small
+/// update it fetches state back (SW). Each sub-test verifies correctness against
+/// the reference sha2 crate.
+fn test_streaming_sha_sw_hw_switching(crypto: &CryptoApi, data: &mut [u8]) {
+    log::info!("Testing streaming SHA SW<->HW switching");
+
+    const SW_THRESHOLD: usize = 0x1000;
+
+    for (i, d) in data[..0x7000].iter_mut().enumerate() {
+        *d = ((i * 37 + 13) % 256) as u8;
+    }
+
+    // A: exactly one byte tips accumulator over the threshold into HW
+    log::info!("  A: SW→HW at exact threshold boundary");
+    {
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..SW_THRESHOLD - 1]).unwrap(); // SW: accumulate 0xFFF bytes
+        ctx.update(&data[SW_THRESHOLD - 1..SW_THRESHOLD]).unwrap(); // tips over → HW
+        let hash = ctx.finalize().unwrap();
+        let expected: [u8; 32] = Sha256::digest(&data[..SW_THRESHOLD]).into();
+        assert_eq!(hash.as_slice(), expected.as_slice(), "A: threshold boundary mismatch");
+        log::info!("    OK");
+    }
+
+    // B: SW → HW → SW round-trip
+    log::info!("  B: SW→HW→SW round-trip");
+    {
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..0x800]).unwrap(); // SW: below threshold
+        ctx.update(&data[0x800..0x2800]).unwrap(); // 0x800+0x2000 ≥ threshold → HW
+        ctx.update(&data[0x2800..0x2a00]).unwrap(); // 0x200 < threshold → SW (fetch from server)
+        let hash = ctx.finalize().unwrap();
+        let expected: [u8; 32] = Sha256::digest(&data[..0x2a00]).into();
+        assert_eq!(hash.as_slice(), expected.as_slice(), "B: SW→HW→SW mismatch");
+        log::info!("    OK");
+    }
+
+    // C: multiple alternating SW<->HW transitions
+    log::info!("  C: multiple SW<->HW oscillations");
+    {
+        let mut ctx = crypto.sha256_init();
+        let mut pos = 0usize;
+        for _ in 0..3 {
+            ctx.update(&data[pos..pos + 0x100]).unwrap(); // small → SW
+            pos += 0x100;
+            ctx.update(&data[pos..pos + 0x2000]).unwrap(); // large → HW
+            pos += 0x2000;
+        }
+        ctx.update(&data[pos..pos + 0x100]).unwrap(); // final small → SW (fetch)
+        pos += 0x100;
+        let hash = ctx.finalize().unwrap();
+        let expected: [u8; 32] = Sha256::digest(&data[..pos]).into();
+        assert_eq!(hash.as_slice(), expected.as_slice(), "C: multiple oscillations mismatch");
+        log::info!("    OK");
+    }
+
+    // D: consecutive large chunks - stays in HW path each call
+    log::info!("  D: consecutive HW→HW chunks");
+    {
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..0x2000]).unwrap();
+        ctx.update(&data[0x2000..0x4000]).unwrap();
+        ctx.update(&data[0x4000..0x6000]).unwrap();
+        let hash = ctx.finalize().unwrap();
+        let expected: [u8; 32] = Sha256::digest(&data[..0x6000]).into();
+        assert_eq!(hash.as_slice(), expected.as_slice(), "D: consecutive HW mismatch");
+        log::info!("    OK");
+    }
+
+    // E: page-aligned fast path — data ptr is page-aligned (map_memory allocation),
+    //    first update is ≥ PAGE_SIZE with empty accumulator, so HW DMA skips the
+    //    scratch buffer; the 0x100-byte tail is SW-accumulated.
+    log::info!("  E: page-aligned fast path with unaligned tail");
+    {
+        let mut ctx = crypto.sha256_init();
+        ctx.update(&data[..0x4100]).unwrap(); // 4 pages DMA'd directly + 0x100 SW tail
+        let hash = ctx.finalize().unwrap();
+        let expected: [u8; 32] = Sha256::digest(&data[..0x4100]).into();
+        assert_eq!(hash.as_slice(), expected.as_slice(), "E: page-aligned fast path mismatch");
+        log::info!("    OK");
+    }
+
+    log::info!("all SW<->HW switching tests passed");
 }

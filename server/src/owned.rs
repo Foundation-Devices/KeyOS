@@ -78,7 +78,7 @@ where
     }
 
     #[inline]
-    fn as_slice(&self) -> &[u8] { as_slice(self.as_memory_message()) }
+    pub fn as_slice(&self) -> &[u8] { as_slice(self.as_memory_message()) }
 }
 
 impl<T> Deref for Owned<T>
@@ -95,6 +95,6 @@ where
 #[inline]
 fn as_slice(mem: &xous::MemoryMessage) -> &[u8] {
     let slice = mem.buf.as_slice();
-    let used = mem.offset.map_or(0, |v| v.get());
+    let used = mem.offset.map_or(0, |v| v.get()).min(slice.len());
     &slice[..used]
 }

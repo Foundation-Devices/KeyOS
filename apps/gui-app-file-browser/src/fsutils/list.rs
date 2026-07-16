@@ -21,15 +21,21 @@ pub struct ListingParams {
     pub allow_dirs: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FilterCounts {
+    pub excluded: usize,
+    pub excluded_by_search: usize,
+}
+
 pub async fn list_directory(
     fs: FileSystem,
     params: ListingParams,
-) -> whence::Result<(Vec<DirEntry>, usize), fs::Error> {
+) -> whence::Result<(Vec<DirEntry>, FilterCounts), fs::Error> {
     let search_query = params.search_query.map(|v| v.to_lowercase());
 
     let dir = fs.open_dir(params.path, params.location).whence()?;
     let mut entries = vec![];
-    let mut num_files_filtered = 0;
+    let mut counts = FilterCounts::default();
     loop {
         let entry = async_archive::<FileSystemPermissions, _>(dir.next_entry_async()).await.whence()?;
         let Some(entry) = entry else {
@@ -45,14 +51,15 @@ pub async fn list_directory(
                 continue;
             }
             if !params.show_hidden {
-                num_files_filtered += 1;
+                counts.excluded += 1;
                 continue;
             }
         }
 
         if let Some(query) = &search_query {
             if !name.to_lowercase().contains(query) {
-                num_files_filtered += 1;
+                counts.excluded += 1;
+                counts.excluded_by_search += 1;
                 continue;
             }
         }
@@ -63,11 +70,11 @@ pub async fn list_directory(
                 if matches!(params.allowed_extensions, AllowedExtensions::Specific(_))
                     && !params.allowed_extensions.contains(extension)
                 {
-                    num_files_filtered += 1;
+                    counts.excluded += 1;
                     continue;
                 }
             } else if !matches!(params.allowed_extensions, AllowedExtensions::All) {
-                num_files_filtered += 1;
+                counts.excluded += 1;
                 continue;
             }
         }
@@ -75,7 +82,7 @@ pub async fn list_directory(
         entries.push(entry);
     }
 
-    Ok((sort_by(entries, params.sort_mode, params.sort_direction), num_files_filtered))
+    Ok((sort_by(entries, params.sort_mode, params.sort_direction), counts))
 }
 
 fn sort_by(list: Vec<DirEntry>, sort_mode: SortMode, sort_direction: SortDirection) -> Vec<DirEntry> {

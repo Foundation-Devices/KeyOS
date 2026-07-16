@@ -15,7 +15,6 @@ production = []
 bip39 = "2.1"
 constant_time_eq = "0.3"
 crypto = { workspace = true }
-fs = { workspace = true }
 hex = "0.4.3"
 log = "0.4"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
@@ -35,6 +34,7 @@ zeroize = { version = "1.8.1", default-features = false, features = ["zeroize_de
 atsama5d27 = { path = "../../imports/atsama5d27" }
 cryptoauthlib = { path = "../../cryptoauthlib" }
 dma = { workspace = true }
+gpio = { workspace = true }
 securam-manager = { path = "../../imports/securam-manager" }
 
 [target.'cfg(not(keyos))'.dependencies]

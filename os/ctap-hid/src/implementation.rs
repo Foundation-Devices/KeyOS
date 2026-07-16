@@ -8,8 +8,8 @@ use std::{collections::BTreeMap, time::Instant};
 use fido::messages::Transport;
 use rgb_led::{RgbAnimation, RgbColor};
 #[cfg(feature = "test-app")]
-use server::{send_archive, BlockingScalarHandler};
-use server::{ArchiveHandler, Server, ServerContext};
+use server::{send_blocking_archive, BlockingScalarHandler};
+use server::{BlockingArchiveHandler, Server, ServerContext};
 #[cfg(all(keyos, not(feature = "test-app")))]
 use usb::device::{
     api::{EndpointDirection, EndpointType},
@@ -46,12 +46,14 @@ const USB_U2F_ENDPOINTS: [EndpointProperties; 2] = [
         ep_direction: EndpointDirection::Out,
         max_packet_len: 64,
         interval: 5,
+        use_dma: true,
     },
     EndpointProperties {
         ep_type: EndpointType::Interrupt,
         ep_direction: EndpointDirection::In,
         max_packet_len: 64,
         interval: 5,
+        use_dma: true,
     },
 ];
 #[cfg(all(keyos, not(feature = "test-app")))]
@@ -114,14 +116,14 @@ impl server::ServerMessages for SetupResponder {
     {
         use server::MessageId;
         use usb::device::messages::SetupPacketCallback;
-        &[(SetupPacketCallback::ID, server::handle_archive_message::<SetupPacketCallback, _>)]
+        &[(SetupPacketCallback::ID, server::handle_blocking_archive_message::<SetupPacketCallback, _>)]
     }
 }
 #[cfg(all(keyos, not(feature = "test-app")))]
 impl Server for SetupResponder {}
 
 #[cfg(all(keyos, not(feature = "test-app")))]
-impl ArchiveHandler<SetupPacketCallback> for SetupResponder {
+impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
     fn handle(
         &mut self,
         SetupPacketCallback(msg): SetupPacketCallback,
@@ -188,7 +190,7 @@ impl Channel {
                 }
             }
             Command::Message => {
-                log::info!("CTAPHID_MSG");
+                log::debug!("CTAPHID_MSG");
                 if self.buf.len() >= 4 {
                     let payload = self.fido.u2f_process_apdu(self.buf.clone(), Transport::Usb);
                     log::debug!("CTAPHID_MSG response: {payload:02x?}");
@@ -199,7 +201,7 @@ impl Channel {
                 }
             }
             Command::Wink => {
-                log::info!("CTAPHID_WINK");
+                log::debug!("CTAPHID_WINK");
                 if self.payload_len == 0 {
                     RgbApi::default().animate_all(RgbAnimation::new(
                         RgbColor::new(0xF1, 0xD0, 0x00),
@@ -214,7 +216,7 @@ impl Channel {
                 }
             }
             Command::Cbor => {
-                log::info!("CTAPHID_CBOR");
+                log::debug!("CTAPHID_CBOR");
                 if self.buf.len() >= 1 {
                     let payload = self.fido.ctap_process_cbor(self.buf[0], self.buf[1..].to_vec());
                     (Command::Cbor, payload)
@@ -348,7 +350,7 @@ fn send_response_thread(mut ep_in: UsbEmulatedEndpoint, receiver: mpsc::Receiver
             xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W).expect("Could not allocate buffer");
         buffer.as_slice_mut()[..pkt.len()].copy_from_slice(&pkt);
         log::trace!("Write {} bytes to endpoint {:02x} : {:02x?}", pkt.len(), ep_in.endpoint_number(), &pkt);
-        if let Err(e) = ep_in.write_buf(buffer, pkt.len() as u16) {
+        if let Err(e) = ep_in.write_buf(buffer, pkt.len()) {
             match e {
                 usb::error::UsbError::HostDisconnected => {
                     log::debug!("Waiting for connection");
@@ -644,7 +646,7 @@ impl CtapHidServer {
         self.usb_ep_sender.send(pkt).unwrap();
         #[cfg(feature = "test-app")]
         if let Some(simu_usb_receiver) = self.simu_usb_receiver {
-            send_archive(simu_usb_receiver, SimuUsbReceiveCallback(pkt))
+            send_blocking_archive(simu_usb_receiver, SimuUsbReceiveCallback(pkt))
         }
     }
 
@@ -668,7 +670,7 @@ impl CtapHidServer {
     }
 }
 
-impl ArchiveHandler<ProcessHidPacket> for CtapHidServer {
+impl BlockingArchiveHandler<ProcessHidPacket> for CtapHidServer {
     fn handle(&mut self, msg: ProcessHidPacket, _sender: xous::PID, _context: &mut ServerContext<Self>) {
         let resp = self.process(&msg.0);
         if let Some(resp) = resp {

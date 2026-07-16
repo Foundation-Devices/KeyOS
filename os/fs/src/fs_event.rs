@@ -4,7 +4,7 @@
 use fs::messages::SubscribeFilesystemEvent;
 use server::{xous, ScalarEventSubscriptionHandler};
 
-use crate::{FileSystemEvent, FileSystemEventType, Server, SubscriberDisconnected};
+use crate::{FileSystemEvent, Server, SubscriberDisconnected};
 
 impl ScalarEventSubscriptionHandler<SubscribeFilesystemEvent> for Server {
     fn handle(
@@ -13,10 +13,8 @@ impl ScalarEventSubscriptionHandler<SubscribeFilesystemEvent> for Server {
         subscriber: server::ScalarEventSubscriber<FileSystemEvent>,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<(), server::Infallible> {
-        if !self.fs(msg.0).is_null() {
-            subscriber
-                .send(&FileSystemEvent { location: msg.0, event_type: FileSystemEventType::Mounted })
-                .ok();
+        if let Some(event) = self.last_fs_event.get(&msg.0) {
+            subscriber.send(&FileSystemEvent { location: msg.0, event_type: *event }).ok();
         }
         self.fs_event_subscribers.entry(msg.0).or_default().push(subscriber);
         Ok(())
@@ -38,6 +36,7 @@ impl server::ScalarHandler<SubscriberDisconnected> for Server {
 
 impl Server {
     pub(crate) fn send_filesystem_event(&mut self, event: FileSystemEvent) {
+        self.last_fs_event.insert(event.location, event.event_type);
         if let Some(subscribers) = self.fs_event_subscribers.get_mut(&event.location) {
             subscribers.retain(|s| s.send(&event).is_ok());
         }

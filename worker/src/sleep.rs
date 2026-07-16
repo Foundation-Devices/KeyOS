@@ -3,23 +3,22 @@
 
 use std::{
     pin::Pin,
-    sync::Weak,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
-use crate::implementation::{Timer, WorkerApiInner, WorkerEvent};
+use crate::implementation::{Shared, Timer, WorkerEvent};
 
 #[must_use]
 pub struct Sleep {
     expires_at: Instant,
-    handle: Weak<WorkerApiInner>,
-    has_woken: bool,
+    handle: Option<Arc<Shared>>,
 }
 
 impl Sleep {
-    pub(crate) fn new(duration: Duration, handle: Weak<WorkerApiInner>) -> Self {
-        Self { expires_at: Instant::now() + duration, handle, has_woken: false }
+    pub(crate) fn new(duration: Duration, handle: Arc<Shared>) -> Self {
+        Self { expires_at: Instant::now() + duration, handle: Some(handle) }
     }
 }
 
@@ -27,16 +26,16 @@ impl std::future::Future for Sleep {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.has_woken && self.expires_at <= Instant::now() {
-            Poll::Ready(())
-        } else {
-            if let Some(handle) = self.handle.upgrade() {
-                handle.queue_event(WorkerEvent::Timer {
-                    timer: Timer { instant: self.expires_at, waker: cx.waker().clone() },
-                });
-            }
-            self.has_woken = true;
-            Poll::Pending
+        if self.expires_at <= Instant::now() {
+            return Poll::Ready(());
         }
+
+        if let Some(handle) = self.handle.take() {
+            handle.queue_event(WorkerEvent::Timer {
+                timer: Timer { instant: self.expires_at, waker: cx.waker().clone() },
+            });
+        }
+
+        Poll::Pending
     }
 }

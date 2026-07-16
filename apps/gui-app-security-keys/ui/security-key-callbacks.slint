@@ -15,7 +15,6 @@ export global SecurityKeyCallbacks {
     callback edit(int, string, string, bool, int) -> CallbackResult;
     callback set-archived(int, bool);
     callback set-archive-mode(bool);
-    callback move-position(int, bool);
     callback set-sort-mode(int);
     pure callback get-view-index([KeyView], int) -> int;
     pure callback get-dropdown-index([DropdownModel], int) -> int;
@@ -23,16 +22,23 @@ export global SecurityKeyCallbacks {
     callback dismiss-outcome();
     callback select-key(int);
     callback deselect-key();
+    // Register presence modal "Create a new key" affordance:
+    // create-new-key: user tapped the trailing dropdown entry; Rust navigates to /edit.
+    // create-new-key-cancelled: user backed out of /edit without saving.
+    // auto-select-last-created: user saved a new key via the register flow; Rust pre-
+    //   selects it in the dropdown so the user only needs to confirm.
+    callback create-new-key();
+    callback create-new-key-cancelled();
+    callback auto-select-last-created();
     callback is-nfc-on() -> bool;
-    pure callback is-usb-on() -> bool;
+    callback is-usb-on() -> bool;
 
     in-out property <[KeyView]> entries;
     in-out property <int> sort-mode: 0;
     in-out property <AuthenticatingState> auth-state;
-    in-out property <int> selected-index;
+    in-out property <int> selected-index: -1;
     in-out property <[DropdownModel]> dropdown-model;
     in-out property <bool> is-outcome-mode: false;
-    in-out property <bool> show-no-keys-modal: false;
 }
 
 export { DropdownModel }

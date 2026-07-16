@@ -9,23 +9,22 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::LazyLock,
 };
 
 use anyhow::Context;
 use app_manifest::Manifest;
 use cargo_metadata::semver::Version;
-use once_cell::sync::Lazy;
-use utralib::map::MEMORY_REGIONS;
 
 use crate::utils::{Cosign2, GIT_TIMESTAMP};
 use crate::xous_arguments::XousArguments;
-use crate::{get_dl_path, tags, BuildArgs};
+use crate::{tags, BuildArgs};
 
 /// An override to `.cargo/config.toml`-provided `RUSTFLAGS` for when PIC/PIE is enabled for the compilation.
 const RUSTFLAGS_OVERRIDE_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie";
 
-static METADATA: Lazy<cargo_metadata::Metadata> =
-    Lazy::new(|| cargo_metadata::MetadataCommand::new().exec().unwrap());
+static METADATA: LazyLock<cargo_metadata::Metadata> =
+    LazyLock::new(|| cargo_metadata::MetadataCommand::new().exec().unwrap());
 
 #[derive(Debug, Copy, Clone)]
 pub enum SigningMode {
@@ -97,8 +96,6 @@ pub(crate) struct Builder {
     features: Vec<String>,
     target: Option<String>,
     profile: Profile,
-    dl_var_name: String,
-    dl_path: String,
     ci: bool,
     reproducible: bool,
 }
@@ -177,8 +174,6 @@ impl Builder {
             kernel_features.push("trace-systemview".into());
         }
 
-        let (dl_var_name, dl_path) = get_dl_path().unwrap_or_default();
-
         Builder {
             loader_features,
             kernel_features,
@@ -187,8 +182,6 @@ impl Builder {
             features,
             target,
             profile: if args.hosted { Profile::Hosted } else { Profile::Release },
-            dl_var_name,
-            dl_path,
             ci: args.ci,
             // production_firmware implies reproducible
             reproducible: args.reproducible || args.production_firmware,
@@ -215,10 +208,7 @@ impl Builder {
     /// Create base cargo command with environment variables
     fn base_cargo_command(&self) -> Command {
         let mut command = Command::new(cargo());
-        command
-            .current_dir(project_root())
-            .env(&self.dl_var_name, &self.dl_path)
-            .env("DYLD_LIBRARY_PATH", &self.dl_path);
+        command.current_dir(project_root());
 
         // disable incremental compilation for reproducible builds
         if self.reproducible {
@@ -421,8 +411,6 @@ impl Builder {
             panic!("No services were specified. Nothing was built");
         }
 
-        crate::utils::ensure_compiler(self.target.as_deref(), false, false);
-
         let target = self.target.as_deref();
         // ------ build the services ------
 
@@ -508,22 +496,7 @@ impl Builder {
     }
 
     fn create_image(&self, kernel: &str, built_services: &[String]) -> PathBuf {
-        let mut ram_regions = tags::MemoryRegions::new();
-
-        for (region_name, region) in MEMORY_REGIONS {
-            if *region_name == "DDR_RAM" || *region_name == "ENCRYPTED_RAM" {
-                continue;
-            }
-            ram_regions.add(tags::MemoryRegion::new(
-                region.start as u32,
-                region.len() as u32,
-                tags::MemoryRegion::make_name(region_name),
-            ));
-        }
-
         let mut args = XousArguments::default();
-
-        args.add(ram_regions);
 
         let kernel = crate::elf::read_program(kernel).expect("unable to read kernel");
 
@@ -545,7 +518,7 @@ impl Builder {
             args.add(tags::BinaryElf::new(
                 pid,
                 program_name,
-                xous::AppId(manifest.app_id_bytes()),
+                xous::AppId(manifest.app_id),
                 std::fs::read(stripped_name).expect("Couldn't read stripped elf file"),
             ));
             if !manifest.memory.is_empty() {
@@ -671,8 +644,10 @@ impl Builder {
                 for message_name in messages.keys() {
                     if !message_names.insert((server_name.clone(), message_name.clone())) {
                         println!(
-                            "[!] Manifest error in {app_name} ({}): duplicate message {}:{}",
-                            manifest.app_id, server_name, message_name
+                            "[!] Manifest error in {app_name} (0x{}): duplicate message {}:{}",
+                            hex::encode(manifest.app_id),
+                            server_name,
+                            message_name
                         );
                         manifest_error = true;
                     };
@@ -686,8 +661,8 @@ impl Builder {
             for (server_name, messages) in manifest.permissions.iter_mut() {
                 if server_name == "template" {
                     println!(
-                        "[!] Manifest error in {app_name} ({}): template(s) {messages:?} do not exist.",
-                        manifest.app_id,
+                        "[!] Manifest error in {app_name} (0x{}): template(s) {messages:?} do not exist.",
+                        hex::encode(manifest.app_id),
                     );
                     manifest_error = true;
                     continue;
@@ -698,13 +673,13 @@ impl Builder {
                     if !message_names.contains(&(server_name.clone(), message_name.clone())) {
                         if is_recovery {
                             println!(
-                                "Manifest warning in {app_name} ({}): message {}:{} does not exist. Removing.",
-                                manifest.app_id, server_name, message_name
+                                "Manifest warning in {app_name} (0x{}): message {}:{} does not exist. Removing.",
+                                hex::encode(manifest.app_id), server_name, message_name
                             );
                         } else {
                             println!(
-                                "[!] Manifest error in {app_name} ({}): message {}:{} does not exist.",
-                                manifest.app_id, server_name, message_name
+                                "[!] Manifest error in {app_name} (0x{}): message {}:{} does not exist.",
+                                hex::encode(manifest.app_id), server_name, message_name
                             );
                             manifest_error = true;
                         }
@@ -719,7 +694,7 @@ impl Builder {
             panic!("There were errors in the manifest files");
         }
 
-        let system_manifests_path = get_crate_dir("xous-names").join("src/system_manifests.rs");
+        let system_manifests_path = get_crate_dir("system-manifests").join("src/system_manifests.rs");
         let mut f = File::create(system_manifests_path).unwrap();
         writeln!(f, "// THIS IS A GENERATED FILE, DO NOT EDIT").unwrap();
         writeln!(f, "// Generated by xtask").unwrap();
@@ -750,32 +725,34 @@ impl BuildResult {
                     service.push_str(".exe")
                 }
             }
-            let mut hosted_args = vec![];
+            let mut services: Vec<app_manifest::HostedService> = vec![];
             for service in self.built_services.iter() {
-                hosted_args.push(service.to_owned());
                 let manifest = load_manifest(Path::new(service).file_name().unwrap().to_str().unwrap());
-                let app_id = manifest.app_id.clone();
-
-                if let Some(pos) = hosted_args.iter().position(|arg| *arg == app_id) {
-                    let service_a = hosted_args[pos - 1].rsplit_once('/').map(|(_, name)| name).unwrap();
+                if let Some(existing) = services.iter().find(|s| s.app_id == manifest.app_id) {
+                    let service_a = existing.path.rsplit_once('/').map(|(_, name)| name).unwrap();
                     let service_b = service.rsplit_once('/').map(|(_, name)| name).unwrap();
-                    panic!("Error: Both {} and {} have app ID {}", service_a, service_b, app_id);
+                    panic!(
+                        "Error: Both {} and {} have app ID 0x{}",
+                        service_a,
+                        service_b,
+                        hex::encode(manifest.app_id)
+                    );
                 }
+                services.push(app_manifest::HostedService {
+                    path: service.to_owned(),
+                    app_id: manifest.app_id,
+                    syscalls: tags::permission::syscall_mask(&manifest.syscall),
+                });
+            }
 
-                hosted_args.push(app_id);
-            }
-            // jam in any pre-built local binary files that were specified
-            let mut binary_files = self.enumerate_binary_files();
-            hosted_args.append(&mut binary_files);
+            let services_path = Path::new(&self.built_kernel).parent().unwrap().join("services.json");
+            serde_json::to_writer_pretty(File::create(&services_path).unwrap(), &services).unwrap();
+
             println!("Starting hosted mode...");
-            print!("    Command: {}", self.built_kernel);
-            for arg in &hosted_args {
-                print!(" {}", arg);
-            }
-            println!();
+            println!("    Command: {} {}", self.built_kernel, services_path.display());
             let exec_err = Command::new(self.built_kernel)
                 .current_dir(project_root().join("xous/kernel"))
-                .args(hosted_args)
+                .arg(&services_path)
                 .exec();
             panic!("Could not execute kernel: {exec_err}");
         } else {
@@ -819,6 +796,7 @@ impl BuildResult {
         let mut loader_bytes = std::fs::read(self.built_loader_bin.as_ref().unwrap()).unwrap();
         let mut image_bytes = std::fs::read(self.built_xous_img.as_ref().unwrap()).unwrap();
         loader_bytes.append(&mut image_bytes);
+        pad_for_sha_dma(&mut loader_bytes);
         std::fs::write(target_path, loader_bytes).unwrap();
 
         let combined_img_path_str = target_path.to_str().unwrap();
@@ -861,16 +839,29 @@ impl BuildResult {
             panic!("cosign2 failed");
         }
     }
+}
 
-    fn enumerate_binary_files(&self) -> Vec<String> {
-        let mut paths = Vec::<String>::new();
-        for item in &self.services[..] {
-            if let CrateSpec::BinaryFile(path) = item {
-                paths.push(path.to_string());
-            }
-        }
-        paths
+/// `atsama5d27::dma::set_data_size` asserts that any DMA transfer with more
+/// than `0x800000` data units (32 MB at D32 width) is a multiple of
+/// `BIG_TRANSFER_CHUNK_SIZE` (1 M data units = 4 MB).
+/// The old bootloader hashes the firmware in one shot via DMA; if the
+/// binary exceeds 32 MB and isn't 4 MB-aligned, it will boot-loop.
+///
+/// The padding happens *before* cosign2 signing so it is included in the
+/// header's `bin_size` and the bootloader's
+/// `binary_bytes.len() == header.bin_size()` check still passes.
+fn pad_for_sha_dma(binary: &mut Vec<u8>) {
+    const SHA_DMA_SIMPLE_MAX: usize = 0x800000 * 4; // 32 MB
+    const SHA_DMA_BIG_ALIGNMENT: usize = 0x100000 * 4; // 4 MB
+
+    if binary.len() <= SHA_DMA_SIMPLE_MAX {
+        return;
     }
+
+    println!("Using padding for 32MB+ app image...");
+
+    let aligned = binary.len().next_multiple_of(SHA_DMA_BIG_ALIGNMENT);
+    binary.resize(aligned, 0);
 }
 
 fn strip_elf(elf_in_path: &str, stripped_path: &str) {
@@ -911,7 +902,20 @@ pub fn get_crate_os_deps(crate_name: &str) -> Vec<String> {
                 }
                 crates_to_check.push(dep.name.clone());
             }
-            let dep_server_crate = format!("{}-server", dep.name);
+            // Derive server crate name from the API crate name by stripping
+            // `-api` and `-server` suffixes, then appending `-server`.
+            // e.g. "camera-api" → "camera-server", "gui-server-api" → "gui-server".
+            let mut base = dep.name.as_str();
+            loop {
+                if let Some(stripped) = base.strip_suffix("-api") {
+                    base = stripped;
+                } else if let Some(stripped) = base.strip_suffix("-server") {
+                    base = stripped;
+                } else {
+                    break;
+                }
+            }
+            let dep_server_crate = format!("{base}-server");
             if dep.path.as_ref().is_some_and(|d| d.starts_with(&api_dir))
                 && !result.contains(&dep_server_crate)
             {

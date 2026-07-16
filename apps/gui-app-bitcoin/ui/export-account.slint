@@ -31,6 +31,7 @@ export struct ExportCapabilities {
 export global ExportAccount {
     in-out property <ExportAccountState> state: ExportAccountState.Idle;
     in property <string> saved-file-path;
+    in-out property <bool> skip-multisig-import: false;
 
     pure callback all-connectors() -> [string];
     pure callback connector-display-name(connector-id: string) -> string;

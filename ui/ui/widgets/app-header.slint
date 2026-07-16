@@ -12,6 +12,7 @@ export component AppHeader inherits Rectangle {
     in property <brush> title-color: Palette.content-primary;
     in property <LayoutAlignment> alignment: space-between;
     in property <length> side-padding: Size.sz4;
+    in property <length> extra-title-padding: Size.zero;
 
     height: Size.sz16;
 
@@ -20,6 +21,9 @@ export component AppHeader inherits Rectangle {
         color: title-color;
         horizontal-alignment: center;
         horizontal-stretch: 1;
+        wrap: no-wrap;
+        overflow: elide;
+        width: parent.width - 2 * (side-padding + Size.sz10 + Size.sz2 + extra-title-padding);
     }
 
     VerticalLayout {

@@ -5,25 +5,22 @@ use fs::messages::Rename;
 
 use crate::{Error, Server};
 
-impl server::ArchiveHandler<Rename> for Server {
+impl server::BlockingArchiveHandler<Rename> for Server {
     fn handle(
         &mut self,
         msg: Rename,
         sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <Rename as server::Archive>::Response {
+    ) -> <Rename as server::BlockingArchive>::Response {
         self.check_write_access(sender, msg.location)?;
         let from = crate::path_of(msg.location, &msg.from, sender);
         let to = crate::path_of(msg.location, &msg.to, sender);
-        let mut open_paths = self
-            .files
-            .iter()
-            .flat_map(|(_, files)| files.open.values().map(|open| &open.path))
-            .chain(self.dirs.iter().flat_map(|(_, dirs)| dirs.open.values().map(|open| &open.path)));
-        if open_paths.any(|p| p == &from) {
+        let mount = self.mount(msg.location).ok_or(Error::NoMedia)?;
+        if mount.path_in_use(&from)? || mount.path_in_use(&to)? {
             return Err(Error::FileInUse);
         }
-        self.root_dir(msg.location)?.rename(&from, &self.root_dir(msg.location)?, &to)?;
+        let root = mount.root_dir();
+        root.rename(&from, &root, &to)?;
         self.flush_fs(msg.location)?;
         Ok(())
     }

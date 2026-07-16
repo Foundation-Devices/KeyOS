@@ -1,7 +1,7 @@
 [package]
 authors = ["Sean Cross <sean@xobs.io>"]
 description = "Log output program"
-edition = "2018"
+edition = "2024"
 name = "xous-log"
 version = "0.1.25"
 license = "MIT OR Apache-2.0"

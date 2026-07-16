@@ -45,15 +45,20 @@ pub fn draw_lcd_contents(gfx: &mut impl GenericImage<Pixel = Rgba<u8>>) {
             for (layer_idx, layer) in layers.layers.iter().enumerate() {
                 let Some(layer) = layer else { continue };
                 assert_eq!(layer.pixel_format(), LayerPixelFormat::Argb8888);
-                const BYTES_PER_PIXEL: usize = 4;
+                let bytes_per_pixel = layer.pixel_format().bytes_per_pixel();
                 let alpha = layer.alpha();
 
                 let img = match layer.src() {
-                    crate::layers::SourceType::Dma(buf) => {
+                    crate::layers::SourceType::Dma { range, .. } => {
                         let (src_w, src_h) = layer.src_dimensions();
-                        let buf_slice = unsafe {
-                            core::slice::from_raw_parts(buf as *const u8, src_w * src_h * BYTES_PER_PIXEL)
-                        };
+                        let src_len = src_w
+                            .checked_mul(src_h)
+                            .and_then(|px| px.checked_mul(bytes_per_pixel))
+                            .expect("validated layer dimensions");
+                        debug_assert!(range.len() >= src_len);
+                        // SAFETY: validated by Layer::new_with_pixel_format
+                        let buf_slice =
+                            unsafe { core::slice::from_raw_parts(range.as_ptr() as *const u8, src_len) };
                         let src_img: ImageBuffer<image::Rgba<u8>, &[u8]> =
                             ImageBuffer::from_raw(src_w as u32, src_h as u32, buf_slice).unwrap();
                         let (crop_x, crop_y) = layer.crop_pos();

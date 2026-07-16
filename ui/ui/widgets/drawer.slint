@@ -36,6 +36,7 @@ export component Drawer inherits Rectangle {
 
     forward-focus: focus-handler;
     focus-handler := FocusScope {
+        enabled: root.open;
         focus-changed-event => {
             root.focus-changed-event(self.has-focus);
         }

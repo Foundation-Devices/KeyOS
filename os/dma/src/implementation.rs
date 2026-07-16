@@ -12,8 +12,9 @@ use atsama5d27::{
 };
 use dma::{error::DmaError, messages::*};
 use server::{
-    ArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler, BlockingScalarRequest,
-    CheckedPermissions, MessageAllowed, ScalarHandler, Server,
+    BlockingArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler, BlockingScalarRequest,
+    CheckedPermissions, MessageAllowed, MessageId as _, ScalarEventSubscriber,
+    ScalarEventSubscriptionHandler, ScalarHandler, Server,
 };
 use utralib::{HW_CSR1_MEM, HW_CSR3_MEM, HW_CSR3_MEM_LEN, HW_XDMAC0_BASE};
 use xous::{arch::irq::IrqNumber, keyos::PAGE_SIZE, MemoryRange};
@@ -22,6 +23,9 @@ power_manager::use_api!();
 
 #[derive(Debug, server::Message)]
 pub struct TransferCompleteMsg(pub usize);
+
+#[derive(Debug, server::Message)]
+pub(crate) struct SubscriberDisconnected(pub xous::CID);
 
 #[derive(server::Server)]
 #[name = "os/dma"]
@@ -42,6 +46,7 @@ struct Channel {
     peripheral_phys_addr: usize,
     descriptors: MemoryRange,
     descriptors_phys_addr: usize,
+    subscriber: Option<ScalarEventSubscriber<TransferComplete>>,
 }
 
 #[derive(Default, Clone)]
@@ -59,7 +64,7 @@ struct InterruptContext {
 }
 
 impl Server for DmaServer {
-    fn on_start(&mut self, _context: &mut server::ServerContext<Self>) {
+    fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
         let int_ctx = Box::into_raw(Box::new(InterruptContext {
             conn: Default::default(),
             xdmac: Xdmac::with_alt_base_addr(self.xdmac_mem.as_ptr() as usize),
@@ -73,6 +78,12 @@ impl Server for DmaServer {
             channel.channel.set_di_interrupt(true);
         }
         self.power_manager.disable_peripheral(PeripheralId::Xdmac0).expect("Could not disable Xdmac0 clock");
+        xous::register_system_event_handler(
+            xous::SystemEvent::Disconnected,
+            context.sid(),
+            SubscriberDisconnected::ID,
+        )
+        .expect("Could not register Disconnected event handler");
     }
 }
 
@@ -99,6 +110,7 @@ impl DmaServer {
                 config: Default::default(),
                 descriptors,
                 descriptors_phys_addr,
+                subscriber: None,
             }
         });
         Self { xdmac_mem, channels, power_manager: PowerManagerApi::default(), enabled: false }
@@ -145,9 +157,20 @@ impl Channel {
             - self.channel.remaining_data_size();
         transferred_data_units as usize * self.config.data_width.byte_len()
     }
+
+    fn clear(&mut self) {
+        self.owner = None;
+        self.subscriber = None;
+        if self.is_running {
+            self.channel.disable();
+            self.is_running = false;
+        }
+        self.last_transferred = 0;
+        self.waiters.clear();
+    }
 }
 
-impl ArchiveHandler<PeripheralTransferMsg> for DmaServer {
+impl BlockingArchiveHandler<PeripheralTransferMsg> for DmaServer {
     fn handle(
         &mut self,
         msg: PeripheralTransferMsg,
@@ -310,6 +333,46 @@ impl ScalarHandler<TransferCompleteMsg> for DmaServer {
             log::trace!("Returning waiter: {waiter:?}");
             waiter.response.respond(Ok(channel.last_transferred)).ok();
         }
+        if let Some(sub) = &channel.subscriber {
+            let event =
+                TransferComplete { transfer_id: msg.0 as u32, bytes: channel.last_transferred as u32 };
+            if let Err(e) = sub.send(&event) {
+                log::warn!("TransferComplete on CH{} send failed: {e:?}", msg.0);
+            }
+        }
+        self.disable_hw_if_not_needed();
+    }
+}
+
+impl ScalarEventSubscriptionHandler<SubscribeTransferComplete> for DmaServer {
+    fn handle(
+        &mut self,
+        msg: SubscribeTransferComplete,
+        subscriber: ScalarEventSubscriber<TransferComplete>,
+        _context: &mut server::ServerContext<Self>,
+    ) -> Result<(), DmaError> {
+        let SubscribeTransferComplete(ch) = msg;
+        let channel = self.channels.get_mut(ch).ok_or(DmaError::InvalidParameter)?;
+        if channel.owner != Some(subscriber.pid()) {
+            return Err(DmaError::InvalidParameter);
+        }
+        channel.subscriber = Some(subscriber);
+        Ok(())
+    }
+}
+
+impl ScalarHandler<SubscriberDisconnected> for DmaServer {
+    fn handle(
+        &mut self,
+        _msg: SubscriberDisconnected,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        for channel in &mut self.channels {
+            if channel.owner == Some(sender) {
+                channel.clear();
+            }
+        }
         self.disable_hw_if_not_needed();
     }
 }
@@ -347,13 +410,7 @@ impl ScalarHandler<DropTransferMsg> for DmaServer {
         if channel.owner != Some(sender) {
             return;
         }
-        channel.owner = None;
-        if channel.is_running {
-            channel.channel.disable();
-            channel.is_running = false;
-        }
-        channel.last_transferred = 0;
-        channel.waiters.clear();
+        channel.clear();
         self.disable_hw_if_not_needed();
     }
 }

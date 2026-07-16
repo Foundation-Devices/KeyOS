@@ -16,6 +16,7 @@ log = "0.4.14"
 num-derive = "0.4.2"
 num-traits = { version = "0.2.18", default-features = false }
 xous-api-ticktimer = { path = "../ticktimer" }
+xous-api-names = { path = "../names" }
 
 [features]
 no_std = []

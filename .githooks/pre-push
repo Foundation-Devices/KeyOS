@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundationdevices.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+if ! just short-lint; then
+    echo "(To push anyway, use the --no-verify option)" >&2
+    exit 1
+fi

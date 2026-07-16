@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use backup_shard::Shard;
-use chrono::Local;
+use chrono::{DateTime, Local};
 use clap::Parser;
 use colored::*;
 use hmac::{Hmac, Mac};
@@ -35,6 +35,10 @@ struct Cli {
     /// Verify mode: Read and verify card data without writing
     #[arg(short = 'v', long = "verify")]
     verify: bool,
+
+    /// Parse mode: Display parsed Shard fields when verifying
+    #[arg(short = 'p', long = "parse")]
+    parse: bool,
 }
 
 #[derive(Deserialize)]
@@ -115,7 +119,15 @@ fn main() {
     let mut last_state = State::UNAWARE;
     let mut loop_counter = 0u32;
     loop {
-        match monitor_and_process_card(&ctx, reader, &secret_key, &mut last_state, cli.erase, cli.verify) {
+        match monitor_and_process_card(
+            &ctx,
+            reader,
+            &secret_key,
+            &mut last_state,
+            cli.erase,
+            cli.verify,
+            cli.parse,
+        ) {
             Ok(()) => {
                 // Continue monitoring
             }
@@ -199,6 +211,33 @@ fn print_error(message: &str) {
     println!("{}", format!("ERROR: {}", message).red());
 }
 
+fn print_shard_details(shard: &Shard) {
+    println!("{}", "--- Parsed Shard Fields ---".cyan().bold());
+
+    let version = match &shard.shard {
+        backup_shard::ShardVersion::V0(_) => "V0",
+        backup_shard::ShardVersion::V1(_) => "V1",
+    };
+    println!("  Version:              {}", version);
+    println!("  device_id:            {}", hex::encode(shard.device_id()));
+    println!("  seed_fingerprint:     {}", hex::encode(shard.seed_fingerprint()));
+    println!("  seed_shamir_share:    {}", hex::encode(shard.seed_shamir_share()));
+    println!("  share_index:          {}", shard.seed_shamir_share_index());
+    println!("  part_of_magic_backup: {}", shard.part_of_magic_backup());
+    println!("  hmac:                 {}", hex::encode(shard.hmac()));
+
+    if let backup_shard::ShardVersion::V1(_) = &shard.shard {
+        let ts = shard.timestamp();
+        let formatted = DateTime::from_timestamp(ts as i64, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .unwrap_or_else(|| "invalid".to_string());
+        println!("  timestamp:            {} ({})", ts, formatted);
+        println!("  scheme:               {} of {}", shard.scheme_threshold(), shard.scheme_share_count());
+    }
+
+    println!("{}", "---------------------------".cyan().bold());
+}
+
 fn monitor_and_process_card(
     ctx: &Context,
     reader: &CStr,
@@ -206,6 +245,7 @@ fn monitor_and_process_card(
     last_state: &mut State,
     erase_mode: bool,
     verify_mode: bool,
+    parse_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Use simple connection-based detection for better compatibility
     match ctx.connect(reader, ShareMode::Shared, Protocols::ANY) {
@@ -226,7 +266,7 @@ fn monitor_and_process_card(
                 let result = if erase_mode {
                     erase_card_direct(&card)
                 } else if verify_mode {
-                    verify_card_direct(&card, secret_key)
+                    verify_card_direct(&card, secret_key, parse_mode)
                 } else {
                     process_card_direct(&card, secret_key)
                 };
@@ -330,7 +370,7 @@ fn process_card_direct(card: &Card, secret_key: &[u8]) -> Result<(), Box<dyn std
     Ok(())
 }
 
-fn verify_card_direct(card: &Card, secret_key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_card_direct(card: &Card, secret_key: &[u8], parse: bool) -> Result<(), Box<dyn std::error::Error>> {
     // Read the UID
     let uid = read_uid(card)?;
     println!("{}", format!("UID: {}", format_uid(&uid)).blue());
@@ -353,6 +393,9 @@ fn verify_card_direct(card: &Card, secret_key: &[u8]) -> Result<(), Box<dyn std:
                                     format!("Data: {}", hex::encode(keycard_data.encode())).blue()
                                 );
                                 println!("{}", format!("HMAC: {}", hex::encode(keycard_data.hmac())).blue());
+                                if parse {
+                                    print_shard_details(&keycard_data);
+                                }
                                 println!("{}", "Card verification PASSED!".green().bold());
                             }
                             Err(_) => {
@@ -396,6 +439,9 @@ fn verify_card_direct(card: &Card, secret_key: &[u8]) -> Result<(), Box<dyn std:
                                     "{}",
                                     format!("Actual HMAC:   {}", hex::encode(keycard_data.hmac())).yellow()
                                 );
+                                if parse {
+                                    print_shard_details(&keycard_data);
+                                }
                             }
                             Err(_) => {
                                 println!("{}", "Data is not in expected KeyCard format".yellow());

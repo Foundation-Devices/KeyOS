@@ -23,6 +23,9 @@ export component TitledInput inherits VerticalLayout {
     in property <bool> show-password: false;
     in property <bool> filter-special-characters: false;
     in property <string> special-chars-removed-label;
+    in property <bool> locked: false;
+    in property <string> accept-button-text;
+    in property <bool> accept-button-enabled: !has-error && !has-notice;
 
     out property <bool> has-focus: input.has-focus;
 
@@ -58,6 +61,9 @@ export component TitledInput inherits VerticalLayout {
         show-password: show-password;
         filter-special-characters: filter-special-characters;
         special-chars-removed-label: special-chars-removed-label;
+        locked: locked;
+        accept-button-text: root.accept-button-text;
+        accept-button-enabled: root.accept-button-enabled;
 
         edited(text) => {
             parent.edited(text);

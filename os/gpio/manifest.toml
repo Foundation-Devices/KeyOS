@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6f732f6770696f000000000000000000"
 memory = ["PIO", "SPIO", "RSTC"]
 syscall = ["ClaimInterrupt", "SetThreadPriority"]

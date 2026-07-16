@@ -36,17 +36,21 @@ pub struct KeyHandle {
     pub registered_key_index: usize,
 }
 impl KeyHandle {
+    /// Serialize as 8 bytes: two big-endian `u32`s. Explicit width so the on-wire format is the
+    /// same on 32-bit ARM (the real device) and on 64-bit hosts (simulator / unit tests), even
+    /// though `security_key_index`/`registered_key_index` are declared as `usize` elsewhere.
     pub(crate) fn to_vec(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&self.security_key_index.to_be_bytes());
-        data.extend_from_slice(&self.registered_key_index.to_be_bytes());
+        let mut data = Vec::with_capacity(8);
+        data.extend_from_slice(&(self.security_key_index as u32).to_be_bytes());
+        data.extend_from_slice(&(self.registered_key_index as u32).to_be_bytes());
         data
     }
 
-    pub(crate) fn from_bytes(data: &[u8; 8]) -> Self {
-        Self {
-            security_key_index: usize::from_be_bytes(data[..4].try_into().unwrap()),
-            registered_key_index: usize::from_be_bytes(data[4..].try_into().unwrap()),
-        }
+    pub(crate) fn from_bytes(data: &[u8]) -> Result<Self, Error> {
+        let bytes: &[u8; 8] = data.try_into().map_err(|_| Error::WrongData)?;
+        Ok(Self {
+            security_key_index: u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize,
+            registered_key_index: u32::from_be_bytes(bytes[4..].try_into().unwrap()) as usize,
+        })
     }
 }

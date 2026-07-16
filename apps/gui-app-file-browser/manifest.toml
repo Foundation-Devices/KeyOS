@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x46696c652042726f7773657200000000"
 
 [appName]
@@ -5,7 +6,6 @@ en = "Files"
 
 [permissions]
 template = ["gui-app", "navigable", "fs-generic"]
-"os/power-manager" = ["SetOtgPriority"]
 "os/fs" = [
     "GetUsbReadAccess",
     "GetUsbWriteAccess",
@@ -13,5 +13,8 @@ template = ["gui-app", "navigable", "fs-generic"]
     "GetUserWriteAccess",
     "GetAirlockReadAccess",
     "GetAirlockWriteAccess",
+    "FormatUsb",
+    "FormatAirlock",
+    "MountAirlock",
 ]
 "os/settings" = ["SubscribeAirlockMode", "SetAirlockMode"]

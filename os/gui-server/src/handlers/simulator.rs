@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gui_server_api::msg::{
-    GetDeviceFrame, GetScreenFrame, SetScaleFactor, SimulatePowerButton, SimulateTouch,
-};
+use gui_server_api::msg::{GetDeviceFrame, SetScaleFactor, SimulateKey, SimulatePowerButton, SimulateScroll};
 use server::{LendMutHandler, ScalarHandler, ServerContext};
 use xous::PID;
 
@@ -27,28 +25,6 @@ impl LendMutHandler<GetDeviceFrame> for Gui {
     }
 }
 
-impl LendMutHandler<GetScreenFrame> for Gui {
-    fn handle(
-        &mut self,
-        GetScreenFrame(mut mem): GetScreenFrame,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) {
-        get_frame(false, &mut mem)
-    }
-}
-
-impl ScalarHandler<SimulateTouch> for Gui {
-    fn handle(
-        &mut self,
-        SimulateTouch(pos): SimulateTouch,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) {
-        self.touch_dispatch(pos);
-    }
-}
-
 impl ScalarHandler<SimulatePowerButton> for Gui {
     fn handle(
         &mut self,
@@ -57,5 +33,27 @@ impl ScalarHandler<SimulatePowerButton> for Gui {
         _context: &mut ServerContext<Self>,
     ) {
         self.handle_power_button(is_pressed);
+    }
+}
+
+impl ScalarHandler<SimulateKey> for Gui {
+    fn handle(
+        &mut self,
+        SimulateKey { key, is_pressed }: SimulateKey,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        self.dispatch_key_event(is_pressed, key);
+    }
+}
+
+impl ScalarHandler<SimulateScroll> for Gui {
+    fn handle(
+        &mut self,
+        SimulateScroll { x, y, delta_x, delta_y }: SimulateScroll,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        self.dispatch_scroll_event(x, y, delta_x, delta_y);
     }
 }

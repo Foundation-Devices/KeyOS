@@ -25,16 +25,13 @@ nfc::use_api!();
 camera::use_api!();
 #[cfg(keyos)]
 haptics::use_api!();
-power_manager::use_api!();
+power_manager::use_ext_api!();
 #[cfg(keyos)]
 usb::use_device_api!();
 #[cfg(keyos)]
 usb::use_host_api!();
 #[cfg(not(feature = "recovery-os"))]
 security::use_api!();
-
-/// If the battery charge is below this level, the device will be shut down.
-const FORCE_SHUTDOWN_BATTERY_THRESHOLD_PCT: u8 = 5;
 
 const STATUS_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -81,22 +78,18 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     let gui = cx.gui.clone();
     spawn_local(async move {
-        let mut status_updates = subscribe_scalar::<power_manager_permissions::PowerManagerPermissions, _>(
-            power_manager::messages::StatusSubscribe,
-        );
+        let mut status_updates = subscribe_scalar::<
+            power_manager_ext_permissions::PowerManagerExtPermissions,
+            _,
+        >(power_manager::messages::StatusSubscribe);
         while let Some(status) = status_updates.next().await {
             let mut state = state.borrow_mut();
             state.battery_percent = status.battery_percent;
 
             // Give haptic feedback when the USB is plugged in and charging begins
             let is_charging = status.charge_status == power_manager::ChargeStatus::Charging;
-            if !is_charging && status.battery_percent < FORCE_SHUTDOWN_BATTERY_THRESHOLD_PCT {
-                log::info!(
-                    "Battery level is very low ({}% < {FORCE_SHUTDOWN_BATTERY_THRESHOLD_PCT}), forcing shutdown",
-                    status.battery_percent
-                );
-
-                // Shut down gracefully
+            if !is_charging && status.battery_percent == 0 {
+                log::info!("Battery reserve reached, forcing shutdown");
                 gui.shutdown().ok();
             }
             let is_usb_attached = status.attached_state != power_manager::AttachedState::None;
@@ -269,6 +262,15 @@ fn init_keyos(state: StoredValue<AppState>) {
         }
     })
     .detach();
+
+    spawn_local(async move {
+        let mut sub = subscribe_scalar::<SettingsPermissions, _>(settings::messages::SubscribeDebugTouch);
+        while let Some(debug) = sub.next().await {
+            let state = state.borrow();
+            state.ui.set_debug_show_corner_deadzone(debug.0);
+        }
+    })
+    .detach();
 }
 
 fn update_battery_state(state: &AppState) {
@@ -285,7 +287,7 @@ fn update_hw_state(state: &AppState) {
 #[cfg(all(keyos, not(feature = "recovery-os")))]
 fn update_hw_state(state: &AppState) {
     state.slint_state().set_is_nfc_in_use(state.nfc.is_active().unwrap_or(false));
-    state.slint_state().set_is_camera_in_use(state.camera.is_in_use().unwrap_or(false));
+    state.slint_state().set_is_camera_in_use(state.camera.is_in_use());
     state.slint_state().set_is_usb_in_use(
         state.usb_host.is_connected().unwrap_or(false) || state.usb_device.is_connected().unwrap_or(false),
     );

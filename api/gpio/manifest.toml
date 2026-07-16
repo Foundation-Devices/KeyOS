@@ -1,3 +1,4 @@
+manifestVersion = "0"
 [servers."os/gpio"]
 ClaimPin = { id = 0, type = "blockingScalar" }
 EnableIrq = { id = 2, type = "scalarEvent" }

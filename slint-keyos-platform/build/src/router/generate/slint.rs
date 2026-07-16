@@ -105,6 +105,9 @@ impl<'a> GenContext<'a> {
                callback backward-animate(Animate);
                callback forward-animate(Animate);
 
+               callback return-home();
+               callback return-home-animate(Animate);
+
                // Log the current navigation state
                callback debug();
 

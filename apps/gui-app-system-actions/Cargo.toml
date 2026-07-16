@@ -8,11 +8,15 @@ edition = "2021"
 
 [dependencies]
 fs = { workspace = true }
+getrandom = { workspace = true }
+keyos = { path = "../../keyos" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
-power-manager = { workspace = true }
 server = { path = "../../server" }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

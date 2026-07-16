@@ -1,12 +1,10 @@
 use std::cmp::Ordering;
 
 pub mod belf;
-pub mod memory;
 pub mod permission;
 pub mod xkrn;
 
 pub use belf::*;
-pub use memory::*;
 pub use permission::*;
 pub use xkrn::*;
 

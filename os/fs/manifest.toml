@@ -1,5 +1,6 @@
+manifestVersion = "0"
 appId = "0x66730000000000000000000000000000"
-syscall = ["SetThreadPriority"]
+syscall = ["SetThreadPriority", "MirrorMemoryToPid"]
 extends = "../../api/fs"
 
 [appName]
@@ -7,6 +8,7 @@ en = "File System"
 
 [servers."os/fs"]
 SubscriberDisconnected = { id = 64, type = "scalar" }
+ProcessDisconnected = { id = 65, type = "scalar" }
 
 [permissions]
 "os/emmc" = [
@@ -15,6 +17,7 @@ SubscriberDisconnected = { id = 64, type = "scalar" }
     "ReadEncryptedBlocks",
     "WriteEncryptedBlocks",
     "BlockCount",
+    "Flush",
 ]
 "os/mass-storage" = [
     "ReadBlocks",
@@ -22,3 +25,4 @@ SubscriberDisconnected = { id = 64, type = "scalar" }
     "BlockCount",
     "Subscribe",
 ]
+"os/security" = ["SubscribeDiskEncryptionKeysReady"]

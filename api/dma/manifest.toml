@@ -1,7 +1,9 @@
+manifestVersion = "0"
 [servers."os/dma"]
-PeripheralTransferMsg = { id = 1, type = "archive" }
+PeripheralTransferMsg = { id = 1, type = "blockingArchive" }
 ExecuteTransferMsg = { id = 2, type = "blockingScalar" }
 WaitTransferMsg = { id = 3, type = "blockingScalar" }
 StopTransferMsg = { id = 4, type = "scalar" }
 DropTransferMsg = { id = 5, type = "scalar" }
 FlushTransferMsg = { id = 6, type = "blockingScalar" }
+SubscribeTransferComplete = { id = 32, type = "scalarEvent" }

@@ -1,0 +1,9 @@
+manifestVersion = "0"
+[servers."os/camera"]
+Subscribe = { id = 1, type = "scalarEvent" }
+SetEnabled = { id = 2, type = "scalar" }
+NotifyVisible = { id = 3, type = "scalar" }
+IsEnabled = { id = 4, type = "blockingScalar" }
+IsInUse = { id = 5, type = "blockingScalar" }
+GetParams = { id = 6, type = "blockingArchive" }
+SetParams = { id = 7, type = "archive" }

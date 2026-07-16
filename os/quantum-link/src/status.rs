@@ -8,18 +8,16 @@ use crate::{bt_tx_bridge::SendOutcome, QuantumLinkServer};
 
 const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6);
 const HEARTBEAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
-const HEARTBEAT_MISS_THRESHOLD: usize = 5;
+const MAX_MISSED_HEARTBEATS: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HeartbeatState {
     pub live: bool,
     pub request: RequestState,
-    pub missed_acks: usize,
 }
 
 impl HeartbeatState {
-    pub const DEAD: HeartbeatState =
-        HeartbeatState { live: false, request: RequestState::Idle, missed_acks: 0 };
+    pub const DEAD: HeartbeatState = HeartbeatState { live: false, request: RequestState::Idle };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +41,17 @@ impl QuantumLinkServer {
         self.bt_state = state;
 
         if !was_connected && is_connected {
+            self.missed_heartbeats = 0;
             self.heartbeat_tick();
+            self.publish_device_name();
         }
 
         if was_connected && !is_connected {
             self.heartbeat_state = HeartbeatState::DEAD;
+            self.missed_heartbeats = 0;
+            // Heartbeat ticks stop while disconnected, so the periodic timeout
+            // path won't fire. Fail any in-flight requests now.
+            self.pending.expire_all_now();
         }
 
         self.notify_connection_status();
@@ -91,7 +95,10 @@ impl QuantumLinkServer {
                     }
                     Err(e) => {
                         log::debug!("failed to send heartbeat: {e:?}");
-                        self.record_heartbeat_miss();
+                        self.heartbeat_failure();
+                        if self.bt_state.is_connected() {
+                            self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
+                        }
                     }
                 }
             }
@@ -100,7 +107,8 @@ impl QuantumLinkServer {
             }
             RequestState::WaitingForResponse => {
                 log::debug!("heartbeat timeout");
-                self.record_heartbeat_miss();
+                self.heartbeat_failure();
+                self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
             }
         }
     }
@@ -114,26 +122,26 @@ impl QuantumLinkServer {
             }
             Err(e) => {
                 log::debug!("failed to send heartbeat over BT: {e:?}");
-                self.record_heartbeat_miss();
+                self.heartbeat_failure();
+                self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
             }
         }
     }
 
-    pub fn heartbeat_success(&mut self) {
-        self.set_heartbeat_state(|h| {
-            *h = HeartbeatState { live: true, request: RequestState::Idle, missed_acks: 0 }
-        });
-        self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
+    fn heartbeat_failure(&mut self) {
+        self.missed_heartbeats += 1;
+        if self.missed_heartbeats >= MAX_MISSED_HEARTBEATS {
+            log::warn!("connection is dead after {} missed heartbeats", self.missed_heartbeats);
+            self.set_heartbeat_state(|h| *h = HeartbeatState::DEAD);
+        } else {
+            log::debug!("missed heartbeat ({}/{})", self.missed_heartbeats, MAX_MISSED_HEARTBEATS);
+            self.set_heartbeat_state(|h| h.request = RequestState::Idle);
+        }
     }
 
-    fn record_heartbeat_miss(&mut self) {
-        self.set_heartbeat_state(|h| {
-            h.request = RequestState::Idle;
-            h.missed_acks = h.missed_acks.saturating_add(1);
-            if h.missed_acks >= HEARTBEAT_MISS_THRESHOLD {
-                h.live = false;
-            }
-        });
+    pub fn heartbeat_success(&mut self) {
+        self.missed_heartbeats = 0;
+        self.set_heartbeat_state(|h| *h = HeartbeatState { live: true, request: RequestState::Idle });
         self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
     }
 

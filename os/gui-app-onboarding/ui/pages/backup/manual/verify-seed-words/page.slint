@@ -9,7 +9,7 @@ import { VerifySeedWordsProps } from "props.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
 import { SeedGlobal, SeedWordChallenge } from "../../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { Pagination } from "../../../../widgets/pagination.slint";
+import { ProgressIndicator } from "../../../../widgets/progress-indicator.slint";
 
 enum WordState {
     Pending,
@@ -20,14 +20,16 @@ enum WordState {
 export component VerifySeedWordsPage inherits OnboardingBasePage {
     in property <VerifySeedWordsProps> props;
 
-    // Get verification challenges from callback
-    property <[SeedWordChallenge]> challenges: SeedGlobal.generate-seed-word-challenges(4);
+    property <[int]> mnemonic-order;
+    property <SeedWordChallenge> current-challenge;
 
     property <WordState> word-state: WordState.Pending;
+    property <int> current-page: 0;
 
-    property <int> current-page:0;
-    property <bool> seed-verified: current-page >= challenges.length;
-    property <SeedWordChallenge> current-challenge: challenges[current-page];
+    init => {
+        mnemonic-order = SeedGlobal.generate-mnemonic-order();
+        current-challenge = SeedGlobal.get-seed-word-challenge(mnemonic-order[current-page]);
+    }
 
     function subheader() -> string {
         if (word-state == WordState.Pending) {
@@ -51,7 +53,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
 
     function verify-selection(selected-index: int) -> bool {
         if (selected-index == current-challenge.correct-option-index) {
-            if (current-page == challenges.length - 1) {
+            if (current-page == mnemonic-order.length - 1) {
                 Navigate.backup-created({ });
             }
             word-state = WordState.Success;
@@ -63,14 +65,11 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
     }
 
     function button-label() -> string {
-        if (word-state == WordState.Pending && current-page < 3) {
-            return TR2.lookup(TrId.BackupManualVerifyTapOnWord);
-        }
-        if (current-page >= 3) {
-            return TR2.lookup(TrId.CommonButtonFinish);
-        }
         if (word-state == WordState.Failure) {
-            return TR2.lookup(TrId.BackupManualVerifyRestartVerification);
+            return TR2.lookup(TrId.CommonButtonRetry);
+        }
+        if (word-state == WordState.Success && current-page == mnemonic-order.length - 1) {
+            return TR2.lookup(TrId.CommonButtonFinish);
         }
         return TR2.lookup(TrId.CommonButtonNext);
     }
@@ -105,7 +104,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
                     }
 
                     HeadingLg {
-                        text: "#\{current-challenge.word-index + 1}";
+                        text: "#\{current-challenge.mnemonic-index + 1}";
                         color: Palette.content-secondary;
                         horizontal-alignment: center;
                     }
@@ -126,6 +125,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
                             importance: secondary;
                             label: current-challenge.options[0];
                             width: 212px;
+
                             clicked => {
                                 if (word-state != WordState.Pending) {
                                     return;
@@ -142,6 +142,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
                             importance: secondary;
                             label: current-challenge.options[1];
                             width: 212px;
+
                             clicked => {
                                 if (word-state != WordState.Pending) {
                                     return;
@@ -161,6 +162,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
                             importance: secondary;
                             label: current-challenge.options[2];
                             width: 212px;
+
                             clicked => {
                                 if (word-state != WordState.Pending) {
                                     return;
@@ -177,6 +179,7 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
                             importance: secondary;
                             label: current-challenge.options[3];
                             width: 212px;
+
                             clicked => {
                                 if (word-state != WordState.Pending) {
                                     return;
@@ -195,22 +198,31 @@ export component VerifySeedWordsPage inherits OnboardingBasePage {
             ButtonSection {
                 HorizontalLayout {
                     alignment: center;
-                    Pagination {
-                        current-page: current-page;
-                        total-pages: 4;
+                    ProgressIndicator {
+                        current: current-page;
+                        total: mnemonic-order.length;
                     }
                 }
 
                 Button {
+                    icon: word-state == WordState.Failure ? "reload" : "";
                     label: button-label();
                     importance: primary;
                     enabled: word-state != WordState.Pending;
+
                     clicked => {
-                        if (word-state == WordState.Failure) {
-                            current-page = 0;
-                        } else {
+                        if (word-state == WordState.Success) {
                             current-page += 1;
                         }
+                        if (current-page <= mnemonic-order.length - 1) {
+                            current-challenge = SeedGlobal.get-seed-word-challenge(
+                                mnemonic-order[current-page]);
+                        } else {
+                            // This should be short-circuited by verify-selection,
+                            // but fits with the check that the current-page is in bounds.
+                            Navigate.backup-created({ });
+                        }
+
                         word-state = WordState.Pending;
                         option-a.importance = Importance.secondary;
                         option-b.importance = Importance.secondary;

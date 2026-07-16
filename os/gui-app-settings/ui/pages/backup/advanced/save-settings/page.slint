@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { TR2, TrId } from "../../../../gen/tr.slint";
-import { Button, TextMd, Icon, TextSm, Checkbox, JumboIcon, BasePage, PageBody, ContentSection, ButtonSection, WrappedIcon, TimerCircularProgress, HeadingMd } from "@ui/widgets.slint";
+import { Button, TextMd, Icon, TextSm, Checkbox, JumboIcon, BasePage, PageBody, ContentSection, ButtonSection, WrappedIcon, TimerCircularProgress, HeadingMd, QrOverlay } from "@ui/widgets.slint";
 import { IconSize, Importance, Palette, Size } from "@ui/theme.slint";
-import { QrOverlay } from "../../../../widgets/qr-code.slint";
 
 import { Navigate } from "../../../../gen/navigate.slint";
 import { SaveSettingsGlobal, SaveSettingsStatus } from "../../../../globals/save-settings-global.slint";
@@ -199,5 +198,6 @@ export component SaveSettingsPage inherits BasePage {
 
     if qrcode-url != "": QrOverlay {
         url <=> qrcode-url;
+        title: TR2.lookup(TrId.CommonSupportModalDocumentationHeader);
     }
 }

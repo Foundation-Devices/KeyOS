@@ -41,6 +41,7 @@ export component CryptoFiatField inherits CardField {
 
         VerticalLayout {
             alignment: center;
+            visible: fiat-amount != "";
 
             HorizontalLayout {
                 spacing: Size.sz0_5;

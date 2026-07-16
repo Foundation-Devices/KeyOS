@@ -385,7 +385,7 @@ fn run_tests() {
             aes.init_decrypt(mode);
         }
 
-        aes.setup_for_dma();
+        aes.setup_for_dma(input.len());
 
         ch0.configure_peripheral_transfer(Aes::TX_DMA_CONFIG);
         ch1.configure_peripheral_transfer(Aes::RX_DMA_CONFIG);

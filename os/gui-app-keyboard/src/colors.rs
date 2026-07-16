@@ -35,6 +35,7 @@ pub struct ColorScheme {
     pub normal: KeyColors,
     pub accent: KeyColors,
     pub cta: KeyColors,
+    pub disabled: KeyColors,
 }
 
 const COLORS_DARK: ColorScheme = ColorScheme {
@@ -55,6 +56,12 @@ const COLORS_DARK: ColorScheme = ColorScheme {
         background: color!(0x00, 0x9D, 0xB9),
         gradient_top: color!(0x33, 0xB7, 0xC1),
         gradient_bottom: color!(0x00, 0x9D, 0xB9),
+    },
+    disabled: KeyColors {
+        text: color!(0x94, 0x94, 0x94),
+        background: color!(0x44, 0x44, 0x44),
+        gradient_top: color!(0x5A, 0x5A, 0x5A),
+        gradient_bottom: color!(0x23, 0x1F, 0x20),
     },
 };
 
@@ -77,6 +84,12 @@ const COLORS_LIGHT: ColorScheme = ColorScheme {
         gradient_top: color!(0x33, 0xB7, 0xC1),
         gradient_bottom: color!(0x00, 0x9D, 0xB9),
     },
+    disabled: KeyColors {
+        text: color!(0xC1, 0xC1, 0xC1),
+        background: color!(0xD5, 0xD5, 0xD5),
+        gradient_top: color!(0x94, 0x94, 0x94),
+        gradient_bottom: color!(0x23, 0x1F, 0x20),
+    },
 };
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +98,7 @@ pub enum KeyStyle {
     Normal,
     Accent,
     Cta, // Call To Action
+    Disabled,
 }
 
 impl KeyStyle {
@@ -95,6 +109,7 @@ impl KeyStyle {
             KeyStyle::Normal => &colors.normal,
             KeyStyle::Accent => &colors.accent,
             KeyStyle::Cta => &colors.cta,
+            KeyStyle::Disabled => &colors.disabled,
         }
     }
 }

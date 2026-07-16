@@ -10,6 +10,7 @@ use xous_api_ticktimer::Ticktimer;
 
 pub mod api;
 mod cursor;
+pub mod reader;
 
 #[derive(Debug)]
 pub enum LogError {
@@ -85,52 +86,12 @@ impl log::Log for XousLogger {
     fn flush(&self) {}
 }
 
-pub struct LogReader(xous::CID);
-
-impl Default for LogReader {
-    fn default() -> Self { Self(xous::connect(xous::SID::from_bytes(b"xous-log-server ").unwrap()).unwrap()) }
-}
-
-impl LogReader {
-    pub fn read(&self, buffer: xous::MemoryRange) -> usize {
-        let result = xous::send_message(
-            self.0,
-            xous::Message::new_lend_mut(crate::api::Opcode::ReadLogs.to_usize().unwrap(), buffer, None, None),
-        )
-        .unwrap();
-        if let xous::Result::MemoryReturned(_offset, valid) = result {
-            valid.map(|v| v.get()).unwrap_or_default()
-        } else {
-            0
-        }
-    }
-
-    pub fn read_last_panic_message(&self, buffer: xous::MemoryRange) -> usize {
-        let result = xous::send_message(
-            self.0,
-            xous::Message::new_lend_mut(
-                api::Opcode::ReadLastPanicMessage.to_usize().unwrap(),
-                buffer,
-                None,
-                None,
-            ),
-        )
-        .unwrap();
-
-        if let xous::Result::MemoryReturned(_offset, valid) = result {
-            valid.map(|v| v.get()).unwrap_or_default()
-        } else {
-            0
-        }
-    }
-}
-
 pub fn init(package: &'static str) -> Result<(), LogError> {
     init_common(
         package,
         xous::try_connect(xous::SID::from_bytes(b"xous-log-server ").unwrap())
             .or(Err(LogError::NoConnection))?,
-        Some(Ticktimer::new().or(Err(LogError::NoConnection))?),
+        Some(Ticktimer::default()),
     )
 }
 
@@ -138,7 +99,7 @@ pub fn init_wait(package: &'static str) -> Result<(), LogError> {
     init_common(
         package,
         xous::connect(xous::SID::from_bytes(b"xous-log-server ").unwrap()).or(Err(LogError::NoConnection))?,
-        Some(Ticktimer::new().or(Err(LogError::NoConnection))?),
+        Some(Ticktimer::default()),
     )
 }
 

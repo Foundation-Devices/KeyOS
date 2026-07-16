@@ -4,7 +4,7 @@
 use haptics::{messages::Vibrate, HapticPattern, HapticsApi};
 use keycard::{
     error::{KeycardError, KeycardIdentifyError},
-    messages::KeycardId,
+    messages::{KeycardId, ShamirScheme},
 };
 use slint_keyos_platform::{
     async_archive, async_scalar, futures_lite,
@@ -62,6 +62,8 @@ fn should_request_overwrite_confirmation(error: KeycardIdentifyError) -> bool {
     }
 }
 
+/// Backup keycards using the default 2-of-3 scheme.
+/// Delegates to [`backup_keycards_with_scheme`] with [`ShamirScheme::DEFAULT`].
 pub async fn backup_keycards<S, PK, PQ, PH>(
     state: &mut S,
     kind: BackupKind,
@@ -72,7 +74,28 @@ where
         + MessageAllowed<keycard::messages::GenerateShards>
         + MessageAllowed<keycard::messages::PopShard>
         + MessageAllowed<keycard::messages::IdentifyKeycard>
-        + MessageAllowed<keycard::messages::StoreShardToKeycard>,
+        + MessageAllowed<keycard::messages::StoreShardToKeycard>
+        + MessageAllowed<keycard::messages::SetShamirScheme>,
+    PQ: CheckedPermissions + MessageAllowed<quantum_link::messages::BackupShard>,
+    PH: CheckedPermissions + MessageAllowed<Vibrate>,
+{
+    backup_keycards_with_scheme::<S, PK, PQ, PH>(state, kind, ShamirScheme::DEFAULT).await
+}
+
+/// Backup keycards using a custom Shamir scheme
+pub async fn backup_keycards_with_scheme<S, PK, PQ, PH>(
+    state: &mut S,
+    kind: BackupKind,
+    scheme: ShamirScheme,
+) -> whence::Result<(), KeycardBackupError>
+where
+    S: KeycardBackupState,
+    PK: CheckedPermissions
+        + MessageAllowed<keycard::messages::GenerateShards>
+        + MessageAllowed<keycard::messages::PopShard>
+        + MessageAllowed<keycard::messages::IdentifyKeycard>
+        + MessageAllowed<keycard::messages::StoreShardToKeycard>
+        + MessageAllowed<keycard::messages::SetShamirScheme>,
     PQ: CheckedPermissions + MessageAllowed<quantum_link::messages::BackupShard>,
     PH: CheckedPermissions + MessageAllowed<Vibrate>,
 {
@@ -85,6 +108,8 @@ where
     state.set_saved_shard_index(0);
     state.set_saving_to_keycard(false);
 
+    // Set the scheme before generating shards
+    async_archive::<PK, _>(keycard::messages::SetShamirScheme(scheme)).await.whence()?;
     async_scalar::<PK, _>(keycard::messages::GenerateShards { with_magic_backup }).await.whence()?;
 
     if kind == BackupKind::Magic {
@@ -93,7 +118,9 @@ where
         state.set_saved_shard_index(1);
     }
 
-    let cards_needed = if with_magic_backup { 2 } else { 3 };
+    // Calculate cards needed based on the scheme
+    // For magic backup: one shard goes to Envoy, rest to keycards
+    let cards_needed = if with_magic_backup { scheme.share_count - 1 } else { scheme.share_count };
 
     while cards_stored.len() < cards_needed {
         backup_card::<S, PK, PH>(state, &haptic, &mut cards_stored).await?;

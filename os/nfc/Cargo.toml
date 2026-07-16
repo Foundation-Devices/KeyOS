@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
 [package]
-name = "nfc"
+name = "nfc-server"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,14 +10,10 @@ edition = "2021"
 getrandom = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
-num-derive = { workspace = true }
-num-traits = { workspace = true }
-rkyv = { workspace = true }
+nfc = { workspace = true }
 server = { workspace = true }
 settings = { workspace = true }
-thiserror = { workspace = true }
 xous = { workspace = true }
-xous-ipc = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
 fido = { path = "../fido" }

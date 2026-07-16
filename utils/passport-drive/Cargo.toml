@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "passport-drive"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+hidapi = "2"
+png = "0.17"
+rusb = "0.9"
+sambuca = { path = "../sambuca" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+usb-debug-protocol = { workspace = true, features = ["client"] }

@@ -121,6 +121,8 @@ fn peripheral_id_to_irq_no(id: PeripheralId) -> IrqNumber {
         PeripheralId::Secumod => IrqNumber::Secumod,
         PeripheralId::Icm => IrqNumber::Icm,
 
+        PeripheralId::Twi0 => IrqNumber::Twi0,
+
         _ => panic!("Unable to find IrqNumber for PeripheralId: {:?}", id),
     }
 }
@@ -160,6 +162,8 @@ pub fn set_irq_enabled(irq_no: IrqNumber, enabled: bool) {
 
         IrqNumber::Secumod => PeripheralId::Secumod,
         IrqNumber::Icm => PeripheralId::Icm,
+
+        IrqNumber::Twi0 => PeripheralId::Twi0,
     };
 
     unsafe {

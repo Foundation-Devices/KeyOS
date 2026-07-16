@@ -46,7 +46,7 @@ pub(crate) fn show_main_screen() -> ! {
 
     let mut menu_page = MenuPage::new();
 
-    let mut release_handled = false;
+    let mut touch_active = false;
     let mut needs_redraw = true;
 
     let mut idle_timer = 0u32;
@@ -81,16 +81,23 @@ pub(crate) fn show_main_screen() -> ! {
                     TouchKind::Press => {
                         menu_page.on_press(x as i32, y as i32);
                         needs_redraw = true;
-                        release_handled = false;
+                        touch_active = true;
                     }
                     TouchKind::Release => {
-                        if !release_handled {
+                        if touch_active {
                             menu_page.on_release(x as i32, y as i32);
                             needs_redraw = true;
-                            release_handled = true;
+                            touch_active = false;
                         }
                     }
-                    TouchKind::Drag | TouchKind::Reserved => {}
+                    TouchKind::Drag => {
+                        if !touch_active {
+                            menu_page.on_press(x as i32, y as i32);
+                            needs_redraw = true;
+                            touch_active = true;
+                        }
+                    }
+                    TouchKind::Reserved => {}
                 }
             }
 

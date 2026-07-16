@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Exclude specific files
+internal-notes.md
+
+# Exclude directories
+scripts/internal/
+docs/private/
+
+# Glob patterns
+*.secret
+.env*

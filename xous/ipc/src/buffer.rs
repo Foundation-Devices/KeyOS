@@ -108,10 +108,11 @@ impl<'buf> Buffer<'buf> {
 
     #[inline]
     pub unsafe fn from_memory_message(mem: &'buf MemoryMessage) -> Self {
+        let len = mem.buf.len();
         Buffer {
             pages: mem.buf,
-            slice: core::slice::from_raw_parts_mut(mem.buf.as_mut_ptr(), mem.buf.len()),
-            used: mem.offset.map_or(0, |v| v.get()),
+            slice: core::slice::from_raw_parts_mut(mem.buf.as_mut_ptr(), len),
+            used: mem.offset.map_or(0, |v| v.get()).min(len),
             should_drop: false,
             memory_message: None,
         }
@@ -119,10 +120,11 @@ impl<'buf> Buffer<'buf> {
 
     #[inline]
     pub unsafe fn from_memory_message_mut(mem: &'buf mut MemoryMessage) -> Self {
+        let len = mem.buf.len();
         Buffer {
             pages: mem.buf,
-            slice: core::slice::from_raw_parts_mut(mem.buf.as_mut_ptr(), mem.buf.len()),
-            used: mem.offset.map_or(0, |v| v.get()),
+            slice: core::slice::from_raw_parts_mut(mem.buf.as_mut_ptr(), len),
+            used: mem.offset.map_or(0, |v| v.get()).min(len),
             should_drop: false,
             memory_message: Some(mem),
         }
@@ -140,7 +142,7 @@ impl<'buf> Buffer<'buf> {
         // Update the offset pointer if the server modified it.
         let result = send_message(connection, Message::MutableBorrow(msg));
         if let Ok(Result::MemoryReturned(offset, _valid)) = result {
-            self.used = offset.map_or(0, |v| v.get());
+            self.used = offset.map_or(0, |v| v.get()).min(self.pages.len());
         }
 
         result
@@ -183,6 +185,17 @@ impl<'buf> Buffer<'buf> {
         // prevents it from being Dropped.
         self.should_drop = false;
         Ok(result)
+    }
+
+    /// Allocate a fresh page-aligned Buffer and copy `bytes` into it. The
+    /// resulting buffer can be sent via [`Self::send`]/[`Self::lend`] just
+    /// like one produced by [`Self::into_buf`]. Useful for forwarding an
+    /// already-archived rkyv payload without re-serializing.
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut buf = Self::new(bytes.len());
+        buf.slice[..bytes.len()].copy_from_slice(bytes);
+        buf.used = bytes.len();
+        buf
     }
 
     pub fn into_buf<T>(src: &T) -> core::result::Result<Self, rkyv::rancor::Error>

@@ -246,6 +246,9 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
                 };
                 self.send_bytes(response.as_bytes())?;
             }
+            Command::StartStopUnit(_) => {
+                // We "spun down" the emmc successfully :)
+            }
         }
         Ok(result)
     }

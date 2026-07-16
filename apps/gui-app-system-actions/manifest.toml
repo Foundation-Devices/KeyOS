@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6775692d6170702d73797374656d2d61"
 
 [appName]
@@ -6,7 +7,6 @@ en = "System Actions"
 [permissions]
 template = ["gui-app"]
 "os/gui-server" = ["Shutdown"]
-"os/power-manager" = ["Reboot"]
 "os/settings" = [
     "GetTouchOffset",
     "SetTouchOffset",

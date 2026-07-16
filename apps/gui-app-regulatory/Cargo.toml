@@ -8,7 +8,7 @@ edition = "2021"
 
 [dependencies]
 bt = { workspace = true }
-camera = { path = "../../os/camera" }
+camera = { workspace = true }
 fs = { workspace = true }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
@@ -16,7 +16,7 @@ server = { path = "../../server" }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 
 [target.'cfg(keyos)'.dependencies]
-nfc = { path = "../../os/nfc" }
+nfc = { workspace = true }
 usb = { workspace = true }
 
 [build-dependencies]

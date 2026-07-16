@@ -47,7 +47,7 @@ fn render_footer(f: &mut Frame, state: &State, area: Rect) {
     let connection_status =
         if state.status_text.is_empty() { "disconnected".to_string() } else { state.status_text.clone() };
     let monitor_status = if state.process.monitor_enabled { "monitor: on (3s)" } else { "monitor: off" };
-    let left_text = format!("{} | {} | {}", state.port, connection_status, monitor_status);
+    let left_text = format!("{connection_status} | {monitor_status}");
 
     let right_text = "?: Help";
 
@@ -119,7 +119,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 
 fn render_help_overlay(f: &mut Frame, state: &State, area: Rect) {
     const LOG_HELP: &[KeybindEntry] = &[
-        KeybindEntry { key: "?", label: "Toggle help" },
+        KeybindEntry { key: "?/h", label: "Toggle help" },
         KeybindEntry { key: "q", label: "Quit" },
         KeybindEntry { key: "v", label: "Switch to process view" },
         KeybindEntry { key: "f", label: "Open log config" },
@@ -129,12 +129,13 @@ fn render_help_overlay(f: &mut Frame, state: &State, area: Rect) {
         KeybindEntry { key: "Up/Down/j/k", label: "Scroll logs" },
         KeybindEntry { key: "t/g", label: "Jump to top" },
         KeybindEntry { key: "b/G", label: "Jump to bottom" },
-        KeybindEntry { key: "y", label: "Copy selected row" },
+        KeybindEntry { key: "c", label: "Clear all logs" },
+        KeybindEntry { key: "y", label: "Copy selected row(s) ([N]y)" },
         KeybindEntry { key: "Y", label: "Copy filtered logs" },
     ];
 
     const PROCESS_HELP: &[KeybindEntry] = &[
-        KeybindEntry { key: "?", label: "Toggle help" },
+        KeybindEntry { key: "?/h", label: "Toggle help" },
         KeybindEntry { key: "q", label: "Quit" },
         KeybindEntry { key: "v", label: "Switch to logs view" },
         KeybindEntry { key: "f", label: "Open process filter/sort" },

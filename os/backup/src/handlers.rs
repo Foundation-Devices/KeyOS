@@ -7,11 +7,12 @@ use quantum_link::foundation_api::backup::{ArchivedRestoreMagicBackupEvent, Rest
 use server::{xous, Owned};
 use server::{
     ArchiveEventSubscriber, ArchiveEventSubscriptionHandler, ArchiveHandler, ArchiveSubscription,
-    MoveHandler, ScalarEventSubscriber, ScalarEventSubscriptionHandler, ScalarHandler, ScalarSubscription,
-    ServerContext,
+    BlockingArchiveHandler, ScalarEventSubscriber, ScalarEventSubscriptionHandler, ScalarHandler,
+    ScalarSubscription, ServerContext,
 };
 
 use crate::messages::*;
+use crate::publish::PublishMode;
 use crate::BackupServer;
 
 impl server::ScalarEventHandler<fs::FileSystemEvent> for BackupServer {
@@ -24,7 +25,7 @@ impl server::ScalarEventHandler<fs::FileSystemEvent> for BackupServer {
         if msg.location == fs::Location::EncryptedRoot && msg.event_type == fs::FileSystemEventType::Mounted {
             log::debug!("encrypted root mounted; loading backup state");
             self.state = Some(FileBacked::new("state.json", fs::Location::AppData).0);
-            self.notify_status();
+            self.publish_status(self.status(false));
             self.schedule_backup_cb("encrypted-root-mounted");
         }
     }
@@ -58,7 +59,7 @@ impl ScalarHandler<PeriodicBackup> for BackupServer {
     }
 }
 
-impl MoveHandler<BackupWorkerEvent> for BackupServer {
+impl ArchiveHandler<BackupWorkerEvent> for BackupServer {
     fn handle(
         &mut self,
         event: Owned<BackupWorkerEvent>,
@@ -70,7 +71,14 @@ impl MoveHandler<BackupWorkerEvent> for BackupServer {
         match event {
             BackupWorkerEvent::BackupPublished { published_at, created_at: _ } => {
                 log::info!("Backup confirmed published");
-                self.update_status(published_at);
+                if let Some(state) = self.state.as_mut() {
+                    state.guard().last_published_backup = Some(published_at);
+                }
+                self.publish_status(self.status(false));
+            }
+            BackupWorkerEvent::BackupPublishFailed => {
+                log::warn!("Backup publish failed");
+                self.publish_status(self.status(true));
             }
         }
     }
@@ -83,13 +91,7 @@ impl ScalarEventSubscriptionHandler<StatusSubscribe> for BackupServer {
         subscriber: ScalarEventSubscriber<Status>,
         _context: &mut ServerContext<Self>,
     ) -> Result<(), <StatusSubscribe as ScalarSubscription>::Error> {
-        if let Some(state) = self.state.as_mut() {
-            let state = state.guard();
-            let status = Status { last_backup_at: state.last_published_backup };
-            if subscriber.send(&status).is_ok() {
-                self.status_subscribers.push(subscriber);
-            }
-        } else {
+        if subscriber.send(&self.status(false)).is_ok() {
             self.status_subscribers.push(subscriber);
         }
 
@@ -97,29 +99,34 @@ impl ScalarEventSubscriptionHandler<StatusSubscribe> for BackupServer {
     }
 }
 
-impl ArchiveHandler<CreateBackup> for BackupServer {
+impl BlockingArchiveHandler<CreateBackup> for BackupServer {
     fn handle(
         &mut self,
         _msg: CreateBackup,
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
-    ) -> <CreateBackup as server::Archive>::Response {
-        self.create_backup(crate::BACKUP_FILE, crate::BACKUP_LOCATION).map(|_| ())
+    ) -> <CreateBackup as server::BlockingArchive>::Response {
+        self.create_backup(
+            crate::BACKUP_FILE,
+            crate::BACKUP_LOCATION,
+            PublishMode::TimeoutWaitingForEnvoy(crate::BACKUP_NOW_QL_READY_TIMEOUT),
+        )
+        .map(|_| ())
     }
 }
 
-impl ArchiveHandler<CreateBackupFile> for BackupServer {
+impl BlockingArchiveHandler<CreateBackupFile> for BackupServer {
     fn handle(
         &mut self,
         msg: CreateBackupFile,
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
-    ) -> <CreateBackupFile as server::Archive>::Response {
+    ) -> <CreateBackupFile as server::BlockingArchive>::Response {
         self.create_backup_internal(&msg.backup_path, msg.location).map(|_| ()).map_err(|e| e.into_inner())
     }
 }
 
-impl ArchiveHandler<RestoreBackup> for BackupServer {
+impl BlockingArchiveHandler<RestoreBackup> for BackupServer {
     fn handle(
         &mut self,
         msg: RestoreBackup,

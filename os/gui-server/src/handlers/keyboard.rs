@@ -3,22 +3,18 @@
 
 use gui_server_api::msg::{HideKeyboard, KeyPressed, KeyReleased, UpdateKeyboard};
 use log::warn;
-use server::{ScalarHandler, ServerContext};
+use server::{ArchiveHandler, Owned, ScalarHandler, ServerContext};
 use xous::PID;
 
 use crate::Gui;
 
-impl ScalarHandler<UpdateKeyboard> for Gui {
-    fn handle(
-        &mut self,
-        UpdateKeyboard { kind, request_caps }: UpdateKeyboard,
-        sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) {
-        self.show_keyboard_for_an_app(sender, kind);
+impl ArchiveHandler<UpdateKeyboard> for Gui {
+    fn handle(&mut self, msg: Owned<UpdateKeyboard>, sender: PID, _context: &mut ServerContext<Self>) {
+        let args = msg.as_slice();
+        self.show_keyboard_for_an_app(sender, args);
         if self.active_app_pid() == Some(sender) {
             if let Some(keyboard_window) = &mut self.keyboard_window {
-                keyboard_window.request_caps(request_caps);
+                keyboard_window.forward_update(args);
             }
         }
     }

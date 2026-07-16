@@ -9,7 +9,7 @@
     {
       "name": "camera",
       "path": "apps/gui-app-qr-scanner",
-      "include": []
+      "include": ["common.button.confirm"]
     },
     {
       "name": "controlcenter",
@@ -19,7 +19,7 @@
     {
       "name": "files",
       "path": "apps/gui-app-file-browser",
-      "include": ["common.button", "common.fillerText"]
+      "include": ["common.button", "common.keyboard", "common.fillerText"]
     },
     {
       "name": "launcher",
@@ -29,12 +29,12 @@
     {
       "name": "lock",
       "path": "os/gui-app-lock-screen",
-      "include": ["common.changePin"]
+      "include": ["common.keyboard", "common.changePin"]
     },
     {
       "name": "onboarding",
       "path": "os/gui-app-onboarding",
-      "include": ["common.button", "common.update", "keycardBackup", "common.recoverRestoreCardKeycard"]
+      "include": ["common.button", "common.update", "keycardBackup", "common.recoverRestoreCardKeycard", "common.recoverWords"]
     },
     {
       "name": "recovery",
@@ -59,7 +59,7 @@
     {
       "name": "vault",
       "path": "apps/gui-app-seed-vault",
-      "include": ["common.button"]
+      "include": ["common.button", "common.keyboard", "common.recoverWords", "common.supportModalDocumentation"]
     },
     {
       "name": "wallet",

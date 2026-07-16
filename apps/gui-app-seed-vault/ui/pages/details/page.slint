@@ -5,9 +5,9 @@ import { Callbacks as CB } from "../../callbacks.slint";
 import { SeedView, SeedViewType } from "../../types.slint";
 import { Palette, Size, Importance, CallbackResult, ResultLevel,
          CardColor } from "@ui/theme.slint";
-import { CardPill, IconButton, LineCard, Arc, TextLg, TextSm,
-         AppHeader, BasePage, PageBody, ContentSection,
-         Movable, Link, ResultModal, Dropdown, DropdownOverlay,
+import { IconButton, TextSm,
+         AppHeader, BasePage, PageBody, ScrollBody, ContentSection,
+         ResultModal,
          TitledInput, ButtonSection, Button, ConfirmationModal,
          CardColorPicker, CircleIcon } from "@ui/widgets.slint";
 import { DetailsProps } from "./props.slint";
@@ -18,19 +18,38 @@ import { TR2, TrId } from "../../gen/tr.slint";
 export component DetailsPage inherits BasePage {
     in property <DetailsProps> props;
 
-    property <string> new-label: props.seed.label;
-    property <int> new-color: props.seed.color;
-    property <string> new-account: props.seed.password.account;
-    property <string> new-password: props.seed.password.password;
+    property <SeedView> seed;
+    property <string> fingerprint;
+
+    init => {
+        seed = CB.get-seed-details(props.index);
+
+        if CB.is-bitcoin(seed.seed-type) {
+            fingerprint = CB.get-fingerprint(seed.index);
+        }
+    }
+
+    property <string> new-label: seed.label;
+    property <int> new-color: seed.color;
+    property <string> new-account: seed.password.account;
+    property <string> new-password: seed.password.password;
     property <bool> is-delete-modal-open: false;
     property <bool> is-display-modal-open: false;
-    property <bool> has-changes: new-label != props.seed.label || (props.seed.seed-type == SeedViewType.password && (new-account != props.seed.password.account || new-password != props.seed.password.password)) || new-color != props.seed.color;
-    property <bool> has-error: label-error || (props.seed.seed-type == SeedViewType.password && password-error);
+    property <bool> has-changes: new-label != seed.label || (CB.is-password(seed.seed-type) && (new-account != seed.password.account || new-password != seed.password.password)) || new-color != seed.color;
+    property <bool> has-error: label-error || (CB.is-password(seed.seed-type) && password-error);
     property <bool> label-error: false;
     property <bool> password-error: false;
+    property <bool> password-has-focus: false;
     property <CallbackResult> result: {
         success: true,
     };
+
+    // Trigger auto-scroll when password input gains focus
+    changed password-has-focus => {
+        if (password-has-focus) {
+            content-scroll.viewport-y = -150px;
+        }
+    }
 
     VerticalLayout {
         AppHeader {
@@ -50,136 +69,176 @@ export component DetailsPage inherits BasePage {
             p-x: Size.sz4;
             p-y: Size.sz4;
 
-            ContentSection {
-                HorizontalLayout {
-                    spacing: Size.sz4;
+            content-scroll := ScrollBody {
+                p-x: Size.zero;
+                p-y: Size.zero;
 
-                    TitledInput {
-                        title: TR2.lookup(TrId.CreateItemItemLabel);
-                        placeholder: TR2.lookup(TrId.CreateItemItemLabelFillerText);
-                        text: props.seed.label;
-                        enabled: props.version != EditPageVersion.archive;
+                ContentSection {
+                    HorizontalLayout {
+                        spacing: Size.sz4;
 
-                        caps-mode: sentences;
+                        TitledInput {
+                            title: TR2.lookup(TrId.CreateItemItemLabel);
+                            placeholder: TR2.lookup(TrId.CreateItemItemLabelFillerText);
+                            text: seed.label;
+                            enabled: props.version != EditPageVersion.archive;
 
-                        edited(text) => {
-                            new-label = text;
-                            self.message = CB.validate-edit-label(props.seed.index, text);
-                            self.has-notice = self.message != "";
-                            label-error = self.has-notice;
+                            caps-mode: sentences;
+
+                            edited(text) => {
+                                new-label = text;
+                                self.message = CB.validate-edit-label(seed.index, text);
+                                self.has-notice = self.message != "";
+                                label-error = self.has-notice;
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: Size.sz2;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.ItemDetailsIcon);
+                                color: Palette.content-tertiary;
+                                horizontal-alignment: TextHorizontalAlignment.center;
+                            }
+
+                            CircleIcon {
+                                icon: CB.get-icon(seed.seed-type);
+                                line-color: CardColor.light-copper;
+                                shadow: false;
+                            }
                         }
                     }
 
                     VerticalLayout {
+                        padding-left: Size.sz4;
                         spacing: Size.sz2;
 
-                        TextSm {
-                            text: TR2.lookup(TrId.ItemDetailsIcon);
-                            color: Palette.content-tertiary;
-                            horizontal-alignment: TextHorizontalAlignment.center;
+                        HorizontalLayout {
+                            alignment: start;
+                            TextSm {
+                                text: TR2.lookup(TrId.ItemDetailsInformation);
+                                color: Palette.content-tertiary;
+                            }
                         }
 
-                        CircleIcon {
-                            icon: CB.get-icon(props.seed.seed-type);
-                            line-color: CardColor.light-copper;
-                            shadow: false;
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: Size.sz4;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.CreateItemType) + ":";
+                                color: Palette.content-primary;
+                                width: 78px;
+                            }
+
+                            TextSm {
+                                text: CB.get-seed-name(seed.seed-type);
+                                color: Palette.content-primary;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: Size.sz4;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.CreateItemSource) + ":";
+                                color: Palette.content-primary;
+                                width: 78px;
+                            }
+
+                            TextSm {
+                                text: CB.index-required(seed.seed-type) ? TR2.lookup(TrId.CreateItemGeneratedFromMasterKey) : TR2.lookup(TrId.CreateItemImported);
+                                color: Palette.content-primary;
+                            }
+                        }
+
+                        if CB.index-required(seed.seed-type): HorizontalLayout {
+                            alignment: start;
+                            spacing: Size.sz4;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.CreateItemIndex) + ":";
+                                color: Palette.content-primary;
+                                width: 78px;
+                            }
+
+                            TextSm {
+                                text: seed.indexed-seed.index;
+                                color: Palette.content-primary;
+                            }
+                        }
+
+                        if CB.is-bitcoin(seed.seed-type): HorizontalLayout {
+                            alignment: start;
+                            spacing: Size.sz4;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.CreateItemFingerprint) + ":";
+                                color: Palette.content-primary;
+                                width: 120px;
+                            }
+
+                            TextSm {
+                                text: fingerprint;
+                                color: Palette.content-primary;
+                            }
                         }
                     }
-                }
 
-                // TODO: make this a widget
-                if CB.is-indexed-seed(props.seed.seed-type): VerticalLayout {
-                    padding-left: Size.sz4;
-                    spacing: Size.sz2;
+                    if CB.is-password(seed.seed-type): TitledInput {
+                        title: TR2.lookup(TrId.CreateItemAccount);
+                        placeholder: TR2.lookup(TrId.CreateItemAccountFillerText);
+                        text: seed.password.account;
+                        caps-mode: sentences;
+                        enabled: props.version != EditPageVersion.archive;
 
-                    HorizontalLayout {
-                        alignment: start;
-                        TextSm {
-                            text: TR2.lookup(TrId.ItemDetailsInformation);
-                            color: Palette.content-tertiary;
+                        edited(text) => {
+                            new-account = text;
                         }
                     }
 
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: Size.sz2;
+                    if CB.is-password(seed.seed-type): TitledInput {
+                        title: TR2.lookup(TrId.CreateItemPassword);
+                        placeholder: TR2.lookup(TrId.CreateItemPasswordFillerText);
+                        text: seed.password.password;
+                        has-notice: self.text == "";
+                        show-password: false;
+                        enabled: props.version != EditPageVersion.archive;
+                        input-type: InputType.password;
+                        locked: seed.seed-type == SeedViewType.password-generated;
 
-                        TextSm {
-                            text: TR2.lookup(TrId.CreateItemType);
-                            color: Palette.content-primary;
-                            width: 57px;
+                        edited(text) => {
+                            new-password = text;
+                            self.has-notice = text == "";
+                            password-error = self.has-notice;
                         }
 
-                        TextSm {
-                            text: CB.get-seed-name(props.seed.seed-type);
-                            color: Palette.content-primary;
+                        changed has-focus => {
+                            password-has-focus = self.has-focus;
                         }
                     }
 
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: Size.sz2;
-
-                        TextSm {
-                            text: TR2.lookup(TrId.CreateItemIndex);
-                            color: Palette.content-primary;
-                            width: 57px;
-                        }
-
-                        TextSm {
-                            text: props.seed.indexed-seed.index;
-                            color: Palette.content-primary;
+                    if props.version != EditPageVersion.archive: CardColorPicker {
+                        selected-index: seed.color;
+                        title: TR2.lookup(TrId.ItemDetailsColor);
+                        changed(index) => {
+                            new-color = index;
                         }
                     }
-                }
 
-                if props.seed.seed-type == SeedViewType.password: TitledInput {
-                    title: TR2.lookup(TrId.CreateItemAccount);
-                    placeholder: TR2.lookup(TrId.CreateItemAccountFillerText);
-                    text: props.seed.password.account;
-                    caps-mode: sentences;
-                    enabled: props.version != EditPageVersion.archive;
-
-                    edited(text) => {
-                        new-account = text;
-                    }
-                }
-
-                if props.seed.seed-type == SeedViewType.password: TitledInput {
-                    title: TR2.lookup(TrId.CreateItemPassword);
-                    placeholder: TR2.lookup(TrId.CreateItemPasswordFillerText);
-                    text: props.seed.password.password;
-                    has-notice: self.text == "";
-                    show-password: false;
-                    enabled: props.version != EditPageVersion.archive;
-                    input-type: InputType.password;
-
-                    edited(text) => {
-                        new-password = text;
-                        self.has-notice = text == "";
-                        // TODO: potentially add warning copy
-                        // if (self.has-notice) {
-                        //     self.message = "Passwords must not be empty";
-                        // } else {
-                        //     self.message = "";
-                        // }
-                        password-error = self.has-notice;
-                    }
-                }
-
-                if props.version != EditPageVersion.archive: CardColorPicker {
-                    selected-index: props.seed.color;
-                    title: TR2.lookup(TrId.ItemDetailsColor);
-                    changed(index) => {
-                        new-color = index;
+                    // Conditional spacer for keyboard scrolling
+                    if password-has-focus: Rectangle {
+                        height: 250px;
                     }
                 }
             }
 
             ButtonSection {
-                if CB.is-indexed-seed(props.seed.seed-type): Button {
+                if CB.supports-qr(seed.seed-type): Button {
                     icon: "scan-qr";
-                    label: props.seed.seed-type == SeedViewType.nostr-key ? TR2.lookup(TrId.ItemDetailsNostrKeyViewKey) : TR2.lookup(TrId.ItemDetailsSeedViewSeed);
+                    label: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ItemDetailsNostrKeyViewKey) : TR2.lookup(TrId.ItemDetailsSeedViewSeed);
                     importance: props.version == EditPageVersion.edit ? Importance.primary : Importance.secondary;
 
                     clicked => {
@@ -194,7 +253,8 @@ export component DetailsPage inherits BasePage {
                     importance: Importance.primary;
 
                     clicked => {
-                        result = CB.is-indexed-seed(props.seed.seed-type) ? CB.edit-indexed(props.seed.index, new-label, new-color) : CB.edit-password(props.seed.index, new-label, new-account, new-password, new-color);
+                        result = CB.is-password(seed.seed-type) ? CB.edit-password(seed.index, new-label, new-account, new-password, new-color) : CB.edit-indexed(seed.index, new-label, new-color);
+
                         if (result.success) {
                             Navigate.backward();
                         }
@@ -208,12 +268,13 @@ export component DetailsPage inherits BasePage {
                     importance: Importance.secondary;
 
                     clicked => {
-                        CB.set-archived(props.seed.index, true);
+                        CB.set-archived(seed.index, true);
                         Navigate.backward();
                     }
                 }
 
-                if props.seed.seed-type == SeedViewType.password && props.version == EditPageVersion.archive: Button {
+                // TODO: Allow delete for imports only? would make is-import() function
+                if CB.is-import(seed.seed-type) && props.version == EditPageVersion.archive: Button {
                     icon: "";
                     label: TR2.lookup(TrId.CommonButtonDelete);
                     importance: Importance.negative;
@@ -225,11 +286,11 @@ export component DetailsPage inherits BasePage {
 
                 if props.version == EditPageVersion.archive: Button {
                     icon: "export";
-                    label: props.seed.seed-type == SeedViewType.password ? TR2.lookup(TrId.ArchivedItemPasswordRestorePassword) : (props.seed.seed-type == SeedViewType.nostr-key ? TR2.lookup(TrId.ArchivedItemNostrKeyRestoreKey) : TR2.lookup(TrId.ArchivedItemSeedRestoreSeed));
+                    label: CB.is-password(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemPasswordRestorePassword) : (CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyRestoreKey) : TR2.lookup(TrId.ArchivedItemSeedRestoreSeed));
                     importance: Importance.primary;
 
                     clicked => {
-                        CB.set-archived(props.seed.index, false);
+                        CB.set-archived(seed.index, false);
                         Navigate.backward();
                     }
                 }
@@ -242,7 +303,7 @@ export component DetailsPage inherits BasePage {
         icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.PasswordDeleteModalHeader);
         text: TR2.format(TrId.PasswordDeleteModalContent1, [
-            props.seed.label,
+            seed.label,
         ]);
         extra-warning: TR2.lookup(TrId.SeedDeleteModalContent2);
         extra-warning-color: Palette.content-notice;
@@ -255,7 +316,7 @@ export component DetailsPage inherits BasePage {
 
         confirm-clicked => {
             is-delete-modal-open = false;
-            CB.delete(props.seed.index);
+            CB.delete(seed.index);
             Navigate.backward();
         }
     }
@@ -264,8 +325,8 @@ export component DetailsPage inherits BasePage {
         icon: "alert";
         icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.ArchivedItemSeedModalRevealHeader);
-        text: props.seed.seed-type == SeedViewType.nostr-key ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent1) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent1);
-        extra-warning: props.seed.seed-type == SeedViewType.nostr-key ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent2) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent2);
+        text: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent1) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent1);
+        extra-warning: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent2) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent2);
         confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
         cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
 
@@ -274,7 +335,7 @@ export component DetailsPage inherits BasePage {
         }
 
         confirm-clicked => {
-            Navigate.view({ seed: props.seed, version: props.version }, { });
+            Navigate.view({ index: seed.index, version: props.version }, { });
         }
     }
 

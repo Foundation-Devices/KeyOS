@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6775692d736572766572000000000000"
 memory = ["LCDC"]
 syscall = ["VirtToPhys", "VirtToPhysPid", "TerminatePid", "ClaimInterrupt", "GetSystemStats", "SetThreadPriority", "Shutdown"]
@@ -21,9 +22,10 @@ ForceShutdownTimeout = { id = 50, type = "scalar" }
 "os/app-manager" = ["LaunchApp", "LaunchAppBlocking"]
 "os/bt" = ["Disconnect"]
 "os/fs" = ["SubscribeFilesystemEvent"]
-"os/camera" = ["NotifyVisible"]
+"os/camera" = ["NotifyVisible", "Subscribe"]
 "os/haptics" = ["Vibrate"]
-"os/power-manager" = ["SetPeripheralEnabled", "GetStatus", "Reboot", "SetOtgPriority", "SetUsbBoost"]
+"os/power-manager" = ["SetPeripheralEnabled", "Shutdown", "Reboot"]
+"os/power-manager-ext" = ["GetStatus"]
 "os/rgb-server" = ["AnimateAllTo", "SetAllTo"]
 "os/security" = ["Logout", "GetMasterKeyState"]
 "os/settings" = [
@@ -35,5 +37,6 @@ ForceShutdownTimeout = { id = 50, type = "scalar" }
     "SubscribeTouchOffset",
     "FlushAll",
     "SubscribeOnboardingStatus",
+    "GetPrimeColor",
 ]
 "os/spi" = ["ClaimPeripheral", "SpiXfer"]

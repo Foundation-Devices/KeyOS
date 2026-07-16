@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::env;
+use std::{env, path::PathBuf};
 
 fn main() {
     // If target OS is not xous, abort
@@ -9,25 +9,14 @@ fn main() {
     if target_os != "xous" {
         return;
     }
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // Create SystemView bindings
     println!("cargo:rerun-if-changed=src/wrapper.h");
 
-    let header = &[
-        // Disfigure the SPDX header to avoid SPDX checks of this build script
-        concat!("// SPD", "X-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>"),
-        concat!("// SPD", "X-License-Identifier: GPL-3.0-or-later"),
-        "",
-        "#![allow(non_upper_case_globals)]",
-        "#![allow(non_camel_case_types)]",
-        "#![allow(non_snake_case)]",
-        "#![allow(unused)]",
-    ];
-
     let bindings = bindgen::Builder::default()
         // prefix `cty` instead of `std` for `no_std`
         .disable_header_comment()
-        .raw_line(header.join("\n").as_str())
         .ctypes_prefix("cty")
         .use_core()
         .header("src/wrapper.h")
@@ -38,7 +27,7 @@ fn main() {
         .generate()
         .expect("Unable to generate bindings");
 
-    bindings.write_to_file("src/bindings.rs").expect("Couldn't write bindings!");
+    bindings.write_to_file(out_dir.join("bindings.rs")).expect("Couldn't write bindings!");
 
     // Compile SystemView
     cc::Build::new()

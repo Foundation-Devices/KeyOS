@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#[derive(Debug, thiserror::Error, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+use server::{AsScalar, FromScalar};
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub enum EmmcError {
     #[error("OS error: {:?}", xous::Error::from_usize(*.0))]
     XousError(usize),
@@ -49,4 +53,12 @@ impl From<EmmcError> for usize {
 
 impl From<crypto::error::CryptoError> for EmmcError {
     fn from(_value: crypto::error::CryptoError) -> Self { Self::InternalError }
+}
+
+impl AsScalar<1> for EmmcError {
+    fn as_scalar(&self) -> [u32; 1] { [usize::from(*self) as u32] }
+}
+
+impl FromScalar<1> for EmmcError {
+    fn from_scalar([v]: [u32; 1]) -> Self { Self::from(v as usize) }
 }

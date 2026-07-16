@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use fs::OpenFlags;
 use futures_lite::future::or;
@@ -30,6 +30,10 @@ pub(super) enum Error {
     Security(#[from] security::AccessDenied),
     #[error(transparent)]
     Ql(#[from] quantum_link::SendMessageError),
+    #[error("envoy reported failure: {0}")]
+    Envoy(String),
+    #[error("timed out waiting for Quantum Link to become ready")]
+    QuantumLinkReadyTimeout,
 }
 
 #[derive(Debug, Clone)]
@@ -39,39 +43,50 @@ enum Outcome {
     UploadError(whence::Error<Arc<Error>>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum PublishMode {
+    WaitForEnvoy,
+    TimeoutWaitingForEnvoy(Duration),
+}
+
 struct Context<'a> {
     worker: &'a WorkerHandle,
     ql_status: &'a QlStatus,
     backup_file: &'a BackupFile,
+    publish_mode: PublishMode,
 }
 
 pub(super) async fn publish_backup(
     worker: &WorkerHandle,
     ql_status: &QlStatus,
     backup_file: &BackupFile,
+    publish_mode: PublishMode,
 ) -> whence::Result<(), Arc<Error>> {
     log::info!("starting backup");
 
-    let cx = Context { worker, ql_status, backup_file };
+    let cx = Context { worker, ql_status, backup_file, publish_mode };
 
-    loop {
-        match try_publish_until_envoy_responds(&cx).await {
-            Outcome::Success => {
-                log::info!("magic backup confirmed by envoy");
-                return Ok(());
-            }
-            Outcome::EnvoyError(e) => {
-                log::warn!("backup failed on envoy: {e}, retrying...");
-            }
-            Outcome::UploadError(e) => {
-                log::warn!("backup publish failed: {e:?}");
-                return Err(e);
-            }
+    match try_publish_until_envoy_responds(&cx).await {
+        Outcome::Success => {
+            log::info!("magic backup confirmed by envoy");
+            Ok(())
+        }
+        Outcome::EnvoyError(e) => {
+            log::warn!("backup failed on envoy: {e}");
+            Err(whence::Error::from(Error::Envoy(e)).map(Arc::new))
+        }
+        Outcome::UploadError(e) => {
+            log::warn!("backup publish failed: {e:?}");
+            Err(e)
         }
     }
 }
 
 async fn try_publish_until_envoy_responds(cx: &Context<'_>) -> Outcome {
+    if let Err(e) = wait_for_ql_ready(cx).await {
+        return Outcome::UploadError(e.map(Arc::new));
+    }
+
     let upload = async {
         match publish_chunks(cx).await {
             Ok(()) => Outcome::Success,
@@ -98,11 +113,34 @@ async fn await_confirmation(worker: &WorkerHandle) -> CreateMagicBackupResult {
         .await
 }
 
-async fn publish_chunks(cx: &Context<'_>) -> whence::Result<(), Error> {
+async fn wait_for_ql_ready(cx: &Context<'_>) -> whence::Result<(), Error> {
     log::info!("waiting for ql connection");
-    cx.ql_status.ready().await;
-    log::info!("ql ready");
 
+    match cx.publish_mode {
+        PublishMode::WaitForEnvoy => {
+            cx.ql_status.ready().await;
+            log::info!("ql ready");
+            Ok(())
+        }
+        PublishMode::TimeoutWaitingForEnvoy(timeout) => {
+            match cx.worker.timeout(cx.ql_status.ready(), timeout).await {
+                Ok(()) => {
+                    log::info!("ql ready");
+                    Ok(())
+                }
+                Err(_) => {
+                    log::warn!(
+                        "timed out waiting for ql connection before backup publish after {}s",
+                        timeout.as_secs()
+                    );
+                    Err(Error::QuantumLinkReadyTimeout).whence()
+                }
+            }
+        }
+    }
+}
+
+async fn publish_chunks(cx: &Context<'_>) -> whence::Result<(), Error> {
     let seed_fingerprint =
         cx.worker.async_archive::<SecurityPermissions, _>(GetSeedFingerprint).await.whence()?;
 

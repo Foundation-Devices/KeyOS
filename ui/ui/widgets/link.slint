@@ -10,25 +10,15 @@ export component Link inherits Rectangle {
     background: Palette.transparent;
     height: Size.sz10;
 
-    function get-text-color(importance: Importance) -> brush {
-        if (!enabled) {
-            return Palette.content-disabled;
-        }
-        if (scaled-touch.pressed || force-pressed) {
-            return Palette.content-link-pressed;
-        }
-        return importance == Importance.normal ? Palette.content-primary : Palette.content-link;
-    }
-
     // Private properties
-    private property <brush> text-color: get-text-color(importance);
+    private property <brush> text-color: ColorHelpers.get-btn-content-color(importance, scaled-touch.pressed || force-pressed, enabled);
 
     // Public properties
     in property <string> id;
     in property <string> label;
     in property <bool> enabled: true;
     in property <bool> force-pressed: false;
-    in property <Importance> importance: Importance.primary;
+    in property <Importance> importance: Importance.tertiary;
     in property <float> touch-factor: 2.5;
 
     // Callbacks

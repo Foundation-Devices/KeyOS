@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     thread,
     time::Duration,
 };
@@ -20,6 +20,7 @@ const COPY1_FILE_NAME: &str = "big_copy1.bin";
 const COPY2_FILE_NAME: &str = "big_copy2.bin";
 const BUFFER_LEN: usize = 1024 * 1024;
 const BUFFER_COUNT: usize = 8;
+const RANDOM_READ_COUNT: usize = 1000;
 
 fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
@@ -78,13 +79,15 @@ fn main() {
         let elapsed = write_start.elapsed().as_secs_f32();
 
         log::info!(
-            "Write speed at {location:?}: {} MB/s",
+            "Write speed at {location:?}: {:.1} MB/s",
             (BUFFER_LEN * BUFFER_COUNT) as f32 / (1024.0 * 1024.0) / elapsed
         );
 
         // --- Measure reading ---
 
-        let mut read_data = vec![0; BUFFER_LEN];
+        let mut read_data_buf =
+            xous::map_memory(None, None, BUFFER_LEN, MemoryFlags::W | MemoryFlags::POPULATE).unwrap();
+        let read_data = read_data_buf.as_slice_mut();
         let read_start = std::time::Instant::now();
         {
             let mut file = fs
@@ -92,16 +95,15 @@ fn main() {
                 .unwrap();
 
             for _ in 0..BUFFER_COUNT {
-                file.read_exact(&mut read_data).unwrap();
+                file.read_exact(read_data).unwrap();
             }
         }
         let elapsed = read_start.elapsed().as_secs_f32();
 
         log::info!(
-            "Read speed at {location:?}: {} MB/s",
+            "Read speed at {location:?}: {:.1} MB/s",
             (BUFFER_LEN * BUFFER_COUNT) as f32 / (1024.0 * 1024.0) / elapsed
         );
-
         // --- Measure std copy ---
 
         let read_start = std::time::Instant::now();
@@ -118,7 +120,7 @@ fn main() {
         let elapsed = read_start.elapsed().as_secs_f32();
 
         log::info!(
-            "std::io::copy speed at {location:?}: {} MB/s",
+            "std::io::copy speed at {location:?}: {:.1} MB/s",
             (BUFFER_LEN * BUFFER_COUNT) as f32 / (1024.0 * 1024.0) / elapsed
         );
 
@@ -138,8 +140,33 @@ fn main() {
         let elapsed = read_start.elapsed().as_secs_f32();
 
         log::info!(
-            "copy_block speed at {location:?}: {} MB/s",
+            "copy_block speed at {location:?}: {:.1} MB/s",
             (BUFFER_LEN * BUFFER_COUNT) as f32 / (1024.0 * 1024.0) / elapsed
+        );
+
+        // --- Measure random seek+read ---
+
+        let file_len = (BUFFER_LEN * BUFFER_COUNT) as u64;
+        let mut chunk = [0u8; 256];
+        let mut rng: u32 = 0x2545_f491;
+        let seek_start = std::time::Instant::now();
+        {
+            let mut file = fs
+                .open_file(TEST_FILE_NAME, location, OpenFlags { read: true, write: false, create: false })
+                .unwrap();
+
+            for _ in 0..RANDOM_READ_COUNT {
+                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+                let offset = rng as u64 % (file_len - chunk.len() as u64);
+                file.seek(std::io::SeekFrom::Start(offset)).unwrap();
+                file.read_exact(&mut chunk).unwrap();
+            }
+        }
+        let elapsed = seek_start.elapsed().as_secs_f32();
+
+        log::info!(
+            "Random seek+read speed at {location:?}: {} ops/s",
+            (RANDOM_READ_COUNT as f32 / elapsed) as u32
         );
 
         // --- Check file contents ---
@@ -148,7 +175,7 @@ fn main() {
                 fs.open_file(name, location, OpenFlags { read: true, write: false, create: false }).unwrap();
 
             for iter in 0..BUFFER_COUNT {
-                file.read_exact(&mut read_data).unwrap();
+                file.read_exact(read_data).unwrap();
                 if data != read_data {
                     for (i, (d1, d2)) in data.iter().zip(read_data.iter()).enumerate() {
                         if d1 != d2 {

@@ -1,28 +1,37 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// SPDX-FileCopyrightText: 2026 immz https://github.com/immz4
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #[cfg(not(test))]
 use slint_keyos_platform::file_backed::JsonBacked;
 use {
     crate::gui_permissions::GuiPermissions,
+    auth::{
+        get_timestamp_in_seconds, make_import_label, Auth, AuthDuplicateReason, AuthEditField,
+        AuthValidationError, DATABASE_FILE,
+    },
     fuzzy_filter::FuzzyFilter,
-    gui_app_authenticator::{Auth, AuthDuplicateReason, AuthEditField, AuthValidationError, DATABASE_FILE},
+    google_migration::MigrationError,
     i18n::replace_placeholders,
     ordered_table::{CardSortMode, FilePersistence, OrderedTable, OrderedTableError, SortableCard},
     slint_keyos_platform::{
         app,
         gui_server_api::{
-            navigation::qrscanner::{ScanQrOptions, ScanQrResult},
-            GuiServerError,
+            navigation::qrscanner::{MatchedQrResult, ScanQrOptions, ScanQrResult},
+            GuiServerError, InputMessage,
         },
         navigation::open_qr_scanner,
         slint::{Model, ModelRc, SharedString, Timer, TimerMode, VecModel},
         StoredValue,
     },
-    std::{rc::Rc, time::Duration},
+    std::{collections::HashSet, rc::Rc, time::Duration},
 };
 
 use crate::fs_permissions::FileSystemPermissions;
+mod auth;
+pub mod google_migration;
 
 const UPDATE_INTERVAL_MS: u64 = 1000;
 const TOTP_TIMESTEP: i32 = 30;
@@ -53,6 +62,10 @@ pub enum AuthError {
     MovePositionError(usize, usize),
     #[error("Code {0:?} is already archived")]
     RedundantArchivalError(usize),
+    #[error("Migration parse error: {0}")]
+    MigrationParseError(String),
+    #[error("No pending imports")]
+    NoPendingImportsError,
 }
 
 impl From<OrderedTableError<Auth>> for AuthError {
@@ -65,6 +78,10 @@ impl From<AuthValidationError> for AuthError {
 
 impl From<AuthDuplicateReason> for AuthError {
     fn from(value: AuthDuplicateReason) -> Self { AuthError::DuplicateError(value) }
+}
+
+impl From<MigrationError> for AuthError {
+    fn from(value: MigrationError) -> Self { AuthError::MigrationParseError(value.to_string()) }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -80,6 +97,7 @@ struct AppState {
     auth_table: OrderedTable<Auth, FilePersistence<FileSystemPermissions>>,
     search_text: String,
     new_code: Option<Auth>,
+    pending_imports: Option<Vec<Auth>>,
     archive_mode: bool,
     model: Rc<VecModel<AuthView>>,
     #[cfg(not(test))]
@@ -105,19 +123,6 @@ impl AuthView {
         self.index = index;
         self
     }
-}
-
-fn get_timestamp_in_seconds() -> u64 {
-    #[cfg(not(test))]
-    return std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_else(|e| {
-            log::error!("Could not get time: {:?}", e);
-            Duration::ZERO
-        })
-        .as_secs();
-    #[cfg(test)]
-    return 0;
 }
 
 impl AppState {
@@ -406,6 +411,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             .expect("failed to create authenticator database"),
         search_text: String::new(),
         new_code: None,
+        pending_imports: None,
         archive_mode: false,
         model: Rc::new(VecModel::default()),
         #[cfg(not(test))]
@@ -447,34 +453,18 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let ui = ui.clone_strong();
         move |caller| {
             let mut app_state = app_state.borrow_mut();
-            let ui_nav = ui.global::<Navigate>();
             let from_edit = caller == ScanQrCaller::Edit;
 
             let url = match scan_qr_request() {
                 Ok(u) => u,
                 Err(e) => {
+                    let ui_nav = ui.global::<Navigate>();
                     CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
                     return;
                 }
             };
 
-            match adapt_scan_qr(url, &mut app_state) {
-                Ok((auth, label_validation)) => {
-                    ui_nav.invoke_edit(
-                        EditParams {
-                            auth,
-                            label_validation,
-                            result: CallbackResult::success(),
-                            version: EditPageVersion::Add,
-                        },
-                        NavigateOptions { replace: from_edit, animate: Animate::None },
-                    );
-                }
-                Err(e) => {
-                    CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
-                    return;
-                }
-            }
+            app_state.handle_scanned_url(url, from_edit, &ui);
         }
     });
 
@@ -485,6 +475,32 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             let ui_state = ui.global::<AuthenticatorCallbacks>();
             app_state.search_text = text.to_string().to_lowercase();
             ui_state.set_entries(app_state.get_auth_entries());
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_import_multiple({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
+
+            if let Err(e) = adapt_import_multiple(&mut app_state) {
+                log::warn!("Import multiple failed: {}", e);
+            }
+
+            ui_state.set_entries(app_state.get_auth_entries());
+            app_state.pending_imports = None;
+            ui_state.set_pending_import_count(0);
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_cancel_import_multiple({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
+            app_state.pending_imports = None;
+            ui_state.set_pending_import_count(0);
         }
     });
 
@@ -665,7 +681,90 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
+    cx.set_input_handler({
+        let gui_api = cx.gui.clone();
+        let ui = ui.clone_strong();
+        move |input| {
+            if input.msg != InputMessage::NavigationFocused {
+                return;
+            }
+            let Ok(Some(nav_bytes)) = gui_api.navigate_pending() else {
+                log::error!("Navigation focused but no pending nav request");
+                return;
+            };
+            let Some(MatchedQrResult { scan_result, matched_rules }) =
+                MatchedQrResult::from_slice(&nav_bytes)
+            else {
+                return;
+            };
+            let ScanQrResult::Qr { data, .. } = scan_result else {
+                log::warn!(
+                    "Unexpected scan result type for universal QR: matched_rules={:?}",
+                    matched_rules.iter().map(|r| r.rule_id.as_str()).collect::<Vec<_>>()
+                );
+                return;
+            };
+            let url = match std::str::from_utf8(data.as_slice()) {
+                Ok(s) => String::from(s),
+                Err(e) => {
+                    log::error!("Failed to decode universal QR data: {}", e);
+                    return;
+                }
+            };
+            ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
+
+            let mut app_state = app_state.borrow_mut();
+            app_state.search_text = String::new();
+            app_state.new_code = None;
+            app_state.pending_imports = None;
+            app_state.handle_scanned_url(url, false, &ui);
+        }
+    });
+
     ui.run().expect("UI running");
+}
+
+impl AppState {
+    fn handle_scanned_url(&mut self, url: String, from_edit: bool, ui: &AppWindow) {
+        let ui_nav = ui.global::<Navigate>();
+        let ui_callbacks = ui.global::<AuthenticatorCallbacks>();
+
+        if google_migration::is_migration_uri(&url) {
+            match google_migration::parse_migration_uri(&url) {
+                Ok(entries) => {
+                    let count = entries.len();
+                    self.pending_imports = Some(entries);
+                    ui_callbacks.set_pending_import_count(count as i32);
+                    ui_nav.invoke_main(
+                        MainParams { version: CardPageVersion::Main },
+                        NavigateOptions { replace: true, animate: Animate::None },
+                    );
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse migration URI: {}", e);
+                    CallbackResult::from(AuthError::from(e)).navigate_from_scan_qr(from_edit, ui_nav);
+                }
+            }
+            return;
+        }
+
+        match adapt_scan_qr(url, self) {
+            Ok((auth, label_validation)) => {
+                ui_nav.invoke_edit(
+                    EditParams {
+                        auth,
+                        label_validation,
+                        result: CallbackResult::success(),
+                        version: EditPageVersion::Add,
+                    },
+                    NavigateOptions { replace: from_edit, animate: Animate::None },
+                );
+            }
+            Err(e) => {
+                CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
+            }
+        }
+    }
 }
 
 // TODO: unit test these functions?
@@ -750,6 +849,44 @@ fn adapt_move_position(index: i32, up: bool, app_state: &mut AppState) -> Result
     Ok(())
 }
 
+fn pick_next_import_label(label: &str, occupied_labels: &HashSet<String>) -> String {
+    if !occupied_labels.contains(label) {
+        return label.to_string();
+    }
+
+    let mut count = 0usize;
+    loop {
+        let import_label = make_import_label(label, count);
+        if !occupied_labels.contains(&import_label) {
+            return import_label;
+        }
+        count += 1;
+    }
+}
+
+fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
+    let entries = app_state.pending_imports.take().ok_or(AuthError::NoPendingImportsError)?;
+    let mut occupied_labels: HashSet<String> =
+        app_state.auth_table.iter().map(|auth| auth.get_label().to_string()).collect();
+
+    for entry in entries {
+        let label = pick_next_import_label(entry.get_label(), &occupied_labels);
+
+        let mut import_auth = entry;
+        import_auth.edit(AuthEditField::Label(label.clone()))?;
+        import_auth.color = 0;
+
+        app_state.auth_table.separate_categories(|a| a.get_category());
+        if let Err(e) = app_state.auth_table.push_categorized(|a| a.get_category(), import_auth) {
+            log::warn!("Failed to import entry: {:?}", e);
+        } else {
+            occupied_labels.insert(label);
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_qr_request() -> Result<String, AuthError> {
     log::debug!("Scanning a TOTP QR code");
     let opt = open_qr_scanner::<GuiPermissions>(ScanQrOptions::default())
@@ -757,7 +894,7 @@ fn scan_qr_request() -> Result<String, AuthError> {
     let nav_res = opt.ok_or(AuthError::ScanQrFailedError)?;
 
     let data = match nav_res {
-        ScanQrResult::Qr(d) => d,
+        ScanQrResult::Qr { data, .. } => data,
         ScanQrResult::LeftClicked => return Err(AuthError::ScanQrCanceledError),
         _ => return Err(AuthError::UnknownQrResultError),
     };
@@ -791,12 +928,14 @@ mod tests {
     const URL4: &str = "otpauth://totp/C:alice@google.com?secret=CBSWY3DPEHPK3PXP&issuer=C";
     const URL5: &str = "otpauth://totp/B:alice@google.com?secret=DBSWY3DPEHPK3PXP&issuer=B";
     const URL_INVALID: &str = "otpauth://totp/A:alice@google.com?secret=ABSWY3DPEHPK3PXP&issuer=B";
+    const URL6: &str = "otpauth://totp/Example:alice@google.com?secret=EBSWY3DPEHPK3PXP&issuer=Example";
 
     fn app_state0() -> AppState {
         AppState {
             auth_table: OrderedTable::new(),
             search_text: String::new(),
             new_code: None,
+            pending_imports: None,
             archive_mode: false,
             model: Rc::new(VecModel::default()),
             sort_mode: CardSortMode::Label,
@@ -820,6 +959,34 @@ mod tests {
         let auth = Auth::new(String::from(URL5), 0).unwrap();
         app_state.auth_table.push(auth).unwrap();
         app_state
+    }
+
+    #[test]
+    fn test_adapt_import_multiple_with_internal_duplicate_labels() {
+        let mut app_state = app_state0();
+        let auth1 = Auth::new(String::from(URL1), 0).unwrap();
+        let auth2 = Auth::new(String::from(URL2), 0).unwrap();
+        app_state.pending_imports = Some(vec![auth1, auth2]);
+
+        adapt_import_multiple(&mut app_state).unwrap();
+
+        assert_eq!(app_state.auth_table.len(), 2);
+        assert_eq!(app_state.auth_table.get(0).unwrap().get_label(), "Example");
+        assert_eq!(app_state.auth_table.get(1).unwrap().get_label(), "[Import] Example");
+    }
+
+    #[test]
+    fn test_adapt_import_multiple_with_repeated_imports() {
+        let mut app_state = app_state1();
+        app_state.pending_imports = Some(vec![Auth::new(String::from(URL2), 0).unwrap()]);
+        adapt_import_multiple(&mut app_state).unwrap();
+        assert_eq!(app_state.auth_table.get(1).unwrap().get_label(), "[Import] Example");
+
+        app_state.pending_imports = Some(vec![Auth::new(String::from(URL6), 0).unwrap()]);
+        adapt_import_multiple(&mut app_state).unwrap();
+
+        assert_eq!(app_state.auth_table.len(), 3);
+        assert_eq!(app_state.auth_table.get(2).unwrap().get_label(), "[Import 1] Example");
     }
 
     #[test]

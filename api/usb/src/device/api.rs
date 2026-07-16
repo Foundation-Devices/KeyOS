@@ -29,7 +29,7 @@ pub struct UsbDeviceEmulation<P: CheckedPermissions>(CheckedConn<P>);
 impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
     pub fn register_setup_responder<S>(&mut self, setup_responder: S) -> Result<(), UsbError>
     where
-        S: server::Server + server::ArchiveHandler<SetupPacketCallback> + Send + 'static,
+        S: server::Server + server::BlockingArchiveHandler<SetupPacketCallback> + Send + 'static,
         P: MessageAllowed<RegisterSetupResponder>,
     {
         let pid = self.0.get_remote_pid();
@@ -52,7 +52,7 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
     where
         P: MessageAllowed<RegisterInterface>,
     {
-        let endpoint_numbers = self.0.send_archive(RegisterInterface {
+        let endpoint_numbers = self.0.send_blocking_archive(RegisterInterface {
             if_class,
             if_subclass,
             if_protocol,
@@ -77,7 +77,7 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
     where
         P: MessageAllowed<RegisterCapability>,
     {
-        self.0.send_archive(RegisterCapability {
+        self.0.send_blocking_archive(RegisterCapability {
             cap_type,
             cap_subtype,
             cap_uuid: cap_uuid.to_bytes_le().to_vec(),
@@ -91,14 +91,6 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
         P: MessageAllowed<WaitForConnection>,
     {
         self.0.try_send_blocking_scalar(WaitForConnection)?;
-        Ok(())
-    }
-
-    pub fn set_enabled(&self, enabled: bool) -> Result<(), UsbError>
-    where
-        P: MessageAllowed<SetDeviceEmulationEnabled>,
-    {
-        self.0.try_send_scalar(SetDeviceEmulationEnabled(enabled))?;
         Ok(())
     }
 
@@ -172,13 +164,31 @@ impl<P: CheckedPermissions> UsbEmulatedEndpoint<P> {
         self.connection.lend_mut(ReadEndpoint { buf, endpoint: self.endpoint_number, length })
     }
 
-    /// Transmit data to the host (IN transaction and endpoint)
-    /// Returns the actual number of bytes sent
-    pub fn write_buf(&mut self, buf: xous::MemoryRange, length: u16) -> Result<usize, UsbError>
+    /// Transmit data to the host (IN transaction and endpoint).
+    ///
+    /// The USB server handles DMA chunking internally for transfers larger
+    /// than one DMA descriptor (64 KB).
+    ///
+    /// **`buf` must be backed by physically contiguous pages** (allocate with
+    /// `MemoryFlags::POPULATE`). The DMA controller reads from a single
+    /// physical start address; non-contiguous pages cause data corruption.
+    pub fn write_buf(&mut self, buf: xous::MemoryRange, length: usize) -> Result<usize, UsbError>
     where
         P: MessageAllowed<WriteEndpoint>,
     {
-        self.connection.lend_mut(WriteEndpoint { buf, endpoint: self.endpoint_number, length })
+        self.connection.lend_mut(WriteEndpoint { buf, endpoint: self.endpoint_number, length, zlp: false })
+    }
+
+    /// Like [`write_buf`](Self::write_buf) but sends a ZLP after the transfer
+    /// if the total length is an exact multiple of `max_packet_len`, so the
+    /// host sees a proper USB transfer boundary.
+    ///
+    /// See [`write_buf`](Self::write_buf) for the physical contiguity requirement.
+    pub fn write_buf_zlp(&mut self, buf: xous::MemoryRange, length: usize) -> Result<usize, UsbError>
+    where
+        P: MessageAllowed<WriteEndpoint>,
+    {
+        self.connection.lend_mut(WriteEndpoint { buf, endpoint: self.endpoint_number, length, zlp: true })
     }
 
     /// Set or unset the stalled (a.k.a. halted) state on the endpoint

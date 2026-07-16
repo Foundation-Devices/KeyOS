@@ -75,9 +75,13 @@ pub fn launch_app(app_id: &AppId, elf_path: &str) -> Result<PID, LaunchError> {
     elf_file.read_exact(&mut elf_bytes.as_slice_mut()[..size]).map_err(|_| LaunchError::InternalError)?;
 
     // Verify the app integrity
-    fw_utils::hash::verify_cosign2_mem(&CryptoApi::default(), &elf_bytes, size, cfg!(feature = "production"))
-        .inspect_err(|e| log::error!("failed to verify app integrity {e:?}"))
-        .map_err(|e| hash_error_to_launch_error(e))?;
+    fw_utils::hash::verify_cosign2_mem(
+        &CryptoApi::default(),
+        &elf_bytes.as_slice::<u8>()[..size],
+        cfg!(feature = "production"),
+    )
+    .inspect_err(|e| log::error!("failed to verify app integrity {e:?}"))
+    .map_err(|e| hash_error_to_launch_error(e))?;
 
     // Skip over the cosign2 header so that the memory begins with the ELF data
     elf_bytes.as_slice_mut::<u8>().copy_within(cosign2::Header::DEFAULT_SIZE.., 0);
@@ -138,7 +142,7 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<(Option<String>, Manifest)>, Laun
                     .is_ok()
                 {
                     log::debug!("Deserializing manifest");
-                    if let Ok(manifest) = Manifest::try_from_bytes(&manifest_bytes)
+                    if let Ok(manifest) = app_manifest::try_from_bytes(&manifest_bytes)
                         .map_err(|e| log::error!("Error parsing the app manifest: {:?}", e))
                     {
                         if let Err(e) = names.add_manifest(&manifest_bytes) {
@@ -160,23 +164,14 @@ pub fn list_apps(apps_dir: &str) -> Result<Vec<(Option<String>, Manifest)>, Laun
 #[cfg(not(keyos))]
 pub fn list_apps(_apps_dir: &str) -> Result<Vec<(Option<std::path::PathBuf>, Manifest)>, LaunchError> {
     let mut apps = vec![];
-
-    // Current dir is the kernel dir, traverse two levels up and into ./target/ to find the apps dir
-    let path = std::env::current_dir()?.parent().unwrap().parent().unwrap().join("target").join("apps");
-    log::trace!("Apps dir: {}", path.display());
-
-    for path in std::fs::read_dir(path)? {
-        let entry = path?;
-        if entry.metadata()?.is_dir() {
-            let elf_file = entry.path().join("app.elf");
-            if !elf_file.exists() {
-                log::error!("App directory {} does not contain an app.elf file", entry.path().display());
-                continue;
+    for manifest_json in system_manifests::SYSTEM_MANIFESTS {
+        match app_manifest::try_from_bytes(manifest_json.as_bytes()) {
+            Ok(manifest) => {
+                apps.push((None, manifest));
             }
-
-            let file = std::fs::read(entry.path().join("manifest.json"))?;
-            let manifest = serde_json::from_slice(&file)?;
-            apps.push((Some(elf_file), manifest));
+            Err(e) => {
+                log::error!("Failed to parse hosted SYSTEM_MANIFEST entry: {:?}", e);
+            }
         }
     }
 

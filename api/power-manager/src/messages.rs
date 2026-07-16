@@ -22,7 +22,10 @@ impl TryFrom<u8> for PeripheralId {
     fn try_from(_value: u8) -> Result<Self, Self::Error> { Err(()) }
 }
 
-/// Reboots the device.
+#[derive(Debug, server::Message)]
+#[response(())]
+pub struct Shutdown;
+
 #[derive(Debug, server::Message)]
 #[response(())]
 pub struct Reboot;
@@ -158,6 +161,5 @@ pub struct ClearChargeFault;
 #[event(Status)]
 pub struct StatusSubscribe;
 
-#[cfg(not(keyos))]
 #[derive(Debug, server::Message)]
 pub struct SetBatteryPercent(pub(crate) u8);

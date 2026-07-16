@@ -174,7 +174,7 @@ macro_rules! message_api_archive {
                 where
                     P: server::MessageAllowed<[<Get $ty>]>,
                 {
-                    self.conn.send_archive([<Get $ty>]::default())
+                    self.conn.send_blocking_archive([<Get $ty>]::default())
                 }
 
                 #[doc = "Sets the value of the [`settings::global::" $ty "`] setting"]
@@ -182,7 +182,7 @@ macro_rules! message_api_archive {
                 where
                     P: server::MessageAllowed<[<Set $ty>]>,
                 {
-                    self.conn.send_move([<Set $ty>](value.into()))
+                    self.conn.send_archive([<Set $ty>](value.into()))
                 }
             }
         }

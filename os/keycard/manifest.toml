@@ -1,20 +1,9 @@
+manifestVersion = "0"
 appId = "0xe3b0c44298fc1c149afbf4c8996fb924"
+extends = "../../api/keycard"
 
 [appName]
 en = "Keycard Server"
-
-[servers."os/keycard"]
-ResetShards = { id = 0, type = "blockingScalar" }
-GenerateShards = { id = 1, type = "blockingScalar" }
-PopShard = { id = 2, type = "archive" }
-PushShard = { id = 3, type = "archive" }
-FormatKeycard = { id = 4, type = "archive" }
-IdentifyKeycard = { id = 5, type = "archive" }
-StoreShardToKeycard = { id = 6, type = "archive" }
-LoadShardFromKeycard = { id = 7, type = "archive" }
-CheckBackup = { id = 8, type = "blockingScalar" }
-RestoreMasterSeed = { id = 9, type = "archive" }
-DetectKeycard = { id = 10, type = "archive" }
 
 [permissions]
 template = ["crypto-sha"]

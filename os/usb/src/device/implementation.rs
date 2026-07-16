@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use atsama5d27::{
     pmc::PeripheralId,
@@ -9,10 +9,9 @@ use atsama5d27::{
         DmaControl, EndpointConfiguration, EndpointControl, EndpointDirection, EndpointStatus, UsbDevice,
     },
 };
-use gpio::{messages::IrqMessage, GpioPin, PinSettings};
 use server::{
-    send_archive, ArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler, BlockingScalarRequest,
-    DeferredLendMut, DeferredLendMutHandler, ScalarEventHandler, ScalarHandler,
+    send_blocking_archive, BlockingArchiveHandler, BlockingScalarAsyncHandler, BlockingScalarHandler,
+    BlockingScalarRequest, DeferredLendMut, DeferredLendMutHandler, MoveHandler, ScalarHandler,
 };
 use usb::{
     device::{messages::*, SetupPacket, BLD_DEV_VERSION, MAJ_DEV_VERSION, MIN_DEV_VERSION},
@@ -22,14 +21,13 @@ use utralib::{HW_UDPHS_BASE, HW_UDPHS_RAM_MEM, HW_UDPHS_RAM_MEM_LEN};
 use xous::arch::irq::IrqNumber;
 
 use super::messages::*;
-
-gpio::use_api!();
-power_manager::use_api!();
+use crate::{PowerManagerApi, PowerManagerExtApi};
 
 #[derive(server::Server)]
 #[name = "os/usbdev"]
 pub struct UsbDeviceServer {
     power_manager: PowerManagerApi,
+    power_manager_ext: PowerManagerExtApi,
     hw: UsbDevice,
     pending_address: Option<u8>,
     otg_device_connected: bool,
@@ -68,12 +66,28 @@ struct InterruptContext {
     hw: UsbDevice,
 }
 
-struct RuntimeEndpointData {
-    properties: EndpointProperties,
-    ongoing_read: Option<DeferredLendMut<ReadEndpoint>>,
-    ongoing_write: Option<DeferredLendMut<WriteEndpoint>>,
+/// State for a multi-chunk DMA or FIFO write in progress.
+struct OngoingWrite {
+    msg: DeferredLendMut<WriteEndpoint>,
+    /// Bytes sent so far (multi-chunk DMA writes).
+    offset: u32,
+    /// Total bytes to send.
+    total: u32,
+    /// Send a ZLP after max_packet_len-aligned transfers.
+    zlp: bool,
+    /// Waiting for the FIFO-mode ZLP to complete via TxCompleteInterrupt.
+    pending_zlp: bool,
 }
 
+struct RuntimeEndpointData {
+    properties: EndpointProperties,
+    use_dma: bool,
+    ongoing_read: Option<DeferredLendMut<ReadEndpoint>>,
+    ongoing_write: Option<OngoingWrite>,
+    pending_rx: VecDeque<Vec<u8>>,
+}
+
+const MAX_PENDING_RX_PACKETS: usize = 8;
 const EPT0_MAX_PACKET_SIZE: usize = 0x40;
 
 const MANUFACTURER: &str = "Foundation Devices, Inc.";
@@ -103,7 +117,7 @@ const GET_DESCRIPTOR: u8 = 6;
 const SET_CONFIGURATION: u8 = 9;
 
 impl server::Server for UsbDeviceServer {
-    fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
+    fn on_start(&mut self, _context: &mut server::ServerContext<Self>) {
         log::debug!("Claiming UDPHS IRQ");
         let int_ctx = Box::into_raw(Box::new(InterruptContext {
             conn: server::CheckedConn::default(),
@@ -111,25 +125,6 @@ impl server::Server for UsbDeviceServer {
         }));
         xous::claim_interrupt(IrqNumber::Udphs, udphs_irq_handler, int_ctx as *mut usize)
             .expect("Could not claim UHPHS interrupt");
-
-        let gpio_api = GpioApi::default();
-        gpio_api
-            .claim_pin(GpioPin::UsbOtgId, PinSettings::InterruptBoth, false)
-            .expect("Could not claim pin");
-
-        log::debug!("Enabling OTG_ID IRQ");
-        gpio_api.enable_irq(GpioPin::UsbOtgId, context).expect("Could not subscribe to gpio interrupt");
-
-        gpio_api
-            .claim_pin(GpioPin::UsbVbusIrq, PinSettings::InterruptBoth, false)
-            .expect("Could not claim pin");
-
-        log::debug!("Enabling VBUS IRQ");
-        gpio_api.enable_irq(GpioPin::UsbVbusIrq, context).expect("Could not subscribe to gpio interrupt");
-
-        self.vbus_has_power = gpio_api.get_pin(GpioPin::UsbVbusIrq).expect("Could not get VBUS pin status");
-        self.handle_otg_pin_state(gpio_api.get_pin(GpioPin::UsbOtgId).expect("Could not get OTG pin status"));
-        self.update_hw_enabled_state();
     }
 }
 
@@ -169,6 +164,7 @@ impl UsbDeviceServer {
 
         Self {
             power_manager,
+            power_manager_ext: Default::default(),
             hw,
             pending_address: None,
             otg_device_connected: false,
@@ -210,18 +206,6 @@ impl UsbDeviceServer {
         }
     }
 
-    fn handle_otg_pin_state(&mut self, pin_state: bool) {
-        if pin_state {
-            log::debug!("OTG slave device disconnected, disabling power");
-            self.power_manager.set_usb_boost(false).ok();
-            self.otg_device_connected = false;
-        } else {
-            log::debug!("OTG slave device connected, enabling power to it");
-            self.power_manager.set_usb_boost(true).ok();
-            self.otg_device_connected = true;
-        }
-    }
-
     fn configure(&mut self) {
         for (ept_num, ept_data) in &mut self.endpoints {
             log::debug!("Setting up EP{ept_num} as {:?}", ept_data.properties);
@@ -232,16 +216,39 @@ impl UsbDeviceServer {
             config.set_ept_size(ept_data.properties.max_packet_len.ilog2().saturating_sub(3));
             config.set_ept_type(ept_data.properties.ep_type);
             config.set_ept_dir(ept_data.properties.ep_direction);
+            // FIFO endpoints use 1 bank to conserve peripheral memory.
             // See SAMA5D2 Datasheet Table 41-4: EPT_1 and EPT2 can have 3 banks.
-            config.set_bank_number(if *ept_num == 1 || *ept_num == 2 { 3 } else { 2 });
+            config.set_bank_number(if !ept_data.use_dma {
+                1
+            } else if *ept_num == 1 || *ept_num == 2 {
+                3
+            } else {
+                2
+            });
             ep.cfg.set(config);
             assert!(ep.cfg.get().mapped());
 
             let mut control = EndpointControl(0);
             control.set_enable(true);
-            control.set_auto_valid(true);
-            ep.ctl_enable.set(control);
-            self.hw.enable_dma_interrupt(*ept_num as usize);
+            if ept_data.use_dma {
+                assert!((1..=7).contains(ept_num), "DMA only supported on EP1-7");
+                control.set_auto_valid(true);
+                // Enable TxComplete interrupt for ZLP support on DMA IN endpoints.
+                // The handler ignores it unless pending_zlp is set.
+                if ept_data.properties.ep_direction == EndpointDirection::In {
+                    control.set_transmission_complete_interrupt(true);
+                }
+                ep.ctl_enable.set(control);
+                self.hw.enable_dma_interrupt(*ept_num as usize);
+                if ept_data.properties.ep_direction == EndpointDirection::In {
+                    self.hw.enable_endpoint_interrupt(*ept_num as usize);
+                }
+            } else {
+                control.set_received_out_interrupt(true);
+                control.set_transmission_complete_interrupt(true);
+                ep.ctl_enable.set(control);
+                self.hw.enable_endpoint_interrupt(*ept_num as usize);
+            }
         }
         self.is_configured = true;
 
@@ -251,17 +258,39 @@ impl UsbDeviceServer {
     }
 
     fn start_dma(&mut self, endpoint_number: u8, buf: *const u8, length: u16) {
+        // END_TR_EN is for OUT (read) transfers only (SAMA5D2 datasheet §41.6.10).
+        // It lets the device end the DMA on a short packet. For IN (write) it has no effect.
+        let is_out = self.endpoints[&endpoint_number].properties.ep_direction == EndpointDirection::Out;
         let mut control = DmaControl(0);
         control.set_enable(true);
-        control.set_end_of_transfer_enable(true);
+        control.set_end_of_transfer_enable(is_out);
         control.set_end_of_buffer_enable(true);
-        control.set_end_of_transfer_interrupt(true);
+        control.set_end_of_transfer_interrupt(is_out);
         control.set_end_of_buffer_interrupt(true);
         control.set_burst_lock(true);
         control.set_length(length);
         let dma = self.hw.dma(endpoint_number as usize);
         dma.address.set(xous::virt_to_phys(buf as usize).unwrap() as u32);
         dma.control.set(control);
+    }
+
+    /// Max DMA chunk size for an endpoint: largest `max_packet_len`-aligned
+    /// value that fits in the 16-bit DMA length register.
+    fn max_dma_chunk(max_packet_len: u16) -> u32 {
+        (u16::MAX as u32 / max_packet_len as u32) * max_packet_len as u32
+    }
+
+    /// Start the next DMA chunk for a multi-chunk write on `endpoint_number`.
+    /// Returns the chunk length that was started.
+    fn start_next_dma_chunk(&mut self, endpoint_number: u8) {
+        let ep = &self.endpoints[&endpoint_number];
+        let wr = ep.ongoing_write.as_ref().unwrap();
+        let remaining = wr.total - wr.offset;
+        let max_chunk = Self::max_dma_chunk(ep.properties.max_packet_len);
+        let chunk_len = remaining.min(max_chunk);
+        let buf_ptr = unsafe { wr.msg.body().buf.as_ptr().add(wr.offset as usize) };
+        self.start_dma(endpoint_number, buf_ptr, chunk_len as u16);
+        self.endpoints.get_mut(&endpoint_number).unwrap().ongoing_write.as_mut().unwrap().offset += chunk_len;
     }
 
     fn to_string_descriptor(s: &str) -> Vec<u8> {
@@ -278,8 +307,9 @@ impl UsbDeviceServer {
                 read.set_response(Err(UsbError::HostDisconnected));
             }
             if let Some(mut write) = ep.ongoing_write.take() {
-                write.set_response(Err(UsbError::HostDisconnected));
+                write.msg.set_response(Err(UsbError::HostDisconnected));
             }
+            ep.pending_rx.clear();
         }
     }
 
@@ -338,7 +368,11 @@ impl UsbDeviceServer {
         descriptors.extend_from_slice(&msg.interface_functional_descriptors);
         let mut result = Vec::new();
         for properties in msg.endpoints {
-            let ep_number = (self.endpoints.len() + 1) as u8;
+            let ep_number = if properties.use_dma {
+                (1..=7u8).find(|n| !self.endpoints.contains_key(n)).expect("no free DMA endpoint (EP1-7)")
+            } else {
+                (8..=15u8).find(|n| !self.endpoints.contains_key(n)).expect("no free FIFO endpoint (EP8-15)")
+            };
             descriptors.extend_from_slice(&[
                 // Endpoint Descriptor
                 0x07, // bLength
@@ -349,9 +383,16 @@ impl UsbDeviceServer {
                 (properties.max_packet_len >> 8) as u8,
                 properties.interval, // bInterval
             ]);
+            let use_dma = properties.use_dma;
             self.endpoints.insert(
                 ep_number,
-                RuntimeEndpointData { properties, ongoing_read: None, ongoing_write: None },
+                RuntimeEndpointData {
+                    properties,
+                    use_dma,
+                    ongoing_read: None,
+                    ongoing_write: None,
+                    pending_rx: VecDeque::new(),
+                },
             );
             result.push(ep_number);
         }
@@ -388,6 +429,16 @@ impl UsbDeviceServer {
         self.capabilities.push(RegisteredCapability { descriptors });
     }
 
+    fn handle_ep0_tx_complete(&mut self) {
+        if let Some(addr) = self.pending_address.take() {
+            log::debug!("Set address: {}", addr);
+            self.hw.set_address(addr);
+        }
+        if !self.remaining_setup_tx_data.is_empty() || self.end_setup_tx_with_short_packet {
+            self.send_remaining_setup_tx();
+        }
+    }
+
     fn send_remaining_setup_tx(&mut self) {
         let mut bytes = core::mem::take(&mut self.remaining_setup_tx_data);
         if bytes.len() >= EPT0_MAX_PACKET_SIZE {
@@ -403,7 +454,7 @@ impl UsbDeviceServer {
     }
 }
 
-impl ArchiveHandler<RegisterInterface> for UsbDeviceServer {
+impl BlockingArchiveHandler<RegisterInterface> for UsbDeviceServer {
     fn handle(
         &mut self,
         msg: RegisterInterface,
@@ -420,7 +471,7 @@ impl ArchiveHandler<RegisterInterface> for UsbDeviceServer {
     }
 }
 
-impl ArchiveHandler<RegisterCapability> for UsbDeviceServer {
+impl BlockingArchiveHandler<RegisterCapability> for UsbDeviceServer {
     fn handle(
         &mut self,
         msg: RegisterCapability,
@@ -503,8 +554,22 @@ impl DeferredLendMutHandler<ReadEndpoint> for UsbDeviceServer {
             return;
         }
         log::trace!("Reading {} bytes on EP{}", msg.body().length, msg.body().endpoint);
-        xous::flush_cache(msg.body().buf, xous::CacheOperation::Invalidate).ok();
-        self.start_dma(endpoint_number, msg.body().buf.as_ptr(), msg.body().length);
+        let use_dma = endpoint.use_dma;
+        if use_dma {
+            xous::flush_cache(msg.body().buf, xous::CacheOperation::Invalidate).ok();
+            self.start_dma(endpoint_number, msg.body().buf.as_ptr(), msg.body().length);
+        } else {
+            // For FIFO mode, check if data is already buffered
+            let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
+            if let Some(data) = ep.pending_rx.pop_front() {
+                let requested = msg.body().length as usize;
+                let len = data.len().min(requested);
+                let dst = msg.body_mut().buf.as_slice_mut::<u8>();
+                dst[..len].copy_from_slice(&data[..len]);
+                msg.set_response(Ok(len));
+                return;
+            }
+        }
         self.endpoints.get_mut(&endpoint_number).unwrap().ongoing_read = Some(msg);
     }
 
@@ -534,10 +599,31 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
             msg.set_response(Err(UsbError::WrongDirection));
             return;
         }
-        log::trace!("Writing {} bytes on EP{}", msg.body().length, msg.body().endpoint);
-        xous::flush_cache(msg.body().buf, xous::CacheOperation::Clean).ok();
-        self.start_dma(endpoint_number, msg.body().buf.as_ptr(), msg.body().length);
-        self.endpoints.get_mut(&endpoint_number).unwrap().ongoing_write = Some(msg);
+        let total = msg.body().length as u32;
+        let zlp = msg.body().zlp;
+        log::trace!("Writing {total} bytes on EP{endpoint_number}");
+        let use_dma = endpoint.use_dma;
+        if use_dma {
+            xous::flush_cache(msg.body().buf, xous::CacheOperation::Clean).ok();
+            let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
+            ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp, pending_zlp: false });
+            // Start first (or only) DMA chunk.
+            self.start_next_dma_chunk(endpoint_number);
+        } else {
+            // FIFO write: copy data to endpoint memory, set tx_packet_ready
+            let len = total as usize;
+            if len > endpoint.properties.max_packet_len as usize {
+                msg.set_response(Err(UsbError::DataTooLarge));
+                return;
+            }
+            let buf = msg.body().buf.as_slice::<u8>();
+            self.hw.write_endpoint_memory(endpoint_number as usize, 0, &buf[..len]);
+            let mut status = EndpointStatus(0x0);
+            status.set_tx_packet_ready(true);
+            self.hw.endpoint(endpoint_number as usize).status_set.set(status);
+            let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
+            ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp: false, pending_zlp: false });
+        }
     }
 
     fn default_response() -> <WriteEndpoint as server::LendMut>::Response { Err(UsbError::HostDisconnected) }
@@ -682,10 +768,9 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
                 }
                 Some(Vec::new())
             }
-            _ => self
-                .setup_responders
-                .iter()
-                .find_map(|setup_responder| send_archive(*setup_responder, SetupPacketCallback(msg.clone()))),
+            _ => self.setup_responders.iter().find_map(|setup_responder| {
+                send_blocking_archive(*setup_responder, SetupPacketCallback(msg.clone()))
+            }),
         };
         match response {
             Some(mut bytes) => {
@@ -704,27 +789,86 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
     }
 }
 
-impl ScalarHandler<Ep0RxComplete> for UsbDeviceServer {
-    fn handle(&mut self, _msg: Ep0RxComplete, sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        if sender != xous::current_pid().unwrap() {
+impl MoveHandler<RxCompleteInterrupt> for UsbDeviceServer {
+    const LEAK_MESSAGE: bool = false;
+
+    fn handle(
+        &mut self,
+        msg: RxCompleteInterrupt,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        let ep_num = msg.endpoint;
+        let byte_count = msg.byte_count as usize;
+
+        // EP0: currently discarded (same as before)
+        if ep_num == 0 {
+            log::trace!("Rx complete on EP0 ({byte_count} bytes, discarded)");
             return;
         }
-        log::trace!("Rx complete");
+
+        let Some(ep) = self.endpoints.get_mut(&ep_num) else {
+            log::warn!("RxCompleteInterrupt for unknown EP{ep_num}");
+            return;
+        };
+
+        let src = msg.buf.as_slice::<u8>();
+
+        // If a read is pending, fulfill it immediately
+        if let Some(mut read) = ep.ongoing_read.take() {
+            let requested = read.body().length as usize;
+            let len = byte_count.min(requested);
+            let dst = read.body_mut().buf.as_slice_mut::<u8>();
+            dst[..len].copy_from_slice(&src[..len]);
+            read.set_response(Ok(len));
+        } else {
+            // Buffer for next ReadEndpoint call
+            if ep.pending_rx.len() >= MAX_PENDING_RX_PACKETS {
+                log::trace!("EP{ep_num}: pending RX queue full, dropping oldest packet");
+                ep.pending_rx.pop_front();
+            }
+            ep.pending_rx.push_back(src[..byte_count].to_vec());
+        }
     }
 }
 
-impl ScalarHandler<Ep0TxComplete> for UsbDeviceServer {
-    fn handle(&mut self, _msg: Ep0TxComplete, sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+impl ScalarHandler<TxCompleteInterrupt> for UsbDeviceServer {
+    fn handle(
+        &mut self,
+        msg: TxCompleteInterrupt,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
         if sender != xous::current_pid().unwrap() {
             return;
         }
-        log::trace!("Tx complete");
-        if let Some(addr) = self.pending_address.take() {
-            log::debug!("Set address: {}", addr);
-            self.hw.set_address(addr);
+        log::trace!("Tx complete on EP{}", msg.endpoint);
+
+        if msg.endpoint == 0 {
+            self.handle_ep0_tx_complete();
+            return;
         }
-        if !self.remaining_setup_tx_data.is_empty() || self.end_setup_tx_with_short_packet {
-            self.send_remaining_setup_tx();
+
+        // EP1+: FIFO-mode write completion.
+        let Some(ep) = self.endpoints.get_mut(&msg.endpoint) else {
+            return;
+        };
+        if let Some(ref wr) = ep.ongoing_write {
+            if wr.pending_zlp {
+                // ZLP was just transmitted — complete the write.
+                let total = wr.total as usize;
+                let mut write = ep.ongoing_write.take().unwrap();
+                write.msg.set_response(Ok(total));
+                return;
+            }
+        }
+        if ep.use_dma {
+            // Ignore spurious TxComplete on DMA endpoints (auto_valid).
+            return;
+        }
+        // Non-DMA endpoint write completion.
+        if let Some(mut write) = ep.ongoing_write.take() {
+            write.msg.set_response(Ok(write.msg.body().length as usize));
         }
     }
 }
@@ -735,25 +879,65 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
             return;
         }
         log::trace!("Dma interrupt: {msg:?}");
-        let Some(ep) = self.endpoints.get_mut(&msg.endpoint) else {
+        let ep_num = msg.endpoint;
+        let Some(ep) = self.endpoints.get_mut(&ep_num) else {
             return;
         };
+        // DMA read completion.
         if let Some(mut read) = ep.ongoing_read.take() {
             read.set_response(Ok((read.body().length - msg.status.length()) as usize))
         }
-        if let Some(mut write) = ep.ongoing_write.take() {
-            write.set_response(Ok((write.body().length - msg.status.length()) as usize))
+        // DMA write completion — may need to continue with next chunk or send ZLP.
+        let Some(ref wr) = ep.ongoing_write else {
+            return;
+        };
+        if wr.offset < wr.total {
+            // More data to send — start next chunk.
+            self.start_next_dma_chunk(ep_num);
+        } else {
+            let ep = self.endpoints.get_mut(&ep_num).unwrap();
+            let wr = ep.ongoing_write.as_mut().unwrap();
+            let max_pkt = ep.properties.max_packet_len as u32;
+            if wr.zlp && wr.total > 0 && wr.total % max_pkt == 0 {
+                // Need a ZLP. The data DMA used end_of_transfer=false so the
+                // endpoint is still active. Set tx_packet_ready with nothing
+                // in the FIFO to send a zero-length packet.
+                wr.pending_zlp = true;
+                let mut status = EndpointStatus(0x0);
+                status.set_tx_packet_ready(true);
+                self.hw.endpoint(ep_num as usize).status_set.set(status);
+            } else {
+                // Transfer complete — respond to caller.
+                let total = wr.total as usize;
+                let mut write = ep.ongoing_write.take().unwrap();
+                write.msg.set_response(Ok(total));
+            }
         }
     }
 }
 
-impl ScalarEventHandler<IrqMessage> for UsbDeviceServer {
-    fn handle(&mut self, msg: IrqMessage, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        log::trace!("GPIO IRQ: {msg:?}");
-        match msg.pin {
-            GpioPin::UsbOtgId => self.handle_otg_pin_state(msg.is_high),
-            GpioPin::UsbVbusIrq => self.vbus_has_power = msg.is_high,
-            _ => log::warn!("Unexpected GPIO IRQ: {msg:?}"),
+impl ScalarHandler<SetCableConnected> for UsbDeviceServer {
+    fn handle(
+        &mut self,
+        msg: SetCableConnected,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.vbus_has_power = msg.0;
+        self.update_hw_enabled_state();
+    }
+}
+
+impl ScalarHandler<OtgMode> for UsbDeviceServer {
+    fn handle(&mut self, msg: OtgMode, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        if msg.0 {
+            log::debug!("OTG slave device connected, enabling power to it");
+            self.power_manager_ext.set_usb_boost(true).ok();
+            self.otg_device_connected = true;
+        } else {
+            log::debug!("OTG slave device disconnected, disabling power");
+            self.power_manager_ext.set_usb_boost(false).ok();
+            self.otg_device_connected = false;
         }
         self.update_hw_enabled_state();
     }
@@ -821,10 +1005,23 @@ fn udphs_irq_handler(_irq_no: usize, arg: *mut usize) {
     if interrupts.end_of_reset() {
         context.conn.send_scalar_nowait(EndOfReset).ok();
     }
-    if interrupts.endpoint(0) != 0 {
-        let status = context.hw.endpoint(0).status.get();
+    for dma_endpoint in 1..8 {
+        if interrupts.dma(dma_endpoint) != 0 {
+            // Reading the status clears the interrupt
+            let status = context.hw.dma(dma_endpoint).status.get();
+            context.conn.send_scalar_nowait(DmaInterrupt { endpoint: dma_endpoint as u8, status }).ok();
+        }
+    }
+    // Unified endpoint interrupt handling (EP0-15)
+    for ep_num in 0..16 {
+        if interrupts.endpoint(ep_num) == 0 {
+            continue;
+        }
+        let status = context.hw.endpoint(ep_num).status.get();
         let mut clear = EndpointStatus(0x0);
-        if status.received_setup() {
+
+        // EP0 only: setup packet
+        if ep_num == 0 && status.received_setup() {
             clear.set_received_setup(true);
             if status.byte_count() == 8 {
                 let mut setup_data = [0; 8];
@@ -832,24 +1029,35 @@ fn udphs_irq_handler(_irq_no: usize, arg: *mut usize) {
                 context.conn.send_scalar_nowait(SetupPacket::from_bytes(&setup_data)).ok();
             }
         }
+
+        // RX complete: read FIFO data into a page and send as Move
         if status.received_out() {
             clear.set_received_out(true);
-            // TODO: we throw away the received bytes. If we ever need setup packets with incoming data,
-            //       this is the place to implement that.
-            context.conn.send_scalar_nowait(Ep0RxComplete).ok();
+            let byte_count = status.byte_count() as usize;
+            if byte_count > 0 {
+                if let Ok(mut page) = xous::map_memory(None, None, 4096, xous::MemoryFlags::W) {
+                    let buf = &mut page.as_slice_mut::<u8>()[..byte_count];
+                    context.hw.read_endpoint_memory(ep_num, 0, buf);
+                    let msg = RxCompleteInterrupt {
+                        buf: page,
+                        endpoint: ep_num as u8,
+                        byte_count: byte_count as u16,
+                    };
+                    if context.conn.send_move_nowait(msg).is_err() {
+                        log::error!("Failed to send RxCompleteInterrupt for EP{ep_num}");
+                        xous::unmap_memory(page).ok();
+                    }
+                }
+            }
         }
+
+        // TX complete
         if status.transmission_complete() {
             clear.set_transmmission_complete(true);
-            context.conn.send_scalar_nowait(Ep0TxComplete).ok();
+            context.conn.send_scalar_nowait(TxCompleteInterrupt { endpoint: ep_num as u8 }).ok();
         }
-        context.hw.endpoint(0).status_clr.set(clear);
-    }
-    for dma_endpoint in 1..8 {
-        if interrupts.dma(dma_endpoint) != 0 {
-            // Reading the status clears the interrupt
-            let status = context.hw.dma(dma_endpoint).status.get();
-            context.conn.send_scalar_nowait(DmaInterrupt { endpoint: dma_endpoint as u8, status }).ok();
-        }
+
+        context.hw.endpoint(ep_num).status_clr.set(clear);
     }
     context.hw.clear_interrupt(interrupts);
 }

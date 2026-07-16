@@ -9,8 +9,6 @@ Authenticator 2FA applet for Passport Prime.
 
 ## QA Checklist
 
-Follow along with the design in [Figma](https://www.figma.com/design/MXEcQMjXyBWfP0l2cXHXuW/KeyOS-Specs?node-id=1595-16118).
-
 - [ ] The app should start up without issues.
 - [ ] When there are no codes saved, the app should start at the "add" page.
 - [ ] When there are codes saved (archived or not), the app should start at the "main" page.

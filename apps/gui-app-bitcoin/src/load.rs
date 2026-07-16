@@ -25,6 +25,7 @@ use crate::{
     account_id::AccountId,
     fs_permissions::FileSystemPermissions,
     get_timestamp_in_milliseconds, log_ms,
+    state::AccountColor,
     store::{CreateMultiSigAccount, CreateSingleSigAccount},
     FileSystem,
 };
@@ -127,7 +128,7 @@ pub fn build_singlesig_account(
         name: create.label,
         index: create.index,
         network: create.network,
-        color: create.color.to_hex().to_string(),
+        color: AccountColor::LightCopper.to_hex().to_string(),
         date_added: Some(get_timestamp_in_milliseconds()),
         seed_has_passphrase: !passphrase.is_empty(),
         device_serial: Some(device_serial),

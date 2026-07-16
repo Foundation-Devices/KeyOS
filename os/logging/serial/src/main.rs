@@ -24,7 +24,7 @@ fn main() -> ! {
     let log_buffer =
         xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W).expect("Could not allocate buffer");
     writeln!(uart, "[LOG] Connecting to log server").ok();
-    let log_reader = log_server::LogReader::default();
+    let log_reader = log_server::reader::LogReader::default();
 
     loop {
         let len = log_reader.read(log_buffer);

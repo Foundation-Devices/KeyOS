@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x73657474696e67735f6d616e61676572"
 memory = ["SFC"]
 syscall = ["SetThreadPriority"]

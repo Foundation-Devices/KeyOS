@@ -23,6 +23,10 @@ pub enum FidoError {
     UnRegisteredKey,
     #[error("IO error")]
     Io,
+    #[error("Label is empty")]
+    EmptyLabel,
+    #[error("Label already in use")]
+    DuplicateLabel,
     #[error("Other Fido error")]
     Other,
 }
@@ -59,6 +63,8 @@ impl AsScalar<3> for FidoError {
             FidoError::UnselectedKey => [8, 0, 0],
             FidoError::UnRegisteredKey => [9, 0, 0],
             FidoError::Io => [10, 0, 0],
+            FidoError::EmptyLabel => [12, 0, 0],
+            FidoError::DuplicateLabel => [13, 0, 0],
             FidoError::Other => [11, 0, 0],
         }
     }
@@ -76,6 +82,8 @@ impl FromScalar<3> for FidoError {
             8 => FidoError::UnselectedKey,
             9 => FidoError::UnRegisteredKey,
             10 => FidoError::Io,
+            12 => FidoError::EmptyLabel,
+            13 => FidoError::DuplicateLabel,
             _ => FidoError::Other,
         }
     }

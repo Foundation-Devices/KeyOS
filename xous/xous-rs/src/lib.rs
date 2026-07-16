@@ -8,7 +8,6 @@ pub mod definitions;
 pub mod drop_deallocate;
 pub mod process;
 pub mod string;
-pub mod stringbuffer;
 pub mod syscall;
 
 pub use arch::{ProcessArgs, ProcessInit, ProcessStartup, ThreadInit};
@@ -17,7 +16,6 @@ pub use drop_deallocate::*;
 #[cfg(keyos)]
 pub use keyos;
 pub use string::*;
-pub use stringbuffer::*;
 pub use syscall::*;
 
 #[cfg(feature = "processes-as-threads")]

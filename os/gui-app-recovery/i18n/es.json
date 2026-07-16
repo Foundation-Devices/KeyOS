@@ -29,6 +29,8 @@
   "common.button.learnMore": "Learn more",
   "common.button.next": "Next",
   "common.button.recover": "Recover",
+  "common.button.restartNow": "Restart Now",
+  "common.button.restartOnboarding": "Restart Setup",
   "common.button.restore": "Restore",
   "common.button.retry": "Retry",
   "common.button.return": "Back",

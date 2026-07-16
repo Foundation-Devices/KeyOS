@@ -114,18 +114,18 @@ macro_rules! settings_registry {
 macro_rules! archive_global_handler {
     ($ty:ident, $storage:ident) => {
         paste::paste! {
-            impl server::ArchiveHandler<settings::messages::[<Get $ty>]> for crate::Server {
+            impl server::BlockingArchiveHandler<settings::messages::[<Get $ty>]> for crate::Server {
                 fn handle(
                     &mut self,
                     _msg: settings::messages::[<Get $ty>],
                     _sender: xous::PID,
                     _context: &mut server::ServerContext<Self>,
-                ) -> <settings::messages::[<Get $ty>] as server::Archive>::Response {
+                ) -> <settings::messages::[<Get $ty>] as server::BlockingArchive>::Response {
                     get_value!($ty, self, $storage)
                 }
             }
 
-            impl server::MoveHandler<settings::messages::[<Set $ty>]> for crate::Server {
+            impl server::ArchiveHandler<settings::messages::[<Set $ty>]> for crate::Server {
                 fn handle(
                     &mut self,
                     msg: server::Owned<settings::messages::[<Set $ty>]>,

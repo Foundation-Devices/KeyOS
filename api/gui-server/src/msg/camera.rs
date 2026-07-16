@@ -16,7 +16,3 @@ impl AsScalar<1> for ShowCamera {
 
 #[derive(Debug, server::Message)]
 pub struct HideCamera;
-
-#[derive(Debug, server::Message)]
-#[response(bool)]
-pub struct IsCameraReady;

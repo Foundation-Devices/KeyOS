@@ -4,7 +4,7 @@
 [package]
 name = "gui-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [features]
 recovery-os = []
@@ -13,7 +13,7 @@ default = []
 [dependencies]
 app-manager = { workspace = true }
 bt = { workspace = true }
-camera = { path = "../camera" }
+camera = { workspace = true }
 fs = { workspace = true }
 gui-server-api = { workspace = true }
 haptics = { workspace = true }
@@ -29,6 +29,7 @@ server = { path = "../../server" }
 settings = { workspace = true }
 simple-easing = "1.0.1"
 xous = { path = "../../xous/xous-rs" }
+xous-ipc = { workspace = true }
 xous-ticktimer = { package = "xous-api-ticktimer", path = "../../xous/api/ticktimer" }
 
 [target.'cfg(keyos)'.dependencies]

@@ -5,7 +5,7 @@
 pub mod device;
 #[cfg(keyos)]
 pub mod host;
-#[cfg(all(keyos, not(feature = "recovery-os")))]
+#[cfg(keyos)]
 pub mod subscription;
 
 #[cfg(keyos)]
@@ -22,6 +22,8 @@ pub static DEVICE_NAME: LazyLock<Mutex<String>> = LazyLock::new(|| {
         Mutex::new(String::from("unnamed"))
     }
 });
+power_manager::use_api!();
+power_manager::use_ext_api!();
 
 fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
@@ -33,7 +35,6 @@ fn main() {
     {
         std::thread::spawn(|| server::listen(device::implementation::UsbDeviceServer::new()));
 
-        #[cfg(not(feature = "recovery-os"))]
         std::thread::spawn(|| server::listen(subscription::SubscriptionServer::default()));
 
         server::listen(host::implementation::UsbHostServer::new())

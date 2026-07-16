@@ -22,7 +22,7 @@ use slint_keyos_platform::{
     gui_server_api::{
         msg::UpdateKioskPolicy,
         navigation::{
-            filepicker::{Location, SelectFileOptions},
+            filepicker::{AllowedExtensions, Location, SelectFileOptions},
             lockscreen::{VerifyPinOptions, VerifyPinResult},
         },
     },
@@ -30,7 +30,7 @@ use slint_keyos_platform::{
     navigation::verify_pin,
     settings::{self, global::SystemTheme},
     slint::{Image, ModelRc, SharedString, Timer, TimerMode, VecModel},
-    spawn_local, spawn_worker, subscribe_archive, subscribe_scalar, StoredValue, TaskHandle,
+    spawn_local, spawn_worker, subscribe_archive, subscribe_scalar, timeout, StoredValue, TaskHandle,
 };
 use update::messages::ProgressUpdate;
 
@@ -50,7 +50,7 @@ backup::use_api!();
 bt::use_api!();
 haptics::use_api!();
 keycard::use_api!();
-power_manager::use_api!();
+power_manager::use_ext_api!();
 quantum_link::use_api!();
 security::use_api!();
 update::use_api!();
@@ -113,6 +113,21 @@ fn setup_settings_global(state: StoredValue<AppState>) {
                 let state = state.borrow();
                 let ui = state.ui();
                 ui.global::<SettingGlobal>().set_screen_brightness(brightness.0 as f32);
+            }
+        }
+    })
+    .detach();
+
+    spawn_local({
+        let state = state.clone();
+        async move {
+            let mut sub = subscribe_archive::<settings_permissions::SettingsPermissions, _>(
+                settings::messages::SubscribeDeviceName,
+            );
+            while let Some(device_name) = sub.next().await {
+                let state = state.borrow();
+                let ui = state.ui();
+                ui.global::<SettingGlobal>().set_device_name(device_name.0.into());
             }
         }
     })
@@ -192,6 +207,13 @@ fn setup_settings_global(state: StoredValue<AppState>) {
                 NavigateOptions { animate: Animate::None, replace: true },
             );
 
+            // Best-effort goodbye to Envoy before wiping. Awaits BLE flush so
+            // the bye is on the wire before erase_system_state() / Lockout reboots.
+            if let Err(e) =
+                async_archive::<QuantumLinkPermissions, _>(quantum_link::messages::UnpairFromEnvoy).await
+            {
+                log::warn!("failed to notify Envoy of unpair before factory reset: {e:?}");
+            }
             erase_system_state();
 
             match async_archive::<SecurityPermissions, _>(Lockout {
@@ -455,7 +477,7 @@ fn get_master_key(app_state: &AppState) -> anyhow::Result<MasterKey> {
 fn setup_callbacks(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let callbacks = ui.global::<Callbacks>();
-    callbacks.on_save_log_files(move || match state.borrow().with_otg_allowed(|s| s.save_log_files()) {
+    callbacks.on_save_log_files(move || match state.borrow().save_log_files() {
         Ok(_) => true,
         Err(e) => {
             log::error!("Failed to save log file: {}", e);
@@ -552,12 +574,21 @@ fn setup_backup_global(state: StoredValue<AppState>) {
         spawn_local(async move {
             let ui = state.borrow().ui();
             let global = ui.global::<BackupGlobal>();
-            global.set_creating_backup(true);
-            match async_archive::<BackupPermissions, _>(backup::messages::CreateBackup).await {
-                Ok(_) => (),
-                Err(e) => {
+            global.set_status(BackupStatus::Creating);
+            match timeout(
+                async_archive::<BackupPermissions, _>(backup::messages::CreateBackup),
+                Duration::from_secs(15),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
                     log::warn!("create backup failed {e:?}");
-                    global.set_creating_backup(false);
+                    global.set_status(BackupStatus::Error);
+                }
+                Err(_) => {
+                    log::warn!("create backup timed out");
+                    global.set_status(BackupStatus::Error);
                 }
             }
         })
@@ -574,7 +605,7 @@ fn setup_backup_global(state: StoredValue<AppState>) {
 
             let ui = state.ui();
             let global = ui.global::<BackupGlobal>();
-            global.set_creating_backup(false);
+            global.set_status(if status.publish_failed { BackupStatus::Error } else { BackupStatus::Idle });
         }
     })
     .detach();
@@ -657,7 +688,14 @@ fn setup_ql_global(state: StoredValue<AppState>) {
     });
 
     ql_global.on_disconnect(move || {
-        state.borrow().quantum.clear_paired_device();
+        spawn_local(async move {
+            if let Err(e) =
+                async_archive::<QuantumLinkPermissions, _>(quantum_link::messages::UnpairFromEnvoy).await
+            {
+                log::warn!("failed to notify Envoy of unpair: {e:?}");
+            }
+        })
+        .detach();
     });
 
     spawn_local(async move {
@@ -672,6 +710,14 @@ fn setup_ql_global(state: StoredValue<AppState>) {
                 PairingEvent::PairingComplete { device_name, new } => {
                     global.set_paired_device_name(device_name.into());
                     if new {
+                        let s = state.borrow();
+                        if s.settings.get_envoy_time_sync().0 {
+                            ql_utils::sync_system_timezone(s.settings.clone(), s.ql_status.clone(), |e| {
+                                log::warn!("failed to retrieve tz from envoy {e:?}")
+                            })
+                            .detach();
+                        }
+                        drop(s);
                         ql_utils::launch_bitcoin_app::<app_manager_permissions::AppManagerPermissions>()
                             .await
                             .inspect_err(|e| log::warn!("failed to start bitcoin app {e:?}"))
@@ -711,7 +757,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
         start_firmware_download(state);
     });
 
-    ql_utils::on_update_sufficient_battery::<power_manager_permissions::PowerManagerPermissions, _>(
+    ql_utils::on_update_sufficient_battery::<power_manager_ext_permissions::PowerManagerExtPermissions, _>(
         move |sufficient_battery| {
             log::info!("update sufficient_battery={}", sufficient_battery);
             let ui = state.borrow().ui();
@@ -911,13 +957,22 @@ async fn check_firmware_update_available(state: StoredValue<AppState>) {
     let ql_status = state.borrow().ql_status.clone();
 
     global.set_checking_fw_update(true);
-    let result = ql_status.send_ql_archive(quantum_link::messages::CheckFirmwareUpdate).await;
+    let result = timeout(
+        ql_status.send_ql_archive(quantum_link::messages::CheckFirmwareUpdate),
+        Duration::from_secs(10),
+    )
+    .await;
     global.set_checking_fw_update(false);
 
     let update = match result {
-        Ok(update) => update,
-        Err(e) => {
+        Ok(Ok(update)) => update,
+        Ok(Err(e)) => {
             log::error!("failed to check for firmware update {e:?}");
+            global.set_new_keyos_version(SharedString::default());
+            return;
+        }
+        Err(_) => {
+            log::error!("timed out checking for firmware update");
             global.set_new_keyos_version(SharedString::default());
             return;
         }
@@ -960,7 +1015,8 @@ async fn save_settings_file(state: StoredValue<AppState>) -> anyhow::Result<()> 
         .with_hidden_allowed(false)
         .with_dirs_allowed(true)
         .with_dir_selection_mode(true)
-        .with_multiple_selection_mode(false);
+        .with_multiple_selection_mode(false)
+        .with_allowed_extensions(AllowedExtensions::specific(&["tar"]));
 
     let (path, location) = select_file::<GuiPermissions>(options)
         .context("Failed to select a directory")?
@@ -973,7 +1029,12 @@ async fn save_settings_file(state: StoredValue<AppState>) -> anyhow::Result<()> 
         Location::Airlock => fs::Location::Airlock,
     };
 
-    let backup_path = format!("{}/settings.tar", path);
+    let now = jiff::Timestamp::now();
+    let tz = state.settings.get_time_zone();
+    let zoned = now.to_zoned(tz.timezone());
+    let timestamp =
+        jiff::fmt::strtime::format("%Y-%m-%d_%H-%M-%S", &zoned).unwrap_or_else(|_| "unknown".to_string());
+    let backup_path = format!("{}/settings-{}.tar", path, timestamp);
 
     state
         .backup_api

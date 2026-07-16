@@ -1,0 +1,155 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Callbacks as CB } from "../../callbacks.slint";
+import { SeedView, SeedViewType } from "../../types.slint";
+import { Palette, Size, Importance, CallbackResult, ResultLevel } from "@ui/theme.slint";
+import { IconButton, AppHeader, BasePage, PageBody, ScrollBody,
+         ContentSection, ErrorModal, Dropdown,
+         TitledInput, ButtonSection, Button, TextMd,
+         TextSm } from "@ui/widgets.slint";
+import { SaveSeedProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component SaveSeedPage inherits BasePage {
+    in property <SaveSeedProps> props;
+
+    property <string> entropy;
+    property <string> fingerprint;
+
+    init => {
+        entropy = CB.get-pending-imported-seed().entropy;
+        fingerprint = CB.get-pending-imported-seed().fingerprint;
+    }
+
+    property <SeedView> new-seed: {
+        seed-type: words.length == 12 ? SeedViewType.bitcoin-import-12 : SeedViewType.bitcoin-import-24,
+    };
+
+    property <CallbackResult> result: { level: ResultLevel.info, success: true, text: "", title: "" };
+    property <bool> has-errors: label-error;
+    property <bool> label-error: true;
+    property <[string]> words: CB.entropy-to-words(entropy);
+
+    VerticalLayout {
+        AppHeader {
+            title: TR2.lookup(TrId.CreateItemTitle);
+
+            IconButton {
+                icon: "chevron-left";
+                size: Size.sz8;
+                importance: Importance.normal;
+                clicked => {
+                    Navigate.backward();
+                }
+            }
+        }
+
+        PageBody {
+            p-x: Size.sz4;
+            p-y: Size.sz4;
+
+            content-scroll := ScrollBody {
+                p-x: Size.zero;
+                p-y: Size.zero;
+
+                ContentSection {
+                    Dropdown {
+                        title: TR2.lookup(TrId.CreateItemType);
+                        placeholder: TR2.lookup(TrId.CreateItemTypeTextFiller);
+                        selected-index: 0;
+                        locked: true;
+                        model: [
+                            {
+                                label: CB.get-seed-name(new-seed.seed-type),
+                                value: "password",
+                                icon: "acorn",
+                            },
+                        ];
+                    }
+
+                    TitledInput {
+                        title: TR2.lookup(TrId.CreateItemItemLabel);
+                        placeholder: TR2.lookup(TrId.CreateItemItemLabelFillerText);
+                        text: new-seed.label;
+                        message: TR2.lookup(TrId.CreateItemSeedErrorsMissingField);
+                        has-notice: self.message != "";
+                        caps-mode: sentences;
+
+                        edited(text) => {
+                            new-seed.label = text;
+                            self.message = CB.validate-new-label(text);
+                            self.has-notice = self.message != "";
+                            label-error = self.has-notice;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: Size.sz2;
+
+                        HorizontalLayout {
+                            padding-left: Size.sz4;
+                            alignment: start;
+                            TextSm {
+                                text: TR2.lookup(TrId.ItemDetailsTitle);
+                                color: Palette.content-tertiary;
+                            }
+                        }
+
+                        Rectangle {
+                            height: Size.sz14;
+                            background: Palette.background-primary-alternative;
+                            border-radius: Size.sz6;
+                            border-width: Size.sz0_25;
+                            border-color: Palette.background-hover;
+
+                            HorizontalLayout {
+                                alignment: space-between;
+                                padding-left: Size.sz4;
+                                padding-right: Size.sz4;
+                                spacing: Size.sz4;
+
+                                TextMd {
+                                    text: TR2.lookup(TrId.CreateItemFingeprint);
+                                    color: Palette.content-primary;
+                                    vertical-alignment: center;
+                                }
+
+                                TextMd {
+                                    text: fingerprint;
+                                    color: Palette.content-primary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ButtonSection {
+                save-button := Button {
+                    label: TR2.lookup(TrId.CommonButtonSave);
+                    enabled: !has-errors;
+                    clicked => {
+                        // Navigation is handled by rust code
+                        new-seed.color = CB.get-default-color(new-seed.seed-type);
+                        result = CB.import-seed-entropy(new-seed, entropy);
+                    }
+                }
+            }
+        }
+    }
+
+    if !result.success: ErrorModal {
+        icon: result.level == ResultLevel.info ? "info" : "alert";
+        icon-color: result.level == ResultLevel.info ? Palette.content-brand : Palette.content-notice;
+        title: result.title;
+        text: result.text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+
+        confirm-clicked => {
+            result.success = true;
+        }
+    }
+}

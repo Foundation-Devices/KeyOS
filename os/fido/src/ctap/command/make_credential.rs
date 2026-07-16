@@ -159,15 +159,7 @@ impl AttestationStatement {
         signature_base.extend_from_slice(public_key);
         log::debug!("Attestation Signature base: {:02x?}", signature_base);
         #[cfg(not(test))]
-        let signature_base_hash = {
-            let buf = &signature_base;
-            let mut page = xous::DropDeallocate::new(
-                xous::map_memory(None, None, 4096, xous::MemoryFlags::W | xous::MemoryFlags::NO_CACHE)
-                    .expect("mapmemory"),
-            );
-            page.as_slice_mut()[..buf.len()].copy_from_slice(buf);
-            crate::CryptoApi::default().sha256(*page, 0, buf.len()).expect("sha256")
-        };
+        let signature_base_hash = crate::CryptoApi::default().sha256(&signature_base).expect("sha256");
         Ok(AttestationStatement {
             alg: PublicKeyCredential::Es256,
             #[cfg(not(test))]

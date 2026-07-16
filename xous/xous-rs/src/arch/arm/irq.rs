@@ -38,6 +38,8 @@ pub enum IrqNumber {
     Secumod = 21,
 
     Icm = 22,
+
+    Twi0 = 23,
 }
 
 impl TryFrom<usize> for IrqNumber {
@@ -79,6 +81,8 @@ impl TryFrom<usize> for IrqNumber {
 
             21 => Ok(Secumod),
             22 => Ok(Icm),
+
+            23 => Ok(Twi0),
 
             _ => Err(()),
         }

@@ -13,7 +13,7 @@ armv7 = { workspace = true }
 cty = "0.2"
 
 [build-dependencies]
-bindgen = { version = "0.69.2", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.72.1", default-features = false, features = ["runtime"] }
 cc = "1.0"
 
 [lints.rust]

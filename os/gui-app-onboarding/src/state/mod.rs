@@ -9,6 +9,7 @@ use security::{messages::RawPin, PinEntryMode};
 pub mod erase;
 pub mod keycard_backup;
 pub mod keycard_restore;
+pub mod seed_challenge;
 pub mod setup_seed;
 
 use bt::BtAddr;
@@ -44,6 +45,7 @@ pub struct AppState {
 
     pub notify_onboarding_state: Option<TaskHandle<Result<(), SendMessageError>>>,
     pub notify_update_progress: Option<TaskHandle<Result<(), SendMessageError>>>,
+    pub ql_status_monitor: Option<TaskHandle<()>>,
 
     pub finished: bool,
 }
@@ -76,6 +78,7 @@ impl AppState {
 
             notify_onboarding_state: None,
             notify_update_progress: None,
+            ql_status_monitor: None,
 
             finished: false,
         }
@@ -110,6 +113,10 @@ impl AppState {
             .seed()
             .map_err(|e| anyhow::anyhow!("Failed to get seed from security service: {:?}", e))?
             .ok_or_else(|| anyhow::anyhow!("No seed"))
+    }
+
+    pub fn try_get_mnemonic_words(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.try_get_seed()?.to_mnemonic_words()?)
     }
 
     pub fn clear_pending_set_pin(&mut self) { self.pending_set_pin = None; }

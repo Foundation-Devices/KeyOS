@@ -168,4 +168,13 @@ impl<P: CheckedPermissions> EmmcApi<P> {
     {
         Ok(self.conn.try_send_blocking_scalar(BlockCount)?)
     }
+
+    /// Block until all writes enqueued before this call have hit flash.
+    pub fn flush(&self) -> Result<(), EmmcError>
+    where
+        P: MessageAllowed<Flush>,
+    {
+        self.conn.try_send_blocking_scalar(Flush)?;
+        Ok(())
+    }
 }

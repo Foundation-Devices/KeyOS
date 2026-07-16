@@ -8,9 +8,9 @@ use bootloader::{build_keyos_boot, BootloaderBuildArgs, SambaCryptArgs};
 use clap::{Args, Parser, Subcommand};
 
 use crate::bootimage::{build_charge_boot, create_boot_image};
+use crate::builder::*;
 use crate::flash::{dump_flash, flash_firmware, DumpFlashArgs, FlashArgs};
 use crate::symbolicate::SymbolicateArgs;
-use crate::{builder::*, utils::*};
 
 mod bootimage;
 mod bootloader;
@@ -23,7 +23,7 @@ mod tags;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.2.0";
+const KEYOS_VERSION: &str = "1.3.0";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
@@ -34,7 +34,7 @@ const RECOVERY_IMAGE: &str = "recovery.bin";
 
 /// Logging output services.
 const LOGGING_SERVICE_SERIAL: &str = "log-serial";
-const LOGGING_SERVICE_USB_SERIAL: &str = "log-usb-serial";
+const LOGGING_SERVICE_USB_DEBUG: &str = "usb-debug";
 const LOGGING_SERVICE_FILE: &str = "log-file";
 const LOGGING_SERVICE_USB_FILE: &str = "log-usb-file";
 
@@ -72,7 +72,7 @@ const DEFAULT_SERVICES_NORMAL: &[&str] = &[
     "spi-server",
     "haptics-server",
     "rgb-led-server",
-    "nfc",
+    "nfc-server",
     "emmc",
     "fs-server",
     "settings-server",
@@ -89,9 +89,9 @@ const DEFAULT_SERVICES_NORMAL: &[&str] = &[
     "backup-server",
     "fido",
     "ctap-hid",
-    "keycard",
+    "keycard-server",
     "app-manager-server",
-    "camera",
+    "camera-server",
     "gui-server",
     "gui-app-control-center",
     "gui-app-lock-screen",
@@ -113,6 +113,7 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
 ];
 
 const DEV_APPS: &[&str] = &[
+    "gui-app-crypto-perf",
     "gui-app-file-picker-test",
     "gui-app-image-viewer",
     "gui-app-playground",
@@ -138,12 +139,12 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "mass-storage-server",
     "fs-server",
     "log-file",
-    "nfc",
+    "nfc-server",
     "fido",
-    "keycard",
+    "keycard-server",
     "settings-server",
     "usb-server",
-    "camera",
+    "camera-server",
     "gui-server",
     "app-manager-server",
     "gui-app-control-center",
@@ -152,6 +153,7 @@ const DEFAULT_SERVICES_HOSTED: &[&str] = &[
     "gui-app-keyboard",
     "gui-app-launcher",
     "gui-app-settings",
+    "gui-app-crypto-perf",
     "gui-app-playground",
     "gui-app-image-viewer",
     "gui-app-regulatory",
@@ -181,12 +183,6 @@ struct XtaskArgs {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Install the rust toolchain necessary to compile KeyOS for the Prime hardware.
-    InstallToolchain {
-        /// If the toolchain already exists, remove it first
-        #[arg(short, long)]
-        reinstall: bool,
-    },
     /// Build the at91bootstrap bootloader
     BuildBootloader(BootloaderBuildArgs),
     /// Build a tiny boot image for factory charging the device
@@ -278,11 +274,11 @@ struct BuildArgs {
     /// This adds the `log-serial` kernel feature and includes `log-serial`.
     #[arg(long, conflicts_with = "hosted")]
     log_serial: bool,
-    /// Enable USB serial logging service in production firmware builds.
+    /// Enable USB debug protocol service in production firmware builds.
     ///
-    /// This includes `log-usb-serial`.
+    /// This includes `usb-debug`.
     #[arg(long, conflicts_with = "hosted")]
-    log_usb_serial: bool,
+    log_usb_debug: bool,
     /// Write logs to files on the external USB drive.
     #[arg(long, conflicts_with = "hosted")]
     log_usb_file: bool,
@@ -302,8 +298,8 @@ struct BuildArgs {
     #[arg(long)]
     reproducible: bool,
     /// Disables serial logging output in production firmware. Implies --reproducible.
-    /// Use `--log-serial` and/or `--log-usb-serial` to re-enable serial logging in production builds.
-    /// Internal flash file logging remains enabled.
+    /// Use `--log-serial` and/or `--log-usb-debug` to re-enable serial/USB debug logging in production
+    /// builds. Internal flash file logging remains enabled.
     #[arg(
         long,
         conflicts_with = "hosted",
@@ -325,9 +321,6 @@ fn main() {
     let args = XtaskArgs::parse();
 
     match args.command {
-        Commands::InstallToolchain { reinstall: remove_existing } => {
-            ensure_compiler(Some(TARGET_TRIPLE_KEYOS), true, remove_existing);
-        }
         Commands::BuildBootloader(args) => build_keyos_boot(args),
         Commands::BuildChargeBoot => build_charge_boot(),
         Commands::Build { build_args, dont_sign } => {
@@ -392,14 +385,17 @@ fn process_services(build_args: &mut BuildArgs) {
         // In non-production firmware, auto-enable serial logging outputs.
         if !build_args.production_firmware {
             build_args.log_serial = true;
-            build_args.log_usb_serial = true;
+            build_args.log_usb_debug = true;
         }
 
         if build_args.log_serial {
             add_service(LOGGING_SERVICE_SERIAL);
         }
-        if build_args.log_usb_serial {
-            add_service(LOGGING_SERVICE_USB_SERIAL);
+        // Only auto-include usb-debug when using default services (which
+        // include gui-server). Explicit service lists (e.g. sys-benchmark)
+        // may not have gui-server, and usb-debug can't function without it.
+        if build_args.log_usb_debug && build_args.services.is_empty() {
+            add_service(LOGGING_SERVICE_USB_DEBUG);
         }
         if build_args.log_usb_file {
             add_service(LOGGING_SERVICE_USB_FILE);
@@ -447,7 +443,7 @@ fn check_crates(crates: Vec<String>) {
 
     // Crates that only work on specific targets
     const HOST_ONLY_CRATES: &[&str] = &["simulator", "log-hosted", "simulator-cli"];
-    const ARM_ONLY_CRATES: &[&str] = &["log-serial", "log-usb-serial"];
+    const ARM_ONLY_CRATES: &[&str] = &["log-serial", "usb-debug"];
 
     let crates_to_check = if crates.is_empty() {
         // Get all the crates that should work on both targets
@@ -473,8 +469,6 @@ fn check_crates(crates: Vec<String>) {
         crates
     };
 
-    let (dl_var_name, dl_path) = get_dl_path().unwrap_or_default();
-
     // Group crates by target compatibility
     let mut arm_crates = Vec::new();
     let mut host_crates = Vec::new();
@@ -497,8 +491,7 @@ fn check_crates(crates: Vec<String>) {
     if !arm_crates.is_empty() {
         println!("Checking {} crates for ARM target...", arm_crates.len());
         let mut cmd = Command::new(cargo());
-        cmd.env(&dl_var_name, &dl_path)
-            .arg("check")
+        cmd.arg("check")
             .arg("--target")
             .arg(TARGET_TRIPLE_KEYOS)
             .stdout(Stdio::piped())
@@ -516,7 +509,7 @@ fn check_crates(crates: Vec<String>) {
     if !host_crates.is_empty() {
         println!("Checking {} crates for simulator target...", host_crates.len());
         let mut cmd = Command::new(cargo());
-        cmd.env(&dl_var_name, &dl_path).arg("check").stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.arg("check").stdout(Stdio::piped()).stderr(Stdio::piped());
 
         for crate_name in &host_crates {
             cmd.arg("-p").arg(crate_name);

@@ -32,7 +32,7 @@ impl server::ArchiveEventSubscriptionHandler<SubscribeUpdateProgress> for Server
     }
 }
 
-impl server::MoveHandler<StartUpdate> for Server {
+impl server::ArchiveHandler<StartUpdate> for Server {
     fn handle(
         &mut self,
         msg: Owned<StartUpdate>,
@@ -80,7 +80,7 @@ impl server::MoveHandler<StartUpdate> for Server {
     }
 }
 
-impl server::MoveHandler<ContinueUpdate> for Server {
+impl server::ArchiveHandler<ContinueUpdate> for Server {
     fn handle(
         &mut self,
         _msg: Owned<ContinueUpdate>,
@@ -91,18 +91,18 @@ impl server::MoveHandler<ContinueUpdate> for Server {
     }
 }
 
-impl server::ArchiveHandler<FirmwareVersion> for Server {
+impl server::BlockingArchiveHandler<FirmwareVersion> for Server {
     fn handle(
         &mut self,
         _msg: FirmwareVersion,
         _sender: server::xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <FirmwareVersion as server::Archive>::Response {
+    ) -> <FirmwareVersion as server::BlockingArchive>::Response {
         Ok("hosted-1.0.0".to_string())
     }
 }
 
-impl server::MoveHandler<ApplyDownloadedUpdate> for Server {
+impl server::ArchiveHandler<ApplyDownloadedUpdate> for Server {
     fn handle(
         &mut self,
         _msg: Owned<ApplyDownloadedUpdate>,
@@ -135,13 +135,13 @@ impl server::ScalarHandler<ClearUpdateApplied> for Server {
     }
 }
 
-impl server::ArchiveHandler<GetUpdateStatus> for Server {
+impl server::BlockingArchiveHandler<GetUpdateStatus> for Server {
     fn handle(
         &mut self,
         _msg: GetUpdateStatus,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
-    ) -> <GetUpdateStatus as server::Archive>::Response {
+    ) -> <GetUpdateStatus as server::BlockingArchive>::Response {
         UpdateStatus {
             downloaded_update: false,
             needs_continue: false,

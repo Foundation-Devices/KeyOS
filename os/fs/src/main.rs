@@ -6,6 +6,7 @@ use std::{collections::HashMap, collections::HashSet};
 use disk::DynamicDisk;
 use fs::messages::*;
 pub use fs::{DirHandle, Error, FileHandle, FileSystemEvent, FileSystemEventType, Location, OpenFlags};
+use mount::Mount;
 use server::{MessageId as _, ScalarEventSubscriber};
 
 #[cfg(not(feature = "recovery-os"))]
@@ -25,17 +26,17 @@ mod flush;
 mod fs_event;
 mod map;
 mod metadata;
+mod mount;
 mod next;
 mod open;
 mod raw_access;
 mod read;
-pub(crate) mod remove;
+mod remove;
 mod rename;
 mod seek;
 mod set_len;
 mod set_mtime;
 mod truncate;
-#[cfg(keyos)]
 mod usb;
 mod write;
 
@@ -43,6 +44,8 @@ mod write;
 emmc::use_api!();
 #[cfg(keyos)]
 mass_storage_server::use_api!();
+#[cfg(all(keyos, not(feature = "recovery-os")))]
+security::use_api!();
 
 // 0: Boot Volume, 1: System volume, 2: Encrypted Volume
 pub const DEFAULT_PARTITION_INDEX: u8 = 1;
@@ -57,32 +60,27 @@ fn main() {
     #[cfg(not(keyos))]
     disk::init_files().expect("init disk files in hosted mode");
 
-    let fs_internal = fatfs::FileSystem::new(system_disk(), fatfs::FsOptions::new()).unwrap();
+    let fs_internal = Mount::new(system_disk()).unwrap();
     #[cfg(not(feature = "recovery-os"))]
-    fixup_interrupted_update(&fs_internal);
-    let fs_internal = Box::into_raw(Box::new(fs_internal));
+    fixup_interrupted_update(fs_internal.fs());
     #[cfg(all(keyos, feature = "recovery-os"))]
-    let fs_boot = Box::into_raw(Box::new(
-        fatfs::FileSystem::new(DynamicDisk::new(EmmcApi::default().into(), 0), fatfs::FsOptions::new())
-            .unwrap(),
-    ));
+    let fs_boot = Some(Mount::new(DynamicDisk::new(EmmcApi::default().into(), 0)).unwrap());
     #[cfg(all(not(keyos), feature = "recovery-os"))]
-    let fs_boot = std::ptr::null_mut();
+    let fs_boot: Option<Mount> = None;
     let server = Server {
-        files: Default::default(),
-        dirs: Default::default(),
         mapped_files: Default::default(),
         #[cfg(feature = "recovery-os")]
         fs_boot,
         fs_internal,
         #[cfg(not(feature = "recovery-os"))]
-        fs_user: std::ptr::null_mut(),
-        fs_usb: std::ptr::null_mut(),
+        fs_user: None,
+        fs_usb: None,
         #[cfg(not(feature = "recovery-os"))]
         airlock: AirlockState::Uninitialized,
         read_access: Default::default(),
         write_access: Default::default(),
         fs_event_subscribers: Default::default(),
+        last_fs_event: Default::default(),
     };
 
     server::listen(server);
@@ -91,40 +89,26 @@ fn main() {
 #[derive(server::Server)]
 #[name = "os/fs"]
 pub struct Server {
-    files: HashMap<xous::PID, Files>,
-    dirs: HashMap<xous::PID, Dirs>,
     mapped_files: HashMap<String, MappedFile>,
     #[cfg(feature = "recovery-os")]
-    fs_boot: *mut fatfs::FileSystem<DynamicDisk>,
-    fs_internal: *mut fatfs::FileSystem<DynamicDisk>,
-    #[cfg(not(feature = "recovery-os"))]
-    fs_user: *mut fatfs::FileSystem<DynamicDisk>,
-    fs_usb: *mut fatfs::FileSystem<DynamicDisk>,
+    fs_boot: Option<Mount>,
+    fs_internal: Mount,
+    // airlock borrows from fs_user's leaked FS via DiskImage, so it must drop first.
     #[cfg(not(feature = "recovery-os"))]
     airlock: AirlockState,
+    #[cfg(not(feature = "recovery-os"))]
+    fs_user: Option<Mount>,
+    fs_usb: Option<Mount>,
     read_access: HashSet<(xous::PID, Location)>,
     write_access: HashSet<(xous::PID, Location)>,
     fs_event_subscribers: HashMap<Location, Vec<ScalarEventSubscriber<FileSystemEvent>>>,
+    last_fs_event: HashMap<Location, FileSystemEventType>,
 }
 
 impl std::fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Server").field("files", &self.files).field("dirs", &self.dirs).finish()
+        f.debug_struct("Server").finish()
     }
-}
-
-#[derive(Default)]
-struct Files {
-    counter: u32,
-    open: HashMap<FileHandle, OpenFile>,
-}
-
-struct OpenFile {
-    file: fatfs::File<'static, DynamicDisk>,
-    path: String,
-    #[allow(dead_code)]
-    location: Location,
-    flags: OpenFlags,
 }
 
 struct MappedFile {
@@ -132,34 +116,9 @@ struct MappedFile {
     size: usize,
 }
 
-impl std::fmt::Debug for Files {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Files").field("counter", &self.counter).field("open", &self.open.keys()).finish()
-    }
-}
-
-#[derive(Default)]
-struct Dirs {
-    counter: u32,
-    open: HashMap<DirHandle, OpenDir>,
-}
-
-struct OpenDir {
-    iter: fatfs::DirIter<'static, DynamicDisk>,
-    path: String,
-    #[allow(dead_code)]
-    location: Location,
-}
-
-impl std::fmt::Debug for Dirs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Dirs").field("counter", &self.counter).field("open", &self.open.keys()).finish()
-    }
-}
-
 /// Converts the path to a full path within the specified location. If resulting path points to
 /// root of the location, an empty string is returned.
-pub(crate) fn path_of(location: Location, path: &str, pid: xous::PID) -> String {
+pub fn path_of(location: Location, path: &str, pid: xous::PID) -> String {
     let path = match location {
         Location::Boot
         | Location::System
@@ -218,12 +177,20 @@ impl server::Server for Server {
     fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
         #[cfg(keyos)]
         MassStorageApi::default().subscribe(context);
+        #[cfg(all(keyos, not(feature = "recovery-os")))]
+        Security::default().subscribe_disk_encryption_keys_ready(context);
         #[cfg(all(not(keyos), not(feature = "recovery-os")))]
         self.mount_encrypted_fs().ok();
         xous::register_system_event_handler(
             xous::SystemEvent::Disconnected,
             context.sid(),
             SubscriberDisconnected::ID,
+        )
+        .unwrap();
+        xous::register_server_event_handler(
+            xous::ServerEvent::Disconnected,
+            context.sid(),
+            ProcessDisconnected::ID,
         )
         .unwrap();
     }
@@ -233,83 +200,108 @@ impl Server {
     fn create_base_dir(&self, location: Location, pid: xous::PID) -> Result<(), Error> {
         match location {
             Location::SystemAppData => {
-                let state_dir = self.root_dir(Location::SystemAppData)?.create_dir(fs::SYSTEM_STATE_ROOT)?;
+                let state_dir = self
+                    .mount(Location::SystemAppData)
+                    .ok_or(Error::NoMedia)?
+                    .root_dir()
+                    .create_dir(fs::SYSTEM_STATE_ROOT)?;
                 state_dir.create_dir(&hex::encode(xous::get_app_id(pid)?.ok_or(Error::InternalError)?.0))?;
             }
             Location::AppData => {
-                let app_dir = self.root_dir(Location::AppData)?.create_dir("appdata")?;
+                let app_dir = self
+                    .mount(Location::AppData)
+                    .ok_or(Error::NoMedia)?
+                    .root_dir()
+                    .create_dir("appdata")?;
                 app_dir.create_dir(&hex::encode(xous::get_app_id(pid)?.ok_or(Error::InternalError)?.0))?;
             }
             #[cfg(not(feature = "recovery-os"))]
             Location::User => {
-                self.root_dir(Location::User)?.create_dir("user")?;
+                self.mount(Location::User).ok_or(Error::NoMedia)?.root_dir().create_dir("user")?;
             }
             _ => {}
         }
         Ok(())
     }
 
-    fn fs(&self, location: Location) -> *mut fatfs::FileSystem<DynamicDisk> {
+    pub fn mount(&self, location: Location) -> Option<&Mount> {
         #[cfg(feature = "recovery-os")]
         match location {
-            Location::Boot => self.fs_boot,
-            Location::System | Location::SystemAppData => self.fs_internal,
-            Location::AppData | Location::User | Location::EncryptedRoot | Location::Airlock => {
-                core::ptr::null_mut()
-            }
-            Location::CommonAssets => self.fs_boot,
-            Location::Usb => self.fs_usb,
+            Location::Boot => self.fs_boot.as_ref(),
+            Location::System | Location::SystemAppData => Some(&self.fs_internal),
+            Location::AppData | Location::User | Location::EncryptedRoot | Location::Airlock => None,
+            Location::CommonAssets => self.fs_boot.as_ref(),
+            Location::Usb => self.fs_usb.as_ref(),
         }
         #[cfg(not(feature = "recovery-os"))]
         match location {
-            Location::Boot => core::ptr::null_mut(),
-            Location::System | Location::SystemAppData | Location::CommonAssets => self.fs_internal,
-            Location::AppData | Location::User | Location::EncryptedRoot => self.fs_user,
-            Location::Airlock => {
-                if let AirlockState::Mounted(airlock_fs) = &self.airlock {
-                    *airlock_fs
-                } else {
-                    core::ptr::null_mut()
-                }
+            Location::Boot => None,
+            Location::System | Location::SystemAppData | Location::CommonAssets => Some(&self.fs_internal),
+            Location::AppData | Location::User | Location::EncryptedRoot => self.fs_user.as_ref(),
+            Location::Airlock => match &self.airlock {
+                AirlockState::Mounted(m) => Some(m),
+                _ => None,
+            },
+            Location::Usb => self.fs_usb.as_ref(),
+        }
+    }
+
+    pub fn mount_mut(&mut self, location: Location) -> Option<&mut Mount> {
+        #[cfg(feature = "recovery-os")]
+        match location {
+            Location::Boot => self.fs_boot.as_mut(),
+            Location::System | Location::SystemAppData => Some(&mut self.fs_internal),
+            Location::AppData | Location::User | Location::EncryptedRoot | Location::Airlock => None,
+            Location::CommonAssets => self.fs_boot.as_mut(),
+            Location::Usb => self.fs_usb.as_mut(),
+        }
+        #[cfg(not(feature = "recovery-os"))]
+        match location {
+            Location::Boot => None,
+            Location::System | Location::SystemAppData | Location::CommonAssets => {
+                Some(&mut self.fs_internal)
             }
-            Location::Usb => self.fs_usb,
-        }
-    }
-
-    pub(crate) fn root_dir(&self, location: Location) -> Result<fatfs::Dir<'static, DynamicDisk>, Error> {
-        let fs = self.fs(location);
-        if fs.is_null() {
-            Err(Error::NoMedia)
-        } else {
-            Ok(unsafe { &*fs }.root_dir())
-        }
-    }
-
-    pub(crate) fn flush_fs(&self, location: Location) -> Result<(), Error> {
-        let fs = self.fs(location);
-        if fs.is_null() {
-            Err(Error::NoMedia)
-        } else {
-            Ok(unsafe { &*fs }.flush_disk()?)
-        }
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        unsafe {
-            Box::from_raw(self.fs_internal).unmount().ok();
-            if !self.fs_usb.is_null() {
-                Box::from_raw(self.fs_usb).unmount().ok();
-            }
-            #[cfg(not(feature = "recovery-os"))]
-            self.unmount_airlock().ok();
+            Location::AppData | Location::User | Location::EncryptedRoot => self.fs_user.as_mut(),
+            Location::Airlock => match &mut self.airlock {
+                AirlockState::Mounted(m) => Some(m),
+                _ => None,
+            },
+            Location::Usb => self.fs_usb.as_mut(),
         }
     }
 }
 
 #[derive(Debug, server::Message)]
 pub struct SubscriberDisconnected(pub xous::CID);
+
+#[derive(Debug, server::Message)]
+pub struct ProcessDisconnected;
+
+impl server::ScalarHandler<ProcessDisconnected> for Server {
+    fn handle(
+        &mut self,
+        _msg: ProcessDisconnected,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.fs_internal.clear_pid(sender);
+        #[cfg(feature = "recovery-os")]
+        if let Some(mount) = self.fs_boot.as_mut() {
+            mount.clear_pid(sender);
+        }
+        #[cfg(not(feature = "recovery-os"))]
+        if let Some(mount) = self.fs_user.as_mut() {
+            mount.clear_pid(sender);
+        }
+        if let Some(mount) = self.fs_usb.as_mut() {
+            mount.clear_pid(sender);
+        }
+        #[cfg(not(feature = "recovery-os"))]
+        if let AirlockState::Mounted(mount) = &mut self.airlock {
+            mount.clear_pid(sender);
+        }
+    }
+}
 
 fn system_disk() -> disk::DynamicDisk {
     #[cfg(not(keyos))]

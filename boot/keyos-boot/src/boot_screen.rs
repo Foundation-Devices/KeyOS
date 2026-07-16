@@ -147,7 +147,7 @@ pub(crate) fn show_boot_screen(initial_page: BootScreenPage) {
     let mut system_error_page = SystemErrorPage::new(false);
     let mut system_qr_code_page = SystemErrorPage::new(true);
 
-    let mut release_handled = false;
+    let mut touch_active = false;
     let mut needs_redraw = true;
 
     set_curr_page(initial_page);
@@ -195,10 +195,10 @@ pub(crate) fn show_boot_screen(initial_page: BootScreenPage) {
                         }
                     }
                     needs_redraw = true;
-                    release_handled = false;
+                    touch_active = true;
                 }
                 TouchKind::Release => {
-                    if !release_handled {
+                    if touch_active {
                         unsafe {
                             match CURR_PAGE {
                                 BootScreenPage::Menu => menu_page.on_release(x as i32, y as i32),
@@ -211,10 +211,22 @@ pub(crate) fn show_boot_screen(initial_page: BootScreenPage) {
                             }
                         }
                         needs_redraw = true;
-                        release_handled = true;
+                        touch_active = false;
                     }
                 }
                 TouchKind::Drag => {
+                    if !touch_active {
+                        unsafe {
+                            match CURR_PAGE {
+                                BootScreenPage::Menu => menu_page.on_press(x as i32, y as i32),
+                                BootScreenPage::SystemError => system_error_page.on_press(x as i32, y as i32),
+                                BootScreenPage::SystemQRCode => {
+                                    system_qr_code_page.on_press(x as i32, y as i32)
+                                }
+                            }
+                        }
+                        touch_active = true;
+                    }
                     unsafe {
                         // Only SystemError page needs custom drag handling for scrolling
                         if CURR_PAGE == BootScreenPage::SystemError {

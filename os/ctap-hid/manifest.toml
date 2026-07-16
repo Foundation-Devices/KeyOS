@@ -1,10 +1,11 @@
+manifestVersion = "0"
 appId = "0xa7a5a9ea2f27706e0a541bb463ab2240"
 
 [appName]
 en = "CTAPHID Server"
 
 [servers."os/ctap-hid"]
-ProcessHidPacket = { id = 0, type = "archive" }
+ProcessHidPacket = { id = 0, type = "blockingArchive" }
 RegisterSimuUsbReceiver = { id = 64, type = "blockingScalar", cfg = "feature = \"test-app\"" }
 
 [permissions]

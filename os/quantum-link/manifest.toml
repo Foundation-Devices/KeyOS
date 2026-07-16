@@ -1,21 +1,22 @@
+manifestVersion = "0"
 appId = "0x6f732f7175616e74756d2d6c696e6b00"
 syscall = ["SetThreadPriority"]
 memory = ["SECURAM"]
 extends = "../../api/quantum-link"
 
 [appName]
-en = "Bluetooth Service"
+en = "Quantum Link Service"
 
 [servers."os/quantum-link"]
 BtRecvWake = { id = 100, type = "scalar" }
-BtSendFailure = { id = 101, type = "move" }
-HeartbeatSendResult = { id = 102, type = "move" }
+BtSendFailure = { id = 101, type = "archive" }
+HeartbeatSendResult = { id = 102, type = "archive" }
 HeartbeatTick = { id = 103, type = "scalar" }
 
 [permissions]
 template = ["fs-generic"]
 "os/bt" = ["SubscribeBle", "SubscribeBleState", "SendBle", "GetState"]
-"os/power-manager" = ["StatusSubscribe"]
+"os/power-manager-ext" = ["StatusSubscribe"]
 "os/security" = ["GetDeviceId", "GetOsVersionInfo", "ScChallenge", "SignWithFidoKey", "GetSeedFingerprint", "IsPinSet"]
 "os/fs" = [
     "GetSystemAppDataReadAccess",
@@ -24,7 +25,11 @@ template = ["fs-generic"]
 "os/settings" = [
     "SubscribeEnvoyTimeSync",
     "SubscribeOnboardingStatus",
+    "SubscribeDeviceName",
     "GetPrimeColor",
     "GetOnboardingStatus",
+    "GetDeviceName",
+    "SetDeviceName",
 ]
 "os/update" = ["StartUpdate", "SubscribeUpdateProgress"]
+"os/ticktimer" = ["SetSystemTime"]

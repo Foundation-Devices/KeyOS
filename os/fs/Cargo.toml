@@ -24,6 +24,7 @@ lru = "0.13"
 num-derive = { workspace = true }
 num-traits = { workspace = true }
 rkyv = { workspace = true }
+security = { workspace = true }
 server = { workspace = true }
 xous = { workspace = true }
 xous-ipc = { workspace = true }
@@ -31,6 +32,7 @@ xous-names = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
 emmc = { path = "../emmc" }
+mbrs = "0.3.1"
 mass-storage-server = { path = "../mass-storage-server" }
 
 [lints.rust]

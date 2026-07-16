@@ -14,22 +14,25 @@ mod subscriptions;
 use std::sync::mpsc;
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use foundation_api::{
     backup::*,
-    bc_envelope::Envelope,
+    bc_components::ARID,
+    bc_envelope::{Envelope, EventBehavior, Expression},
     bc_xid::XIDDocument,
     bitcoin::{AccountUpdate, SignPsbt},
     dcbor::{CBOREncodable, CBOR},
     firmware::*,
-    fx::{ExchangeRate, ExchangeRateHistory},
+    fx::{ExchangeRate, ExchangeRateHistory, PrimeFiatPreference},
     message::{EnvoyMessage, PassportMessage, QuantumLinkMessage, PROTOCOL_VERSION},
     onboarding::OnboardingState,
-    pairing::PairingRequest,
+    pairing::{PairingRequest, UnpairingRequest},
     passport::PassportColor,
-    quantum_link::{ARIDCache, QuantumLink},
+    quantum_link::{ARIDCache, QlError, QuantumLink, ReplayCheck, EXPIRATION_DURATION},
     scv::{ChallengeResponseResult, SecurityCheck},
-    status::{DeviceStatus, EnvoyStatus, TimezoneRequest},
+    status::{DeviceNameUpdate, DeviceStatus, EnvoyStatus, TimezoneRequest},
 };
+use gstp::{SealedEvent, SealedEventBehavior};
 use log::debug;
 use quantum_link::{messages::*, PairingEvent, SecurityCheckState, SendMessageError};
 use security::OsVersionInfo;
@@ -38,7 +41,7 @@ use server::{
     ArchiveEventSubscriber, ArchiveRequest, Owned, ServerContext,
 };
 use settings::global::EnvoyTimeSync;
-use xous_ticktimer::{Ticktimer, TicktimerCallback};
+use xous_ticktimer::{TicktimerCallback, TicktimerPrivileged};
 
 use crate::{
     bt_rx_bridge::{BtReceptionBridge, BtRecvWake},
@@ -52,7 +55,7 @@ use crate::{
 
 fs::use_api!();
 bt::use_api!();
-power_manager::use_api!();
+power_manager::use_ext_api!();
 security::use_api!();
 settings::use_api!();
 
@@ -79,8 +82,9 @@ pub struct QuantumLinkServer {
     state: FileBacked<QuantumLinkState>,
     fs: FileSystem,
     security: Security,
+    settings: SettingsApi,
 
-    tick_timer: Ticktimer,
+    tick_timer: TicktimerPrivileged,
     last_time_seconds: u32,
     should_set_system_time: bool,
 
@@ -91,6 +95,7 @@ pub struct QuantumLinkServer {
     message_subscribers: MessageSubscribers,
     pending: PendingRequests,
 
+    last_received_name: Option<String>,
     pwr_state: Option<power_manager::Status>,
     os_version: Option<OsVersionInfo>,
 
@@ -99,6 +104,13 @@ pub struct QuantumLinkServer {
     heartbeat_cb: xous_ticktimer::TicktimerCallback,
     heartbeat_state: HeartbeatState,
     missed_heartbeats: u32,
+}
+
+struct UnsealedEnvoyMessage {
+    message: EnvoyMessage,
+    sender: XIDDocument,
+    arid: ARID,
+    expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Default, Clone, server::Permissions)]
@@ -112,13 +124,13 @@ impl server::Server for QuantumLinkServer {
         let mut bt = BluetoothApi::default();
         bt.subscribe_ble_state(context);
 
-        let pwr = PowerManagerApi::default();
+        let pwr = PowerManagerExtApi::default();
         pwr.subscribe_status(context);
 
         self.fs.subscribe_filesystem_events(context, fs::Location::AppData);
-        let settings = SettingsApi::default();
-        settings.server_subscribe_envoy_time_sync(context);
-        settings.server_subscribe_onboarding_status(context);
+        self.settings.server_subscribe_envoy_time_sync(context);
+        self.settings.server_subscribe_onboarding_status(context);
+        self.settings.server_subscribe_device_name(context);
     }
 }
 
@@ -133,7 +145,7 @@ impl QuantumLinkServer {
         bt_rx: std::sync::mpsc::Receiver<Vec<u8>>,
     ) -> Self {
         let bt_sender = start_ble_send_thread();
-        let tick_timer = Ticktimer::new().unwrap();
+        let tick_timer = TicktimerPrivileged::default();
         let heartbeat_cb = TicktimerCallback::new(sid).unwrap();
 
         Self {
@@ -141,6 +153,7 @@ impl QuantumLinkServer {
             state,
             fs: FileSystem::default(),
             security: Security::default(),
+            settings: SettingsApi::default(),
 
             tick_timer,
             last_time_seconds: 0,
@@ -156,6 +169,7 @@ impl QuantumLinkServer {
             message_subscribers: MessageSubscribers::default(),
 
             pending: PendingRequests::default(),
+            last_received_name: None,
             bt_rx,
 
             heartbeat_cb,
@@ -173,46 +187,117 @@ impl QuantumLinkServer {
         let cbor = CBOR::try_from_data(message).context("invalid cbor")?;
         let envelope = Envelope::try_from_cbor(cbor).context("invalid envelope")?;
 
-        let (envoy_message, sender) = EnvoyMessage::unseal_envoy_message_with_replay_check(
-            &envelope,
-            &self.state.guard().system_identity.private_keys,
-            &mut self.arid_cache,
-        )
-        .context("unseal envelope")?;
+        let unsealed = self.unseal_envoy_message(&envelope).context("unseal envelope")?;
+        let message = &unsealed.message.message;
+        let sender = &unsealed.sender;
+        let timestamp = unsealed.message.timestamp;
 
-        let time_seconds = envoy_message.timestamp;
-        let message = envoy_message.message;
-
-        // QL server itself needs to handle some messages
-        match message {
-            QuantumLinkMessage::PairingRequest(ref p) => {
-                log::info!("received pairing request");
-                log::info!("clearing last envoy timestamp seconds, previous={}s", self.last_time_seconds);
-                self.last_time_seconds = 0;
-
-                let event = PairingEvent::RequestReceived;
-                self.message_subscribers.pairing_event.send_nowait(&event);
-
-                match self.pair_device(p) {
-                    Ok(()) => {
-                        let event =
-                            PairingEvent::PairingComplete { device_name: p.device_name.clone(), new: true };
-                        self.message_subscribers.pairing_event.send_nowait(&event);
-                    }
-                    Err(e) => {
-                        log::error!("failed to pair device {e:?}");
-                        let event = PairingEvent::PairingFailed;
-                        self.message_subscribers.pairing_event.send_nowait(&event);
-                    }
-                }
-            }
-            _ => {}
+        if let QuantumLinkMessage::PairingRequest(p) = message {
+            return self.handle_pairing_request(p, sender, timestamp);
         }
 
-        if !self.is_paired(&sender) {
+        self.check_replay(&unsealed).context("replay check")?;
+
+        if !self.is_paired(sender) {
             anyhow::bail!("Not paired with this sender. Need to send a pairing request first.");
         }
 
+        self.sync_system_time(timestamp);
+
+        log_message("received message", &message);
+        self.dispatch_ql_message(unsealed.message.message);
+
+        Ok(())
+    }
+
+    fn handle_pairing_request(
+        &mut self,
+        request: &PairingRequest,
+        sender: &XIDDocument,
+        timestamp: u32,
+    ) -> anyhow::Result<()> {
+        if self.state.guard().paired_device.is_some() {
+            anyhow::bail!("Already paired. Pairing request ignored.");
+        }
+
+        log::info!("received pairing request");
+        log::info!("clearing last envoy timestamp seconds, previous={}s", self.last_time_seconds);
+        self.last_time_seconds = 0;
+
+        let event = PairingEvent::RequestReceived;
+        self.message_subscribers.pairing_event.send_nowait(&event);
+
+        let pair_result = (|| {
+            let xid_cbor = CBOR::try_from_data(request.clone().xid_document).context("invalid xid cbor")?;
+            let xid_document = XIDDocument::try_from(xid_cbor).context("invalid xid")?;
+            if &xid_document != sender {
+                anyhow::bail!("pairing request XID did not match envelope sender");
+            }
+
+            self.sync_system_time(timestamp);
+
+            self.state.guard().paired_device =
+                Some(PairedDevice { xid: xid_document, name: request.device_name.clone() });
+
+            self.send_pairing_response()
+        })();
+
+        match pair_result {
+            Ok(()) => {
+                let event =
+                    PairingEvent::PairingComplete { device_name: request.device_name.clone(), new: true };
+                self.message_subscribers.pairing_event.send_nowait(&event);
+                self.publish_device_name();
+                // Restart the heartbeat loop, which goes dead while unpaired.
+                self.missed_heartbeats = 0;
+                self.heartbeat_tick();
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("failed to pair device {e:?}");
+                let event = PairingEvent::PairingFailed;
+                self.message_subscribers.pairing_event.send_nowait(&event);
+                Err(e)
+            }
+        }
+    }
+
+    fn unseal_envoy_message(&mut self, envelope: &Envelope) -> anyhow::Result<UnsealedEnvoyMessage> {
+        let event: SealedEvent<Expression> = SealedEvent::try_from_envelope(
+            envelope,
+            None,
+            None,
+            &self.state.guard().system_identity.private_keys,
+        )?;
+        let expression = event.content().clone();
+        let expires_at = event.date().ok_or(QlError::MissingDate)?.datetime();
+        Ok(UnsealedEnvoyMessage {
+            message: EnvoyMessage::decode(&expression)?,
+            sender: event.sender().clone(),
+            arid: event.id(),
+            expires_at,
+        })
+    }
+
+    fn check_replay(&mut self, message: &UnsealedEnvoyMessage) -> Result<(), QlError> {
+        const CLOCK_SKEW_TOLERANCE: std::time::Duration = std::time::Duration::from_secs(30);
+        let now = Utc::now();
+        let expires_at = message.expires_at;
+        if now >= expires_at {
+            return Err(QlError::Expired);
+        }
+        if expires_at > now + EXPIRATION_DURATION + CLOCK_SKEW_TOLERANCE {
+            return Err(QlError::FutureDated);
+        }
+
+        match self.arid_cache.check_and_store(&message.arid, expires_at, now) {
+            ReplayCheck::Fresh => Ok(()),
+            ReplayCheck::Replay => Err(QlError::ReplayAttack),
+            ReplayCheck::Expired => Err(QlError::Expired),
+        }
+    }
+
+    fn sync_system_time(&mut self, time_seconds: u32) {
         if self.should_set_system_time
             // prevent time shifting backwards
             // until envoy deprecates "send message from file" pattern
@@ -220,15 +305,10 @@ impl QuantumLinkServer {
                 // if large time difference then overwrite
                 || time_seconds.abs_diff(self.last_time_seconds) > 60 * 10)
         {
-            let time_nanos = time_seconds as u64 * 1000_000_000;
+            let time_nanos = time_seconds as u64 * 1_000_000_000;
             self.tick_timer.set_system_time(time_nanos);
             self.last_time_seconds = time_seconds;
         }
-
-        log_message("received message", &message);
-        self.dispatch_ql_message(message);
-
-        Ok(())
     }
 
     fn send(&mut self, msg: QuantumLinkMessage, outcome: SendOutcome) -> Result<(), SendMessageError> {
@@ -261,16 +341,16 @@ impl QuantumLinkServer {
         let version_info =
             self.get_current_os_version().ok_or_else(|| anyhow::anyhow!("missing os version"))?;
 
-        let settings = SettingsApi::default();
-        let passport_color = match settings.get_prime_color() {
+        let passport_color = match self.settings.get_prime_color() {
             settings::global::SystemTheme::Dark => PassportColor::Dark,
             settings::global::SystemTheme::Light => PassportColor::Light,
         };
-        let onboarding_complete = match settings.get_onboarding_status() {
+        let onboarding_complete = match self.settings.get_onboarding_status() {
             Some(settings::global::OnboardingStatus::Complete) => true,
             _ => false,
         };
         let pin_set = self.security.is_pin_set().unwrap_or(false);
+        let device_name = self.settings.get_device_name().0;
 
         let response = foundation_api::pairing::PairingResponse {
             passport_model: PassportModel::Prime,
@@ -278,6 +358,7 @@ impl QuantumLinkServer {
             passport_serial: PassportSerial(device_id),
             passport_color,
             onboarding_complete: onboarding_complete && pin_set,
+            device_name: Some(device_name),
         };
 
         log::info!("sending pairing response {response:?}");
@@ -298,6 +379,10 @@ impl QuantumLinkServer {
             }
             QuantumLinkMessage::EnvoyStatus(status) => {
                 self.message_subscribers.envoy_status.send_nowait(&status);
+            }
+            QuantumLinkMessage::DeviceNameUpdate(update) => {
+                log::info!("received device name update: {}", update.device_name);
+                self.handle_inbound_device_name(update);
             }
             QuantumLinkMessage::SignPsbt(psbt) => {
                 self.message_subscribers.sign_psbt.send_nowait(&psbt);
@@ -360,7 +445,7 @@ impl QuantumLinkServer {
             }
             QuantumLinkMessage::CreateMagicBackupResult(result) => {
                 if let Some(request) = self.pending.create_magic_backup_result.take() {
-                    request.response.respond(result).ok();
+                    request.respond(result);
                 }
             }
             QuantumLinkMessage::RestoreMagicBackupEvent(event) => {
@@ -380,6 +465,7 @@ impl QuantumLinkServer {
                     request.respond(Ok(response));
                 }
             }
+            QuantumLinkMessage::UnpairingResponse(_) => {}
 
             QuantumLinkMessage::DeviceStatus(_)
             | QuantumLinkMessage::PairingResponse(_)
@@ -395,9 +481,11 @@ impl QuantumLinkServer {
             | QuantumLinkMessage::RestoreMagicBackupResult(_)
             | QuantumLinkMessage::ApplyPassphrase(_)
             | QuantumLinkMessage::PrimeMagicBackupEnabled(_)
+            | QuantumLinkMessage::PrimeFiatPreference(_)
             | QuantumLinkMessage::PrimeMagicBackupStatusRequest(_)
             | QuantumLinkMessage::UnpairingRequest(_)
-            | QuantumLinkMessage::UnpairingResponse(_)
+            | QuantumLinkMessage::MagicBackupRequestV2(_)
+            | QuantumLinkMessage::MagicBackupResponseV2(_)
             | QuantumLinkMessage::TimezoneRequest(_) => {
                 log::warn!("received spurious event message");
                 log::debug!("{msg:?}");
@@ -409,15 +497,23 @@ impl QuantumLinkServer {
         self.message_subscribers.firmware_fetch.send_nowait(&event);
     }
 
-    fn pair_device(&mut self, request: &PairingRequest) -> anyhow::Result<()> {
-        let xid_cbor = CBOR::try_from_data(request.clone().xid_document).context("invalid xid cbor")?;
-        let xid_document = XIDDocument::try_from(xid_cbor).context("invalid xid")?;
+    fn handle_inbound_device_name(&mut self, update: DeviceNameUpdate) {
+        self.last_received_name = Some(update.device_name.clone());
+        self.settings.set_device_name(settings::global::DeviceName(update.device_name));
+    }
 
-        self.state.guard().paired_device =
-            Some(PairedDevice { xid: xid_document, name: request.device_name.clone() });
-
-        self.send_pairing_response()?;
-        Ok(())
+    fn publish_device_name(&mut self) {
+        if self.state.guard().paired_device.is_none() {
+            return;
+        }
+        let device_name = self.settings.get_device_name().0;
+        if self.last_received_name.as_deref() == Some(device_name.as_str()) {
+            return;
+        }
+        let update = DeviceNameUpdate { device_name };
+        if let Err(e) = self.send(QuantumLinkMessage::DeviceNameUpdate(update), SendOutcome::Ignore) {
+            log::warn!("failed to publish device name {e:?}");
+        }
     }
 
     fn handle_security_challenge_request(&mut self, req: foundation_api::scv::ChallengeRequest) {
@@ -489,13 +585,13 @@ impl QuantumLinkServer {
     }
 }
 
-impl server::ArchiveHandler<GetXidDocument> for QuantumLinkServer {
+impl server::BlockingArchiveHandler<GetXidDocument> for QuantumLinkServer {
     fn handle(
         &mut self,
         _msg: GetXidDocument,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> <GetXidDocument as server::Archive>::Response {
+    ) -> <GetXidDocument as server::BlockingArchive>::Response {
         self.state.guard().system_identity.xid_document.to_cbor_data()
     }
 }
@@ -655,7 +751,7 @@ impl server::ScalarEventSubscriptionHandler<SubscribeConnectionStatus> for Quant
     }
 }
 
-impl server::ArchiveAsyncHandler<SendAccountUpdate> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendAccountUpdate> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<SendAccountUpdate>, _context: &mut ServerContext<Self>) {
         let update = &request.message;
         let ql_message = QuantumLinkMessage::AccountUpdate(foundation_api::bitcoin::AccountUpdate {
@@ -667,21 +763,23 @@ impl server::ArchiveAsyncHandler<SendAccountUpdate> for QuantumLinkServer {
         }
     }
 
-    fn default_response() -> <SendAccountUpdate as server::Archive>::Response {
+    fn default_response() -> <SendAccountUpdate as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<PublishPsbt> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<PublishPsbt> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<PublishPsbt>, _context: &mut ServerContext<Self>) {
         let quantum_link_message = QuantumLinkMessage::BroadcastTransaction(request.message.transaction);
         self.send(quantum_link_message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <PublishPsbt as server::Archive>::Response { Err(SendMessageError::Cancelled) }
+    fn default_response() -> <PublishPsbt as server::BlockingArchive>::Response {
+        Err(SendMessageError::Cancelled)
+    }
 }
 
-impl server::ArchiveAsyncHandler<EnvoyMagicBackupEnabled> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<EnvoyMagicBackupEnabled> for QuantumLinkServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<EnvoyMagicBackupEnabled>,
@@ -698,13 +796,13 @@ impl server::ArchiveAsyncHandler<EnvoyMagicBackupEnabled> for QuantumLinkServer 
         }
     }
 
-    fn default_response() -> <EnvoyMagicBackupEnabled as server::Archive>::Response {
+    fn default_response() -> <EnvoyMagicBackupEnabled as server::BlockingArchive>::Response {
         log::error!("failed to respond to magic backup enabled request");
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<CheckFirmwareUpdate> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<CheckFirmwareUpdate> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<CheckFirmwareUpdate>, _context: &mut ServerContext<Self>) {
         let current_version = match self.get_current_os_version() {
             Some(version) => version,
@@ -724,13 +822,13 @@ impl server::ArchiveAsyncHandler<CheckFirmwareUpdate> for QuantumLinkServer {
         }
     }
 
-    fn default_response() -> <CheckFirmwareUpdate as server::Archive>::Response {
+    fn default_response() -> <CheckFirmwareUpdate as server::BlockingArchive>::Response {
         log::error!("failed to respond to firmware check request");
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<StartFirmwareUpdate> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<StartFirmwareUpdate> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<StartFirmwareUpdate>, _context: &mut ServerContext<Self>) {
         let current_version = match self.get_current_os_version() {
             Some(version) => version,
@@ -751,12 +849,12 @@ impl server::ArchiveAsyncHandler<StartFirmwareUpdate> for QuantumLinkServer {
         self.pending.update_start = Some(PendingRequest::new(request));
     }
 
-    fn default_response() -> <StartFirmwareUpdate as server::Archive>::Response {
+    fn default_response() -> <StartFirmwareUpdate as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<BackupShard> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<BackupShard> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<BackupShard>, _context: &mut ServerContext<Self>) {
         let shard = Shard(backup_shard::Shard::encode(&request.message.shard));
         let backup_request = BackupShardRequest { shard };
@@ -770,16 +868,18 @@ impl server::ArchiveAsyncHandler<BackupShard> for QuantumLinkServer {
         self.pending.backup_shard = Some(PendingRequest::new(request));
     }
 
-    fn default_response() -> <BackupShard as server::Archive>::Response {
+    fn default_response() -> <BackupShard as server::BlockingArchive>::Response {
         log::info!("failed to respond to backup shard request");
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<RestoreShard> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<RestoreShard> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<RestoreShard>, _context: &mut ServerContext<Self>) {
-        let restore_request =
-            RestoreShardRequest { seed_fingerprint: request.message.seed_fingerprint.clone() };
+        let restore_request = RestoreShardRequest {
+            seed_fingerprint: request.message.seed_fingerprint.clone(),
+            timestamp: Some(request.message.timestamp),
+        };
         let message = QuantumLinkMessage::RestoreShardRequest(restore_request);
 
         if let Err(e) = self.send(message, SendOutcome::NotifyOnFailure(PendingRequestKind::RestoreShard)) {
@@ -790,21 +890,23 @@ impl server::ArchiveAsyncHandler<RestoreShard> for QuantumLinkServer {
         self.pending.restore_shard = Some(PendingRequest::new(request));
     }
 
-    fn default_response() -> <RestoreShard as server::Archive>::Response { Err(SendMessageError::Cancelled) }
+    fn default_response() -> <RestoreShard as server::BlockingArchive>::Response {
+        Err(SendMessageError::Cancelled)
+    }
 }
 
-impl server::ArchiveAsyncHandler<NotifyOnboardingState> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<NotifyOnboardingState> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<NotifyOnboardingState>, _context: &mut ServerContext<Self>) {
         let message = QuantumLinkMessage::OnboardingState(request.message.state);
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <NotifyOnboardingState as server::Archive>::Response {
+    fn default_response() -> <NotifyOnboardingState as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<SendApplyPassphrase> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendApplyPassphrase> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<SendApplyPassphrase>, _context: &mut ServerContext<Self>) {
         let message = QuantumLinkMessage::ApplyPassphrase(foundation_api::bitcoin::ApplyPassphrase {
             fingerprint: request.message.fingerprint,
@@ -812,34 +914,34 @@ impl server::ArchiveAsyncHandler<SendApplyPassphrase> for QuantumLinkServer {
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <SendApplyPassphrase as server::Archive>::Response {
+    fn default_response() -> <SendApplyPassphrase as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<NotifyFirmwareInstall> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<NotifyFirmwareInstall> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<NotifyFirmwareInstall>, _context: &mut ServerContext<Self>) {
         let message = QuantumLinkMessage::FirmwareInstallEvent(request.message.event);
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <NotifyFirmwareInstall as server::Archive>::Response {
+    fn default_response() -> <NotifyFirmwareInstall as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<SendMagicBackupEvent> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendMagicBackupEvent> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<SendMagicBackupEvent>, _context: &mut ServerContext<Self>) {
         let message = QuantumLinkMessage::CreateMagicBackupEvent(request.message.event);
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <SendMagicBackupEvent as server::Archive>::Response {
+    fn default_response() -> <SendMagicBackupEvent as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<SendRestoreMagicBackupResult> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendRestoreMagicBackupResult> for QuantumLinkServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<SendRestoreMagicBackupResult>,
@@ -849,31 +951,32 @@ impl server::ArchiveAsyncHandler<SendRestoreMagicBackupResult> for QuantumLinkSe
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <SendRestoreMagicBackupResult as server::Archive>::Response {
+    fn default_response() -> <SendRestoreMagicBackupResult as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<AwaitCreateMagicBackupResult> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<AwaitCreateMagicBackupResult> for QuantumLinkServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<AwaitCreateMagicBackupResult>,
         _context: &mut ServerContext<Self>,
     ) {
-        self.pending.create_magic_backup_result = Some(request);
+        self.pending.create_magic_backup_result = Some(PendingRequest::new(request));
     }
 
-    fn default_response() -> <AwaitCreateMagicBackupResult as server::Archive>::Response {
+    fn default_response() -> <AwaitCreateMagicBackupResult as server::BlockingArchive>::Response {
         log::error!("failed to respond to AwaitCreateMagicBackupResult");
         CreateMagicBackupResult::Error { error: String::from("cancelled") }
     }
 }
 
-impl server::ArchiveAsyncHandler<MagicBackupStatus> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<MagicBackupStatus> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<MagicBackupStatus>, _context: &mut ServerContext<Self>) {
         let Some(seed_fingerprint) = self.get_seed_fingerprint() else { return };
         let msg = QuantumLinkMessage::PrimeMagicBackupStatusRequest(PrimeMagicBackupStatusRequest {
             seed_fingerprint: SeedFingerprint(seed_fingerprint),
+            timestamp: None,
         });
         match self.send(msg, SendOutcome::NotifyOnFailure(PendingRequestKind::MagicBackupStatus)) {
             Ok(()) => {
@@ -885,13 +988,13 @@ impl server::ArchiveAsyncHandler<MagicBackupStatus> for QuantumLinkServer {
         }
     }
 
-    fn default_response() -> <MagicBackupStatus as server::Archive>::Response {
+    fn default_response() -> <MagicBackupStatus as server::BlockingArchive>::Response {
         log::error!("failed to respond to MagicBackupStatus");
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<StartRestoreMagicBackup> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<StartRestoreMagicBackup> for QuantumLinkServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<StartRestoreMagicBackup>,
@@ -914,29 +1017,37 @@ impl server::ArchiveAsyncHandler<StartRestoreMagicBackup> for QuantumLinkServer 
         }
     }
 
-    fn default_response() -> <StartRestoreMagicBackup as server::Archive>::Response {
+    fn default_response() -> <StartRestoreMagicBackup as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveHandler<ClearPairedDevice> for QuantumLinkServer {
-    fn handle(
-        &mut self,
-        _msg: ClearPairedDevice,
-        _sender: xous::PID,
-        _context: &mut ServerContext<Self>,
-    ) -> <ClearPairedDevice as server::Archive>::Response {
-        log::info!("Clearing paired device");
+impl server::BlockingArchiveAsyncHandler<UnpairFromEnvoy> for QuantumLinkServer {
+    fn handle(&mut self, request: ArchiveRequest<UnpairFromEnvoy>, _context: &mut ServerContext<Self>) {
+        if self.state.guard().paired_device.is_none() {
+            request.response.respond(Ok(())).ok();
+            return;
+        }
+
+        // only until ble send, no ack required
+        self.send(
+            QuantumLinkMessage::UnpairingRequest(UnpairingRequest {}),
+            SendOutcome::Respond(request.response),
+        )
+        .ok();
 
         self.state.guard().paired_device = None;
+        self.last_received_name = None;
         self.set_heartbeat_state(|h| *h = HeartbeatState::DEAD);
+        self.message_subscribers.pairing_event.send_nowait(&PairingEvent::Disconnected);
+    }
 
-        let event = PairingEvent::Disconnected;
-        self.message_subscribers.pairing_event.send_nowait(&event);
+    fn default_response() -> <UnpairFromEnvoy as server::BlockingArchive>::Response {
+        Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::ArchiveAsyncHandler<SendPrimeMagicBackupEnabled> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendPrimeMagicBackupEnabled> for QuantumLinkServer {
     fn handle(
         &mut self,
         request: ArchiveRequest<SendPrimeMagicBackupEnabled>,
@@ -951,12 +1062,28 @@ impl server::ArchiveAsyncHandler<SendPrimeMagicBackupEnabled> for QuantumLinkSer
         self.send(message, SendOutcome::Respond(request.response)).ok();
     }
 
-    fn default_response() -> <SendRestoreMagicBackupResult as server::Archive>::Response {
+    fn default_response() -> <SendRestoreMagicBackupResult as server::BlockingArchive>::Response {
         Err(SendMessageError::Cancelled)
     }
 }
 
-impl server::MoveHandler<BtSendFailure> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<SendPrimeFiatPreference> for QuantumLinkServer {
+    fn handle(
+        &mut self,
+        request: ArchiveRequest<SendPrimeFiatPreference>,
+        _context: &mut ServerContext<Self>,
+    ) {
+        let message = PrimeFiatPreference { currency_code: request.message.currency_code.clone() };
+        let message = QuantumLinkMessage::PrimeFiatPreference(message);
+        self.send(message, SendOutcome::Respond(request.response)).ok();
+    }
+
+    fn default_response() -> <SendPrimeFiatPreference as server::BlockingArchive>::Response {
+        Err(SendMessageError::Cancelled)
+    }
+}
+
+impl server::ArchiveHandler<BtSendFailure> for QuantumLinkServer {
     fn handle(
         &mut self,
         failure: Owned<BtSendFailure>,
@@ -1066,6 +1193,17 @@ impl server::ArchiveEventHandler<settings::global::OnboardingStatus> for Quantum
     }
 }
 
+impl server::ArchiveEventHandler<settings::global::DeviceName> for QuantumLinkServer {
+    fn handle(
+        &mut self,
+        _msg: Owned<settings::global::DeviceName>,
+        _sender: xous::PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        self.publish_device_name();
+    }
+}
+
 impl server::ScalarEventHandler<EnvoyTimeSync> for QuantumLinkServer {
     fn handle(&mut self, msg: EnvoyTimeSync, _sender: PID, _context: &mut ServerContext<Self>) {
         self.should_set_system_time = msg.0;
@@ -1088,10 +1226,11 @@ impl server::ScalarHandler<BtRecvWake> for QuantumLinkServer {
 impl server::ScalarHandler<HeartbeatTick> for QuantumLinkServer {
     fn handle(&mut self, _msg: HeartbeatTick, _sender: PID, _context: &mut ServerContext<Self>) {
         self.heartbeat_tick();
+        self.pending.cleanup_expired();
     }
 }
 
-impl server::MoveHandler<HeartbeatSendResult> for QuantumLinkServer {
+impl server::ArchiveHandler<HeartbeatSendResult> for QuantumLinkServer {
     fn handle(
         &mut self,
         result: Owned<HeartbeatSendResult>,
@@ -1103,7 +1242,7 @@ impl server::MoveHandler<HeartbeatSendResult> for QuantumLinkServer {
     }
 }
 
-impl server::ArchiveAsyncHandler<EnvoyTimezone> for QuantumLinkServer {
+impl server::BlockingArchiveAsyncHandler<EnvoyTimezone> for QuantumLinkServer {
     fn handle(&mut self, request: ArchiveRequest<EnvoyTimezone>, _context: &mut ServerContext<Self>) {
         let message = QuantumLinkMessage::TimezoneRequest(TimezoneRequest {});
 
@@ -1115,7 +1254,9 @@ impl server::ArchiveAsyncHandler<EnvoyTimezone> for QuantumLinkServer {
         self.pending.timezone = Some(PendingRequest::new(request));
     }
 
-    fn default_response() -> <EnvoyTimezone as server::Archive>::Response { Err(SendMessageError::Cancelled) }
+    fn default_response() -> <EnvoyTimezone as server::BlockingArchive>::Response {
+        Err(SendMessageError::Cancelled)
+    }
 }
 
 fn log_message(prefix: &str, msg: &QuantumLinkMessage) {
@@ -1146,6 +1287,9 @@ fn log_message(prefix: &str, msg: &QuantumLinkMessage) {
         }
         QuantumLinkMessage::DeviceStatus(_) => {
             log::info!("{prefix} DeviceStatus");
+        }
+        QuantumLinkMessage::DeviceNameUpdate(_) => {
+            log::info!("{prefix} DeviceNameUpdate");
         }
         QuantumLinkMessage::EnvoyStatus(_) => {
             log::info!("{prefix} EnvoyStatus");
@@ -1227,6 +1371,15 @@ fn log_message(prefix: &str, msg: &QuantumLinkMessage) {
         }
         QuantumLinkMessage::UnpairingResponse(_) => {
             log::info!("{prefix} UnpairingResponse")
+        }
+        QuantumLinkMessage::MagicBackupRequestV2(_) => {
+            log::info!("{prefix} MagicBackupRequestV2")
+        }
+        QuantumLinkMessage::MagicBackupResponseV2(_) => {
+            log::info!("{prefix} MagicBackupResponseV2")
+        }
+        QuantumLinkMessage::PrimeFiatPreference(_) => {
+            log::info!("{prefix} PrimeFiatPreference")
         }
     }
 }

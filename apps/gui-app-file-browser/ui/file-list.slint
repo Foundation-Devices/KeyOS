@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: © 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Icon, RadioButton, Shimmer, TextMd, TextSm } from "@ui/widgets.slint";
-import { Palette, Size } from "@ui/theme.slint";
+import { ListView } from "std-widgets.slint";
+
+import { Icon, RadioButton, Shimmer, TextMd, TextSm, HeadingMd, TimerCircularProgress, JumboIcon, Button } from "@ui/widgets.slint";
+import { Palette, Size, IconSize, Importance } from "@ui/theme.slint";
+import { TR2, TrId } from "gen/tr.slint";
+import { CurrentTheme } from "@ui/theme.slint";
 
 export struct FileEntryModel {
     name: string,
@@ -11,15 +15,27 @@ export struct FileEntryModel {
     is-selected: bool,
 }
 
+export enum FileListType {
+    Loading,
+    FileList,
+    GeneralError,
+    AirlockUsb,
+    UsbNotConnected,
+    NotFormatted,
+    Formatting,
+    FormatSuccessful,
+    FormatFailed,
+}
+
 export struct FileListData {
-    loading: bool,
-    error: bool,
-    num-files-filtered: int,
+    is-airlock: bool,
+    list-type: FileListType,
+    num-files-excluded: int,
+    num-files-excluded-by-search: int,
     files: [FileEntryModel],
 }
 
-
-component FileEntry {
+component FileEntry inherits Rectangle {
     in property <string> name;
     in property <string> info;
     in property <bool> is-folder;
@@ -27,93 +43,68 @@ component FileEntry {
     in property <bool> is-last;
     in property <bool> is-select-mode;
     in property <bool> is-selected;
-    in property <bool> is-loading;
-    in property <int> loading-phase;
-
-    min-width: i-layout.min-width;
-    min-height: max(Size.sz16, i-layout.min-height);
-    vertical-stretch: 0;
-    horizontal-stretch: 1;
+    in property <bool> enabled: true;
 
     states [
-        pressed when root.is-pressed: {
-            i-background.background: Palette.background-primary.mix(black, 0.8);
+        pressed when root.is-pressed && root.enabled: {
+            background: Palette.background-primary.mix(black, 0.8);
         }
     ]
 
-    i-background := Rectangle {
-        height: root.height - 1px;
+    HorizontalLayout {
+        padding-left: Size.sz3;
+        spacing: Size.sz4;
 
-        i-layout := HorizontalLayout {
-            padding-left: Size.sz3;
-            spacing: Size.sz4;
-
-            if root.is-select-mode: VerticalLayout {
-                vertical-stretch: 1;
-                alignment: center;
-                RadioButton {
-                    checked: root.is-selected;
-                    controlled: true;
-                }
+        if root.is-select-mode: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            RadioButton {
+                checked: root.is-selected;
+                controlled: true;
             }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                name: root.is-folder ? "folder" : "file";
+                color: root.enabled ? Palette.content-lightcopper-brand : Palette.content-disabled;
+                size: Size.sz10 + Size.sz0_5;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            padding-top: Size.sz5;
+            padding-bottom: Size.sz5;
+            padding-right: Size.sz5;
 
             VerticalLayout {
                 alignment: center;
-                Icon {
-                    name: root.is-folder ? "folder" : "file";
-                    color: Palette.content-lightcopper-brand;
-                    size: Size.sz12;
+
+                TextMd {
+                    text: root.name;
+                    color: root.enabled ? Palette.content-primary : Palette.content-disabled;
+                }
+
+                if root.info != "": TextSm {
+                    text: root.info;
+                    color: root.enabled ? Palette.content-tertiary : Palette.content-disabled;
                 }
             }
 
-            HorizontalLayout {
-                spacing: 16px;
-                padding-top: Size.sz5;
-                padding-bottom: Size.sz5;
-                padding-right: Size.sz5;
-
-                if !root.is-loading: VerticalLayout {
-                    alignment: center;
-
-                    TextMd {
-                        text: root.name;
-                        color: Palette.content-primary;
-                    }
-
-                    if root.info != "": TextSm {
-                        text: root.info;
-                        color: Palette.content-tertiary;
-                    }
-                }
-
-                if root.is-loading: VerticalLayout {
-                    alignment: center;
-
-                    Shimmer {
-                        width: 100%;
-                        height: Size.sz6;
-                        starting-step: root.loading-phase;
-                        Rectangle {
-                            border-radius: Size.sz6;
-                            padding: Size.sz2;
-                            background: Palette.content-tertiary.brighter(50%);
-                        }
-                    }
-                }
-
-                if root.is-folder && !root.is-loading: VerticalLayout {
-                    alignment: center;
-                    Icon {
-                        name: "chevron-right";
-                        size: Size.sz6;
-                    }
+            if root.is-folder: VerticalLayout {
+                alignment: center;
+                Icon {
+                    name: "chevron-right";
+                    size: Size.sz6;
                 }
             }
         }
     }
 
     if !is-last: Rectangle {
-        y: i-background.height;
+        y: root.height - 1px;
         height: 1px;
         width: root.width;
         background: Palette.content-tertiary;
@@ -122,58 +113,109 @@ component FileEntry {
     @children
 }
 
-export component FileList inherits Flickable {
+component FileLoadingEntry inherits Rectangle {
+    in property <bool> is-folder;
+    in property <bool> is-last;
+    in property <bool> is-loading;
+    in property <int> loading-phase;
+
+    HorizontalLayout {
+        padding-left: Size.sz3;
+        padding-right: Size.sz6;
+        spacing: Size.sz4;
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                name: root.is-folder ? "folder" : "file";
+                color: Palette.content-lightcopper-brand;
+                size: Size.sz10 + Size.sz0_5;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            padding-top: Size.sz5;
+            padding-bottom: Size.sz5;
+            padding-right: Size.sz5;
+
+            VerticalLayout {
+                alignment: center;
+
+                Shimmer {
+                    width: 100%;
+                    height: Size.sz6;
+                    starting-step: root.loading-phase;
+                    Rectangle {
+                        border-radius: Size.sz6;
+                        padding: Size.sz2;
+                        background: Palette.content-tertiary.brighter(50%);
+                    }
+                }
+            }
+        }
+    }
+
+    if !is-last: Rectangle {
+        y: root.height - 1px;
+        height: 1px;
+        width: root.width;
+        background: Palette.content-tertiary;
+    }
+}
+
+export component FileListInner inherits ListView {
     in property <[FileEntryModel]> model;
     in property <bool> is-select-mode;
+    in property <bool> are-files-allowed: true;
     in property <bool> long-press-enabled: true;
     in property <duration> long-press-delay: 0.6s;
 
     callback entry-pressed(name: string, is-folder: bool);
     callback entry-long-pressed(name: string, is-folder: bool);
 
-    VerticalLayout {
-        alignment: start;
+    mouse-drag-pan-enabled: true;
 
-        for item[index] in model: FileEntry {
-            height: self.min-height;
-            name: item.name;
-            info: item.info;
-            is-folder: item.is-folder;
-            is-pressed: i-touch-area.pressed;
-            is-last: index == model.length - 1;
-            is-select-mode: root.is-select-mode;
-            is-selected: item.is-selected;
+    for item[index] in model: entry := FileEntry {
+        name: item.name;
+        info: item.info;
+        is-folder: item.is-folder;
+        is-pressed: i-touch-area.pressed;
+        is-last: index == model.length - 1;
+        is-select-mode: root.is-select-mode;
+        is-selected: item.is-selected;
+        enabled: root.are-files-allowed || item.is-folder;
 
-            property <bool> long-press-armed: false;
-            property <bool> long-press-fired: false;
+        property <bool> long-press-armed: false;
+        property <bool> long-press-fired: false;
 
-            i-touch-area := TouchArea {
-                pointer-event(event) => {
-                    if (event.kind == PointerEventKind.down) {
-                        long-press-fired = false;
-                        if (!root.is-select-mode && root.long-press-enabled) {
-                            long-press-armed = true;
-                        }
-                    } else if (event.kind == PointerEventKind.up) {
-                        long-press-armed = false;
-                        if (!long-press-fired) {
-                            root.entry-pressed(item.name, item.is-folder);
-                        }
-                    } else if (event.kind == PointerEventKind.cancel) {
-                        long-press-armed = false;
+        i-touch-area := TouchArea {
+            enabled: entry.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    long-press-fired = false;
+                    if (!root.is-select-mode && root.long-press-enabled) {
+                        long-press-armed = true;
                     }
+                } else if (event.kind == PointerEventKind.up) {
+                    long-press-armed = false;
+                    if (!long-press-fired) {
+                        root.entry-pressed(item.name, item.is-folder);
+                    }
+                } else if (event.kind == PointerEventKind.cancel) {
+                    long-press-armed = false;
                 }
             }
+        }
 
-            Timer {
-                interval: root.long-press-delay;
-                running: long-press-armed;
+        Timer {
+            interval: root.long-press-delay;
+            running: long-press-armed;
 
-                triggered() => {
-                    long-press-armed = false;
-                    long-press-fired = true;
-                    root.entry-long-pressed(item.name, item.is-folder);
-                }
+            triggered() => {
+                long-press-armed = false;
+                long-press-fired = true;
+                root.entry-long-pressed(item.name, item.is-folder);
             }
         }
     }
@@ -185,14 +227,265 @@ export component FileListLoading inherits Flickable {
 
     VerticalLayout {
         alignment: start;
-        for i in loading-items: FileEntry {
-            height: self.min-height;
+        for i in loading-items: FileLoadingEntry {
             is-folder: i == 0 && root.are-folders-allowed;
             is-last: i == loading-items.length - 1;
             is-loading: true;
 
             // Make the loaders out of phase with each other
             loading-phase: root.are-folders-allowed ? 3 - i : 2 - i;
+        }
+    }
+}
+
+component FormatAlert inherits VerticalLayout {
+    in property <string> heading;
+    in property <string> line1;
+    in property <string> line2;
+    in property <string> icon;
+    in property <string> button-text;
+    in property <string> button-icon;
+    in property <bool> button-loading;
+    callback button-clicked();
+
+    spacing: Size.sz10;
+    padding-top: Size.sz16;
+    padding-left: Size.sz4;
+    padding-right: Size.sz4;
+    padding-bottom: Size.sz6;
+    vertical-stretch: 1;
+
+    HorizontalLayout {
+        alignment: center;
+        if root.icon != "": JumboIcon {
+            Icon {
+                name: root.icon;
+                size: IconSize.px96;
+                color: Palette.content-brand;
+            }
+        }
+        if root.icon == "": TimerCircularProgress {
+            size: IconSize.px184;
+            indeterminate: true;
+        }
+    }
+
+    VerticalLayout {
+        spacing: Size.sz5;
+        if root.heading != "": HeadingMd {
+            text: root.heading;
+            horizontal-alignment: center;
+        }
+        TextSm {
+            text: root.line1;
+            color: Palette.content-secondary;
+            horizontal-alignment: center;
+        }
+
+        if root.line2 != "": TextSm {
+            text: root.line2;
+            color: Palette.content-notice;
+            horizontal-alignment: center;
+        }
+    }
+
+    Rectangle { }
+
+    if root.button-text != "": HorizontalLayout {
+        alignment: center;
+        Button {
+            width: 100%;
+            label: root.button-text;
+            icon: root.button-icon;
+            enabled: !root.button-loading;
+            loading: root.button-loading;
+            importance: Importance.primary;
+            clicked => {
+                root.button-clicked();
+            }
+        }
+    }
+}
+
+export component FileList inherits VerticalLayout {
+    in property <bool> long-press-enabled: false;
+    in property <FileListData> file-list;
+    in property <bool> is-select-mode;
+    in property <bool> are-files-allowed: true;
+    in property <bool> are-folders-allowed: true;
+    in property <bool> format-allowed: false;
+    in property <bool> compact-airlock-usb: false;
+
+    y: 0px;
+    spacing: Size.sz6 - 2px;
+
+    callback entry-pressed(name: string, is-folder: bool);
+    callback entry-long-pressed(name: string, is-folder: bool);
+
+    callback format-clicked();
+    callback format-ok-acknowledged();
+
+    pure function empty-message() -> string {
+        if (root.file-list.num-files-excluded == 0) {
+            return TR2.lookup(TrId.EmptyFolderEmpty);
+        }
+        if (root.file-list.num-files-excluded-by-search > 0) {
+            if (root.file-list.num-files-excluded-by-search == 1) {
+                return TR2.lookup(TrId.EmptyNoMatchingFiles) + TR2.lookup(TrId.EmptyOneFileFiltered);
+            }
+            return TR2.lookup(TrId.EmptyNoMatchingFiles) + TR2.format(TrId.EmptyFilesFiltered, [root.file-list.num-files-excluded-by-search]);
+        }
+        return TR2.lookup(TrId.EmptyNoMatchingFiles);
+    }
+
+    @children
+
+    if file-list.list-type == FileListType.FileList && file-list.files.length != 0: FileListInner {
+        model: root.file-list.files;
+        is-select-mode: root.is-select-mode;
+        are-files-allowed: root.are-files-allowed;
+        long-press-enabled: root.long-press-enabled;
+        entry-pressed(name, is-folder) => {
+            root.entry-pressed(name, is-folder)
+        }
+        entry-long-pressed(name, is-folder) => {
+            root.entry-long-pressed(name, is-folder)
+        }
+    }
+    if file-list.list-type == FileListType.FileList && file-list.files.length == 0: VerticalLayout {
+        height: parent.height;
+        padding: Size.sz6;
+        vertical-stretch: 1;
+
+        HorizontalLayout {
+            alignment: center;
+            TextSm {
+                text: root.empty-message();
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    if file-list.list-type == FileListType.Loading: FileListLoading {
+        are-folders-allowed: root.are-folders-allowed;
+    }
+
+    if file-list.list-type == FileListType.GeneralError: VerticalLayout {
+        height: parent.height;
+        padding: Size.sz6;
+
+        HorizontalLayout {
+            alignment: center;
+            TextSm {
+                text: TR2.lookup(TrId.ErrorContent);
+                color: Palette.content-notice;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    if file-list.list-type == FileListType.AirlockUsb && !root.compact-airlock-usb: VerticalLayout {
+        alignment: start;
+        spacing: Size.sz10;
+        padding-top: Size.sz16;
+        vertical-stretch: 1;
+
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                width: 424px;
+                height: 184px;
+                source: CurrentTheme.is-dark ? @image-url("images/airlock-mounted-dark.png") : @image-url("images/airlock-mounted.png");
+            }
+        }
+
+        HeadingMd {
+            text: TR2.lookup(TrId.AirlockUSBHeader);
+            horizontal-alignment: center;
+        }
+    }
+
+    if file-list.list-type == FileListType.AirlockUsb && root.compact-airlock-usb: VerticalLayout {
+        alignment: start;
+        spacing: Size.sz4;
+        padding-top: Size.sz12;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        vertical-stretch: 1;
+
+        HorizontalLayout {
+            alignment: center;
+            Icon {
+                name: "info";
+                size: Size.sz8;
+                color: Palette.content-tertiary;
+            }
+        }
+
+        TextSm {
+            text: TR2.lookup(TrId.AirlockDisabledContent);
+            color: Palette.content-tertiary;
+            horizontal-alignment: center;
+        }
+    }
+
+    if file-list.list-type == FileListType.UsbNotConnected: VerticalLayout {
+        alignment: start;
+        spacing: Size.sz10;
+        padding-top: Size.sz16;
+        vertical-stretch: 1;
+
+        HorizontalLayout {
+            alignment: center;
+
+            TimerCircularProgress {
+                size: IconSize.px184;
+                indeterminate: true;
+            }
+        }
+
+        HeadingMd {
+            text: TR2.lookup(TrId.ExternalHeader);
+            horizontal-alignment: center;
+        }
+    }
+
+    if file-list.list-type == FileListType.NotFormatted: FormatAlert {
+        heading: root.format-allowed ? root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageHeader) : TR2.lookup(TrId.ExternalFormatStorageHeader) : "";
+        line1: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageContent) : TR2.lookup(TrId.ExternalFormatStorageContent);
+        line2: root.format-allowed ? root.file-list.is-airlock ? "" : TR2.lookup(TrId.ExternalFormatStorageContentWarning) : "";
+        icon: "alert";
+        button-text: root.format-allowed ? root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFormatAirlock) : TR2.lookup(TrId.ExternalFormatStorageFormatStorage) : "";
+        button-icon: "alert";
+        button-clicked => {
+            if root.format-allowed {
+                root.format-clicked()
+            }
+        }
+    }
+    if file-list.list-type == FileListType.Formatting: FormatAlert {
+        heading: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFormattingHeader) : TR2.lookup(TrId.ExternalFormatStorageFormattingHeader);
+        line1: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFormattingContent) : TR2.lookup(TrId.ExternalFormatStorageFormattingContent);
+        button-text: TR2.lookup(TrId.ExternalFormatStorageFormattingFormatting);
+        button-loading: true;
+    }
+    if file-list.list-type == FileListType.FormatSuccessful: FormatAlert {
+        heading: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageSuccessHeader) : TR2.lookup(TrId.ExternalFormatStorageSuccessHeader);
+        line1: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageSuccessContent) : TR2.lookup(TrId.ExternalFormatStorageSuccessContent);
+        icon: "check";
+        button-text: TR2.lookup(TrId.CommonButtonDone);
+        button-clicked => {
+            root.format-ok-acknowledged()
+        }
+    }
+    if file-list.list-type == FileListType.FormatFailed: FormatAlert {
+        heading: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFailedHeader) : TR2.lookup(TrId.ExternalFormatStorageFailedHeader);
+        line1: root.file-list.is-airlock ? TR2.lookup(TrId.AirlockFormatStorageFailedContent) : TR2.lookup(TrId.ExternalFormatStorageFailedContent);
+        icon: "close";
+        button-text: TR2.lookup(TrId.CommonButtonRetry);
+        button-clicked => {
+            root.format-clicked()
         }
     }
 }

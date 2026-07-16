@@ -46,14 +46,15 @@ fn derive_server(item: syn::Item, manifest: &Manifest) -> Result<proc_macro2::To
         .map(|(message_type, definition)| {
             let message_ident = syn::Ident::new(message_type, item.span());
             let handler = match definition.r#type {
-                MessageType::Move => "handle_move_message",
                 MessageType::Archive => "handle_archive_message",
+                MessageType::BlockingArchive => "handle_blocking_archive_message",
                 MessageType::ArchiveEvent => "handle_archive_subscription",
                 MessageType::Scalar => "handle_scalar_message",
                 MessageType::BlockingScalar => "handle_blocking_scalar_message",
                 MessageType::ScalarEvent => "handle_scalar_subscription",
                 MessageType::LendMut => "handle_lend_mut",
                 MessageType::DeferredLendMut => "handle_deferred_lend_mut",
+                MessageType::Move => "handle_move",
             };
             let handler = syn::Ident::new(handler, item.span());
             let cfg_attr = if let Some(cfg) = &definition.cfg {
@@ -198,22 +199,22 @@ fn derive_message(item: syn::Item, manifest: &ApiManifest) -> Result<proc_macro2
     }
     let id = msg.id;
     let impl_trait = match msg.r#type {
-        MessageType::Move => {
+        MessageType::Archive => {
             unused_attr!(response);
             unused_attr!(event);
             unused_attr!(error);
 
             quote! {
-                impl server::Move for #ident {};
+                impl server::Archive for #ident {};
             }
         }
-        MessageType::Archive => {
+        MessageType::BlockingArchive => {
             let response = used_attr!(response);
             unused_attr!(event);
             unused_attr!(error);
 
             quote! {
-                impl server::Archive for #ident {
+                impl server::BlockingArchive for #ident {
                     type Response = #response;
                 };
             }
@@ -277,6 +278,15 @@ fn derive_message(item: syn::Item, manifest: &ApiManifest) -> Result<proc_macro2
                 impl server::LendMut for #ident {
                     type Response = #response;
                 };
+            }
+        }
+        MessageType::Move => {
+            unused_attr!(response);
+            unused_attr!(event);
+            unused_attr!(error);
+
+            quote! {
+                impl server::Move for #ident {};
             }
         }
     };

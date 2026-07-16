@@ -11,6 +11,7 @@ export enum ActiveModal {
     Rename,
     CreateFolder,
     CopyMove,
+    Format,
 }
 
 export enum FileAction {
@@ -52,4 +53,6 @@ export global ModalGlobal {
     callback copy-move-breadcrumb-selected(string, int);
     callback copy-move-enter-folder(string);
     callback copy-move-exit-folder();
+
+    callback format-confirmed();
 }

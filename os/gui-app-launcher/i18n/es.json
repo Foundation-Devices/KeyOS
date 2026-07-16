@@ -21,6 +21,8 @@
   "common.button.learnMore": "Learn more",
   "common.button.next": "Next",
   "common.button.recover": "Recover",
+  "common.button.restartNow": "Restart Now",
+  "common.button.restartOnboarding": "Restart Setup",
   "common.button.restore": "Restore",
   "common.button.retry": "Retry",
   "common.button.return": "Back",
@@ -64,10 +66,12 @@
   "launcherCrash.header": "Launcher Error",
   "main.2FaCodes": "Códigos\n2FA",
   "main.appsAreComing": "Las aplicaciones llegarán pronto.",
+  "main.developers": "Developers",
   "main.developersWelcome": "Desarrolladores Bienvenidos",
   "main.disconnected": "Disconnected",
   "main.fileBrowser": "Explorar\nArchivos",
   "main.lastUpdate": "Last Update",
+  "main.legacy": "Legacy",
   "main.loadingData": "Loading Data…",
   "main.securityKeys": "Keys",
   "main.seedVault": "Vault",
@@ -76,6 +80,7 @@
   "main.updateResumeDescription": "Please keep Passport powered on.",
   "main.updateResumeHeader": "Update in progress",
   "main.wallet": "Wallet",
+  "main.welcome": "Welcome!",
   "main.xAgo": "{0} ago",
   "mainDevs.content1": "Por primera vez, KeyOS permite ampliar la funcionalidad de Passport Prime con aplicaciones de terceros.",
   "mainDevs.content2": "Las aplicaciones de KeyOS pueden ser cualquier cosa: añadir una cartera fría a tu cartera móvil, integrarlas con tu administrador de contraseñas... incorpora tu logotipo y tu interfaz de usuario para ofrecer la mejor experiencia de usuario.  El SDK para desarrolladores estará disponible más adelante, en 2025. ¡Compártelo con tus aplicaciones y servicios favoritos!",
@@ -84,5 +89,15 @@
   "mainDevs.subheader": "¿Echas algo en falta? ¡Constrúyelo!",
   "mainDevs.url": "https://foundation.xyz/dev",
   "mainDevs.visitForInfo": "Aprende más en:",
-  "mainTemp.temporarySeed": "Temporary Seed"
+  "mainTemp.temporarySeed": "Temporary Seed",
+  "scan.content": "Scan any QR code,\nPassport will take care of it.",
+  "scan.title": "Scan QR",
+  "selectApp.2fa": "2FA",
+  "selectApp.content": "This QR code can be used by multiple apps. Select the app you'd like to continue with.",
+  "selectApp.files": "Files",
+  "selectApp.header": "Select an App",
+  "selectApp.keys": "Keys",
+  "selectApp.selectAnApp": "Select an app",
+  "selectApp.vault": "Vault",
+  "selectApp.wallet": "Wallet"
 }

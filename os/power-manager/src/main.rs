@@ -5,11 +5,15 @@
 mod atsama5d2;
 #[cfg(keyos)]
 use atsama5d2::PowerManagerServer;
+#[cfg(keyos)]
+mod atsama5d2_ext;
+#[cfg(keyos)]
+use atsama5d2_ext::PowerManagerServerExt;
 
 #[cfg(not(keyos))]
 mod hosted;
 #[cfg(not(keyos))]
-use hosted::PowerManagerServer;
+use hosted::{PowerManagerServer, PowerManagerServerExt};
 
 fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
@@ -17,5 +21,6 @@ fn main() {
 
     xous::set_thread_priority(xous::ThreadPriority::System7).unwrap();
 
-    server::listen(PowerManagerServer::new().unwrap())
+    std::thread::spawn(|| server::listen(PowerManagerServer::new().unwrap()));
+    server::listen(PowerManagerServerExt::new().unwrap())
 }

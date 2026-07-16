@@ -12,7 +12,8 @@ pub enum I2cError {
     AlreadyClaimed = 1,
     PeripheralNotClaimed,
     AccessDenied,
-    UnsupportedRegisterSize,
+    Nack,
+    Timeout,
     UnsupportedDataSize,
     InternalError,
 }

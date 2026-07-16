@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gui_server_api::msg::{HideCamera, IsCameraReady, ShowCamera};
-use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
+use gui_server_api::msg::{HideCamera, ShowCamera};
+use server::{ScalarHandler, ServerContext};
 use xous::PID;
 
 use crate::Gui;
@@ -39,24 +39,10 @@ impl ScalarHandler<HideCamera> for Gui {
     }
 }
 
-impl BlockingScalarHandler<IsCameraReady> for Gui {
-    #[cfg(not(feature = "recovery-os"))]
-    fn handle(
-        &mut self,
-        _msg: IsCameraReady,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) -> <IsCameraReady as BlockingScalar>::Response {
-        self.camera_window.is_some()
-    }
-
-    #[cfg(feature = "recovery-os")]
-    fn handle(
-        &mut self,
-        _msg: IsCameraReady,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) -> <IsCameraReady as BlockingScalar>::Response {
-        false
+#[cfg(not(feature = "recovery-os"))]
+impl server::ScalarEventHandler<camera::Frame> for Gui {
+    fn handle(&mut self, msg: camera::Frame, _sender: xous::PID, _context: &mut ServerContext<Self>) {
+        self.camera_window.latest_frame = Some(msg);
+        self.update_layers();
     }
 }

@@ -1,7 +1,18 @@
+manifestVersion = "0"
 appId = "0x41757468656e74696361746f72203246"
+[[qrMatchRules]]
+id = "otpauth"
+idLocalizations = { en = "OTP Auth" }
+subRules = { qr = { QR = { regex_pattern = "^otpauth://" } } }
+
+[[qrMatchRules]]
+id = "otpauth-migration"
+idLocalizations = { en = "OTP Auth Migration" }
+subRules = { qr = { QR = { regex_pattern = "^otpauth-migration://" } } }
 
 [appName]
 en = "2FA"
 
 [permissions]
 template = ["gui-app", "fs-generic"]
+"os/gui-server" = ["GetPendingNavRequest"]

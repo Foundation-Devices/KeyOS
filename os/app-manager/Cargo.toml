@@ -30,6 +30,9 @@ tar = { path = "../../imports/tar-rs" }
 thiserror = "1.0"
 xous = { path = "../../xous/xous-rs" }
 
+[target.'cfg(not(keyos))'.dependencies]
+system-manifests = { path = "../system-manifests/" }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }
 

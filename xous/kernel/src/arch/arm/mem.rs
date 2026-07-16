@@ -313,21 +313,18 @@ impl MemoryMapping {
     }
 
     /// Move a page from one address space to another.
-    /// The source page must be backed by a physical page.
+    /// The page cannot be shared (unmapped but has phys address)
     pub fn move_page(
         &mut self,
         mm: &mut MemoryManager,
         src_addr: *mut usize,
         dest_space: &mut MemoryMapping,
         dest_addr: *mut usize,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         klog!("***move - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let entry_data = L2TableEntry::read_from(src_entry);
-        // Note: we could probably get away with "moving" unmapped pages here,
-        //       but some code might depend on moved and lent pages being actually
-        //       backed.
-        if !entry_data.is_mapped() {
+        if !entry_data.is_mapped() && entry_data.phys()? != 0 {
             return Err(Error::BadAddress);
         }
         let dest_entry = dest_space.allocate_l2_entry(mm, dest_addr)?;
@@ -336,7 +333,7 @@ impl MemoryMapping {
 
         entry_data.write_to(dest_addr, dest_entry);
 
-        Ok(())
+        Ok(entry_data.phys()?)
     }
 
     /// Lend a page from one address space to another.
@@ -349,7 +346,7 @@ impl MemoryMapping {
         dest_space: &mut MemoryMapping,
         dest_addr: *mut usize,
         mutable: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         klog!("***lend - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let entry_data = L2TableEntry::read_from(src_entry);
@@ -366,7 +363,7 @@ impl MemoryMapping {
         let new_data = if !mutable { entry_data.to_immutable()? } else { entry_data };
         new_data.write_to(dest_addr, dest_entry);
 
-        Ok(())
+        entry_data.phys()
     }
 
     /// Return a page from `src_space` back to `dest_space`.
@@ -378,7 +375,7 @@ impl MemoryMapping {
         src_addr: *mut usize,
         dest_space: &mut MemoryMapping,
         dest_addr: *mut usize,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         klog!("***return - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
         let src_entry = self.get_l2_entry(src_addr)?;
         let dest_entry = dest_space.get_l2_entry(dest_addr)?;
@@ -393,7 +390,7 @@ impl MemoryMapping {
         L2TableEntry::Empty.write_to(src_addr, src_entry);
 
         dest_data.to_mapped(dest_addr)?.write_to(dest_addr, dest_entry);
-        Ok(())
+        dest_data.phys()
     }
 
     /// Get the physical address of a virtual one.

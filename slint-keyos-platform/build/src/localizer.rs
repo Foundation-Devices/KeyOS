@@ -284,8 +284,8 @@ fn generate_rust_code(
                 // Get first and largest non-zero count and unit
                 .next()
                 .map(|(count, unit)| (count.to_string(), unit, count != 1))
-                // If filtering 0s and seconds removed everything, round up to ~1 min
-                .unwrap_or((String::from(\"~1\"), DurationUnit::Minute, false));
+                // If filtering 0s and seconds removed everything, round up to 1 min
+                .unwrap_or((String::from(\"1\"), DurationUnit::Minute, false));
 
             format!(\"{{}} {{}}\", count, lookup_duration_unit(unit, DurationStringSize::Medium, plural))
         }}

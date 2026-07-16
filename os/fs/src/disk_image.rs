@@ -154,8 +154,8 @@ impl<U: ReadWriteSeek> DiskImage<U> {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Cluster was already free"));
         }
         log::debug!("Freeing cluster: {logical_cluster:x} => {mapped:x}");
-        self.fs.free_cluster(mapped)?;
         self.set_cluster_mapping(logical_cluster, 0)?;
+        self.fs.free_cluster(mapped)?;
         Ok(())
     }
 

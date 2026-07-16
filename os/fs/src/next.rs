@@ -7,7 +7,7 @@ use {
     server::xous,
 };
 
-impl server::ArchiveHandler<NextEntry> for Server {
+impl server::BlockingArchiveHandler<NextEntry> for Server {
     fn handle(
         &mut self,
         next: NextEntry,
@@ -15,11 +15,9 @@ impl server::ArchiveHandler<NextEntry> for Server {
         _context: &mut server::ServerContext<Self>,
     ) -> Result<Option<DirEntry>, Error> {
         let dir = self
-            .dirs
-            .get_mut(&sender)
-            .ok_or(Error::FileNotOpen)?
-            .open
-            .get_mut(&next.0)
+            .mount_mut(next.0.location()?)
+            .ok_or(Error::NoMedia)?
+            .dir_mut(sender, next.0)
             .ok_or(Error::FileNotOpen)?;
         match dir.iter.next() {
             Some(r) => {

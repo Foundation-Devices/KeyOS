@@ -32,11 +32,12 @@ fn main() {
     // Verify selection didn't change (still None) after invalid index
     let selected_sec_key_idx = fido.selected_security_key_index().unwrap();
     assert_eq!(selected_sec_key_idx, None);
-    // set_live with invalid index is fire-and-forget (logs warning on server side)
-    fido.set_live(1000, true);
-    log::info!("step 0 set_live(1000,_) - invalid index, should log warning on server");
+    // set_archived now returns InvalidIndex for unknown slots instead of being fire-and-forget.
+    assert!(fido.set_archived(1000, true).is_err());
+    log::info!("step 0 set_archived(1000,_) - invalid index, returned Err as expected");
 
-    fido.create_security_key();
+    let key_index = fido.create_security_key("Test Key".to_string(), 0, String::new()).unwrap();
+    log::info!("step 1 created security key at index {key_index}");
 
     let selected_sec_key_idx = fido.selected_security_key_index().unwrap();
     log::info!("step 1 live security key index: {selected_sec_key_idx:?}");
@@ -48,23 +49,11 @@ fn main() {
     log::info!("step 2 live security key index: {selected_sec_key_idx:?}");
     assert_eq!(selected_sec_key_idx, Some(0));
 
-    fido.set_live(0, true);
-    log::info!("step 3 set_live(0,true)");
-    // Small delay to ensure async operation completes before checking
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    let res = fido.is_live(0);
-    log::info!("step 3 is_live(0) result: {res:?}");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), true);
+    fido.set_archived(0, true).unwrap();
+    log::info!("step 3 set_archived(0, true) - archive the key");
 
-    fido.set_live(0, false);
-    log::info!("step 4 set_live(0,false)");
-    // Small delay to ensure async operation completes before checking
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    let res = fido.is_live(0);
-    log::info!("step 4 is_live(0) result: {res:?}");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), false);
+    fido.set_archived(0, false).unwrap();
+    log::info!("step 4 set_archived(0, false) - restore the key");
 
     // Simulate USB HID communication
     log::info!("simulate receiving CTAPHID_INIT");
@@ -151,7 +140,7 @@ impl server::ServerMessages for SimuUsbReceiver {
 }
 impl server::Server for SimuUsbReceiver {}
 
-impl server::ArchiveHandler<SimuUsbReceiveCallback> for SimuUsbReceiver {
+impl server::BlockingArchiveHandler<SimuUsbReceiveCallback> for SimuUsbReceiver {
     fn handle(
         &mut self,
         SimuUsbReceiveCallback(msg): SimuUsbReceiveCallback,

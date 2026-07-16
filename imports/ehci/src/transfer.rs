@@ -132,8 +132,12 @@ impl<CT: TransferContext> Transfer<CT> {
         virt_to_phys: impl Fn(*const u8) -> usize,
     ) -> Result<Self, (CT, EhciError)> {
         let mut qtds = Vec::new();
-        for chunk in context.data_buffer().chunks(0x4000) {
-            qtds.push(alloc!(qtd_pool, Out, chunk, virt_to_phys, context));
+        if context.data_buffer().is_empty() {
+            qtds.push(alloc!(qtd_pool, Out, &[], virt_to_phys, context));
+        } else {
+            for chunk in context.data_buffer().chunks(0x4000) {
+                qtds.push(alloc!(qtd_pool, Out, chunk, virt_to_phys, context));
+            }
         }
         for i in 0..qtds.len() - 1 {
             qtds[i].next.set(qtds[i + 1].to_controller_ptr());
@@ -156,8 +160,12 @@ impl<CT: TransferContext> Transfer<CT> {
         virt_to_phys: impl Fn(*const u8) -> usize,
     ) -> Result<Self, (CT, EhciError)> {
         let mut qtds = Vec::new();
-        for chunk in context.data_buffer().chunks(0x4000) {
-            qtds.push(alloc!(qtd_pool, In, chunk, virt_to_phys, context));
+        if context.data_buffer().is_empty() {
+            qtds.push(alloc!(qtd_pool, In, &[], virt_to_phys, context));
+        } else {
+            for chunk in context.data_buffer().chunks(0x4000) {
+                qtds.push(alloc!(qtd_pool, In, chunk, virt_to_phys, context));
+            }
         }
         for i in 0..qtds.len() - 1 {
             qtds[i].next.set(qtds[i + 1].to_controller_ptr());

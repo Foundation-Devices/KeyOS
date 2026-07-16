@@ -8,6 +8,9 @@ pub type MemorySize = NonZeroUsize;
 
 pub type PID = NonZeroU8;
 
+/// Page size used by both the kernel and userspace memory management.
+pub const PAGE_SIZE: usize = 4096;
+
 // Secretly, you can change this by setting the XOUS_SEED environment variable.
 // I don't lke environment variables because where do you document features like this?
 // But, this was the most expedient way to get all the threads in Hosted mode to pick up a seed.
@@ -159,6 +162,11 @@ pub enum Error {
     InvalidPhysicalAddress = 29,
 
     InvalidArguments = 30,
+
+    /// A fixed-size kernel table (e.g. the per-process connection map, the PID
+    /// table, the server table) had no free slot. Distinct from `OutOfMemory`,
+    /// which is reserved for actual physical-memory exhaustion.
+    KernelTableFull = 31,
 }
 
 impl Error {
@@ -196,6 +204,7 @@ impl Error {
             28 => ParseError,
             29 => InvalidPhysicalAddress,
             30 => InvalidArguments,
+            31 => KernelTableFull,
             _ => UnknownError,
         }
     }
@@ -668,9 +677,33 @@ pub const NUM_SYSTEM_EVENTS: usize = 3;
 impl From<usize> for SystemEvent {
     fn from(value: usize) -> Self {
         match value {
+            0 => Self::ChildTerminated,
             1 => Self::Disconnected,
             2 => Self::LowFreeMemory,
             _ => Self::ChildTerminated,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ServerEvent {
+    /// A new process has connected.
+    /// Sender => PID of the process making the connection. Not necessarily the same as the one that will use
+    /// the connection.
+    NewConnection = 0,
+    /// A process has disconnected.
+    /// Sender => PID of the process
+    Disconnected = 1,
+}
+
+pub const NUM_SERVER_EVENTS: usize = 2;
+
+impl From<usize> for ServerEvent {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => Self::NewConnection,
+            1 => Self::Disconnected,
+            _ => Self::NewConnection,
         }
     }
 }

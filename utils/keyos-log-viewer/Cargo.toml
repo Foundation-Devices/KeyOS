@@ -11,11 +11,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1"
+arboard = "3"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.27"
 log = "0.4"
 ratatui = "0.30"
 regex = "1"
-serialport = "4.8"
 textwrap = "0.16"
-thiserror = "2"
+usb-debug-protocol = { path = "../../os/usb-debug/protocol", features = ["client"] }

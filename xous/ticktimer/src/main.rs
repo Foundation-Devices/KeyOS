@@ -89,7 +89,6 @@ fn main() -> ! {
 
     xous::set_thread_priority(xous::ThreadPriority::Highest).unwrap();
 
-    // TODO: Only allow privileged clients to set system time (SFT-5025)
     let ticktimer_server =
         xous::create_server_with_sid(xous::SID::from_bytes(b"ticktimer-server").unwrap(), 0..16)
             .expect("Couldn't create Ticktimer server");
@@ -208,16 +207,6 @@ fn main() -> ! {
                 };
                 let time_nanos = scalar.arg1 as u64 | ((scalar.arg2 as u64) << 32);
                 ticktimer.set_system_time_ns(time_nanos);
-                xous::return_scalar(msg.sender, 0).ok();
-            }
-
-            #[cfg(not(keyos))]
-            api::Opcode::ResetSystemTime => {
-                if !blocking {
-                    log::warn!("ResetSystemTime request was not blocking");
-                    continue;
-                };
-                ticktimer.reset_system_time();
                 xous::return_scalar(msg.sender, 0).ok();
             }
 

@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x6c6f672d7573622d73657269616c0000"
 syscall = ["DebugCommand"]
 
@@ -13,3 +14,4 @@ en = "Log over USB serial"
     "RegisterInterface",
     "WaitForConnection",
 ]
+"os/log" = ["ReadLogs"]

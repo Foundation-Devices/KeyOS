@@ -19,9 +19,12 @@ export global AuthenticatorCallbacks {
     callback move-position(int, bool);
     callback set-sort-mode(int);
     callback get-view-index([AuthView], int) -> int;
+    callback import-multiple();
+    callback cancel-import-multiple();
 
     in property <int> time-until-refresh: 0;
     in-out property <[AuthView]> entries: [];
     in-out property <int> sort-mode: 0;
     in-out property <string> search-text: "";
+    in-out property <int> pending-import-count: 0;
 }

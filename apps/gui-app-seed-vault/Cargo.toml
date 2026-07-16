@@ -8,14 +8,14 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-bip39 = "2.2"
+bip85_extended = "1.1.0"
 fs = { workspace = true }
 fuzzy-filter = "0.1.0"
+hex = { workspace = true }
 i18n = { path = "../../i18n" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
-ngwallet = { workspace = true }
-nostr = { version = "=0.43.1", features = ["nip06"] }
+nostr = { version = "0.44", features = ["nip06"] }
 ordered-table = { path = "../../utils/ordered-table" }
 security = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -23,6 +23,7 @@ serde_json = "1.0"
 server = { path = "../../server" }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 thiserror = "1.0"
+zeroize = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

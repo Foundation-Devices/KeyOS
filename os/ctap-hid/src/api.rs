@@ -26,7 +26,7 @@ impl<P: CheckedPermissions> CtapHidApi<P> {
     where
         P: MessageAllowed<ProcessHidPacket>,
     {
-        self.0.send_archive(ProcessHidPacket(pkt.to_vec()))
+        self.0.send_blocking_archive(ProcessHidPacket(pkt.to_vec()))
     }
 
     /* For Tests only */
@@ -37,7 +37,7 @@ impl<P: CheckedPermissions> CtapHidApi<P> {
         simu_usb_receiver: S,
     ) -> Result<(), crate::error::CtapHidError>
     where
-        S: server::Server + server::ArchiveHandler<SimuUsbReceiveCallback> + Send + 'static,
+        S: server::Server + server::BlockingArchiveHandler<SimuUsbReceiveCallback> + Send + 'static,
         P: MessageAllowed<RegisterSimuUsbReceiver>,
     {
         use server::MessageId;

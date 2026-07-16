@@ -51,7 +51,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     NfcApi::default().set_enabled(false).expect("disable NFC");
     #[cfg(keyos)]
     usb::host::api::UsbHost::default().set_enabled(false).expect("disable USB host");
-    CameraApi::default().set_enabled(false).expect("disable camera");
+    #[cfg(keyos)]
+    CameraApi::default().set_enabled(false);
 
     // Handle the app being hidden.
     // In the real test setting there wouldn't be an option to dismiss the app (similar to onboarding),
@@ -93,13 +94,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         if ui_cloned.global::<State>().get_nfc_enabled() {
             NfcApi::default().set_enabled(true).expect("enable NFC");
         }
-        if ui_cloned.global::<State>().get_camera_enabled() {
-            while !gui_api.is_camera_ready().expect("can't access the gui api") {
-                log::debug!("Waiting for the camera to become ready...");
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-
         if ui_cloned.global::<State>().get_test_mode() == 0 {
             // Cycle mode
             let interval = ui_cloned.global::<State>().get_cycle_interval();
@@ -221,9 +215,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                         });
                         gui_api.show_camera(CAMERA_Y_POS).expect("show camera");
                         let camera_api = CameraApi::default();
-                        camera_api.set_enabled(true).expect("enable camera");
+                        camera_api.set_enabled(true);
                         std::thread::sleep(interval);
-                        camera_api.set_enabled(false).expect("disable camera");
+                        camera_api.set_enabled(false);
                         gui_api.hide_camera().expect("hide camera");
 
                         queue_with_ui(move |ui| ui.global::<State>().set_camera_message("Idle".into()));
@@ -322,7 +316,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
             if ui_cloned.global::<State>().get_camera_enabled() {
                 gui_api.show_camera(CAMERA_Y_POS).expect("show camera");
-                CameraApi::default().set_enabled(true).expect("enable camera");
+                CameraApi::default().set_enabled(true);
                 log::info!("Showing Camera stream...");
                 ui_cloned.global::<State>().set_camera_message("Showing Camera stream...".into());
             }
@@ -486,7 +480,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         if ui_cloned.global::<State>().get_camera_enabled() {
             log::debug!("disabling camera");
             ui_cloned.global::<State>().set_camera_message("Idle".into());
-            CameraApi::default().set_enabled(false).expect("disable camera");
+            CameraApi::default().set_enabled(false);
             gui_api.hide_camera().expect("hide camera");
         }
     });

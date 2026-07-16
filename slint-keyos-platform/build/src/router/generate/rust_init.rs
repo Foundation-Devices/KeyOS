@@ -221,6 +221,38 @@ fn generate(ctx: GenContext) -> GeneratedFile {
                     }}
                 }}
             }});
+            navigation.on_return_home({{
+                let gui_api = gui_api.clone();
+                move || {{
+                    let mut router = router.borrow_mut();
+                    let navigated = {{
+                        let mut any = false;
+                        while router.navigate_backward() {{ any = true; }}
+                        any
+                    }};
+                    if navigated {{
+                        gui_api.animate_next_frame(slint_keyos_platform::gui_server_api::NextFrameAnimationKind::SlideOutRight).unwrap();
+                    }}
+                }}
+            }});
+            navigation.on_return_home_animate({{
+                let gui_api = gui_api.clone();
+                move |animate| {{
+                    let mut router = router.borrow_mut();
+                    let navigated = {{
+                        let mut any = false;
+                        while router.navigate_backward() {{ any = true; }}
+                        any
+                    }};
+                    if navigated {{
+                        match animate {{
+                            Animate::Forward => gui_api.animate_next_frame(slint_keyos_platform::gui_server_api::NextFrameAnimationKind::SlideOutRight).unwrap(),
+                            Animate::Backward => gui_api.animate_next_frame(slint_keyos_platform::gui_server_api::NextFrameAnimationKind::SlideInRight).unwrap(),
+                            _ => (),
+                        }};
+                    }}
+                }}
+            }});
             navigation.on_debug({{
                 move || {{
                     let router = router.borrow();

@@ -54,9 +54,11 @@ jobs:
                       --exclude crypto-client \
                       --exclude log-serial \
                       --exclude log-usb-serial \
+                      --exclude usb-debug \
                       --exclude libblur \
                       --exclude keycard-auth-tool \
                       --exclude gui-app-recovery \
-                      --exclude recovery-worker
+                      --exclude recovery-worker \
+                      --exclude app-manager
         env:
           RUSTFLAGS: '--check-cfg=cfg(keyos)'

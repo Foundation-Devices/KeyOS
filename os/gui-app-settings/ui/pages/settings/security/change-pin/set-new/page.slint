@@ -66,6 +66,7 @@ component ChangePin inherits Rectangle {
             }
 
             pin-entry := PinEntry {
+                accept-button-enabled: self.pin-length >= root.minimum-length;
                 accepted => {
                     if (root.is-confirming) {
                         if (self.pin == root.new-pin) {
@@ -152,6 +153,7 @@ component ChangePassword inherits Rectangle {
             }
 
             password-entry := PasswordEntry {
+                accept-button-enabled: root.password-length >= root.minimum-length;
                 accepted => {
                     if (root.is-confirming) {
                         if (self.password == root.new-pin) {

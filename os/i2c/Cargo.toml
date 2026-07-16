@@ -13,6 +13,8 @@ server = { path = "../../server" }
 
 [target.'cfg(keyos)'.dependencies]
 atsama5d27 = { workspace = true }
+dma = { workspace = true }
+gpio = { workspace = true }
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 rkyv = { workspace = true }
 utralib = { workspace = true }

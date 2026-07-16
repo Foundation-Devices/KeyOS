@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "passport-drive": {
+      "command": "cargo",
+      "args": ["run", "-p", "passport-drive", "--release", "--", "mcp"],
+      "cwd": "."
+    }
+  }
+}

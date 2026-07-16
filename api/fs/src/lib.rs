@@ -66,7 +66,11 @@ impl<P: CheckedPermissions> FileSystem<P> {
             self.ensure_write_access(location)?;
         }
         Ok(File {
-            handle: self.conn.send_archive(OpenFileMessage { path: path.into(), location, flags })?,
+            handle: self.conn.send_blocking_archive(OpenFileMessage {
+                path: path.into(),
+                location,
+                flags,
+            })?,
             work_buf: DropDeallocate::new(
                 xous::map_memory(None, None, FILE_BUFFER_SIZE, xous::MemoryFlags::W)
                     .map_err(|_| Error::FileNotOpen)?,
@@ -82,7 +86,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
     {
         self.ensure_read_access(location)?;
         Ok(Dir {
-            handle: self.conn.send_archive(OpenDirMessage { path: path.into(), location })?,
+            handle: self.conn.send_blocking_archive(OpenDirMessage { path: path.into(), location })?,
             conn: self.conn.clone(),
         })
     }
@@ -94,7 +98,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
     {
         self.ensure_write_access(location)?;
         Ok(Dir {
-            handle: self.conn.send_archive(CreateDirMessage { path: path.into(), location })?,
+            handle: self.conn.send_blocking_archive(CreateDirMessage { path: path.into(), location })?,
             conn: self.conn.clone(),
         })
     }
@@ -126,7 +130,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
     {
         let path = path.into();
         self.ensure_write_access(location)?;
-        self.conn.send_archive(Remove { path, location })
+        self.conn.send_blocking_archive(Remove { path, location })
     }
 
     pub fn remove_async(&self, path: impl Into<String>, location: Location) -> Result<Remove, Error>
@@ -142,6 +146,9 @@ impl<P: CheckedPermissions> FileSystem<P> {
     /// recursive.
     ///
     /// Optionally, the copied file/directory can be renamed by providing the `rename` argument.
+    ///
+    /// The destination directory must be empty; copying into a non-empty directory returns
+    /// [`Error::FileAlreadyExists`].
     pub fn atomic_copy(
         &self,
         src: impl Into<String>,
@@ -158,7 +165,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
         let src = src.into();
         let dest_dir = dest_dir.into();
         let rename = rename.map(|s| s.into());
-        self.conn.send_archive(AtomicCopy { src, dest_dir, rename, location })
+        self.conn.send_blocking_archive(AtomicCopy { src, dest_dir, rename, location })
     }
 
     pub fn metadata(&self, path: impl Into<String>, location: Location) -> Result<Metadata, Error>
@@ -166,7 +173,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
         P: MessageAllowed<GetMetadata>,
     {
         self.ensure_read_access(location)?;
-        self.conn.send_archive(GetMetadata::Path { path: path.into(), location })
+        self.conn.send_blocking_archive(GetMetadata::Path { path: path.into(), location })
     }
 
     pub fn rename(
@@ -179,7 +186,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
         P: MessageAllowed<Rename>,
     {
         self.ensure_write_access(location)?;
-        self.conn.send_archive(Rename { from: from.into(), to: to.into(), location })
+        self.conn.send_blocking_archive(Rename { from: from.into(), to: to.into(), location })
     }
 
     pub fn rename_async(
@@ -200,7 +207,7 @@ impl<P: CheckedPermissions> FileSystem<P> {
         P: MessageAllowed<MapFileMessage>,
     {
         self.ensure_read_access(location)?;
-        let result = self.conn.send_archive(MapFileMessage { path: path.into(), location })?;
+        let result = self.conn.send_blocking_archive(MapFileMessage { path: path.into(), location })?;
         Ok(unsafe { xous::MemoryRange::new(result.addr, result.size).unwrap() })
     }
 
@@ -289,14 +296,6 @@ impl<P: CheckedPermissions> FileSystem<P> {
         self.conn.try_send_blocking_scalar(BlockCount(location))?
     }
 
-    pub fn disk_encryption_keys_ready(&self) -> Result<(), Error>
-    where
-        P: MessageAllowed<DiskEncryptionKeysReady>,
-    {
-        self.conn.send_scalar(DiskEncryptionKeysReady);
-        Ok(())
-    }
-
     pub fn format_encrypted_volume(&self)
     where
         P: MessageAllowed<FormatEncryptedVolume>,
@@ -354,7 +353,7 @@ impl<P: CheckedPermissions + MessageAllowed<CloseFile>> File<P> {
     where
         P: MessageAllowed<TruncateFile>,
     {
-        self.conn.send_archive(TruncateFile(self.handle))
+        self.conn.send_blocking_archive(TruncateFile(self.handle))
     }
 
     // if len is less than the current file size, the file is truncated
@@ -364,21 +363,21 @@ impl<P: CheckedPermissions + MessageAllowed<CloseFile>> File<P> {
     where
         P: MessageAllowed<SetLen>,
     {
-        self.conn.send_archive(SetLen { handle: self.handle, len })
+        self.conn.send_blocking_archive(SetLen { handle: self.handle, len })
     }
 
     pub fn metadata(&self) -> Result<Metadata, Error>
     where
         P: MessageAllowed<GetMetadata>,
     {
-        self.conn.send_archive(GetMetadata::Handle { handle: self.handle })
+        self.conn.send_blocking_archive(GetMetadata::Handle { handle: self.handle })
     }
 
     pub fn set_mtime(&mut self, datetime: DateTime) -> Result<(), Error>
     where
         P: MessageAllowed<SetMtime>,
     {
-        self.conn.send_archive(SetMtime { handle: self.handle, datetime })
+        self.conn.send_blocking_archive(SetMtime { handle: self.handle, datetime })
     }
 
     /// Prepare a message that can be sent with slint_keyos_platform::async_archive
@@ -465,7 +464,7 @@ where
     P: MessageAllowed<SeekFile>,
 {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.conn.send_archive(SeekFile { file: self.handle, pos: pos.into() }).map_err(Into::into)
+        self.conn.send_blocking_archive(SeekFile { file: self.handle, pos: pos.into() }).map_err(Into::into)
     }
 }
 
@@ -519,7 +518,7 @@ impl<P: CheckedPermissions + MessageAllowed<CloseDir>> Dir<P> {
     where
         P: MessageAllowed<NextEntry>,
     {
-        self.conn.send_archive(NextEntry(self.handle))
+        self.conn.send_blocking_archive(NextEntry(self.handle))
     }
 
     pub fn next_entry_async(&self) -> NextEntry { NextEntry(self.handle) }
@@ -629,10 +628,34 @@ pub struct FileHandle(pub u32);
 
 wrapped_scalar!(FileHandle);
 
+impl FileHandle {
+    pub fn new(id: u32, location: Location) -> Self {
+        Self(((location.to_usize().unwrap() as u32) << 24) | (id & 0x00FF_FFFF))
+    }
+
+    pub fn id(self) -> u32 { self.0 & 0x00FF_FFFF }
+
+    pub fn location(self) -> Result<Location, Error> {
+        Location::from_usize((self.0 >> 24) as usize).ok_or(Error::FileNotOpen)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct DirHandle(pub u32);
 
 wrapped_scalar!(DirHandle);
+
+impl DirHandle {
+    pub fn new(id: u32, location: Location) -> Self {
+        Self(((location.to_usize().unwrap() as u32) << 24) | (id & 0x00FF_FFFF))
+    }
+
+    pub fn id(self) -> u32 { self.0 & 0x00FF_FFFF }
+
+    pub fn location(self) -> Result<Location, Error> {
+        Location::from_usize((self.0 >> 24) as usize).ok_or(Error::FileNotOpen)
+    }
+}
 
 #[derive(
     Debug,

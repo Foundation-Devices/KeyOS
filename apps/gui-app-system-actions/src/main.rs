@@ -1,12 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use {
-    slint_keyos_platform::app,
-    std::{rc::Rc, thread, time::Duration},
-};
-
-power_manager::use_api!();
+use {slint_keyos_platform::app, std::rc::Rc};
 
 app!("System Actions");
 
@@ -20,13 +15,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<Callbacks>().on_reboot({
         let gui = cx.gui.clone();
         move || {
-            log::info!("Turning LCD off");
-            gui.shutdown().ok();
-
             log::info!("Rebooting");
-            thread::sleep(Duration::from_millis(500));
-            let power_manager_api = PowerManagerApi::default();
-            power_manager_api.reboot().ok();
+            gui.reboot().ok();
         }
     });
 
@@ -39,8 +29,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.global::<Callbacks>().on_crash_test(move || {
-        log::info!("Crashing the app with a panic message");
-        panic!("This application has crashed with a test panic message");
+        crash_test();
     });
 
     ui.global::<Callbacks>().set_debug_touch(settings.get_debug_touch().0);
@@ -65,5 +54,53 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
+    ui.global::<Callbacks>().on_is_sim({
+        move || {
+            return !cfg!(keyos);
+        }
+    });
+
     ui.run().expect("UI running");
+}
+
+fn crash_test() {
+    let mut byte = [0u8; 1];
+    getrandom::getrandom(&mut byte).expect("getrandom");
+    match byte[0] % 3 {
+        0 => {
+            log::info!("Crashing the app with a panic message");
+            panic!("This application has crashed with a test panic message");
+        }
+        1 => {
+            log::info!("Crashing the app with a stack overflow");
+            stack_overflow(0);
+        }
+        _ => {
+            log::info!("Crashing the app by hammering random user-space pointers");
+            wild_pointer_hammer();
+        }
+    }
+}
+
+#[inline(never)]
+#[allow(unconditional_recursion)]
+fn stack_overflow(depth: u64) -> u64 {
+    let frame = [depth; 64];
+    let next = stack_overflow(depth + 1);
+    core::hint::black_box(frame[0]).wrapping_add(next)
+}
+
+fn wild_pointer_hammer() -> ! {
+    let start = keyos::ASLR_START;
+    let end = keyos::USER_AREA_END;
+    loop {
+        let mut bytes = [0u8; 4];
+        getrandom::getrandom(&mut bytes).expect("getrandom");
+        let addr = start + (u32::from_le_bytes(bytes) as usize) % (end - start);
+        let ptr = addr as *mut u8;
+        unsafe {
+            let v = ptr.read_volatile();
+            ptr.write_volatile(v);
+        }
+    }
 }

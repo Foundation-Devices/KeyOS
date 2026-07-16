@@ -1,5 +1,8 @@
 # SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
+#
+# SPDX-FileCopyrightText: 2026 immz https://github.com/immz4
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 [package]
 name = "gui-app-authenticator"
@@ -7,19 +10,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+base32 = "0.4"
+base64 = "0.22.1"
 fs = { workspace = true }
 fuzzy-filter = "0.1.0"
 i18n = { path = "../../i18n" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 ordered-table = { path = "../../utils/ordered-table" }
+prost = "0.14.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 thiserror = "1.0"
 totp-rs = { version = "5.6.0", features = ["otpauth", "serde_support"] }
-url = "2"
-urlencoding = "2.1"
+url = "2.5.8"
+urlencoding = "2.1.3"
 
 [build-dependencies]
+prost-build = "0.14.3"
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

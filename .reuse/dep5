@@ -12,6 +12,8 @@ Files:
   **/config.toml
   flake.lock
   .cargo/audit.toml
+  .mcp.json
+  AGENTS.md
 Copyright: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 License: MIT
 
@@ -32,7 +34,8 @@ Files:
   os/gui-app-*/ui/*.png
   apps/gui-app-*/ui/images/*.svg
   os/gui-app-*/ui/images/*.svg
-  os/gui-server/assets/device.png
+  os/gui-server/assets/*.png
+  os/gui-server/assets/*.raw
   api/settings/assets/*.tzif
   ui/ui/icons/*.svg
   ui/ui/icons/*.png
@@ -297,4 +300,11 @@ Copyright:
     2016 Alex Crichton
     2017 The Tokio Authors
     2025 Foundation Devices, Inc. <hello@foundation.xyz>
+License: MIT OR Apache-2.0
+
+Files:
+  apps/gui-app-authenticator/proto/*
+Copyright:
+    2026 Foundation Devices, Inc. <hello@foundation.xyz>
+    2026 immz https://github.com/immz4
 License: MIT OR Apache-2.0

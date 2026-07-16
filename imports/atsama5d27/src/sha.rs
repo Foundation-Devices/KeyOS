@@ -365,10 +365,6 @@ impl Sha {
         while !self.status().contains(SHAStatus::DATARDY) {}
     }
 
-    fn wait_write_ready(&self) {
-        while !self.status().contains(SHAStatus::WRDY) {}
-    }
-
     #[inline]
     pub fn dma_in_address(&self) -> usize {
         (self.base_addr + IDATAR_OFFSET) as usize
@@ -398,7 +394,8 @@ impl Sha {
     /// [`Self::update_dma`] for each chunk, and finally [`Self::finalize`] to get the
     /// hash
     ///
-    /// `total_len` is the total message size in bytes, required for padding
+    /// Pass `total_len = 0` to disable auto-padding (open-ended streaming); pass the
+    /// actual byte count to enable HW padding and finalization.
     #[inline]
     pub fn init_streaming<A: Algo>(&self, total_len: usize) {
         self.reset();
@@ -423,10 +420,12 @@ impl Sha {
         self.first();
     }
 
-    /// Save the current SHA hardware context for later restoration
+    /// Save the current SHA hardware context for later restoration.
+    ///
+    /// Can only be called once, as DATRDY clears on the first IODATAR read
     #[inline]
     pub fn save_context(&self, ctx: &mut ShaHwContext) {
-        self.wait_write_ready();
+        self.wait_data_ready();
         ctx.bytes_remaining = self.byte_count() as usize;
         ctx.hash_state = self.read_hash_state(ctx.algorithm);
     }
@@ -453,27 +452,9 @@ impl Sha {
         state
     }
 
-    /// Updates the streaming SHA hash via DMA
-    /// The caller must ensure proper cache management on the DMA buffer
-    ///
-    /// Note: this does *NOT* wait for `DATARDY` which is only set when the
-    /// entire message lenght (w/ padding) is processed
-    #[inline]
-    pub fn update_dma<E>(&self, dma_execute: impl Fn() -> Result<(), E>) -> Result<(), E> {
-        dma_execute()?;
-        Ok(())
-    }
-
-    /// Update the streaming SHA hash with more data via DMA and wait for completion
-    /// Used for processing the final chunk when all data has been fed
-    #[inline]
-    pub fn update_dma_final<E>(&self, dma_execute: impl Fn() -> Result<(), E>) -> Result<(), E> {
-        dma_execute()?;
-        self.wait_data_ready();
-        Ok(())
-    }
-
     /// Finalize the streaming SHA hash and return the result
+    ///
+    /// Can only be called once, as DATRDY clears on the first IODATAR read
     #[inline]
     pub fn finalize<H: HashTypeHelper>(&self) -> H {
         self.wait_data_ready();

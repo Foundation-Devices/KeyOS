@@ -14,7 +14,7 @@ use crate::server::MessagePermissions;
 #[cfg(keyos)]
 const MEMORY_PERMISSION_COUNT: usize = 8;
 
-pub const MAX_CONNECTIONS: usize = 32;
+pub const MAX_CONNECTIONS: usize = 64;
 
 /// Maximum size of the panic message buffer
 pub const PANIC_MESSAGE_SIZE: usize = 1024;
@@ -131,7 +131,7 @@ impl Process {
             thread_priorities: [ThreadPriority::AppDefault; MAX_THREAD_COUNT],
             app_id,
             permissions: Default::default(),
-            connection_map: Default::default(),
+            connection_map: [const { ConnectionSlot::Free }; MAX_CONNECTIONS],
             allocation_hint: MMAP_AREA_VIRT,
             next_mirror_address: MEMORY_MIRROR_AREA_VIRT,
             #[cfg(keyos)]
@@ -274,7 +274,7 @@ impl Process {
                 return Ok(());
             }
         }
-        Err(Error::OutOfMemory)
+        Err(Error::KernelTableFull)
     }
 
     pub fn syscall_permissions(&self) -> u64 { self.permissions.syscall }
@@ -283,12 +283,17 @@ impl Process {
         self.permissions.syscall = permission_mask;
     }
 
-    pub fn set_event_handler(&mut self, event: SystemEvent, sid: SID, id: MessageId) -> Result<(), Error> {
-        klog!("Registering {event:?} handler for SID {:?}, PID = {}", sid, self.pid);
+    pub fn set_system_event_handler(
+        &mut self,
+        event: SystemEvent,
+        sid: SID,
+        id: MessageId,
+    ) -> Result<(), Error> {
+        klog!("Registering system event {event:?} handler for SID {:?}, PID = {}", sid, self.pid);
 
         if let Some(_existing) = &self.event_handlers[event as usize] {
-            klog!("Children terminate handler already registered for SID {:?}", _existing.sid);
-            return Err(Error::AccessDenied);
+            klog!("Handler already registered for SID {:?}", _existing.sid);
+            return Err(Error::MemoryInUse);
         }
 
         self.event_handlers[event as usize] = Some(EventHandler { sid, message_id: id });
@@ -328,12 +333,18 @@ impl Process {
         None
     }
 
-    pub fn add_connection(&mut self, sidx: usize, permissions: MessagePermissions) -> Result<CID, Error> {
+    /// Returns CID, true if a new connection was made,
+    /// Returns CID, false if a connection already existed
+    pub fn add_connection(
+        &mut self,
+        sidx: usize,
+        permissions: MessagePermissions,
+    ) -> Result<(CID, bool), Error> {
         for (cidx, connection) in self.connection_map.iter_mut().enumerate() {
             match connection {
                 ConnectionSlot::Connected { sidx: sidx_other, refcount, .. } if *sidx_other == sidx as u8 => {
                     *refcount += 1;
-                    return Ok(cidx as CID + 2);
+                    return Ok((cidx as CID + 2, false));
                 }
                 _ => {}
             }
@@ -341,9 +352,9 @@ impl Process {
         if let Some(cidx) = self.connection_map.iter().position(|c| matches!(c, ConnectionSlot::Free)) {
             self.connection_map[cidx] =
                 ConnectionSlot::Connected { sidx: sidx as u8, permissions, refcount: 1 };
-            Ok((cidx as CID) + 2)
+            Ok(((cidx as CID) + 2, true))
         } else {
-            Err(Error::OutOfMemory)
+            Err(Error::KernelTableFull)
         }
     }
 
@@ -364,6 +375,16 @@ impl Process {
     #[allow(dead_code)]
     pub fn number_of_connections(&self) -> usize {
         self.connection_map.iter().filter(|c| !matches!(c, ConnectionSlot::Free)).count()
+    }
+
+    pub fn connected_sidxes(&self) -> impl Iterator<Item = usize> {
+        self.connection_map.clone().into_iter().filter_map(|c| {
+            if let ConnectionSlot::Connected { sidx, .. } = c {
+                Some(sidx as usize)
+            } else {
+                None
+            }
+        })
     }
 }
 

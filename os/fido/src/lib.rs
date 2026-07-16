@@ -7,6 +7,7 @@ mod ctap;
 pub mod error;
 mod implementation;
 pub mod messages;
+mod nav_thread;
 mod u2f;
 
 use ctap::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity};
@@ -63,6 +64,58 @@ impl RegisteredKey {
 pub struct SecurityKey {
     pub registered_keys: Vec<RegisteredKey>,
     pub live: bool,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub color: u8,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub date: u64,
+}
+
+/// View of a SecurityKey exposed to UI clients via IPC.
+/// Must be serializable with rkyv for archive events/messages.
+#[derive(
+    Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, serde::Serialize, serde::Deserialize,
+)]
+pub struct SecurityKeyView {
+    pub index: usize,
+    pub label: String,
+    pub color: u8,
+    pub icon: String,
+    pub archived: bool,
+    pub live: bool,
+    pub date: u64,
+    pub registered_count: usize,
+}
+
+impl SecurityKey {
+    /// Convert to a view suitable for IPC, given the key's index.
+    pub fn to_view(&self, index: usize) -> SecurityKeyView {
+        SecurityKeyView {
+            index,
+            label: self.label.clone(),
+            color: self.color,
+            icon: self.icon.clone(),
+            archived: self.archived,
+            live: self.live,
+            date: self.date,
+            registered_count: self.registered_keys.len(),
+        }
+    }
+
+    /// Set archived state. Archived keys are automatically not live.
+    pub fn set_archived(&mut self, archived: bool) {
+        self.archived = archived;
+        if archived {
+            self.live = false;
+        } else {
+            self.live = true;
+        }
+    }
 }
 
 impl SecurityKey {
@@ -164,6 +217,7 @@ mod tests {
                 }),
             ],
             live: false,
+            ..Default::default()
         };
         let registered_key_indexes_ctap = security_key.registered_key_indexes(false, "test.com".as_bytes());
         println!("{:?}", registered_key_indexes_ctap);

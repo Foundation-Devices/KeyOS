@@ -8,7 +8,10 @@ use std::{
 };
 
 use gui_server_api::{GuiApi, KeyboardKind};
-use i_slint_core::window::{InputMethodRequest, WindowAdapter, WindowAdapterInternal, WindowInner};
+use i_slint_core::{
+    software_renderer::LineBufferProvider,
+    window::{InputMethodRequest, WindowAdapter, WindowAdapterInternal, WindowInner},
+};
 use slint::{
     platform::{
         software_renderer::{RepaintBufferType, SoftwareRenderer},
@@ -23,8 +26,8 @@ use crate::GuiAppGuiPermissions;
 pub struct KeyOsWindow<PG: GuiAppGuiPermissions> {
     window: Window,
     gui: Arc<GuiApi<PG>>,
-    renderer: SoftwareRenderer,
-    needs_redraw: Cell<bool>,
+    pub(crate) renderer: SoftwareRenderer,
+    requested_redraw: Cell<bool>,
     size: PhysicalSize,
 }
 
@@ -34,15 +37,15 @@ impl<PG: GuiAppGuiPermissions> KeyOsWindow<PG> {
             window: Window::new(w.clone()),
             gui,
             renderer: SoftwareRenderer::new_with_repaint_buffer_type(RepaintBufferType::SwappedBuffers),
-            needs_redraw: Default::default(),
+            // We get a frame at the start, which is an implicit redraw request at init.
+            requested_redraw: Cell::new(true),
             size,
         })
     }
 
-    pub fn draw_if_needed(&self, render_callback: impl FnOnce(&SoftwareRenderer)) {
-        if self.needs_redraw.replace(false) {
-            render_callback(&self.renderer);
-        }
+    pub fn draw(&self, line_provider: impl LineBufferProvider) {
+        self.renderer.render_by_line(line_provider);
+        self.requested_redraw.set(false);
     }
 }
 
@@ -57,7 +60,12 @@ impl<PG: GuiAppGuiPermissions> WindowAdapter for KeyOsWindow<PG> {
         log::warn!("Trying to call unimplemented function: set_size({size:?})");
     }
 
-    fn request_redraw(&self) { self.needs_redraw.set(true); }
+    fn request_redraw(&self) {
+        if !self.requested_redraw.get() {
+            self.gui.request_redraw().ok();
+        }
+        self.requested_redraw.set(true);
+    }
 
     fn internal(&self, _: i_slint_core::InternalToken) -> Option<&dyn WindowAdapterInternal> { Some(self) }
 }
@@ -86,7 +94,16 @@ impl<PG: GuiAppGuiPermissions> WindowAdapterInternal for KeyOsWindow<PG> {
                     }
                     i_slint_core::items::CapsMode::All => true,
                 };
-                self.gui.update_keyboard(kind, request_caps).ok()
+                let delete_button_enabled = imp.delete_button_enabled && !imp.text.is_empty();
+                self.gui
+                    .update_keyboard(gui_server_api::msg::UpdateKeyboard {
+                        kind,
+                        request_caps,
+                        accept_button_text: imp.accept_button_text.to_string(),
+                        accept_button_enabled: imp.accept_button_enabled,
+                        delete_button_enabled,
+                    })
+                    .ok()
             }
             InputMethodRequest::Disable => self.gui.hide_keyboard().ok(),
             _ => None,

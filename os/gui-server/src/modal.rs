@@ -16,7 +16,7 @@ use server::ArchiveRequest;
 use xous::PID;
 
 use crate::touch::TouchGestureOrigin;
-use crate::{AppState, Gui, GuiState};
+use crate::{AppCloseState, Gui, GuiState};
 
 const BACKGROUND_DARKEN_ALPHA_MAX: u8 = 255 - 24; // The higher, the darker
 
@@ -121,16 +121,20 @@ impl Gui {
     pub(crate) fn modal_activate(&mut self, modal_pid: PID, mut request: ArchiveRequest<ShowModal>) {
         debug!("Entered modal state, top PID: {modal_pid}");
         request.response.set_response(|| Err(NavigationError::CanceledBySystem));
-        let state = match self.windows.get_mut(&modal_pid).map(|w| &mut w.state) {
-            None | Some(AppState::Starting) => ModalStateInner::Waiting,
-            Some(AppState::Active { last_activated }) => {
-                *last_activated = Instant::now();
-                self.notify_switcher_app_activated(modal_pid);
-                ModalStateInner::Expanding
-            }
-            Some(AppState::Closing) | Some(AppState::Terminating) => {
-                log::warn!("Trying to start a modal that's closing (pid={modal_pid}");
-                ModalStateInner::Waiting
+        let state = match self.windows.get_mut(&modal_pid) {
+            None => ModalStateInner::Waiting,
+            Some(window) => {
+                if window.close_state != AppCloseState::Running {
+                    ModalStateInner::Waiting
+                } else {
+                    if window.buffers.most_recent_buffer().is_none() {
+                        ModalStateInner::Waiting
+                    } else {
+                        window.last_active = Instant::now();
+                        self.notify_switcher_app_activated(modal_pid);
+                        ModalStateInner::Expanding
+                    }
+                }
             }
         };
         let modal_style = request.message.modal_style;

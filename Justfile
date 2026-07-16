@@ -17,6 +17,11 @@ fmt:
     just nix-fmt
 
 toml-fmt *args:
+	#!/usr/bin/env bash
+	if ! command -v taplo >/dev/null 2>&1; then
+		echo "taplo not found, install it with 'cargo install taplo-cli'"
+		exit 1
+	fi
 	taplo format {{args}} \
 		apps/*/Cargo.toml \
 		boot/*/Cargo.toml \
@@ -86,6 +91,7 @@ check-workspace:
       --exclude crypto-client \
       --exclude log-serial \
       --exclude log-usb-serial \
+      --exclude usb-debug \
       --exclude libblur \
       --exclude tar-rs \
       --exclude recovery-worker \
@@ -218,6 +224,10 @@ build-bl-unsigned:
 build-all args="":
     cargo xtask build-all {{args}}
 
+build-repro:
+    cargo xtask build-all --production-bootloader --production-firmware
+    cargo xtask print-hashes
+
 # Prepare a KeyOS release (builds, signs, and pushes in one step)
 # Usage: just prepare-release 1.0.0 ~/secrets/SAM-BA [--log-serial] [--log-usb-serial] [--log-usb-file]
 #
@@ -243,11 +253,27 @@ clean:
 list-subtrees:
     git log | grep git-subtree-dir | tr -d ' ' | cut -d ":" -f2 | sort | uniq | xargs -I {} bash -c 'if [ -d $(git rev-parse --show-toplevel)/{} ] ; then echo {}; fi'
 
-# A shorter pre-commit lint
+# Run the quick lint checks.
 short-lint:
-    reuse --suppress-deprecation lint
-    cargo fmt --all --check
-    just toml-fmt --check
+    #!/usr/bin/env bash
+    failed=0
+
+    if ! reuse --suppress-deprecation lint; then
+        echo -e "\nREUSE lint failed: one or more files are missing SPDX copyright/license headers." >&2
+        failed=1
+    fi
+
+    if ! cargo fmt --all --check; then
+        echo -e "\nRust formatting check failed: run 'just fmt' (or 'cargo fmt') and commit the result." >&2
+        failed=1
+    fi
+
+    if ! just toml-fmt --check; then
+        echo -e "\nTOML formatting check failed: run 'just fmt' (or 'just toml-fmt') and commit the result." >&2
+        failed=1
+    fi
+
+    exit $failed
 
 # Lint for panics
 panic-lint:
@@ -259,6 +285,7 @@ flash *args:
 unit-test:
     cargo test \
         -p ordered-table \
+        -p worker \
         -p gui-app-authenticator \
         -p slint-keyos-platform-build \
         -p slint-keyos-platform-common \
@@ -267,7 +294,8 @@ unit-test:
         -p quantum-link-server \
         -p backup-server \
         -p update-server \
-        -p update
+        -p update \
+        -p emmc
 
 one-int-test +args:
     cargo xtask run --hosted --integration-test {{args}}
@@ -284,7 +312,7 @@ integration-test:
     tests=(
         "fs-server ordered-table-test"
         "fs-server settings-server settings-test-client"
-        "worker-test"
+        "worker-test worker-test-disposable"
     )
 
     failures=0
@@ -378,8 +406,8 @@ clean-package package="":
 check package="":
     cargo xtask check {{package}}
 
-logs port="":
-    cargo run --release --manifest-path utils/keyos-log-viewer/Cargo.toml -- --port {{port}}
+logs:
+    cargo run --release --manifest-path utils/keyos-log-viewer/Cargo.toml
 
 
 # Build the cosign2 binary for x86_64 Linux (Chromebook)

@@ -13,7 +13,6 @@ use std::{
 
 use async_task::Runnable;
 use slotmap::SlotMap;
-use worker::WorkerHandle;
 
 use super::RuntimeHandle;
 use crate::handle::RuntimeHandleInner;
@@ -103,7 +102,7 @@ impl Runtime {
                     wake_sent: AtomicBool::new(false),
                     waker: Arc::new(waker),
                     main_tx: tx,
-                    worker: WorkerHandle::default(),
+                    worker: Default::default(),
                 }),
             },
         };

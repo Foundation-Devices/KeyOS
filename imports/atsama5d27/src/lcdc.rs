@@ -854,17 +854,17 @@ impl Lcdc {
 
         if enable {
             match layer {
-                LcdcLayerId::Base => lcdc_csr.wfo(BASEIER_DMA, 1),
-                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IER_DMA, 1),
-                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IER_DMA, 1),
-                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIER_DMA, 1),
+                LcdcLayerId::Base => lcdc_csr.wfo(BASEIER_DSCR, 1),
+                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IER_DSCR, 1),
+                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IER_DSCR, 1),
+                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIER_DSCR, 1),
             }
         } else {
             match layer {
-                LcdcLayerId::Base => lcdc_csr.wfo(BASEIDR_DMA, 1),
-                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IDR_DMA, 1),
-                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IDR_DMA, 1),
-                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIDR_DMA, 1),
+                LcdcLayerId::Base => lcdc_csr.wfo(BASEIDR_DSCR, 1),
+                LcdcLayerId::Ovr1 => lcdc_csr.wfo(OVR1IDR_DSCR, 1),
+                LcdcLayerId::Ovr2 => lcdc_csr.wfo(OVR2IDR_DSCR, 1),
+                LcdcLayerId::Heo => lcdc_csr.wfo(HEOIDR_DSCR, 1),
             }
         }
     }

@@ -19,7 +19,7 @@ impl server::LendMutHandler<ReadBlocks> for Server {
     ) -> Result<usize, Error> {
         self.with_fs_disk(msg.location, |disk| {
             let PartitionInfo { start: partition_start, len_bytes } = disk.partition_info();
-            if msg.block_index + msg.block_count as u32 > (len_bytes / BLOCK_SIZE) as u32 {
+            if msg.block_index as u64 + msg.block_count as u64 > len_bytes / BLOCK_SIZE {
                 return Err(Error::InvalidBufferLength);
             }
             disk.read_blocks(
@@ -44,7 +44,7 @@ impl server::LendMutHandler<WriteBlocks> for Server {
     ) -> Result<usize, Error> {
         self.with_fs_disk(msg.location, |disk| {
             let PartitionInfo { start: partition_start, len_bytes } = disk.partition_info();
-            if msg.block_index + msg.block_count as u32 > (len_bytes / BLOCK_SIZE) as u32 {
+            if msg.block_index as u64 + msg.block_count as u64 > len_bytes / BLOCK_SIZE {
                 return Err(Error::InvalidBufferLength);
             }
             disk.write_blocks(
@@ -78,21 +78,12 @@ impl Server {
         f: impl FnOnce(&mut DynamicDisk) -> Result<R, Error>,
     ) -> Result<R, Error> {
         match location {
-            Location::System => {
-                if !self.fs_internal.is_null() {
-                    unsafe { &*self.fs_internal }.with_disk(f)
-                } else {
-                    Err(Error::NoMedia)
-                }
-            }
+            Location::System => self.fs_internal.fs().with_disk(f),
             #[cfg(not(feature = "recovery-os"))]
-            Location::EncryptedRoot => {
-                if !self.fs_user.is_null() {
-                    unsafe { &*self.fs_user }.with_disk(f)
-                } else {
-                    Err(Error::NoMedia)
-                }
-            }
+            Location::EncryptedRoot => match self.fs_user.as_ref() {
+                Some(mount) => mount.fs().with_disk(f),
+                None => Err(Error::NoMedia),
+            },
             #[cfg(not(feature = "recovery-os"))]
             Location::Airlock => {
                 if let crate::airlock::AirlockState::Unmounted(disk) = &mut self.airlock {

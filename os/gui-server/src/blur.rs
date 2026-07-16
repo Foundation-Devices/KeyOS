@@ -3,10 +3,7 @@
 
 use std::rc::Rc;
 
-use gui_server_api::{
-    consts::{DEFAULT_KEYBOARD_HEIGHT, SCREEN_HEIGHT, SCREEN_WIDTH},
-    DoubleBufferVMA, VMALocation,
-};
+use gui_server_api::consts::{DEFAULT_KEYBOARD_HEIGHT, SCREEN_HEIGHT, SCREEN_WIDTH};
 use xous::{DropDeallocate, MemoryFlags, MemoryRange, Message, ScalarMessage, CID, PID, SID};
 
 use crate::{handlers::BlurDone, Gui};
@@ -43,13 +40,17 @@ impl Gui {
         let modal_bg_pid = self.modal_background_pid();
         let control_center_blur = self.is_control_center_blur_active();
         for (pid, window) in &mut self.windows {
-            window.blur_state.should_blur =
-                modal_bg_pid == Some(*pid) || control_center_blur && active_pid == Some(*pid);
-            window.blur_state.on_vsync(blur_cid, *pid, &window.bufs, SCREEN_HEIGHT);
+            if let Some(buffer) = window.buffers.most_recent_buffer() {
+                window.blur_state.should_blur =
+                    modal_bg_pid == Some(*pid) || control_center_blur && active_pid == Some(*pid);
+                window.blur_state.on_vsync(blur_cid, *pid, buffer, SCREEN_HEIGHT);
+            }
         }
-        if let Some(keyboard) = &mut self.keyboard_window {
+        if let Some(keyboard) = &mut self.keyboard_window
+            && let Some(buffer) = keyboard.buffers.most_recent_buffer()
+        {
             keyboard.blur_state.should_blur = control_center_blur;
-            keyboard.blur_state.on_vsync(blur_cid, keyboard.pid, &keyboard.bufs, DEFAULT_KEYBOARD_HEIGHT);
+            keyboard.blur_state.on_vsync(blur_cid, keyboard.pid, buffer, DEFAULT_KEYBOARD_HEIGHT);
         }
     }
 
@@ -84,7 +85,7 @@ impl BlurBufferState {
         self.next_buffer = Some(Rc::new(buffer));
     }
 
-    pub fn on_vsync(&mut self, cid: CID, pid: PID, bufs: &DoubleBufferVMA, height: usize) {
+    pub fn on_vsync(&mut self, cid: CID, pid: PID, display_buffer: MemoryRange, height: usize) {
         self.displaying_buffer = self.next_buffer.clone();
 
         if !self.should_blur {
@@ -112,8 +113,11 @@ impl BlurBufferState {
                 return;
             }
         };
-        let display_buffer = unsafe { MemoryRange::new(bufs.disp_buf.virt_addr, fb_size).unwrap() };
-        buffer.subrange(0, fb_size).unwrap().as_slice_mut::<u32>().copy_from_slice(display_buffer.as_slice());
+        buffer
+            .subrange(0, fb_size)
+            .unwrap()
+            .as_slice_mut::<u32>()
+            .copy_from_slice(display_buffer.subrange(0, fb_size).unwrap().as_slice());
 
         self.ongoing = true;
         self.ongoing_stale = false;
@@ -121,13 +125,7 @@ impl BlurBufferState {
         xous::send_message(cid, Message::Scalar(BlurRequest { pid, buffer, height }.into())).unwrap();
     }
 
-    pub fn blurred_buf(&self) -> Option<VMALocation> {
-        if let Some(buf) = &self.next_buffer {
-            VMALocation::new_vma(buf.as_ptr() as usize).ok()
-        } else {
-            None
-        }
-    }
+    pub fn blurred_buf(&self) -> Option<MemoryRange> { self.next_buffer.as_ref().map(|b| ***b) }
 
     pub fn mark_stale(&mut self) {
         self.buffer_stale = true;

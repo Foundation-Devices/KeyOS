@@ -449,14 +449,7 @@ pub struct AuthData {
 impl AuthData {
     pub fn new(_rp_id: &str) -> Self {
         #[cfg(not(test))]
-        let rp_id_hash = {
-            let buf = _rp_id.as_bytes();
-            let mut page =
-                xous::map_memory(None, None, 4096, xous::MemoryFlags::W | xous::MemoryFlags::NO_CACHE)
-                    .expect("mapmemory");
-            page.as_slice_mut()[..buf.len()].copy_from_slice(buf);
-            crate::CryptoApi::default().sha256(page, 0, buf.len()).expect("sha256")
-        };
+        let rp_id_hash = crate::CryptoApi::default().sha256(_rp_id.as_bytes()).expect("sha256");
         #[cfg(test)]
         let rp_id_hash = [
             0x20, 0xa8, 0x3b, 0x42, 0xcd, 0x54, 0x0c, 0x2f, 0xcd, 0xee, 0x61, 0xe4, 0xf1, 0x47, 0x93, 0xed,

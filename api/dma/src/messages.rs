@@ -8,6 +8,25 @@ use xous::MemoryRange;
 use crate::error::DmaError;
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[event(TransferComplete)]
+#[error(DmaError)]
+pub struct SubscribeTransferComplete(pub usize);
+
+#[derive(Debug, Clone, Copy)]
+pub struct TransferComplete {
+    pub transfer_id: u32,
+    pub bytes: u32,
+}
+
+impl AsScalar<2> for TransferComplete {
+    fn as_scalar(&self) -> [u32; 2] { [self.transfer_id, self.bytes] }
+}
+
+impl FromScalar<2> for TransferComplete {
+    fn from_scalar([transfer_id, bytes]: [u32; 2]) -> Self { Self { transfer_id, bytes } }
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<usize, DmaError>)]
 pub struct PeripheralTransferMsg {
     pub address: usize,

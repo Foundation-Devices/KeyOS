@@ -12,6 +12,47 @@ import { TR2, TrId } from "./gen/tr.slint";
 import { OnboardingCallbacks } from "./onboarding-callbacks.slint";
 
 
+component RestartOnboardingModal inherits Modal {
+    private property <bool> is-confirming: false;
+
+    title: is-confirming ? TR2.lookup(TrId.RestartOnboardingModalAreYouSureHeader) : TR2.lookup(TrId.RestartOnboardingModalHeader);
+    text: is-confirming ? TR2.lookup(TrId.RestartOnboardingModalAreYouSureContent) : TR2.lookup(TrId.RestartOnboardingModalContent);
+
+    FocusScope {
+        init => {
+            self.focus();
+        }
+    }
+
+    Button {
+        icon: "";
+        label: root.is-confirming ? TR2.lookup(TrId.CommonButtonBack) : TR2.lookup(TrId.CommonButtonRestartNow);
+        importance: Importance.secondary;
+        clicked => {
+            if (root.is-confirming) {
+                OnboardingCallbacks.show-restart-modal = false;
+            } else {
+                root.is-confirming = true;
+            }
+        }
+    }
+
+    Button {
+        icon: "";
+        label: root.is-confirming ? TR2.lookup(TrId.CommonButtonRestartOnboarding) : TR2.lookup(TrId.CommonButtonDismiss);
+        importance: Importance.primary;
+        clicked => {
+            if (root.is-confirming) {
+                self.loading = true;
+                self.enabled = false;
+                OnboardingCallbacks.restart-onboarding();
+            } else {
+                OnboardingCallbacks.show-restart-modal = false;
+            }
+        }
+    }
+}
+
 export component AppWindow inherits BaseWindow {
     in-out property <bool> show-menu: false;
 
@@ -23,6 +64,13 @@ export component AppWindow inherits BaseWindow {
         title: TR2.lookup(TrId.ScanModalPassportDisconnectedHeader);
         text: TR2.lookup(TrId.ScanModalPassportDisconnectedContent);
 
+        // steal focus from any active inputs, closing the keyboard
+        FocusScope {
+            init => {
+                self.focus();
+            }
+        }
+
         Button {
             label: TR2.lookup(TrId.ScanModalPassportDisconnectedRestartOnboarding);
             clicked => {
@@ -32,6 +80,8 @@ export component AppWindow inherits BaseWindow {
             }
         }
     }
+
+    if OnboardingCallbacks.show-restart-modal && !OnboardingCallbacks.fatal-disconnect: RestartOnboardingModal { }
 
     if OnboardingCallbacks.debug-actions.length > 0: IconButton {
         x: UISize.screen-width / 2 - self.width / 2;

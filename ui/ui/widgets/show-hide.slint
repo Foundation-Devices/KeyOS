@@ -34,10 +34,19 @@ export component ShowHide inherits VerticalLayout {
             }
         }
 
-        touchArea := TouchArea {
+        TouchArea {
             clicked => {
                 show = !show;
+                // Hidden elements keep their focus,
+                // so we have to take it from them forcibly
+                if !show {
+                    focus-taker.focus();
+                }
             }
+        }
+
+        focus-taker := FocusScope {
+            enabled: false;
         }
     }
 

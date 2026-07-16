@@ -3,8 +3,7 @@
 
 import { Size, Importance } from "@ui/theme.slint";
 import { IconButton, AppHeader, OverlayMenu, PopupMenuItem, BasePage, Movable, Link } from "@ui/widgets.slint";
-import { CardPageVersion, CardList } from "@ui/pages.slint";
-import { EditPageVersion } from "@ui/pages.slint";
+import { CardPageVersion, CardList, EditPageVersion } from "@ui/pages.slint";
 import { AccountsProps } from "./props.slint";
 import { SeedEntry } from "../../widgets/seed-entry.slint";
 import { Callbacks as CB } from "../../callbacks.slint";
@@ -90,7 +89,7 @@ export component AccountsPage inherits BasePage {
             }
 
             new => {
-                Navigate.create({ });
+                Navigate.main({ });
             }
 
             for entry[index] in CB.entries: Movable {
@@ -108,7 +107,7 @@ export component AccountsPage inherits BasePage {
                     clicked() => {
                         if !reorder-mode {
                             Navigate.details({
-                                seed: entry,
+                                index: entry.index,
                                 version: props.version == CardPageVersion.main ? EditPageVersion.edit : EditPageVersion.archive,
                             }, { });
                         }
@@ -130,7 +129,7 @@ export component AccountsPage inherits BasePage {
             first: true;
             clicked => {
                 is-menu-open = false;
-                Navigate.create({ });
+                Navigate.main({ });
             }
         }
 

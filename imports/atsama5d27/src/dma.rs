@@ -19,6 +19,7 @@ const CC_REG_OFFSET: u32 = 0x78;
 
 pub const DMA_CHANNELS: usize = 16;
 pub const BIG_TRANSFER_CHUNK_SIZE: usize = 0x100000;
+pub const BIG_TRANSFER_THRESHOLD: usize = 0x800000;
 
 pub const MASK_BLOCK_INTERRUPT: u32 = 1 << 0;
 pub const MASK_LINKED_LIST_INTERRUPT: u32 = 1 << 1;
@@ -310,7 +311,7 @@ impl XdmacChannel {
     fn set_data_size(&self, size: usize) {
         unsafe {
             // If the size does not fit into UBLEN, do multiple microblocks.
-            if size > 0x800000 {
+            if size > BIG_TRANSFER_THRESHOLD {
                 // Make sure we are aligned and fit into blocklen, otherwise this
                 // function will not do what is expected.
                 assert_eq!(size & (BIG_TRANSFER_CHUNK_SIZE - 1), 0);

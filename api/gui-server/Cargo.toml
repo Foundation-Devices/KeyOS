@@ -4,11 +4,12 @@
 [package]
 name = "gui-server-api"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "GUI server API crate"
 publish = false
 
 [dependencies]
+app-manifest = { path = "../../os/app-manifest" }
 hex-literal = "0.4.1"
 keyos = { path = "../../keyos" }
 log = "0.4.14"

@@ -63,7 +63,7 @@ impl<P: CheckedPermissions> SettingsApi<P> {
     where
         P: MessageAllowed<LookupTimeZone>,
     {
-        self.conn.send_archive(LookupTimeZone { name, offset_minutes })
+        self.conn.send_blocking_archive(LookupTimeZone { name, offset_minutes })
     }
 }
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette, Size } from "@ui/theme.slint";
+import { Palette, Size, UISize } from "@ui/theme.slint";
 import { Button, ButtonSection, Dialog, HeadingMd, TextSm, TimerCircularProgress, JumboIconPageBody, WrappedIcon } from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 
@@ -138,7 +138,7 @@ export component RestoreMagicBackupPage inherits OnboardingBasePage {
             cancel-text: TR2.lookup(TrId.CommonButtonSkip);
             show-cancel: true;
             show-close-button: true;
-            width: 352px;
+            width: UISize.modal-width;
             on-cancel => {
                 Navigate.connect-wallet({ replace: true, animate: Animate.None })
             }

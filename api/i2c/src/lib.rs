@@ -104,10 +104,10 @@ where
         if buffer.len() > 255 || bytes.len() > 255 {
             return Err(I2cError::UnsupportedDataSize);
         }
-        let result = self.conn.send_archive(SingleTransfer {
+        let result = self.conn.send_blocking_archive(SingleTransfer {
             peripheral: self.peripheral,
             write_data: bytes.to_owned(),
-            read_len: buffer.len() as u8,
+            read_len: buffer.len(),
         })?;
         // result.len() should be the same as buffer.len(). If not, a panic!() is warranted anyway.
         buffer.copy_from_slice(&result);

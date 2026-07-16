@@ -5,12 +5,11 @@ import { AppHeader, BasePage, Chip, Drawer, Icon, IconButton, NavHeader, PageBod
 import { Size, Palette, Importance } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import { Utils } from "@ui/utils.slint";
-import { DarkPalette } from "@ui/palettes/dark-palette.slint";
 
 import { AccountProps } from "../props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
 import { KeychainKind, AddressType, Callbacks, AccountView } from "../../../callbacks.slint";
-import { DarkOverlay } from "../../../widgets/dark-overlay.slint";
+import { Overlay } from "../../../widgets/overlay.slint";
 import { ListView } from "std-widgets.slint";
 
 component RadioItem inherits Rectangle {
@@ -42,6 +41,10 @@ component RadioItem inherits Rectangle {
     }
 
     TouchArea {
+        // Extend hit target left past the Drawer's sz8 padding so taps in the
+        // empty space left of the radio button still register. SFT-6880.
+        x: -Size.sz8;
+        width: parent.width + Size.sz8;
         clicked => {
             root.clicked();
         }
@@ -62,7 +65,7 @@ component AddressSwitch inherits Rectangle {
             alignment: center;
             Icon {
                 name: root.icon;
-                color: enabled ? DarkPalette.content-primary : DarkPalette.content-tertiary;
+                color: enabled ? Palette.content-primary : Palette.content-tertiary;
                 size: Size.sz10;
             }
         }
@@ -161,7 +164,7 @@ export component ExploreAddressPage inherits BasePage {
         }
     }
 
-    DarkOverlay {
+    Overlay {
         open: selected-address > -1;
         title: TR2.format(TrId.ExploreAddressesDetailTitle, [selected-address]);
         closed => {
@@ -178,8 +181,8 @@ export component ExploreAddressPage inherits BasePage {
 
                 BtcAddress {
                     address: addresses[selected-address];
-                    primary-color: DarkPalette.content-primary;
-                    secondary-color: DarkPalette.content-tertiary;
+                    primary-color: Palette.content-primary;
+                    secondary-color: Palette.content-tertiary;
                 }
 
                 VerticalLayout {

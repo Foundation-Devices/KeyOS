@@ -19,6 +19,7 @@ features = ["image-decoders"]
 [dependencies]
 async-task = { workspace = true }
 euclid = "0.22"
+fiat-symbols = { workspace = true }
 file-backed = { path = "../../utils/file-backed" }
 foundation-ur = { workspace = true }
 fs = { workspace = true }
@@ -27,7 +28,6 @@ gui-server-api = { workspace = true }
 i-slint-common = { workspace = true }
 i-slint-core = { workspace = true, default-features = false }
 i18n = { path = "../../i18n/" }
-image = "0.25"
 indoc = "2.0.5"
 itertools = "0.13.0"
 itoa = { version = "1.0" }

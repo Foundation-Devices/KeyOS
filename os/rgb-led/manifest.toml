@@ -1,3 +1,4 @@
+manifestVersion = "0"
 appId = "0x7267622d736572766572000000000000"
 syscall = ["SetThreadPriority"]
 extends = "../../api/rgb-led"

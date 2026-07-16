@@ -10,8 +10,12 @@ use command::{
 };
 pub use command::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity};
 use error::{Error, Status};
+use gui_server_api::navigation::securitykeys::UserPresenceOptions;
 
-use crate::{implementation::FidoServer, RegisteredKey};
+use crate::{
+    implementation::{presence_fingerprint, FidoServer, PresencePoll},
+    RegisteredKey,
+};
 
 impl FidoServer {
     // stupid naming, but copied from the spec
@@ -56,6 +60,15 @@ impl FidoServer {
         // TODO: CTAP2 implementation needs debugging, disable for now to force U2F-only
         log::warn!("CTAP2 disabled, returning InvalidCommand to force U2F fallback");
         return Err(Error::InvalidCommand);
+
+        // Fingerprint used to correlate retrying RP requests to a pending presence prompt.
+        #[allow(unreachable_code)]
+        let fingerprint = {
+            let mut buf = Vec::with_capacity(1 + _data.len());
+            buf.push(_cmd);
+            buf.extend_from_slice(_data);
+            presence_fingerprint(&buf)
+        };
 
         #[allow(unreachable_code)]
         let prime_options = GetInfoResponseOptions::prime();
@@ -373,19 +386,10 @@ impl FidoServer {
                                 }
                                 // - If userPresentFlagValue is false, then:
                                 if !user_present_flag_value {
-                                    // - Wait for user presence.
-                                    self.check_user_presence(
-                                        Some(security_key_index),
-                                        false,
-                                        Some(req.rp.id.clone()),
-                                        req.rp.name.clone(),
-                                        req.user.name.clone(),
-                                        req.user.display_name.clone(),
-                                    )
-                                    .ok();
-                                    // - Regardless of whether user presence is obtained or the authenticator
-                                    //   times out, terminate this procedure and return
-                                    //   CTAP2_ERR_CREDENTIAL_EXCLUDED.
+                                    // Spec requires a presence indication here, but the outcome is
+                                    // always CTAP2_ERR_CREDENTIAL_EXCLUDED regardless. Under the
+                                    // non-blocking model we skip the advisory prompt and return
+                                    // CredentialExcluded directly.
                                     return Err(Error::CredentialExculded);
                                 } else {
                                     // - Else, (implying userPresentFlagValue is true) terminate this
@@ -414,19 +418,7 @@ impl FidoServer {
                                     }
                                     // - If userPresentFlagValue is false, then:
                                     if !user_present_flag_value {
-                                        // - Wait for user presence.
-                                        self.check_user_presence(
-                                            Some(security_key_index),
-                                            false,
-                                            Some(req.rp.id.clone()),
-                                            req.rp.name.clone(),
-                                            req.user.name.clone(),
-                                            req.user.display_name.clone(),
-                                        )
-                                        .ok();
-                                        // - Regardless of whether user presence is obtained or the
-                                        //   authenticator times out, terminate this procedure and return
-                                        //   CTAP2_ERR_CREDENTIAL_EXCLUDED.
+                                        // Advisory prompt skipped; return CredentialExcluded per spec.
                                         return Err(Error::CredentialExculded);
                                     } else {
                                         // - Else, (implying userPresentFlagValue is true) terminate this
@@ -453,57 +445,29 @@ impl FidoServer {
                 log::trace!("step 14");
                 // 14. If the "up" option is set to true:
                 if opt_up {
-                    // - If the pinUvAuthParam parameter is present then:
-                    if req.pin_uv_auth_param.is_some() {
-                        // - Let userPresentFlagValue be the result of calling getUserPresentFlagValue().
-                        let user_present_flag_value = self.get_user_presence_flag_value();
-                        // - If userPresentFlagValue is false:
-                        // Note: An authenticator may be configured to collect user presence whenever the
-                        // "up" option is true by setting the default user present time limit to zero.
-                        if !user_present_flag_value {
-                            // - Request evidence of user interaction in an authenticator-specific way (e.g.,
-                            //   flash the LED light). If the authenticator has a display, show the items
-                            //   contained within the user and rp parameter structures to the user, and
-                            //   request permission to create a credential.
-                            // - If the user declines permission, or the operation times out, then end the
-                            //   operation by returning CTAP2_ERR_OPERATION_DENIED.
-                            let (confirmed, _) = self
-                                .check_user_presence(
-                                    Some(security_key_index),
-                                    false,
-                                    Some(req.rp.id.clone()),
-                                    req.rp.name.clone(),
-                                    req.user.name.clone(),
-                                    req.user.display_name.clone(),
-                                )
-                                .map_err(|_| Error::OperationDenied)?;
-                            if !confirmed {
-                                return Err(Error::OperationDenied);
-                            }
-                        }
+                    // Decide whether a presence prompt is needed (mirrors the spec's branches on
+                    // pinUvAuthParam / cached up flag) and run a single non-blocking check.
+                    let needs_prompt = if req.pin_uv_auth_param.is_some() {
+                        !self.get_user_presence_flag_value()
                     } else {
-                        // - Else (implying the pinUvAuthParam parameter is not present):
-                        //   - If the "up" bit is false in the response :
-                        if !resp.auth_data.flags.up {
-                            // - Request evidence of user interaction in an authenticator-specific way (e.g.,
-                            //   flash the LED light). If the authenticator has a display, show the items
-                            //   contained within the user and rp parameter structures to the user, and
-                            //   request permission to create a credential.
-                            // - If the user declines permission, or the operation times out, then end the
-                            //   operation by returning CTAP2_ERR_OPERATION_DENIED.
-                            let (confirmed, _) = self
-                                .check_user_presence(
-                                    Some(security_key_index),
-                                    false,
-                                    Some(req.rp.id.clone()),
-                                    req.rp.name.clone(),
-                                    req.user.name.clone(),
-                                    req.user.display_name.clone(),
-                                )
-                                .map_err(|_| Error::OperationDenied)?;
-                            if !confirmed {
-                                return Err(Error::OperationDenied);
-                            }
+                        !resp.auth_data.flags.up
+                    };
+                    if needs_prompt {
+                        let mut options = UserPresenceOptions::registration(Some(security_key_index))
+                            .with_rp_id(req.rp.id.clone());
+                        if let Some(rp_name) = &req.rp.name {
+                            options = options.with_rp_name(rp_name.clone());
+                        }
+                        if let Some(user_name) = &req.user.name {
+                            options = options.with_user_name(user_name.clone());
+                        }
+                        if let Some(user_display_name) = &req.user.display_name {
+                            options = options.with_user_display_name(user_display_name.clone());
+                        }
+                        match self.poll_or_start_presence(fingerprint, options) {
+                            PresencePoll::Pending => return Err(Error::UserActionPending),
+                            PresencePoll::Dismissed => return Err(Error::OperationDenied),
+                            PresencePoll::Confirmed { .. } => {}
                         }
                     }
                     // - Set the "up" bit to true in the response.
@@ -547,8 +511,12 @@ impl FidoServer {
                 log::trace!("step 16");
                 // 16. Generate a new credential key pair for the algorithm chosen in step 3.
                 let security_key_index = self.security_key_index(None)?;
-                let (_created_resgistered_key_index, public_key) =
-                    self.create_registered_key_ctap(security_key_index, req.rp.clone(), req.user.clone())?;
+                // Peek the next credential public key without committing — fallible attestation
+                // (step 19) runs before we mutate registered-key state, so an attest failure
+                // doesn't leave the in-memory state ahead of disk. ctap_process_cbor only calls
+                // save_and_notify on Ok, so a failure between mutation and return would persist
+                // a half-baked registration on the next successful operation.
+                let public_key = self.peek_next_registration_public_key(security_key_index)?;
                 log::trace!("step 17");
                 // 17. If the "rk" option is set to true:
                 if opt_rk {
@@ -622,6 +590,10 @@ impl FidoServer {
                 // supported format whose attestation statement format identifier appears with the lowest
                 // index in the supplied array. If no supported format identifier appears on the list, the
                 // authenticator may select a format by any other means.
+
+                // Attestation succeeded — commit state.
+                self.create_registered_key_ctap(security_key_index, req.rp.clone(), req.user.clone())?;
+
                 log::debug!("Response: {resp:02x?}");
                 Ok(resp.to_vec_cbor())
             }
@@ -867,57 +839,20 @@ impl FidoServer {
                     log::trace!("step 9");
                     // 9. If the "up" option is set to true or not present:
                     if opt_up {
-                        // - If the pinUvAuthParam parameter is present then:
-                        if req.pin_uv_auth_param.is_some() {
-                            // - Let userPresentFlagValue be the result of calling getUserPresentFlagValue().
-                            let user_present_flag_value = self.get_user_presence_flag_value();
-                            // - If userPresentFlagValue is false:
-                            // Note: An authenticator may be configured to collect user presence whenever the
-                            // "up" option is true by setting the default user present time limit to zero.
-                            if !user_present_flag_value {
-                                // - Request evidence of user interaction in an authenticator-specific way
-                                //   (e.g., flash the LED light). If the authenticator has a display, show the
-                                //   items contained within the user and rp parameter structures to the user,
-                                //   and request permission to create a credential.
-                                // - If the user declines permission, or the operation times out, then end the
-                                //   operation by returning CTAP2_ERR_OPERATION_DENIED.
-                                let (confirmed, _) = self
-                                    .check_user_presence(
-                                        Some(security_key_index),
-                                        true,
-                                        Some(req.rp_id.clone()),
-                                        None,
-                                        None,
-                                        None,
-                                    )
-                                    .map_err(|_| Error::OperationDenied)?;
-                                if !confirmed {
-                                    return Err(Error::OperationDenied);
-                                }
-                            }
+                        // Decide whether a presence prompt is needed (mirrors the spec's branches
+                        // on pinUvAuthParam / cached up flag) and run a single non-blocking check.
+                        let needs_prompt = if req.pin_uv_auth_param.is_some() {
+                            !self.get_user_presence_flag_value()
                         } else {
-                            // - Else (implying the pinUvAuthParam parameter is not present):
-                            //   - If the "up" bit is false in the response:
-                            if !resp.auth_data.flags.up {
-                                // - Request evidence of user interaction in an authenticator-specific way
-                                //   (e.g., flash the LED light). If the authenticator has a display, show the
-                                //   rpId parameter value to the user, and request permission to create an
-                                //   assertion.
-                                // - If the user declines permission, or the operation times out, then end the
-                                //   operation by returning CTAP2_ERR_OPERATION_DENIED.
-                                let (confirmed, _) = self
-                                    .check_user_presence(
-                                        Some(security_key_index),
-                                        true,
-                                        Some(req.rp_id.clone()),
-                                        None,
-                                        None,
-                                        None,
-                                    )
-                                    .map_err(|_| Error::OperationDenied)?;
-                                if !confirmed {
-                                    return Err(Error::OperationDenied);
-                                }
+                            !resp.auth_data.flags.up
+                        };
+                        if needs_prompt {
+                            let options = UserPresenceOptions::authentication(Some(security_key_index))
+                                .with_rp_id(req.rp_id.clone());
+                            match self.poll_or_start_presence(fingerprint, options) {
+                                PresencePoll::Pending => return Err(Error::UserActionPending),
+                                PresencePoll::Dismissed => return Err(Error::OperationDenied),
+                                PresencePoll::Confirmed { .. } => {}
                             }
                         }
                         // - Set the "up" bit to true in the response.
@@ -1035,8 +970,12 @@ impl FidoServer {
 
     pub fn ctap_process_cbor(&mut self, cmd: u8, data: &[u8]) -> Vec<u8> {
         let res = self._process_cbor(cmd, data);
-        if let Err(e) = self.save_states() {
-            log::error!("Failed to save FIDO states: {:?}", e);
+        // Only persist/notify when the command completed successfully — pending retries and
+        // errors don't mutate FIDO state.
+        if res.is_ok() {
+            if let Err(e) = self.save_and_notify() {
+                log::error!("Failed to save FIDO states: {:?}", e);
+            }
         }
         Status::from(&res).to_vec(res.unwrap_or_default().as_slice())
     }

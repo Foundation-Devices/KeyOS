@@ -13,14 +13,18 @@ import { OnboardingBasePage } from "../../../../widgets/base-page.slint";
 export component ManualKeycardBackupPage inherits OnboardingBasePage {
     VerticalLayout {
         NavHeader {
+            left-icon: backup-page.backup-created ? "" : "chevron-left";
+
             clicked => {
-                Navigate.backward();
+                if !backup-page.backup-created {
+                    Navigate.backward();
+                }
             }
         }
 
         PageBody {
             alignment: stretch;
-            KeycardBackupPage {
+            backup-page := KeycardBackupPage {
                 magic: false;
                 steps: KeycardBackupGlobal.steps;
                 saving-to-keycard: KeycardBackupGlobal.saving-to-keycard;

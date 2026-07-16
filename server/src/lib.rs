@@ -4,6 +4,7 @@
 //! A type-safe way to implement KeyOS servers.
 
 mod archive;
+mod blocking_archive;
 mod checked_conn;
 mod deferred;
 mod definitions;
@@ -20,6 +21,7 @@ mod utils;
 pub mod rkyv_with;
 
 pub use archive::*;
+pub use blocking_archive::*;
 pub use checked_conn::*;
 pub use deferred::*;
 pub use definitions::*;

@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-pub mod api;
-pub mod error;
-pub mod messages;
-
 #[cfg(keyos)]
 mod atsama5d2;
 
@@ -17,9 +13,8 @@ use atsama5d2::Implementation;
 mod hosted;
 #[cfg(not(keyos))]
 use hosted::Implementation;
-use server::{ArchiveHandler, BlockingScalar, BlockingScalarHandler, Server, ServerContext};
-
-use crate::{error::NfcError, messages::*};
+use nfc::{error::NfcError, messages::*};
+use server::{BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, Server, ServerContext};
 
 settings::use_api!();
 
@@ -79,7 +74,7 @@ impl server::ScalarEventHandler<gpio::IrqMessage> for NfcServer {
     }
 }
 
-impl ArchiveHandler<ReadNdefRawMsg> for NfcServer {
+impl BlockingArchiveHandler<ReadNdefRawMsg> for NfcServer {
     fn handle(
         &mut self,
         ReadNdefRawMsg(timeout): ReadNdefRawMsg,
@@ -95,7 +90,7 @@ impl ArchiveHandler<ReadNdefRawMsg> for NfcServer {
     }
 }
 
-impl ArchiveHandler<WriteNdefRawMsg> for NfcServer {
+impl BlockingArchiveHandler<WriteNdefRawMsg> for NfcServer {
     fn handle(
         &mut self,
         WriteNdefRawMsg((uid, msg, timeout)): WriteNdefRawMsg,

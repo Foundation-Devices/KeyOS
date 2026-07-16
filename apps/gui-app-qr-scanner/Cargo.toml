@@ -7,18 +7,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-camera = { path = "../../os/camera" }
+app-manager = { workspace = true }
+app-manifest = { path = "../../os/app-manifest" }
+camera = { workspace = true }
 foundation-ur = { workspace = true }
 gui-server-api = { workspace = true }
 haptics = { workspace = true }
 i18n = { path = "../../i18n" }
 log = { workspace = true }
 log-server = { workspace = true }
-quircs = "0.10.2"
+regex-lite = "0.1"
 rgb565 = "0.1.3"
+rxing = { version = "0.7.1", default-features = false }
+serde_json = { workspace = true }
 server = { workspace = true }
 settings = { workspace = true }
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
+
+[features]
+production = []
 
 [build-dependencies]
 slint-keyos-platform-build = { path = "../../slint-keyos-platform/build" }

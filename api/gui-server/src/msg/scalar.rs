@@ -4,29 +4,7 @@
 use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar};
 
-use crate::{NextFrameAnimationKind, Vsync};
-
-#[derive(Debug, server::Message)]
-#[response(Option<u64>)]
-pub struct SwapBuffers {
-    pub vsync: Vsync,
-}
-
-impl AsScalar<1> for SwapBuffers {
-    fn as_scalar(&self) -> [u32; 1] { [self.vsync as u32] }
-}
-
-impl FromScalar<1> for SwapBuffers {
-    fn from_scalar([value]: [u32; 1]) -> Self {
-        Self {
-            vsync: match value {
-                1 => Vsync::DontWait,
-                2 => Vsync::CapFPS,
-                _ => Vsync::Wait,
-            },
-        }
-    }
-}
+use crate::NextFrameAnimationKind;
 
 #[derive(Debug, server::Message)]
 pub struct SwitchTo {
@@ -90,16 +68,6 @@ impl AsScalar<1> for Shutdown {
 #[derive(Debug, server::Message)]
 #[response(bool)]
 pub struct SwitchToLauncher;
-
-impl FromScalar<2> for crate::DoubleBuffer {
-    fn from_scalar([a, b]: [u32; 2]) -> Self {
-        crate::DoubleBuffer { disp_buf: a as usize, work_buf: b as usize }
-    }
-}
-
-impl AsScalar<2> for crate::DoubleBuffer {
-    fn as_scalar(&self) -> [u32; 2] { [self.disp_buf as u32, self.work_buf as u32] }
-}
 
 #[derive(Debug, server::Message)]
 pub struct CloseApp {

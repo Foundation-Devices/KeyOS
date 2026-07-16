@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 
+export enum BackupStatus {
+    Idle,
+    Creating,
+    Error,
+}
+
 export global BackupGlobal {
     in property <[string]> seed-words: [];
 
-    in property <string> last-backup-time-ago: "";
+    in property <string> last-backup-duration: "";
 
     in-out property <bool> magic-backup-enabled: true;
     callback set-magic-backup-enabled(bool);
 
     callback create-backup();
-    in property <bool> creating-backup;
+    in-out property <BackupStatus> status: BackupStatus.Idle;
 }

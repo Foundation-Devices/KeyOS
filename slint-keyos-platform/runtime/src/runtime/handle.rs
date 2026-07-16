@@ -6,7 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{SyncSender, TrySendError},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -22,14 +22,6 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
-    /// Create a new runtime handle. runtime must be initialized first.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # slint_keyos_platform::Runtime::unsafe_init(|| ());
-    /// let runtime_handle = slint_keyos_platform::RuntimeHandle::default();
-    /// ```
     pub fn default() -> Self { with_runtime(|runtime| runtime.handle()) }
 
     pub fn spawn<I, T>(&self, task: I) -> TaskHandle<T>
@@ -46,55 +38,29 @@ impl RuntimeHandle {
         TaskHandle::from(task)
     }
 
-    /// task runs on worker thread while app is visible
     pub fn spawn_worker<I, T>(&self, task: I) -> TaskHandle<T>
     where
         I: IntoFuture<Output = T>,
         <I as IntoFuture>::IntoFuture: Send + 'static,
         T: Send + 'static,
     {
-        self.inner.worker.spawn(task)
+        self.worker().spawn(task)
     }
 
-    pub fn sleep(&self, duration: Duration) -> Sleep { self.inner.worker.sleep(duration) }
+    pub fn sleep(&self, duration: Duration) -> Sleep { self.worker().sleep(duration) }
 
     pub fn timeout<F>(&self, future: F, duration: Duration) -> Timeout<F>
     where
         F: Future,
     {
-        self.inner.worker.timeout(future, duration)
+        self.worker().timeout(future, duration)
     }
 
-    /// Quit the runtime
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # slint_keyos_platform::Runtime::unsafe_init(|| ());
-    /// let runtime_handle = slint_keyos_platform::RuntimeHandle::default();
-    /// std::thread::spawn(move || {
-    ///     runtime_handle.quit();
-    /// })
-    /// .join()
-    /// .unwrap();
-    /// ```
     pub fn quit(&self) { self.queue_event(MainEvent::Quit) }
 
-    /// Wake up the runtime
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # slint_keyos_platform::Runtime::unsafe_init(|| ());
-    /// let runtime_handle = slint_keyos_platform::RuntimeHandle::default();
-    /// std::thread::spawn(move || {
-    ///     // wake up the runtime from a worker thread
-    ///     runtime_handle.wake();
-    /// })
-    /// .join()
-    /// .unwrap();
-    /// ```
     pub fn wake(&self) { (self.inner.waker)(); }
+
+    pub(crate) fn worker(&self) -> &WorkerHandle { self.inner.worker.get_or_init(WorkerHandle::default) }
 }
 
 impl RuntimeHandle {
@@ -122,7 +88,7 @@ pub(crate) struct RuntimeHandleInner {
     // Waker to wake up the runtime
     pub(crate) waker: Arc<dyn EventLoopWaker>,
     pub(crate) main_tx: SyncSender<MainEvent>,
-    pub(crate) worker: WorkerHandle,
+    pub(crate) worker: OnceLock<WorkerHandle>,
 }
 
 impl EventLoopProxy for RuntimeHandle {

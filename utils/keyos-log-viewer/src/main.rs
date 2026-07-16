@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod parse;
-mod serial;
 mod state;
+mod transport;
 mod tui;
 
 use std::sync::mpsc;
@@ -20,36 +20,22 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::parse::{parse_payload, ParseItem};
-use crate::serial::{start_serial_thread, SerialCommand};
 use crate::state::State;
+use crate::transport::{start_transport_thread, TransportCommand, TransportEvent};
 
 const MAX_EVENTS_PER_FRAME: usize = 32;
 
 #[derive(Debug)]
 pub enum AppEvent {
     Input(Event),
-    Serial(SerialEvent),
-}
-
-#[derive(Debug)]
-pub enum SerialEvent {
-    Payload(String),
-    Status(String),
+    Transport(TransportEvent),
 }
 
 #[derive(Parser)]
 #[command(name = "keyos-log-viewer")]
-#[command(about = "View keyOS logs from serial port")]
+#[command(about = "View keyOS logs from USB vendor interface")]
 #[command(version)]
 struct Args {
-    /// Serial port (e.g., /dev/ttyUSB0, COM3)
-    #[arg(short, long, value_name = "PORT")]
-    port: String,
-
-    /// Baud rate (default: 115200)
-    #[arg(short, long, default_value = "115200")]
-    baud: u32,
-
     /// Reconnect timeout in seconds (default: 3)
     #[arg(short, long, default_value = "3")]
     timeout: u64,
@@ -57,10 +43,9 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let port = args.port.clone();
 
     let (event_tx, event_rx) = mpsc::channel::<AppEvent>();
-    let (serial_tx, serial_rx) = mpsc::channel::<SerialCommand>();
+    let (transport_tx, transport_rx) = mpsc::channel::<TransportCommand>();
 
     thread::spawn({
         let event_tx = event_tx.clone();
@@ -73,15 +58,9 @@ fn main() {
         }
     });
 
-    start_serial_thread(
-        args.port.clone(),
-        args.baud,
-        Duration::from_secs(args.timeout),
-        event_tx.clone(),
-        serial_rx,
-    );
+    start_transport_thread(Duration::from_secs(args.timeout), event_tx.clone(), transport_rx);
 
-    let mut state = State::new(serial_tx.clone(), port);
+    let mut state = State::new(transport_tx.clone());
     state.log.refresh_filters();
 
     enable_raw_mode().unwrap();
@@ -133,9 +112,9 @@ fn run_loop(
 fn apply_event(state: &mut State, event: AppEvent) -> bool {
     match event {
         AppEvent::Input(event) => state.handle_input(event),
-        AppEvent::Serial(event) => {
+        AppEvent::Transport(event) => {
             match event {
-                SerialEvent::Payload(payload) => {
+                TransportEvent::Payload(payload) => {
                     if let Some(parsed) = parse_payload(&payload, &state.log.entries) {
                         match parsed {
                             ParseItem::Log(record) => state.log.push_entry(record),
@@ -145,7 +124,7 @@ fn apply_event(state: &mut State, event: AppEvent) -> bool {
                         }
                     }
                 }
-                SerialEvent::Status(status) => {
+                TransportEvent::Status(status) => {
                     state.status_text = status;
                 }
             }

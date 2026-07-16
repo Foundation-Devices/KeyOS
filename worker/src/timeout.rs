@@ -4,17 +4,15 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::Weak,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-use pin_project_lite::pin_project;
-
-use crate::implementation::WorkerApiInner;
+use crate::implementation::Shared;
 use crate::sleep::Sleep;
 
-pin_project! {
+pin_project_lite::pin_project! {
     pub struct Timeout<F> {
         #[pin]
         future: F,
@@ -24,7 +22,7 @@ pin_project! {
 }
 
 impl<F> Timeout<F> {
-    pub fn new(future: F, duration: Duration, handle: Weak<WorkerApiInner>) -> Self {
+    pub fn new(future: F, duration: Duration, handle: Arc<Shared>) -> Self {
         Self { future, sleep: Sleep::new(duration, handle) }
     }
 }
@@ -41,7 +39,7 @@ impl<F: Future> Future for Timeout<F> {
         }
 
         // then check if we've timed out
-        if let Poll::Ready(()) = this.sleep.poll(cx) {
+        if this.sleep.poll(cx) == Poll::Ready(()) {
             return Poll::Ready(Err(TimeoutError));
         }
 
