@@ -126,6 +126,25 @@ enum StartupState {
     Started,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) struct KioskPolicy {
+    auto_lock_enabled: bool,
+    control_center_enabled: bool,
+    home_button_enabled: bool,
+    power_button_enabled: bool,
+}
+
+impl Default for KioskPolicy {
+    fn default() -> Self {
+        Self {
+            auto_lock_enabled: true,
+            control_center_enabled: true,
+            home_button_enabled: true,
+            power_button_enabled: true,
+        }
+    }
+}
+
 #[derive(server::Server)]
 #[name = "os/gui-server"]
 pub struct Gui {
@@ -154,6 +173,7 @@ pub struct Gui {
     touch_state: TouchState,
     rgb_led: RgbLedState,
     power_button_state: PowerButtonState,
+    kiosk_policies: HashMap<PID, KioskPolicy>,
     auto_lock: AutoLockState,
     close_app_callback: Option<TicktimerCallback>,
     shutting_down: Option<bool>,
@@ -258,6 +278,7 @@ impl Gui {
             touch_state: TouchState::init(),
             rgb_led: RgbLedState::default(),
             power_button_state: PowerButtonState::default(),
+            kiosk_policies: HashMap::new(),
             auto_lock: AutoLockState::default(),
             close_app_callback: None,
             shutting_down: None,
@@ -822,19 +843,29 @@ impl Gui {
         self.active_app_pid().is_some() && self.active_app_pid() == self.app_registry.lock_screen_pid()
     }
 
-    fn home_button_enabled(&self) -> bool {
-        let modal_allows =
-            self.modal_background_pid().map(|pid| self.home_button_allowed_for_app(pid)).unwrap_or(true);
+    fn home_button_enabled(&self) -> bool { self.control_enabled(|policy| policy.home_button_enabled, false) }
+
+    fn power_button_enabled(&self) -> bool {
+        self.control_enabled(|policy| policy.power_button_enabled, true)
+    }
+
+    fn control_center_enabled(&self) -> bool {
+        self.control_enabled(|policy| policy.control_center_enabled, true)
+    }
+
+    #[cfg(all(keyos, not(feature = "recovery-os")))]
+    fn auto_lock_enabled(&self) -> bool { self.control_enabled(|policy| policy.auto_lock_enabled, true) }
+
+    fn control_enabled(&self, enabled: fn(KioskPolicy) -> bool, active_default: bool) -> bool {
+        let modal_allows = self.modal_background_pid().map_or(true, |pid| enabled(self.kiosk_policy(pid)));
         let active_allows =
-            self.active_app_pid().map(|pid| self.home_button_allowed_for_app(pid)).unwrap_or(false);
+            self.active_app_pid().map_or(active_default, |pid| enabled(self.kiosk_policy(pid)));
 
         modal_allows && active_allows
     }
 
-    fn home_button_allowed_for_app(&self, pid: PID) -> bool {
-        Some(pid) != self.app_registry.lock_screen_pid()
-            && Some(pid) != self.app_registry.onboarding_app_pid()
-            && Some(pid) != self.app_registry.alerts_app_pid()
+    fn kiosk_policy(&self, pid: PID) -> KioskPolicy {
+        self.kiosk_policies.get(&pid).copied().unwrap_or_default()
     }
 
     #[cfg(not(feature = "recovery-os"))]

@@ -23,6 +23,7 @@ use slint_keyos_platform::{
     app, async_archive,
     futures_lite::StreamExt,
     gui_server_api::{
+        msg::UpdateKioskPolicy,
         navigation::filepicker::{AllowedExtensions, AllowedLocations, Location, SelectFileOptions},
         InputMessage,
     },
@@ -68,6 +69,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     log::set_max_level(log::LevelFilter::Info);
 
     cx.config.enable_swipe_back.set(false);
+    cx.gui.update_kiosk_policy(UpdateKioskPolicy::default().set_home_button(false)).ok();
 
     let state = init_state(ui.clone_strong(), cx.gui.clone());
 

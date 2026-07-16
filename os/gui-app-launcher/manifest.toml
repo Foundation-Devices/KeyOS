@@ -12,7 +12,8 @@ template = ["gui-app"]
     "FormatAirlock",
     "MountAirlock",
 ]
-"os/gui-server" = ["SwitchTo", "Shutdown", "NavigateTo"]
+"os/gui-server" = ["SwitchTo", "Shutdown", "NavigateTo", "UpdateKioskPolicy"]
 "os/haptics" = ["Vibrate"]
 "os/quantum-link" = ["SubscribeExchangeRate", "SubscribeExchangeRateHistory", "SubscribeConnectionStatus"]
 "os/settings" = ["SetOnboardingStatus"]
+"os/update" = ["ClearUpdateApplied", "GetUpdateApplied", "GetUpdateStatus", "SubscribeUpdateProgress"]

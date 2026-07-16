@@ -21,7 +21,7 @@ macro_rules! use_api {
     };
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PowerManagerApi<P: CheckedPermissions> {
     conn: CheckedConn<P>,
 }

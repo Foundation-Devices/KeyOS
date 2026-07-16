@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gui_server_api::{
-    msg::{AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwapBuffers, SwitchTo, SwitchToLauncher},
+    msg::{
+        AnimateNextFrame, CloseApp, RequestRedraw, Shutdown, SwapBuffers, SwitchTo, SwitchToLauncher,
+        UpdateKioskPolicy,
+    },
     InputMessage,
 };
 use log::{error, info, warn};
@@ -15,7 +18,7 @@ use xous::PID;
 use super::{BlurDone, CloseAppTimeout, ForceShutdownTimeout, OnFreeMemoryBelowThreshold};
 use crate::{
     handlers::{DisconnectHandlerMessage, OnVsyncMessage, PowerButtonTimerCallback},
-    Gui,
+    Gui, KioskPolicy,
 };
 
 impl BlockingScalarAsyncHandler<SwapBuffers> for Gui {
@@ -67,6 +70,47 @@ impl BlockingScalarHandler<SwitchToLauncher> for Gui {
         }
 
         false
+    }
+}
+
+impl ScalarHandler<UpdateKioskPolicy> for Gui {
+    fn handle(&mut self, update: UpdateKioskPolicy, sender: PID, _context: &mut ServerContext<Self>) {
+        fn update_kiosk_policy(policy: &mut KioskPolicy, update: UpdateKioskPolicy) {
+            if let Some(auto_lock_enabled) = update.auto_lock_enabled {
+                policy.auto_lock_enabled = auto_lock_enabled;
+            }
+            if let Some(control_center_enabled) = update.control_center_enabled {
+                policy.control_center_enabled = control_center_enabled;
+            }
+            if let Some(home_button_enabled) = update.home_button_enabled {
+                policy.home_button_enabled = home_button_enabled;
+            }
+            if let Some(power_button_enabled) = update.power_button_enabled {
+                policy.power_button_enabled = power_button_enabled;
+            }
+        }
+        use std::collections::hash_map::Entry;
+
+        info!("Kiosk policy set to {update:?} by PID={sender}");
+        match self.kiosk_policies.entry(sender) {
+            Entry::Occupied(mut entry) => {
+                update_kiosk_policy(entry.get_mut(), update);
+                if *entry.get() == KioskPolicy::default() {
+                    entry.remove();
+                }
+            }
+            Entry::Vacant(entry) => {
+                let mut policy = KioskPolicy::default();
+                update_kiosk_policy(&mut policy, update);
+                if policy != KioskPolicy::default() {
+                    entry.insert(policy);
+                }
+            }
+        }
+
+        if update.auto_lock_enabled.is_some() {
+            self.reset_auto_lock();
+        }
     }
 }
 

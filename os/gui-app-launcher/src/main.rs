@@ -4,9 +4,11 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use anyhow::{anyhow, Context};
 use fs::{FileSystemEventType, Location};
 use gui_server_api::{
     consts::CLOSE_TIMEOUT_EXIT_CODE,
+    msg::UpdateKioskPolicy,
     navigation::alerts::{AlertResult, InvokeAlert},
     InputMessage,
 };
@@ -21,6 +23,7 @@ use slint_keyos_platform::{
     slint::{ComponentHandle, VecModel},
     spawn_local, subscribe_archive, subscribe_scalar, StoredValue,
 };
+use update::messages::ProgressUpdate;
 use xous::{app_id_to_pid, current_pid, AppId, PID};
 
 use crate::gui_permissions::GuiPermissions;
@@ -38,6 +41,7 @@ const GRAPH_WIDTH: u32 = 402;
 const GRAPH_HEIGHT: u32 = 76;
 const GRAPH_MAX_HEIGHT: u32 = GRAPH_HEIGHT - 10;
 const GRAPH_WINDOW_SECS: u64 = 60 * GRAPH_WINDOW_MINUTES;
+static SETTINGS_APP_ID_STR: &str = "0xc192b79230473875f159d4423d74d00f";
 const FLATLINE_POINTS: [PricePoint; 2] = [
     PricePoint { price: 500, timestamp: 0, is_pad: true },
     PricePoint { price: 500, timestamp: 1, is_pad: true },
@@ -46,6 +50,7 @@ const FLATLINE_POINTS: [PricePoint; 2] = [
 app_manager::use_api!();
 haptics::use_api!();
 quantum_link::use_api!();
+update::use_api!();
 
 pub struct AppState {
     pub gui: Arc<GuiApi>,
@@ -114,6 +119,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     }
 
     cx.set_input_handler({
+        let mut needs_first_visible = true;
         move |app_input| {
             if let InputMessage::Hidden = app_input.msg {
                 let mut state_borrow = state.borrow_mut();
@@ -138,6 +144,11 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 }
                 if show_airlock_error {
                     invoke_airlock_format_alert(state);
+                }
+
+                if needs_first_visible {
+                    needs_first_visible = false;
+                    maybe_resume_update(state);
                 }
             }
         }
@@ -278,6 +289,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     .detach();
 
     setup_ql_status(state);
+    setup_update_progress(state);
     setup_bitcoin_status(state);
     refresh_bitcoin_status(state);
 
@@ -573,8 +585,9 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             gui_api.switch_to(pid, 0, 0).expect("switch_to failed");
         }
 
-        app_manager::AppEvent::LaunchError(e) => {
+        app_manager::AppEvent::LaunchError { app_id, error: e } => {
             log::error!("App launch error: {e:?}");
+            clear_update_settings_crash(state, app_id);
             error_message(
                 &ui,
                 tr::lookup_id(TrId::LauncherCrashHeader),
@@ -587,6 +600,8 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
 
         // TODO (SFT-5433): push the crash message into a log
         app_manager::AppEvent::AppCrashed { app_id, pid, exit_code, panic_message, .. } => {
+            clear_update_settings_crash(state, app_id);
+
             let app_name = AppManagerApi::default()
                     .app_name_by_app_id(&app_id.into(), "en") // TODO: i18n, get the locale from the settings
                     .unwrap_or_else(|| "Unknown App".to_string());
@@ -617,6 +632,114 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
         }
     }
 }
+
+fn setup_update_progress(state: StoredValue<AppState>) {
+    spawn_local(async move {
+        let mut update_events = subscribe_archive::<update_permissions::UpdatePermissions, _>(
+            update::messages::SubscribeUpdateProgress,
+        );
+
+        while let Some(event) = update_events.next().await {
+            match event {
+                ProgressUpdate::InstallError(_) | ProgressUpdate::DownloadError(_) => {
+                    clear_update_resume_state(state);
+                }
+                ProgressUpdate::Rebooting | ProgressUpdate::Done => {}
+                ProgressUpdate::DownloadProgress(_)
+                | ProgressUpdate::DownloadComplete
+                | ProgressUpdate::InstallProgress(_) => {}
+            }
+        }
+    })
+    .detach();
+}
+
+fn show_update_applied_alert(state: StoredValue<AppState>) {
+    let gui = state.borrow().gui.clone();
+    gui.invoke_alert(InvokeAlert {
+        app_title: None,
+        title: tr::lookup_id(TrId::MainUpdateAppliedHeader).to_string(),
+        icon: "check-circle".to_string(),
+        line1: tr::lookup_id(TrId::MainUpdateAppliedDescription).to_string(),
+        line2: None,
+        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
+        button2_title: None,
+        button3_title: None,
+    })
+    .ok();
+}
+
+fn maybe_resume_update(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    let update = UpdateApi::default();
+
+    if update.check_update_applied() {
+        show_update_applied_alert(state);
+        update.clear_update_applied();
+        return;
+    }
+
+    if !update.update_status().needs_continue {
+        return;
+    }
+
+    if let Err(e) = try_resume_update(state) {
+        log::error!("failed to resume interrupted update: {e:?}");
+        clear_update_resume_state(state);
+        error_message(
+            &ui,
+            tr::lookup_id(TrId::LauncherCrashHeader),
+            tr::lookup_id(TrId::LauncherCrashContent),
+            Some(format!("{e:?}")),
+            None,
+            None,
+        );
+    }
+}
+
+fn try_resume_update(state: StoredValue<AppState>) -> anyhow::Result<()> {
+    let state = state.borrow();
+    let ui = state.ui();
+
+    log::info!("interrupted update detected; launching settings to resume");
+    ui.global::<State>().set_update_resume_active(true);
+    ui.global::<State>().set_loading_app_id(SETTINGS_APP_ID_STR.into());
+
+    state.gui.update_kiosk_policy(UpdateKioskPolicy::all(false)).context("set kiosk policy")?;
+
+    let settings_app_id = settings_app_id();
+
+    let settings_pid =
+        app_id_to_pid(&settings_app_id).map_err(|e| anyhow!("lookup settings app PID: {e:?}"))?;
+
+    match settings_pid {
+        Some(pid) => state.gui.switch_to(pid, 0, 0).context("switch to settings")?,
+        None => AppManagerApi::default()
+            .launch_app(&settings_app_id)
+            .map_err(|e| anyhow!("failed to launch settings: {e:?}"))?,
+    }
+
+    Ok(())
+}
+
+fn clear_update_settings_crash(state: StoredValue<AppState>, app_id: [u32; 4]) {
+    if state.borrow().ui().global::<State>().get_update_resume_active()
+        && AppId::from(app_id) == settings_app_id()
+    {
+        clear_update_resume_state(state);
+    }
+}
+
+fn clear_update_resume_state(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    ui.global::<State>().set_update_resume_active(false);
+    clear_launching_state(&ui);
+    if let Err(e) = state.borrow().gui.update_kiosk_policy(UpdateKioskPolicy::all(true)) {
+        log::error!("failed to clear kiosk policy after update resume failure: {e:?}");
+    }
+}
+
+fn settings_app_id() -> AppId { app_manager::decode_app_id_str(SETTINGS_APP_ID_STR).unwrap() }
 
 fn fmt_price(n: f32) -> String {
     let s = n.to_string();

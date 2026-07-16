@@ -142,7 +142,12 @@ impl server::ArchiveHandler<GetUpdateStatus> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <GetUpdateStatus as server::Archive>::Response {
-        UpdateStatus { downloaded_update: false, needs_continue: false, sufficient_battery: true }
+        UpdateStatus {
+            downloaded_update: false,
+            needs_continue: false,
+            installing: false,
+            sufficient_battery: true,
+        }
     }
 }
 

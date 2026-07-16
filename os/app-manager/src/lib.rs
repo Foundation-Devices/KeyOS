@@ -90,7 +90,7 @@ impl ScalarHandler<LaunchApp> for AppManagerServer {
         info!("PID {sender} is asynchronously launching app 0x{}", hex::encode(app_id.0));
         if let Err(e) = self.launch_app(app_id, sender) {
             if let Some(s) = self.app_event_subscribers.iter().find(|s| s.pid() == sender) {
-                let event = AppEvent::LaunchError(e);
+                let event = AppEvent::LaunchError { app_id: (&app_id).into(), error: e };
                 if s.send(&event).is_err() {
                     error!("Failed to send launch error to subscriber PID {sender}");
                 }

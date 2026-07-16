@@ -38,6 +38,8 @@ pub struct UpdateStatus {
     pub downloaded_update: bool,
     /// Whether there is an update that was interrupted by reboot and needs to continue.
     pub needs_continue: bool,
+    /// Whether a firmware update is currently being installed.
+    pub installing: bool,
     /// Whether the battery level is sufficient for an update.
     pub sufficient_battery: bool,
 }
@@ -101,10 +103,10 @@ pub struct PatchProgress {
 }
 
 impl InstallProgress {
-    const COPY_BYTES_PER_SECOND: f64 = 2.0 * 1024.0 * 1024.0;
-    const PATCH_OVERHEAD_SECONDS: f64 = 5.0;
+    const COPY_BYTES_PER_SECOND: f64 = 7.0 * 1024.0 * 1024.0;
+    const PATCH_OVERHEAD_SECONDS: f64 = 2.0;
     const SECONDS_PER_ACTION: f64 = 1.5;
-    const SECONDS_PER_MB: f64 = 0.3;
+    const SECONDS_PER_MB: f64 = 5.0;
 
     pub fn action_completed(&mut self) {
         if let Some(patch) = self.patches.iter_mut().find(|p| p.completed_actions < p.total_actions) {

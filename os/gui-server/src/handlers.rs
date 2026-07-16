@@ -6,7 +6,6 @@ use server::{AsScalar, FromScalar};
 use xous::{MemoryRange, PID};
 
 mod camera;
-mod control_center;
 mod keyboard;
 mod navigation;
 mod register;

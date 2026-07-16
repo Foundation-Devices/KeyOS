@@ -3,12 +3,63 @@
 
 import { Router } from "./gen/router.slint";
 import { LauncherCallbacks, State } from "./launcher-callbacks.slint";
-import { Images, CurrentTheme, Utils } from "@ui/theme.slint";
+import { Images, CurrentTheme, Utils, Size, Palette } from "@ui/theme.slint";
 import { TR } from "@ui/i18n/i18n.slint";
-import { BaseWindow } from "@ui/widgets.slint";
+import { TR2, TrId } from "./gen/tr.slint";
+import { BaseWindow, PopupMenu, TimerLoader, HeadingMd, TextSm } from "@ui/widgets.slint";
 
 export component AppWindow inherits BaseWindow {
     Router { }
+
+    if State.update-resume-active: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Palette.black.transparentize(0.45);
+        z: 1000;
+
+        PopupMenu {
+            width: 424px;
+            x: parent.width / 2 - self.width / 2;
+            y: parent.height / 2 - self.height / 2;
+            z: 1001;
+
+            VerticalLayout {
+                padding-left: Size.sz8;
+                padding-right: Size.sz8;
+
+                padding-top: Size.sz16;
+                padding-bottom: Size.sz16;
+
+                spacing: Size.sz8;
+
+                VerticalLayout {
+                    spacing: Size.sz4;
+                    alignment: center;
+
+                    HeadingMd {
+                        text: TR2.lookup(TrId.MainUpdateResumeHeader);
+                        color: Palette.content-primary;
+                        horizontal-alignment: center;
+                    }
+
+                    TextSm {
+                        text: TR2.lookup(TrId.MainUpdateResumeDescription);
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    TimerLoader {
+                        size: Size.sz16;
+                    }
+                }
+            }
+        }
+
+        TouchArea { }
+    }
 }
 
 export * from "gen/exports.slint";

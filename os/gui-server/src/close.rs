@@ -24,7 +24,7 @@ impl Gui {
             return;
         }
 
-        self.release_wake_lock_for(pid);
+        self.kiosk_policies.remove(&pid);
 
         if self.shutting_down.is_none() {
             // If the app was a modal, collapse it

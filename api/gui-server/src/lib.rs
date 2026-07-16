@@ -285,6 +285,14 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
     {
         Ok(self.conn.try_send_blocking_scalar(msg::Shutdown { reboot: true })?)
     }
+
+    pub fn update_kiosk_policy(&self, policy: msg::UpdateKioskPolicy) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::UpdateKioskPolicy>,
+    {
+        self.conn.try_send_scalar(policy)?;
+        Ok(())
+    }
 }
 
 impl<P: CheckedPermissions> GuiApi<P> {
@@ -439,34 +447,6 @@ impl<P: CheckedPermissions> GuiApi<P> {
         P: MessageAllowed<msg::AnimateNextFrame>,
     {
         self.conn.try_send_scalar(msg::AnimateNextFrame { animation_kind })?;
-        Ok(())
-    }
-
-    pub fn show_control_center(&self) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<msg::ShowControlCenter>,
-    {
-        self.conn.try_send_scalar(msg::ShowControlCenter(true))?;
-        Ok(())
-    }
-
-    // if background is None, the background will be the system default
-    pub fn hide_control_center(&self) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<msg::ShowControlCenter>,
-    {
-        self.conn.try_send_scalar(msg::ShowControlCenter(false))?;
-        Ok(())
-    }
-
-    /// Prevents the device from auto-locking and auto-shutting down while `enabled` is true
-    /// Dimming is still allowed
-    /// Call with `false` to release the lock
-    pub fn set_wake_lock(&self, enabled: bool) -> Result<(), GuiServerError>
-    where
-        P: MessageAllowed<msg::SetWakeLock>,
-    {
-        self.conn.try_send_scalar(msg::SetWakeLock(enabled))?;
         Ok(())
     }
 }

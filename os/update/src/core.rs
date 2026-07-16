@@ -36,7 +36,7 @@ pub const MANIFEST_FILE_PATH: &str = "/release/manifest.json";
 pub const FIRMWARE_FILE_PATH: &str = "/keyos/app.bin";
 
 /// The outcome of applying updates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum UpdateOutcome {
     /// All releases were applied successfully.
     Done,
@@ -101,8 +101,12 @@ where
 
             let mut remaining = entry.len as usize;
             while remaining > 0 {
-                let block_size = remaining.next_multiple_of(keyos::PAGE_SIZE);
+                let block_size = remaining.min(1024 * 1024);
                 let written = src.copy_block_to(&mut dst, block_size).whence()?;
+                // copy_block_to returns 0 at EOF; stop, or else an over-long entry.len loops forever.
+                if written == 0 {
+                    break;
+                }
                 remaining = remaining.saturating_sub(written);
                 completed_work += written as u64;
                 progress(completed_work);
