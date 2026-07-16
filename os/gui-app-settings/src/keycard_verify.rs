@@ -82,8 +82,7 @@ impl VerifyKeycardError {
                 tr::lookup_id(TrId::MagicVerifyBackupErrorReadingKeycardFailed).into()
             }
             VerifyKeycardError::Keycard(KeycardError::DuplicateShardIndex { .. }) => {
-                // TODO: localize
-                "Duplicate Keycard part".into()
+                tr::lookup_id(TrId::MagicVerifyBackupErrorKeycardDuplicatePart).into()
             }
             VerifyKeycardError::SendMessage(_) => {
                 tr::lookup_id(TrId::MagicVerifyBackupErrorNoConnectionToEnvoy).into()

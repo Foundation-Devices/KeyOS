@@ -406,6 +406,7 @@
   "magicVerifyBackup.thirdPartVerifiedKeycard": "Part 3 verified on Keycard",
   "magicVerifyBackupError.header": "Verification Failed",
   "magicVerifyBackupError.keycardDifferentBackup": "Keycard from different Backup",
+  "magicVerifyBackupError.keycardDuplicatePart": "Duplicate Keycard part",
   "magicVerifyBackupError.keycardEmpty": "Keycard is empty",
   "magicVerifyBackupError.noConnectionToEnvoy": "No Connection to Envoy",
   "magicVerifyBackupError.noEnvoyBackupFound": "No Envoy Backup found",
