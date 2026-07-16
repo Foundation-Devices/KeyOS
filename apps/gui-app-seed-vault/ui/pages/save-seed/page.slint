@@ -88,7 +88,7 @@ export component SaveSeedPage inherits BasePage {
 
                     TitledInput {
                         title: TR2.lookup(TrId.CreateItemItemLabel);
-                        placeholder: CB.item-label-filler-text(new-seed.seed-type);
+                        placeholder: CB.get-item-label-filler-text(new-seed.seed-type);
                         text: new-seed.label;
                         message: TR2.lookup(TrId.CreateItemSeedErrorsMissingField);
                         has-notice: self.message != "";

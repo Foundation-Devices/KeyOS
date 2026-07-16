@@ -6,7 +6,7 @@
   "Registration": "Registration",
   "Time": "15",
   "Value": "m/48’/0’/0’/2’",
-  "_": "6:15",
+  "_": "Confirm",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -54,8 +54,8 @@
       "title": "Label is already in use"
     },
     "importFileModalUnsupported": {
-      "content": "Passport only supports JSON file formats for 2FA imports.",
-      "header": "Unsupported File Type"
+      "content": "Please try again or contact support.",
+      "header": "Unable to open file"
     },
     "main": {
       "import": "Import",
@@ -100,7 +100,7 @@
       "noCodes": "No codes"
     },
     "mainModalImportMultipleAccounts": {
-      "content": "This QR code will import {0} accounts. ",
+      "content": "You are about to import {0} accounts. ",
       "header": "Import multiple Accounts?"
     },
     "mainThreeDots": {
@@ -586,15 +586,23 @@
     "main": {
       "2FaCodes": "2FA",
       "appsAreComing": "Apps are coming soon.",
+      "bitcoin": "Bitcoin",
       "developers": "Developers",
       "developersWelcome": "Developers Welcome",
       "disconnected": "Disconnected",
       "fileBrowser": "Files",
+      "files": "Files",
       "lastUpdate": "Last Update",
       "legacy": "Legacy",
       "loadingData": "Loading Data…",
+      "scanQr": "Scan QR",
       "securityKeys": "Keys",
       "seedVault": "Vault",
+      "settings": "Settings",
+      "updateAppliedDescription": "Passport has been updated successfully.",
+      "updateAppliedHeader": "Update complete",
+      "updateResumeDescription": "Please keep Passport powered on.",
+      "updateResumeHeader": "Update in progress",
       "wallet": "Wallet",
       "welcome": "Welcome!",
       "xAgo": "{0} ago"
@@ -610,6 +618,12 @@
     },
     "mainTemp": {
       "temporarySeed": "Temporary Seed"
+    },
+    "removeApp": {
+      "content": "Remove {0} from Passport?",
+      "failedContent": "Passport could not remove {0}.",
+      "failedHeader": "Unable to remove app",
+      "header": "Remove App?"
     },
     "scan": {
       "content": "Scan any QR code,\nPassport will take care of it.",
@@ -1237,9 +1251,9 @@
     },
     "accessSeedWords": {
       "ViewSeedWords": "View Seed Words",
-      "contentStep1": "<b figma-seg=\"s0\">Foundation and other legitimate companies will </b><b figma-seg=\"s1\">never ask</b><b figma-seg=\"s2\"> you to share these words.</b>",
-      "contentStep2": "<b figma-seg=\"s0\">Any request to share these words or enter them into an app or website is</b><b figma-seg=\"s1\"> a scam</b><b figma-seg=\"s2\">.</b>",
-      "contentStep3": "<b figma-seg=\"s0\">Anyone with access to your seed words gains </b><b figma-seg=\"s1\">full control</b><b figma-seg=\"s2\"> over your funds.</b>",
+      "contentStep1": "Foundation and other legitimate companies will never ask you to share these words.",
+      "contentStep2": "Any request to share these words or enter them into an app or website is a scam.",
+      "contentStep3": "Anyone with access to your seed words gains full control over your funds.",
       "title": "Warning"
     },
     "advancedBackups": {
@@ -1256,9 +1270,9 @@
     "apps": {
       "appId": "App ID",
       "description": "Description",
-      "detailsTitle": "Apps Details",
+      "detailsTitle": "App Details",
       "developerMode": "Developer Mode",
-      "installTrustedPublisherCertificate": "Remove Trusted Publisher",
+      "installTrustedPublisherCertificate": "Install Certificate",
       "installedApps": "Installed Apps",
       "invalidTrustedPublisherCertificate": "Invalid Trusted Publisher certificate.",
       "mcpControl": "MCP Control",
@@ -1272,10 +1286,13 @@
         "header": "Remove App",
         "remove": "Remove"
       },
+      "removeAppFailed": "Unable to remove this app.",
+      "removeAppRunning": "Close this app before removing it.",
       "removeTrustedPublisher": "Remove Trusted Publisher",
+      "removeTrustedPublisherCertificate": "Remove Trusted Publisher",
       "removeTrustedPublisherConfirm": "Are you sure you want to remove this Trusted Publisher?",
       "removeTrustedPublisherConfirmButton": "Remove",
-      "requestedPermissions ": "Requested Permissions",
+      "requestedPermissions": "Requested Permissions",
       "sectionSettings": "Settings",
       "size": "Size",
       "title": "Apps",
@@ -1289,13 +1306,14 @@
       "trustedPublisherKeyUsage": "Key Usage",
       "trustedPublisherName": "Name",
       "trustedPublisherPublicKey": "Public Key",
-      "trustedPublisherRemoveBlocked": "settings.apps.trustedPublisherRemoveBlocked",
+      "trustedPublisherRemoveBlocked": "Remove {0} first, then try removing this Trusted Publisher again.",
       "trustedPublisherRemoveFailed": "Unable to remove this Trusted Publisher.",
       "trustedPublisherSerialNumber": "Serial Number",
       "trustedPublisherSubject": "Subject",
       "trustedPublisherSupportUrl": "Support URL",
       "trustedPublishers": "Trusted Publishers",
       "trustedPublishersIntro": "Install public key certificates for Trusted Publishers.",
+      "unableToRemoveApp": "Unable to remove App",
       "unableToRemoveTrustedPublisher": "Unable to remove Trusted Publisher",
       "usbLogging": "USB Logging",
       "version": "Version"

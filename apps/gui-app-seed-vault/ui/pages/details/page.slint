@@ -96,7 +96,7 @@ export component DetailsPage inherits BasePage {
 
                         TitledInput {
                             title: TR2.lookup(TrId.CreateItemItemLabel);
-                            placeholder: CB.item-label-filler-text(seed.seed-type);
+                            placeholder: CB.get-item-label-filler-text(seed.seed-type);
                             text: seed.label;
                             enabled: props.version != EditPageVersion.archive;
 
