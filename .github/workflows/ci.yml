@@ -33,6 +33,8 @@ jobs:
       - name: Setup nix cache
         if: steps.check.outputs.changed == 'true'
         uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - name: Build nix shell
         if: steps.check.outputs.changed == 'true'
         run: nix build .#devShells.x86_64-linux.build --no-link

@@ -8,8 +8,6 @@
 # - Do not use just in CI. It increases CI times.
 
 docker_image := 'keyos'
-api_doc_packages := 'server app-manager backup camera crypto fs gui-server-api haptics keycard nfc power-manager quantum-link rgb-led security settings update usb fido'
-
 # Crates excluded from host builds, shared by `unit-test` and `check-workspace`.
 
 # Target-only: hardware registers, bootloader, ELF loader, hardware logging.
@@ -268,10 +266,45 @@ clean:
 
 # Build the local KeyOS API rustdoc site.
 docs-api:
-    python3 scripts/generate-api-docs.py {{api_doc_packages}}
+    cargo xtask docs-api
 
 # Alias for the singular form.
 doc-api: docs-api
+
+# Build and copy the generated KeyOS API rustdoc site into a Docs-Site checkout.
+docs-api-copy docs_site:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v rsync >/dev/null 2>&1; then
+        echo "ERROR: rsync is required to copy the generated API docs." >&2
+        exit 1
+    fi
+
+    docs_site={{quote(docs_site)}}
+    if ! docs_site_root="$(git -C "$docs_site" rev-parse --show-toplevel 2>/dev/null)"; then
+        echo "ERROR: '$docs_site' is not a Git checkout." >&2
+        exit 1
+    fi
+
+    destination="$docs_site_root/static/developers/api"
+    if [[ ! -d "$destination" || ! -f "$docs_site_root/content/developers/api-reference.md" ]]; then
+        echo "ERROR: '$docs_site_root' does not have the expected Docs-Site layout." >&2
+        exit 1
+    fi
+
+    if [[ -n "$(git -C "$docs_site_root" status --porcelain -- static/developers/api)" ]]; then
+        echo "ERROR: Docs-Site has uncommitted changes under static/developers/api." >&2
+        echo "Commit or discard those changes before copying generated docs." >&2
+        exit 1
+    fi
+
+    cargo xtask docs-api
+    rsync -a --delete --exclude='.lock' target/doc/ "$destination/"
+
+    printf 'Copied KeyOS API docs to %s\n' "$destination"
+    printf 'Docs-Site changes:\n'
+    git -C "$docs_site_root" status --short -- static/developers/api
 
 # Package the generated KeyOS API rustdoc site for hosting.
 docs-api-package: docs-api

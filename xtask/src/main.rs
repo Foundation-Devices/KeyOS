@@ -15,6 +15,7 @@ use crate::symbolicate::SymbolicateArgs;
 mod bootimage;
 mod bootloader;
 mod builder;
+mod docs_api;
 mod elf;
 mod flash;
 mod hot_reload;
@@ -240,6 +241,8 @@ enum Commands {
         #[arg(value_name = "CRATE")]
         crates: Vec<String>,
     },
+    /// Build and annotate the public KeyOS API rustdoc site
+    DocsApi(docs_api::DocsApiArgs),
     /// Run hardware-backed test helpers
     Test(tests::TestArgs),
     /// Flash (parts of) the boot.bin file to the device using sam-ba
@@ -374,6 +377,12 @@ fn main() {
         }
         Commands::Check { crates } => {
             check_crates(crates);
+        }
+        Commands::DocsApi(args) => {
+            if let Err(err) = docs_api::run(args) {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
         }
         Commands::Test(args) => {
             if let Err(err) = tests::run(args) {

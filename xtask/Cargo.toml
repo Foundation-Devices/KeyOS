@@ -20,6 +20,7 @@ chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 colored = "2.0"
 crc = "1.8.1"
+dom_query = "0.28"
 fatfs = { workspace = true, features = ["std", "alloc"] }
 fatfs-image = { path = "../utils/fatfs-image" }
 fscommon = "0.1.1"

@@ -35,3 +35,5 @@ runs:
     - name: Setup nix cache
       if: inputs.use-cache == 'true' && steps.check-nix.outputs.installed == 'false'
       uses: DeterminateSystems/magic-nix-cache-action@main
+      with:
+        use-flakehub: false

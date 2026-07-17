@@ -1,0 +1,112 @@
+<!--
+SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<header class="foundation-docs-header">
+  <div class="foundation-docs-header-inner">
+    <a class="foundation-docs-brand" href="https://docs.foundation.xyz/developers/home/" aria-label="Foundation Developer Docs">
+      <picture class="foundation-docs-logo">
+        <source data-foundation-logo-dark media="(prefers-color-scheme: dark)" srcset="./top-logo-dark.webp">
+        <img data-foundation-logo-light src="./top-logo.webp" alt="">
+      </picture>
+    </a>
+    <span class="foundation-docs-divider" aria-hidden="true"></span>
+    <span class="foundation-docs-title">KeyOS API Reference</span>
+    <nav class="foundation-docs-nav" aria-label="Foundation documentation">
+      <a href="https://docs.foundation.xyz/developers/home/">Developer Docs</a>
+      <button type="button" class="foundation-theme-toggle" aria-label="Toggle colour theme" data-foundation-theme-toggle data-theme-mode="system">
+        <svg class="foundation-theme-toggle__icon foundation-theme-toggle__icon--light" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+        </svg>
+        <svg class="foundation-theme-toggle__icon foundation-theme-toggle__icon--dark" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+        </svg>
+        <svg class="foundation-theme-toggle__icon foundation-theme-toggle__icon--system" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+          <path d="M8 20h8m-4-4v4"></path>
+        </svg>
+        <span class="foundation-sr-only">Cycle theme</span>
+      </button>
+      <a class="foundation-docs-support" href="https://foundation.xyz/support/">Get Support</a>
+    </nav>
+  </div>
+</header>
+<script>
+  (() => {
+    const button = document.querySelector("[data-foundation-theme-toggle]");
+    if (!button) return;
+
+    const rustdocVars = document.querySelector('head > meta[name="rustdoc-vars"]');
+    const darkLogo = document.querySelector("[data-foundation-logo-dark]");
+
+    const modes = ["system", "light", "dark"];
+    const readSetting = (name) => {
+      if (typeof getSettingValue === "function") return getSettingValue(name);
+      try {
+        return window.localStorage.getItem(`rustdoc-${name}`);
+      } catch {
+        return null;
+      }
+    };
+    const writeSetting = (name, value) => {
+      if (typeof updateLocalStorage === "function") {
+        updateLocalStorage(name, value);
+        return;
+      }
+      try {
+        window.localStorage.setItem(`rustdoc-${name}`, value);
+      } catch {}
+    };
+    const currentMode = () => {
+      if (readSetting("use-system-theme") !== "false") return "system";
+      return ["dark", "ayu"].includes(readSetting("theme")) ? "dark" : "light";
+    };
+    const syncButton = () => {
+      const mode = currentMode();
+      button.dataset.themeMode = mode;
+      button.title = mode === "system" ? "Theme follows system" : `${mode[0].toUpperCase()}${mode.slice(1)} theme`;
+      const settingValue = mode === "system" ? "system preference" : mode;
+      document.querySelectorAll('input[name="theme"]').forEach((input) => {
+        input.checked = input.value === settingValue;
+      });
+      if (rustdocVars && darkLogo) {
+        darkLogo.media = ["dark", "ayu"].includes(document.documentElement.dataset.theme) ? "all" : "not all";
+      }
+    };
+    const applyMode = (mode) => {
+      if (mode === "system") {
+        writeSetting("use-system-theme", "true");
+        if (typeof updateTheme === "function") {
+          updateTheme();
+        } else {
+          document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+      } else {
+        writeSetting("use-system-theme", "false");
+        if (typeof switchTheme === "function") {
+          switchTheme(mode, true);
+        } else {
+          writeSetting("theme", mode);
+          document.documentElement.dataset.theme = mode;
+        }
+      }
+      syncButton();
+    };
+
+    button.addEventListener("click", () => {
+      const next = modes[(modes.indexOf(currentMode()) + 1) % modes.length];
+      applyMode(next);
+    });
+    document.addEventListener("change", (event) => {
+      if (event.target instanceof HTMLInputElement && event.target.name === "theme") {
+        window.setTimeout(syncButton, 0);
+      }
+    });
+    new MutationObserver(syncButton).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    syncButton();
+  })();
+</script>
