@@ -11,6 +11,10 @@ import {
     Shield,
     Button,
     ButtonSection,
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
 } from "@ui/widgets.slint";
 import { OnboardingBasePage } from "../../../widgets/base-page.slint";
 import { StepLine, StepLineSection } from "@ui/widgets/step-list.slint";
@@ -19,12 +23,6 @@ import {
     SecurityCheckState,
     FirmwareCheckState,
 } from "../../../onboarding-callbacks.slint";
-import {
-    ShieldSection,
-    ShieldContent,
-    OnboardingShieldPage,
-    OverlayImage,
-} from "../../../widgets/shield-page.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
 
@@ -238,7 +236,7 @@ component UpdateAvailableView inherits ShieldSection {
     }
 }
 
-export component CheckEnvoyPage inherits OnboardingShieldPage {
+export component CheckEnvoyPage inherits GlowShieldPage {
     in property <SecurityCheckState> security-state: OnboardingCallbacks.security-state;
     in property <FirmwareCheckState> firmware-check-state: OnboardingCallbacks.firmware-check-state;
 

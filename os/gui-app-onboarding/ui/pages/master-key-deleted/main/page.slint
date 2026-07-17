@@ -11,6 +11,10 @@ import {
     IconButton,
     ButtonSection,
     WrappedIcon,
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
 } from "@ui/widgets.slint";
 import { OnboardingBasePage } from "../../../widgets/base-page.slint";
 import {
@@ -24,17 +28,11 @@ import { Navigate, Animate } from "../../../gen/navigate.slint";
 import { Size } from "@ui/types.slint";
 import { TextMd } from "@ui/widgets/txt.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
-import {
-    ShieldSection,
-    ShieldContent,
-    OnboardingShieldPage,
-    OverlayImage,
-} from "../../../widgets/shield-page.slint";
 import { UISize } from "../../../../../../ui/ui/theme.slint";
 import { SeedGlobal } from "../../../onboarding-callbacks.slint";
 
 
-export component MasterKeyDeletedMainPage inherits OnboardingShieldPage {
+export component MasterKeyDeletedMainPage inherits GlowShieldPage {
     property <bool> dark-mode <=> CurrentTheme.is-dark;
 
     ShieldSection {

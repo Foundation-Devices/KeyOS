@@ -1,69 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {
-    Button,
-    TextLg,
-    Icon,
-    JumboIcon,
-    Shield,
-    HeadingMd,
-    TextMd,
-    TextSm,
-    ButtonSection,
-} from "@ui/widgets.slint";
-import { Font } from "@ui/fonts.slint";
-import {
-    Palette,
-    Size,
-    Utils,
-    UISize,
-    Images,
-    Importance,
-} from "@ui/theme.slint";
+import { Shield } from "@ui/widgets.slint";
 import { OnboardingBasePage } from "base-page.slint";
-
-export component ShieldSection inherits Rectangle {
-    height: 480px;
-    y: 270px;
-
-    Shield {
-        width: parent.width - Size.sz2;
-        height: parent.height;
-        mask: false;
-
-        VerticalLayout {
-            padding-left: Size.sz6;
-            padding-right: Size.sz6;
-
-            @children
-        }
-    }
-}
-
-export component ShieldContent inherits VerticalLayout {
-    padding-top: Size.sz10;
-    spacing: Size.sz6;
-    alignment: start;
-}
-
-export component OverlayImage inherits Image {
-    in property <string> image;
-    y: 30px;
-    source: Images.common(image);
-}
-
-export component OnboardingShieldPage inherits OnboardingBasePage {
-    background: transparent;
-
-    Image {
-        y: 35px;
-        source: Images.common("images/glow");
-        image-fit: cover;
-    }
-
-    @children
-}
 
 export component OnboardingFullShieldPage inherits OnboardingBasePage {
     Shield {

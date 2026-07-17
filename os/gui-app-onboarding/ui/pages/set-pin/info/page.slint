@@ -11,18 +11,16 @@ import {
     Shield,
     Button,
     ButtonSection,
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
 } from "@ui/widgets.slint";
 import { OnboardingBasePage } from "../../../widgets/base-page.slint";
 import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
-import {
-    ShieldSection,
-    ShieldContent,
-    OnboardingShieldPage,
-    OverlayImage,
-} from "../../../widgets/shield-page.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
-export component SetPinInfoPage inherits OnboardingShieldPage {
+export component SetPinInfoPage inherits GlowShieldPage {
     ShieldSection {
         ShieldContent {
             VerticalLayout {

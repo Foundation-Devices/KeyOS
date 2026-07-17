@@ -12,17 +12,15 @@ import {
     ButtonSection,
     AppHeader,
     NavHeader,
-} from "@ui/widgets.slint";
-import { Palette, Size, UISize } from "@ui/theme.slint";
-import {
+    GlowShieldPage,
     ShieldSection,
     ShieldContent,
-    OnboardingShieldPage,
     OverlayImage,
-} from "../../widgets/shield-page.slint";
+} from "@ui/widgets.slint";
+import { Palette, Size, UISize } from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 
-component Overview inherits OnboardingShieldPage {
+component Overview inherits GlowShieldPage {
     callback show-confirmation();
 
     ShieldSection {
@@ -64,7 +62,7 @@ component Overview inherits OnboardingShieldPage {
     }
 }
 
-component Confirmation inherits OnboardingShieldPage {
+component Confirmation inherits GlowShieldPage {
     callback go-back();
 
     NavHeader {

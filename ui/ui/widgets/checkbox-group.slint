@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Size } from "@ui/theme.slint";
-
+import { Size, Palette } from "@ui/theme.slint";
 import { Checkbox } from "./checkbox.slint";
 import { TextSm } from "./txt.slint";
 
@@ -19,6 +18,8 @@ export component CheckboxGroup inherits VerticalLayout {
     // Public properties
     in-out property <[CheckboxGroupModel]> model: [];
     in property <bool> label-right;
+    in property <bool> disabled-labels-dimmed: false;
+    in property <length> horizontal-spacing: Size.sz6;
 
     // Callbacks
     callback changed(int, string);
@@ -28,24 +29,32 @@ export component CheckboxGroup inherits VerticalLayout {
         changed(index, value);
     }
 
-    for entry[index] in model: HorizontalLayout {
-        spacing: Size.sz6;
-        if !label-right: TextSm {
-            text: entry.name;
-            vertical-alignment: TextVerticalAlignment.center;
+    for entry[index] in model: Rectangle {
+        HorizontalLayout {
+            spacing: horizontal-spacing;
+            if !label-right: TextSm {
+                text: entry.name;
+                color: root.disabled-labels-dimmed && !entry.enabled ? Palette.content-disabled : Palette.content-primary;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+            Checkbox {
+                controlled: true;
+                checked: entry.checked;
+                enabled: entry.enabled;
+            }
+
+            if label-right: TextSm {
+                text: entry.name;
+                color: root.disabled-labels-dimmed && !entry.enabled ? Palette.content-disabled : Palette.content-primary;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
         }
-        Checkbox {
-            controlled: true;
-            checked: entry.checked;
+
+        TouchArea {
             enabled: entry.enabled;
             clicked => {
                 item-changed(index, entry.value);
             }
-        }
-
-        if label-right: TextSm {
-            text: entry.name;
-            vertical-alignment: TextVerticalAlignment.center;
         }
     }
 }

@@ -4,12 +4,6 @@
 import { MagicBackupProps } from "props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
 import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
-import {
-    OnboardingShieldPage,
-    ShieldContent,
-    ShieldSection,
-    OverlayImage,
-} from "../../../widgets/shield-page.slint";
 import { Size, Palette } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import {
@@ -19,9 +13,13 @@ import {
     TextMd,
     ButtonSection,
     Button,
+    GlowShieldPage,
+    ShieldContent,
+    ShieldSection,
+    OverlayImage,
 } from "@ui/widgets.slint";
 
-export component MagicBackupPage inherits OnboardingShieldPage {
+export component MagicBackupPage inherits GlowShieldPage {
     in property <MagicBackupProps> props;
 
     property <bool> first-page: true;

@@ -10,18 +10,16 @@ import {
     HeadingMd,
     NavHeader,
     TextMd,
-} from "@ui/widgets.slint";
-import { Palette, UISize } from "@ui/theme.slint";
-import {
-    OnboardingShieldPage,
+    GlowShieldPage,
     ShieldSection,
     ShieldContent,
     OverlayImage,
-} from "../../../widgets/shield-page.slint";
+} from "@ui/widgets.slint";
+import { Palette, UISize } from "@ui/theme.slint";
 import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
-export component ManualBackupPage inherits OnboardingShieldPage {
+export component ManualBackupPage inherits GlowShieldPage {
     in property <ManualBackupProps> props;
 
     property <bool> show-dialog:false;

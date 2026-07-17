@@ -14,13 +14,11 @@ import {
     Button,
     ButtonSection,
     NavHeader,
-} from "@ui/widgets.slint";
-import {
+    GlowShieldPage,
     ShieldSection,
     ShieldContent,
-    OnboardingShieldPage,
     OverlayImage,
-} from "../../../widgets/shield-page.slint";
+} from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import {
     OnboardingCallbacks,
@@ -32,7 +30,7 @@ enum RestoreOption {
     SeedWords,
 }
 
-export component RestoreSeedPage inherits OnboardingShieldPage {
+export component RestoreSeedPage inherits GlowShieldPage {
     property <bool> show-dialog: false;
     property <RestoreOption> restore-option: ScanQr;
 

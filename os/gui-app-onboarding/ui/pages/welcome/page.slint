@@ -10,6 +10,10 @@ import {
     TextLg,
     Button,
     ButtonSection,
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
 } from "@ui/widgets.slint";
 import { OnboardingBasePage } from "../../widgets/base-page.slint";
 import {
@@ -23,15 +27,9 @@ import { Navigate } from "../../gen/navigate.slint";
 import { Size } from "@ui/types.slint";
 import { TextMd } from "@ui/widgets/txt.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import {
-    ShieldSection,
-    ShieldContent,
-    OnboardingShieldPage,
-    OverlayImage,
-} from "../../widgets/shield-page.slint";
 
 
-export component WelcomePage inherits OnboardingShieldPage {
+export component WelcomePage inherits GlowShieldPage {
     property <bool> dark-mode <=> CurrentTheme.is-dark;
 
     NavHeader {

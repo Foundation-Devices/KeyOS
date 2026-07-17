@@ -10,17 +10,15 @@ import {
     ButtonSection,
     Button,
     NavHeader,
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
 } from "@ui/widgets.slint";
 import { OnboardingCallbacks } from "../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import {
-    ShieldSection,
-    ShieldContent,
-    OnboardingShieldPage,
-    OverlayImage,
-} from "../../widgets/shield-page.slint";
 
-export component UpdateDevicePage inherits OnboardingShieldPage {
+export component UpdateDevicePage inherits GlowShieldPage {
     property <string> current-version: OnboardingCallbacks.current-keyos-version;
     property <string> new-version: OnboardingCallbacks.new-keyos-version;
 
