@@ -121,6 +121,7 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
 
 const DEV_APPS: &[&str] = &[
     "gui-app-crypto-perf",
+    "gui-app-entropy-test",
     "gui-app-file-picker-test",
     "gui-app-image-viewer",
     "gui-app-playground",

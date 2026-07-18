@@ -1,4 +1,5 @@
 use atsama5d27::adc::{Adc, AdcChannel, StartupTime};
+use sha2::{Digest, Sha256};
 
 // Peripheral clock is around 80Mhz, max ADC clock is 20Mhz.
 // The actual prescale divider is (this value + 1) * 2, so we
@@ -7,6 +8,11 @@ const ADC_CLOCK_PRESCALER: u8 = 4;
 const ADC_STARTUP_TIME: StartupTime = StartupTime::StartupTime24;
 const NOISE_CHANNEL: AdcChannel = AdcChannel::Channel5;
 
+// Number of raw 12-bit ADC samples hashed per 32-bit output word. SHA-256 removes
+// the linear structure of the former XOR fold; the sample count is based on the
+// measured entropy from the avalanche source with margin over a 32-bit output.
+const RAW_SAMPLES_PER_WORD: usize = 16;
+
 pub(crate) struct AvalancheNoiseRng {
     adc: Adc,
 }
@@ -14,32 +20,57 @@ pub(crate) struct AvalancheNoiseRng {
 impl AvalancheNoiseRng {
     pub(crate) fn new(adc: Adc) -> Self { Self { adc } }
 
-    pub(crate) fn read_u32(&self) -> u32 {
+    pub(crate) fn fill_buf(&self, data: &mut [u32]) {
+        if data.is_empty() {
+            return;
+        }
+
+        self.enable_adc();
+
+        for word in data {
+            *word = self.conditioned_word();
+        }
+
+        self.adc.sleep();
+    }
+
+    pub(crate) fn fill_raw_samples(&self, data: &mut [u32]) {
+        if data.is_empty() {
+            return;
+        }
+
+        self.enable_adc();
+
+        for sample in data {
+            *sample = self.raw_sample() as u32;
+        }
+
+        self.adc.sleep();
+    }
+
+    fn enable_adc(&self) {
         self.adc.reset();
         self.adc.set_prescaler(ADC_CLOCK_PRESCALER);
         self.adc.set_startup_time(ADC_STARTUP_TIME);
         self.adc.enable_channel(NOISE_CHANNEL);
-
-        let result = self.read_noise_adc();
-
-        self.adc.sleep();
-
-        result
     }
 
-    fn read_noise_adc(&self) -> u32 {
-        let mut res = 0;
-        for _ in 0..8 {
-            res <<= 4;
-            self.adc.start();
-            let raw_noise = self.adc.read(NOISE_CHANNEL);
-            // We get 12 bits of data, let's mix that together, so each output bit is mixed from 3 raw bits.
-            // As long as at least one bit out of the 3 components are truly random, it doesn't matter if the
-            // rest are not.
-            let noise = raw_noise ^ (raw_noise >> 4) ^ (raw_noise >> 8);
-            res ^= (noise & 15) as u32;
-        }
+    fn raw_sample(&self) -> u16 {
+        self.adc.start();
+        self.adc.read(NOISE_CHANNEL)
+    }
 
-        res
+    /// Collect `RAW_SAMPLES_PER_WORD` raw ADC noise samples and extract 32 bits
+    /// of conditioned output from their SHA-256 digest. The hasher is
+    /// deliberately reinitialized for each word: carrying state across words
+    /// would keep producing pseudorandom-looking output if the ADC became stuck,
+    /// masking that failure until online health checks are available.
+    fn conditioned_word(&self) -> u32 {
+        let mut hasher = Sha256::new();
+        for _ in 0..RAW_SAMPLES_PER_WORD {
+            hasher.update(self.raw_sample().to_le_bytes());
+        }
+        let digest = hasher.finalize();
+        u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
     }
 }

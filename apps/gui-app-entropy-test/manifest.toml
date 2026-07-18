@@ -1,0 +1,8 @@
+manifestVersion = "0"
+appId = "0x6218a052f4ce6c5e9490fbc2670985c7"
+
+[appName]
+en = "Entropy Test"
+
+[permissions]
+template = ["gui-app"]

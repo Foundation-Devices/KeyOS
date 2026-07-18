@@ -61,4 +61,29 @@ impl Trng {
         xous::unmap_memory(aligned_buffer)?;
         result
     }
+
+    /// Fill `data` with raw 12-bit avalanche ADC samples for source diagnostics.
+    ///
+    /// Each returned `u32` contains one raw ADC sample in bits 0..=11. This is
+    /// intentionally separate from [`TrngSource`] because these values are not
+    /// conditioned random output.
+    pub fn fill_avalanche_raw_samples(&self, data: &mut [u32]) -> Result<(), xous::Error> {
+        let aligned_buffer =
+            xous::map_memory(None, None, (data.len() * 4).next_multiple_of(4096), xous::MemoryFlags::W)?;
+        let result = xous::send_message(
+            self.conn,
+            xous::Message::MutableBorrow(xous::MemoryMessage {
+                id: api::Opcode::FillAvalancheRaw.to_usize().unwrap(),
+                buf: aligned_buffer,
+                offset: None,
+                valid: NonZeroUsize::new(data.len()),
+            }),
+        )
+        .map(|_| ());
+        if result.is_ok() {
+            data.copy_from_slice(&aligned_buffer.as_slice()[0..data.len()]);
+        }
+        xous::unmap_memory(aligned_buffer)?;
+        result
+    }
 }

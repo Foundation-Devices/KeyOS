@@ -49,6 +49,22 @@ fn main() -> ! {
                     log::error!("FillTrng Message was not LendMut")
                 }
             }
+            Some(api::Opcode::FillAvalancheRaw) => {
+                if let xous::Message::MutableBorrow(ref mut mem_msg) = msg.body {
+                    let mut slice = mem_msg.buf.as_slice_mut();
+                    if let Some(valid) = mem_msg.valid {
+                        if valid.get() < slice.len() {
+                            slice = &mut slice[0..valid.get()]
+                        }
+                    }
+                    trng.fill_avalanche_raw_samples(slice);
+                } else {
+                    if matches!(msg.body, xous::Message::BlockingScalar(_)) {
+                        xous::return_scalar(msg.sender, 0).ok();
+                    }
+                    log::error!("FillAvalancheRaw Message was not LendMut")
+                }
+            }
             None => {
                 log::error!("couldn't convert opcode, ignoring");
             }

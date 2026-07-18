@@ -1,0 +1,154 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import {
+    BaseWindow,
+    BasePage,
+    ScrollBody,
+    Button,
+    Input,
+    SegmentedControl,
+    HeadingLg,
+    HeadingMd,
+    TextMd,
+} from "@ui/widgets.slint";
+import {
+    Palette,
+    Size,
+    Importance,
+    Images,
+    CurrentTheme,
+    Palettes,
+    Utils,
+} from "@ui/theme.slint";
+
+export global Callbacks {
+    // iterations-text is the count in thousands of samples; Rust parses and clamps it.
+    callback start-test(int, string);
+    callback stop-test();
+}
+
+export global State {
+    // 0 = MCU hardware TRNG, 1 = Avalanche, 2 = Combined, 3 = raw Avalanche ADC
+    in-out property <int> source-index: 2;
+    // sample count in thousands, entered as free text
+    in-out property <string> iterations-text: "1000";
+    in-out property <bool> running: false;
+    in property <int> progress: 0;
+    in property <int> total: 0;
+    in property <string> status-text: "Idle";
+    in property <string> results-text: "Run a test to analyse the selected source.";
+}
+
+// A bordered content card; children are laid out vertically.
+component Card inherits Rectangle {
+    width: 100%;
+    border-width: 1px;
+    border-radius: Size.sz5;
+    border-color: Palette.border-primary;
+    background: Palette.background-primary;
+
+    VerticalLayout {
+        padding: Size.sz5;
+        spacing: Size.sz3;
+        @children
+    }
+}
+
+export component AppWindow inherits BaseWindow {
+    BasePage {
+        ScrollBody {
+            VerticalLayout {
+                spacing: Size.sz5;
+
+                HeadingLg {
+                    text: "Entropy Test";
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    text: "Reads samples from the selected TRNG source and runs randomness checks. Raw ADC mode reports the unconditioned 12-bit avalanche readings.";
+                    color: Palette.content-secondary;
+                    wrap: word-wrap;
+                }
+
+                // --- Source selector ---
+                Card {
+                    TextMd {
+                        text: "Source";
+                        color: Palette.content-secondary;
+                    }
+
+                    SegmentedControl {
+                        labels: ["MCU", "Avalanche", "Combined", "Raw ADC"];
+                        selected_index <=> State.source-index;
+                        enabled: !State.running;
+                    }
+                }
+
+                // --- Iterations: number entry (count in thousands of samples) ---
+                Card {
+                    TextMd {
+                        text: "Iterations (× 1000 samples)";
+                        color: Palette.content-secondary;
+                    }
+
+                    Input {
+                        text <=> State.iterations-text;
+                        input-type: text;
+                        placeholder: "1000";
+                        enabled: !State.running;
+                    }
+                }
+
+                // --- Status + live counter ---
+                Card {
+                    TextMd {
+                        text: "Status";
+                        color: Palette.content-secondary;
+                    }
+
+                    HeadingMd {
+                        text: State.status-text;
+                        color: Palette.content-primary;
+                        wrap: word-wrap;
+                    }
+
+                    TextMd {
+                        text: "\{State.progress} / \{State.total} samples";
+                        color: Palette.content-secondary;
+                    }
+                }
+
+                // --- Start / Stop ---
+                Button {
+                    label: State.running ? "Stop test" : "Start test";
+                    importance: Importance.primary;
+                    clicked => {
+                        if State.running {
+                            Callbacks.stop-test();
+                        } else {
+                            Callbacks.start-test(State.source-index, State.iterations-text);
+                        }
+                    }
+                }
+
+                // --- Results ---
+                Card {
+                    TextMd {
+                        text: "Results";
+                        color: Palette.content-secondary;
+                    }
+
+                    TextMd {
+                        text: State.results-text;
+                        color: Palette.content-primary;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export { CurrentTheme, Images, Palettes, Utils }

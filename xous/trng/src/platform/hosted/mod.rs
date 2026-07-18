@@ -24,4 +24,14 @@ impl Trng {
             *d = self.rng.next_u32();
         }
     }
+
+    pub fn fill_avalanche_raw_samples(&mut self, data: &mut [u32]) {
+        if self.msgcount < 3 {
+            log::info!("hosted mode TRNG is *not* random, it is a deterministic PRNG");
+        }
+        self.msgcount += 1;
+        for d in data {
+            *d = self.rng.next_u32() & 0x0fff;
+        }
+    }
 }

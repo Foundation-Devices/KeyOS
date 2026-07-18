@@ -32,6 +32,7 @@ members = [
     "apps/gui-app-authenticator",
     "apps/gui-app-bitcoin",
     "apps/gui-app-crypto-perf",
+    "apps/gui-app-entropy-test",
     "apps/gui-app-file-browser",
     "apps/gui-app-image-viewer",
     "apps/gui-app-playground",

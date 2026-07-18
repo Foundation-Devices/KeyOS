@@ -11,4 +11,8 @@ pub(crate) enum Opcode {
     /// Fill a buffer with random data. Buffer is expected to be an array of u32s,
     /// and the `valid` field of the memory message is the number of u32s to get.
     FillTrng = 1,
+
+    /// Diagnostic access to raw 12-bit avalanche ADC samples. Buffer is expected
+    /// to be an array of u32s; each returned value uses bits 0..=11.
+    FillAvalancheRaw = 2,
 }

@@ -18,6 +18,8 @@ xous-names = { package = "xous-api-names", path = "../api/names" }
 [target.'cfg(keyos)'.dependencies]
 atsama5d27 = { workspace = true }
 utralib = { workspace = true }
+# no_std-safe SHA-256 used to condition the avalanche noise source (see avalanche.rs).
+sha2 = { version = "0.10", default-features = false }
 
 [target.'cfg(not(keyos))'.dependencies]
 rand = "0.8.5"

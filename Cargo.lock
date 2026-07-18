@@ -4710,6 +4710,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-app-entropy-test"
+version = "0.1.0"
+dependencies = [
+ "log 0.4.27",
+ "slint-keyos-platform",
+ "slint-keyos-platform-build",
+ "trng",
+ "xous-api-log",
+]
+
+[[package]]
 name = "gui-app-file-browser"
 version = "0.1.0"
 dependencies = [
@@ -13332,6 +13343,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "sha2",
  "utralib",
  "xous",
  "xous-api-log",

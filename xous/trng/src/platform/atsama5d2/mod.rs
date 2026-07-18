@@ -39,14 +39,21 @@ impl Trng {
     }
 
     pub fn fill_buf(&mut self, data: &mut [u32], source: TrngSource) {
-        for d in data {
-            *d = 0;
-            if source == TrngSource::Combined || source == TrngSource::Avalanche {
-                *d ^= self.avalanche.read_u32();
+        match source {
+            TrngSource::Avalanche => self.avalanche.fill_buf(data),
+            TrngSource::Mcu => {
+                for word in data {
+                    *word = self.trng.read_u32();
+                }
             }
-            if source == TrngSource::Combined || source == TrngSource::Mcu {
-                *d ^= self.trng.read_u32();
+            TrngSource::Combined => {
+                self.avalanche.fill_buf(data);
+                for word in data {
+                    *word ^= self.trng.read_u32();
+                }
             }
         }
     }
+
+    pub fn fill_avalanche_raw_samples(&mut self, data: &mut [u32]) { self.avalanche.fill_raw_samples(data); }
 }
