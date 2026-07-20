@@ -115,7 +115,7 @@ export component ScrollFadeMask inherits Rectangle {
         width: parent.width;
         height: root.fade-height;
         visible: root.top-visible;
-        background: @linear-gradient(0deg, #00000000 0%, root.fade-color 100%);
+        background: @linear-gradient(180deg, root.fade-color 0%, #00000000 100%);
     }
 
     Rectangle {
@@ -123,7 +123,7 @@ export component ScrollFadeMask inherits Rectangle {
         width: parent.width;
         height: root.fade-height;
         visible: root.bottom-visible;
-        background: @linear-gradient(0deg, root.fade-color 0%, #00000000 100%);
+        background: @linear-gradient(180deg, #00000000 0%, root.fade-color 100%);
     }
 }
 

@@ -12,6 +12,7 @@ import {
     MenuSection,
     MenuSectionLayout,
     PageBody,
+    ScrollFadeMask,
     TextMd,
     TextSm,
 } from "@ui/widgets.slint";
@@ -114,89 +115,101 @@ export component TrustedPublishersPage inherits BasePage {
     private property <bool> invalid-certificate-visible: false;
     private property <bool> certificate-installed-visible: false;
     private property <TrustedPublisherImportResult> import-result: TrustedPublisherImportResult.canceled;
+    property <bool> at-top: flickable.viewport-y == 0;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
 
     init => {
         AppManagementGlobal.refresh-trusted-publishers();
     }
 
-    VerticalLayout {
-        SettingsNavHeader {
-            title: TR2.lookup(TrId.AppsTrustedPublishers);
-        }
+    header := SettingsNavHeader {
+        y: 0px;
+        title: TR2.lookup(TrId.AppsTrustedPublishers);
+    }
 
-        Flickable {
-            viewport-width: self.width;
+    flickable := Flickable {
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+        viewport-width: self.width;
 
-            PageBody {
-                width: parent.width;
+        PageBody {
+            width: parent.width;
 
-                ContentSection {
-                    TextSm {
-                        width: parent.width;
-                        text: TR2.lookup(TrId.AppsTrustedPublishersIntro);
-                        color: Palette.content-tertiary;
-                        horizontal-alignment: left;
-                        wrap: word-wrap;
-                    }
+            ContentSection {
+                TextSm {
+                    width: parent.width;
+                    text: TR2.lookup(TrId.AppsTrustedPublishersIntro);
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: left;
+                    wrap: word-wrap;
+                }
 
-                    MenuSection {
-                        title: TR2.lookup(TrId.AppsTrustedPublisherCertificates);
+                MenuSection {
+                    title: TR2.lookup(TrId.AppsTrustedPublisherCertificates);
 
-                        MenuSectionLayout {
-                            if AppManagementGlobal.trusted-publishers.length == 0: Rectangle {
-                                height: 64px;
+                    MenuSectionLayout {
+                        if AppManagementGlobal.trusted-publishers.length == 0: Rectangle {
+                            height: 64px;
 
-                                TextSm {
-                                    x: Size.sz4;
-                                    y: (parent.height - self.preferred-height) / 2;
-                                    width: parent.width - (Size.sz4 * 2);
-                                    text: TR2.lookup(TrId.AppsNoTrustedPublishers);
-                                    color: Palette.content-tertiary;
-                                }
-                            }
-
-                            for publisher[index] in AppManagementGlobal.trusted-publishers: VerticalLayout {
-                                TrustedPublisherRow {
-                                    publisher: publisher;
-                                    first: index == 0;
-                                    last: index == AppManagementGlobal.trusted-publishers.length - 1;
-
-                                    clicked => {
-                                        Navigate.trusted-publisher-details({
-                                            name: publisher.name,
-                                            company: publisher.company,
-                                            contact-email: publisher.contact_email,
-                                            support-url: publisher.support_url,
-                                            public-key: publisher.public_key,
-                                            serial-number: publisher.serial_number,
-                                            subject: publisher.subject,
-                                            basic-constraints: publisher.basic_constraints,
-                                            key-usage: publisher.key_usage,
-                                            extended-key-usage: publisher.extended_key_usage,
-                                        }, { });
-                                    }
-                                }
-
-                                if index < AppManagementGlobal.trusted-publishers.length - 1: HLine { }
+                            TextSm {
+                                x: Size.sz4;
+                                y: (parent.height - self.preferred-height) / 2;
+                                width: parent.width - (Size.sz4 * 2);
+                                text: TR2.lookup(TrId.AppsNoTrustedPublishers);
+                                color: Palette.content-tertiary;
                             }
                         }
-                    }
 
-                    Button {
-                        label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
-                        clicked => {
-                            root.import-result = AppManagementGlobal.import-trusted-publisher();
-                            if root.import-result == TrustedPublisherImportResult.failed {
-                                root.invalid-certificate-visible = true;
+                        for publisher[index] in AppManagementGlobal.trusted-publishers: VerticalLayout {
+                            TrustedPublisherRow {
+                                publisher: publisher;
+                                first: index == 0;
+                                last: index == AppManagementGlobal.trusted-publishers.length - 1;
+
+                                clicked => {
+                                    Navigate.trusted-publisher-details({
+                                        name: publisher.name,
+                                        company: publisher.company,
+                                        contact-email: publisher.contact_email,
+                                        support-url: publisher.support_url,
+                                        public-key: publisher.public_key,
+                                        serial-number: publisher.serial_number,
+                                        subject: publisher.subject,
+                                        basic-constraints: publisher.basic_constraints,
+                                        key-usage: publisher.key_usage,
+                                        extended-key-usage: publisher.extended_key_usage,
+                                    }, { });
+                                }
                             }
-                            if root.import-result == TrustedPublisherImportResult.installed {
-                                root.certificate-installed-visible = true;
-                            }
+
+                            if index < AppManagementGlobal.trusted-publishers.length - 1: HLine { }
+                        }
+                    }
+                }
+
+                Button {
+                    label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
+                    clicked => {
+                        root.import-result = AppManagementGlobal.import-trusted-publisher();
+                        if root.import-result == TrustedPublisherImportResult.failed {
+                            root.invalid-certificate-visible = true;
+                        }
+                        if root.import-result == TrustedPublisherImportResult.installed {
+                            root.certificate-installed-visible = true;
                         }
                     }
                 }
             }
         }
+    }
+
+    ScrollFadeMask {
+        y: flickable.y;
+        width: flickable.width;
+        height: flickable.height;
+        at-top: root.at-top;
+        at-bottom: root.at-bottom;
     }
 
     if invalid-certificate-visible: ErrorModal {
