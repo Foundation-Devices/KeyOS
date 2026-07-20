@@ -301,6 +301,7 @@ component AccountsPage inherits BasePage {
     property <bool> passphrase-modal-open: false;
     property <string> selected: "";
     property <bool> has-passphrase: EnterPassphrase.passphrase != "";
+    property <bool> passphrase-icon-visible: has-passphrase && EnterPassphrase.slider-index == 1;
 
     VerticalLayout {
         padding-left: 5px;
@@ -308,11 +309,13 @@ component AccountsPage inherits BasePage {
 
         NavHeader {
             title: TR2.lookup(TrId.AccountsTitle);
-            left-icon: (has-passphrase && EnterPassphrase.slider-index == 1) ? "shield-passphrase" : "";
+            left-icon: passphrase-icon-visible ? "shield-passphrase" : "";
             right-icon: "ellipsis";
 
             clicked => {
-                Navigate.enter-passphrase({ });
+                if passphrase-icon-visible {
+                    Navigate.enter-passphrase({ });
+                }
             }
 
             right-clicked => {
