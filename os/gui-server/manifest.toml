@@ -45,5 +45,6 @@ PermissionRequest = { id = 66, type = "scalar", cfg = 'not(feature = "recovery-o
     "FlushAll",
     "SubscribeOnboardingStatus",
     "GetPrimeColor",
+    "SubscribeLocale",
 ]
 "os/spi" = ["ClaimPeripheral", "SpiXfer"]

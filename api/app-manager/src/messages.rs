@@ -128,7 +128,7 @@ pub struct PermissionRequestInfo {
     pub app_name: String,
     /// Subgroup key the grant is recorded under (e.g. `peripherals.camera-use`).
     pub subgroup: String,
-    /// User-facing name of the subgroup, shown in the prompt.
+    /// The subgroup's localized display name, ready to show in the prompt as-is.
     pub label: String,
 }
 

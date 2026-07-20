@@ -320,7 +320,8 @@ impl AppRegistry {
             let app_info = &self.installed_apps[&id];
             let name = app_info.localized_name(locale);
             let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
-            let (basic_permissions, approvable_permissions) = app_info.permission_groups(permission_grants);
+            let (basic_permissions, approvable_permissions) =
+                app_info.permission_groups(permission_grants, locale);
             apps.push(InstalledAppInfo {
                 app_id: format!("0x{}", app_info.id),
                 publisher,
@@ -536,7 +537,7 @@ impl AppRegistry {
                 app_id: app_info.id,
                 app_name: app_info.localized_name(locale),
                 subgroup: entry.subgroup().to_string(),
-                label: entry.subgroup_label().to_string(),
+                label: entry.subgroup_label(locale).to_string(),
             }),
         }
     }
@@ -603,6 +604,7 @@ impl AppInfo {
     fn permission_groups(
         &self,
         permission_grants: &PermissionGrantStore,
+        locale: &str,
     ) -> (Vec<InstalledAppPermissionGroup>, Vec<InstalledAppPermissionGroup>) {
         let mut basic = Vec::new();
         let mut approvable = Vec::new();
@@ -621,7 +623,7 @@ impl AppInfo {
                     ),
                     MessageAvailability::Unavailable => continue,
                 };
-                push_permission_subgroup(groups, entry, approved);
+                push_permission_subgroup(groups, entry, approved, locale);
             }
         }
 
@@ -760,6 +762,7 @@ fn push_permission_subgroup(
     groups: &mut Vec<InstalledAppPermissionGroup>,
     entry: &crate::permission_catalog::MessageMetadata,
     approved: bool,
+    locale: &str,
 ) {
     let group = match groups.iter_mut().find(|group| group.key == entry.group()) {
         Some(group) => group,
@@ -776,7 +779,7 @@ fn push_permission_subgroup(
     if !group.subgroups.iter().any(|subgroup| subgroup.key == entry.subgroup()) {
         group.subgroups.push(InstalledAppPermissionSubgroup {
             key: entry.subgroup().to_string(),
-            label: entry.subgroup_label().to_string(),
+            label: entry.subgroup_label(locale).to_string(),
             approved,
         });
     }

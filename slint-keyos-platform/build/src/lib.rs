@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 
 use slint_keyos_platform_common::utils;
 
-pub(crate) mod generated_file;
-pub mod localizer;
 pub mod raw_image;
 pub(crate) mod router;
-pub(crate) mod source;
 
 use anyhow::Result;
+// The translation codegen and its `Source`/`GeneratedFile` helpers live in the standalone
+// `localizer-codegen` crate; re-export them under the module paths the rest of this crate uses.
+pub(crate) use localizer_codegen::{generated_file, source};
 pub use raw_image::{convert_icons, convert_image_to_raw};
 pub use slint_keyos_platform_common::{UI2_ICON_SET, UI_ICON_SET};
 use source::{uwrite, uwriteln, Source};
@@ -114,10 +114,10 @@ fn localize(
     let translations_dir = manifest_dir.join("i18n");
 
     if include_translations && translations_dir.exists() {
-        localizer::build_translations(&translations_dir, out_dir, gen_dir, include_time_localization)
-            .unwrap();
+        let options = localizer_codegen::TranslationOptions { slint: true, include_time_localization };
+        localizer_codegen::build_translations(&translations_dir, out_dir, gen_dir, &options).unwrap();
     } else {
-        localizer::generate_empty_translations(out_dir).unwrap();
+        localizer_codegen::generate_empty_translations(out_dir).unwrap();
     }
 }
 

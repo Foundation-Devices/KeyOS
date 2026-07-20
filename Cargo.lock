@@ -316,9 +316,11 @@ dependencies = [
  "fs",
  "fw-utils",
  "hex",
+ "localizer-codegen",
  "log 0.4.27",
  "num-derive",
  "num-traits",
+ "phf 0.11.2",
  "power-manager",
  "rand 0.8.5",
  "regex",
@@ -5097,14 +5099,17 @@ dependencies = [
  "gpio",
  "gui-server-api",
  "haptics",
+ "i18n",
  "i2c",
  "image 0.25.6",
  "image_swizzle",
  "libblur",
  "libc",
+ "localizer-codegen",
  "log 0.4.27",
  "num-derive",
  "num-traits",
+ "phf 0.11.2",
  "power-manager",
  "rayon",
  "rgb-led",
@@ -7541,6 +7546,16 @@ dependencies = [
  "serde",
  "serde_json",
  "walkdir",
+]
+
+[[package]]
+name = "localizer-codegen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indoc",
+ "phf_codegen 0.11.2",
+ "serde_json",
 ]
 
 [[package]]
@@ -12081,9 +12096,9 @@ dependencies = [
  "image 0.25.6",
  "indoc",
  "itertools 0.13.0",
+ "localizer-codegen",
  "miette",
  "once_cell",
- "phf_codegen 0.11.2",
  "qrcode",
  "resvg 0.44.0",
  "rkyv",

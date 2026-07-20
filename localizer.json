@@ -65,6 +65,16 @@
       "name": "wallet",
       "path": "apps/gui-app-bitcoin",
       "include": ["common.button", "common.slideToSign", "common.createAccountsanitized", "common.createAccount"]
+    },
+    {
+      "name": "gui-server",
+      "path": "os/gui-server",
+      "include": ["permission"]
+    },
+    {
+      "name": "app-manager",
+      "path": "os/app-manager",
+      "include": ["permission"]
     }
   ]
 }

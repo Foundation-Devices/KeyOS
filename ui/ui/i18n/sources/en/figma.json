@@ -1,4 +1,72 @@
 {
+  "permission": {
+    "appManagement": {
+      "appMetadata": "App metadata",
+      "main": "Apps and publisher trust"
+    },
+    "cryptography": {
+      "hardwareHashing": "Hardware hashing",
+      "main": "Cryptography",
+      "primitives": "Cryptographic primitives",
+      "secretSharing": "Secret sharing"
+    },
+    "deviceConnectivity": {
+      "bluetoothStatus": "Bluetooth status",
+      "main": "Bluetooth, NFC, and USB",
+      "nfcStatus": "NFC status",
+      "usbDeviceStatus": "USB device status",
+      "usbHostStatus": "USB host status"
+    },
+    "deviceSecrets": {
+      "appScopedSeed": "App-scoped seed",
+      "deviceIdentityStatus": "Device identity status",
+      "main": "Device secrets and identity"
+    },
+    "fileSystem": {
+      "airlockFiles": "Airlock files",
+      "main": "File system",
+      "modifyFiles": "Modify files",
+      "readFiles": "Read files",
+      "usbFiles": "USB files",
+      "userFiles": "User files"
+    },
+    "interfaceAndNavigation": {
+      "controlCenterAppearance": "Control Center appearance",
+      "main": "Interface and navigation",
+      "navigation": "Navigation",
+      "onScreenKeyboard": "On-screen keyboard",
+      "screenDrawing": "Screen drawing",
+      "systemDialogs": "System dialogs"
+    },
+    "networkAndPairing": {
+      "main": "Network sync and pairing",
+      "statusAndRates": "Network status and rates",
+      "walletSync": "Wallet sync"
+    },
+    "peripherals": {
+      "cameraStatus": "Camera status",
+      "cameraUse": "Camera use",
+      "hapticAndLed": "Haptics and LED",
+      "main": "Peripherals",
+      "sensors": "Sensors"
+    },
+    "powerAndFirmware": {
+      "batteryStatus": "Battery status",
+      "main": "Power and firmware"
+    },
+    "prompt": {
+      "allowAlways": "Allow Always",
+      "header": "Permission Request",
+      "neverAllow": "Never Allow",
+      "notNow": "Not Now",
+      "subheader": "{0} wants permission: {1}\nAllow this permission?"
+    },
+    "settings": {
+      "appearanceAndTime": "Appearance and time",
+      "deviceConfiguration": "Device configuration",
+      "main": "Settings"
+    }
+  },
   "2": {
     "4%": "2.4%"
   },

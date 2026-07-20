@@ -159,6 +159,7 @@ members = [
     "utils/keycard-scan",
     "utils/keyos-dep-graph",
     "utils/localizer",
+    "utils/localizer-codegen",
     "utils/ordered-table",
     "utils/repo-sync",
     "utils/sambuca",
@@ -204,6 +205,7 @@ haptics = { path = "api/haptics" }
 i2c = { path = "api/i2c" }
 keycard = { path = "api/keycard" }
 keycard-scan = { path = "utils/keycard-scan" }
+localizer-codegen = { path = "utils/localizer-codegen" }
 log-server = { package = "xous-api-log", path = "xous/api/log" }
 nfc = { path = "api/nfc" }
 power-manager = { path = "api/power-manager" }

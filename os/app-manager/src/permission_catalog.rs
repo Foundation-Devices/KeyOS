@@ -14,40 +14,45 @@ use std::sync::OnceLock;
 use app_manifest::{ApprovalBehavior, Manifest, Message, RequiredSignature};
 use xous::MessageId;
 
-/// English labels for the permission subgroups (a message's full `permissionGroup` value). The
-/// permission UI groups and grants at the subgroup level, so approving one covers all of its
-/// messages.
-// TODO(SFT-7229): localize these labels (and the permission prompt strings in gui-server).
-static SUBGROUP_LABELS: &[(&str, &str)] = &[
-    ("app-management.app-metadata", "App metadata"),
-    ("cryptography.primitives", "Cryptographic primitives"),
-    ("cryptography.hardware-hashing", "Hardware hashing"),
-    ("cryptography.secret-sharing", "Secret sharing"),
-    ("device-connectivity.bluetooth-status", "Bluetooth status"),
-    ("device-connectivity.nfc-status", "NFC status"),
-    ("device-connectivity.usb-device-status", "USB device status"),
-    ("device-connectivity.usb-host-status", "USB host status"),
-    ("device-secrets.app-scoped-seed", "App-scoped seed"),
-    ("device-secrets.general-status", "Device identity status"),
-    ("file-system.read-handles", "Read files"),
-    ("file-system.write-and-mutate", "Modify files"),
-    ("file-system.user-files", "User files"),
-    ("file-system.usb-files", "USB files"),
-    ("file-system.airlock-files", "Airlock files"),
-    ("network-and-pairing.status-and-rates", "Network status and rates"),
-    ("network-and-pairing.wallet-sync", "Wallet sync"),
-    ("peripherals.camera-status", "Camera status"),
-    ("peripherals.camera-use", "Camera use"),
-    ("peripherals.feedback", "Haptics and LED"),
-    ("peripherals.sensors", "Sensors"),
-    ("power-and-firmware.battery-status", "Battery status"),
-    ("settings.ui-essentials", "Appearance and time"),
-    ("settings.device-configuration", "Device configuration"),
-    ("ui-and-input.app-surface", "Screen drawing"),
-    ("ui-and-input.brokered-modal", "System dialogs"),
-    ("ui-and-input.control-center-appearance", "Control Center appearance"),
-    ("ui-and-input.keyboard-request", "On-screen keyboard"),
-    ("ui-and-input.navigation-response", "Navigation"),
+/// Each permission subgroup (a message's full `permissionGroup` value) mapped to the [`TrId`] of its
+/// display name. The permission UI groups and grants at the subgroup level, so approving one covers
+/// all of its messages. The names are curated: semantic renames of the subgroup key, not a
+/// mechanical transform (e.g. `device-secrets.general-status` becomes "Device identity status").
+///
+/// [`TrId`]: crate::tr::TrId
+static SUBGROUP_LABELS: &[(&str, crate::tr::TrId)] = &[
+    ("app-management.app-metadata", crate::tr::TrId::PermissionAppManagementAppMetadata),
+    ("cryptography.primitives", crate::tr::TrId::PermissionCryptographyPrimitives),
+    ("cryptography.hardware-hashing", crate::tr::TrId::PermissionCryptographyHardwareHashing),
+    ("cryptography.secret-sharing", crate::tr::TrId::PermissionCryptographySecretSharing),
+    ("device-connectivity.bluetooth-status", crate::tr::TrId::PermissionDeviceConnectivityBluetoothStatus),
+    ("device-connectivity.nfc-status", crate::tr::TrId::PermissionDeviceConnectivityNfcStatus),
+    ("device-connectivity.usb-device-status", crate::tr::TrId::PermissionDeviceConnectivityUsbDeviceStatus),
+    ("device-connectivity.usb-host-status", crate::tr::TrId::PermissionDeviceConnectivityUsbHostStatus),
+    ("device-secrets.app-scoped-seed", crate::tr::TrId::PermissionDeviceSecretsAppScopedSeed),
+    ("device-secrets.general-status", crate::tr::TrId::PermissionDeviceSecretsDeviceIdentityStatus),
+    ("file-system.read-handles", crate::tr::TrId::PermissionFileSystemReadFiles),
+    ("file-system.write-and-mutate", crate::tr::TrId::PermissionFileSystemModifyFiles),
+    ("file-system.user-files", crate::tr::TrId::PermissionFileSystemUserFiles),
+    ("file-system.usb-files", crate::tr::TrId::PermissionFileSystemUsbFiles),
+    ("file-system.airlock-files", crate::tr::TrId::PermissionFileSystemAirlockFiles),
+    ("network-and-pairing.status-and-rates", crate::tr::TrId::PermissionNetworkAndPairingStatusAndRates),
+    ("network-and-pairing.wallet-sync", crate::tr::TrId::PermissionNetworkAndPairingWalletSync),
+    ("peripherals.camera-status", crate::tr::TrId::PermissionPeripheralsCameraStatus),
+    ("peripherals.camera-use", crate::tr::TrId::PermissionPeripheralsCameraUse),
+    ("peripherals.feedback", crate::tr::TrId::PermissionPeripheralsHapticAndLed),
+    ("peripherals.sensors", crate::tr::TrId::PermissionPeripheralsSensors),
+    ("power-and-firmware.battery-status", crate::tr::TrId::PermissionPowerAndFirmwareBatteryStatus),
+    ("settings.ui-essentials", crate::tr::TrId::PermissionSettingsAppearanceAndTime),
+    ("settings.device-configuration", crate::tr::TrId::PermissionSettingsDeviceConfiguration),
+    ("ui-and-input.app-surface", crate::tr::TrId::PermissionInterfaceAndNavigationScreenDrawing),
+    ("ui-and-input.brokered-modal", crate::tr::TrId::PermissionInterfaceAndNavigationSystemDialogs),
+    (
+        "ui-and-input.control-center-appearance",
+        crate::tr::TrId::PermissionInterfaceAndNavigationControlCenterAppearance,
+    ),
+    ("ui-and-input.keyboard-request", crate::tr::TrId::PermissionInterfaceAndNavigationOnScreenKeyboard),
+    ("ui-and-input.navigation-response", crate::tr::TrId::PermissionInterfaceAndNavigationNavigation),
 ];
 
 /// English labels for the top-level permission groups (the part of a subgroup before the
@@ -95,13 +100,20 @@ impl MessageMetadata {
     /// groups and grants by.
     pub(crate) fn subgroup(&self) -> &str { self.subgroup.as_str() }
 
-    pub(crate) fn subgroup_label(&self) -> &str {
+    /// The `TrId` of this subgroup's display name, or `None` for a subgroup with no catalog entry
+    /// (should not happen for a message that declares a `permissionGroup`).
+    fn subgroup_tr_id(&self) -> Option<crate::tr::TrId> {
         let key = self.subgroup();
-        SUBGROUP_LABELS
-            .iter()
-            .find(|(candidate, _)| *candidate == key)
-            .map(|(_, label)| *label)
-            .unwrap_or(key)
+        SUBGROUP_LABELS.iter().find(|(candidate, _)| *candidate == key).map(|(_, id)| *id)
+    }
+
+    /// The subgroup's display name, localized in `locale` (unknown locales fall back to English).
+    /// An unmapped subgroup falls back to its raw key.
+    pub(crate) fn subgroup_label(&self, locale: &str) -> &str {
+        match self.subgroup_tr_id() {
+            Some(id) => crate::tr::lookup_id_in(locale, id),
+            None => self.subgroup(),
+        }
     }
 
     /// The top-level group: the part of the subgroup before the first `.`.

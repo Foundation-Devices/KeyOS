@@ -142,6 +142,12 @@ fn read_config(path: &Path) -> Result<LocalizerConfig> {
 fn validate_includes(apps: &[AppConfig], available_keys: &HashSet<String>) -> Result<()> {
     for app in apps {
         for prefix in &app.include {
+            // The app name is auto-added as an include for the app's own namespace; a service that
+            // only consumes shared namespaces has none of its own, so a name matching nothing is
+            // fine. Declared includes must still match.
+            if prefix == &app.name {
+                continue;
+            }
             if available_keys.iter().any(|k| k.starts_with(prefix)) {
                 continue;
             }

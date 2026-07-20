@@ -10,13 +10,12 @@ use std::ops::Deref;
 /// `Source` and `String`.
 ///
 /// [`write!`]: std::write
+#[macro_export]
 macro_rules! uwrite {
     ($dst:expr, $($arg:tt)*) => {
         indoc::writedoc!($dst, $($arg)*).unwrap()
     };
 }
-
-pub(crate) use uwrite;
 
 /// Calls [`writeln!`] with the passed arguments and unwraps the result.
 ///
@@ -24,6 +23,7 @@ pub(crate) use uwrite;
 /// `Source` and `String`.
 ///
 /// [`writeln!`]: std::writeln
+#[macro_export]
 macro_rules! uwriteln {
     ($dst:expr, $($arg:tt)*) => {
         {
@@ -32,7 +32,11 @@ macro_rules! uwriteln {
         }
     };
 }
-pub(crate) use uwriteln;
+
+// `#[macro_export]` lands the macros at the crate root; re-export them here too so callers (and the
+// re-export in `slint-keyos-platform-build`) can reach them by the `source::` module path they
+// have always used.
+pub use crate::{uwrite, uwriteln};
 
 pub struct Source {
     s: String,

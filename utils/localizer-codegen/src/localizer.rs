@@ -12,19 +12,58 @@ use serde_json::Value;
 use crate::generated_file::GeneratedFile;
 use crate::source::{uwriteln, Source};
 
+/// Controls what the translation codegen emits, so one implementation serves both a Slint app and a
+/// headless service.
+#[derive(Debug, Clone, Copy)]
+pub struct TranslationOptions {
+    /// A Slint app: the `TrId` enum comes from the generated `tr.slint` (referenced as
+    /// `crate::TrId`), the `init_tr!` macro wiring the Slint `TR`/`TR2` globals is emitted, and the
+    /// phf maps resolve through `slint_keyos_platform::phf`. When false this is a headless service:
+    /// the generated `mod tr` defines its own `TrId` enum, no Slint globals are referenced, and the
+    /// phf maps resolve through the service's own `phf` dependency.
+    pub slint: bool,
+    /// Emit the duration/relative-time formatting helpers (only meaningful for Slint apps that pull
+    /// in the `common.time` strings).
+    pub include_time_localization: bool,
+}
+
+impl TranslationOptions {
+    /// The crate path of the `TrId` enum in the generated code: a Slint app takes it from the
+    /// compiled `tr.slint`, a service defines its own inside `mod tr`.
+    fn trid_path(&self) -> &'static str {
+        if self.slint {
+            "crate::TrId"
+        } else {
+            "TrId"
+        }
+    }
+
+    /// The crate path of `phf`: a Slint app reaches it re-exported from `slint_keyos_platform`, a
+    /// service depends on `phf` directly.
+    fn phf_path(&self) -> &'static str {
+        if self.slint {
+            "slint_keyos_platform::phf"
+        } else {
+            "phf"
+        }
+    }
+}
+
 pub fn build_translations(
     translations_dir: &Path,
     out_dir: &Path,
     gen_dir: &Path,
-    include_time_localization: bool,
+    options: &TranslationOptions,
 ) -> anyhow::Result<()> {
     let languages = get_languages_from_dir(translations_dir)?;
 
     let all_translations = load_all_translations(translations_dir, &languages)?;
 
     let output_path = out_dir.join("tr.rs");
-    generate_rust_code(&all_translations, &output_path, include_time_localization)?;
-    generate_slint_tr(&all_translations, gen_dir)?;
+    generate_rust_code(&all_translations, &output_path, options)?;
+    if options.slint {
+        generate_slint_tr(&all_translations, gen_dir)?;
+    }
 
     for lang in &languages {
         let file_path = translations_dir.join(format!("{}.json", lang));
@@ -106,8 +145,17 @@ fn extract_translations(translations: &mut BTreeMap<String, String>, prefix: &st
 fn generate_rust_code(
     all_translations: &BTreeMap<String, BTreeMap<String, String>>,
     output_path: &Path,
-    include_time_localization: bool,
+    options: &TranslationOptions,
 ) -> anyhow::Result<()> {
+    let trid = options.trid_path();
+    let phf = options.phf_path();
+
+    let keys: Vec<&String> = all_translations
+        .get("en")
+        .or_else(|| all_translations.values().next())
+        .map(|translations| translations.keys().collect())
+        .unwrap();
+
     let mut src = Source::default();
 
     uwriteln!(
@@ -121,6 +169,18 @@ fn generate_rust_code(
     "
     );
 
+    // A Slint app takes `TrId` from the compiled `tr.slint`; a headless service has no Slint, so
+    // the module carries its own copy of the enum.
+    if !options.slint {
+        uwriteln!(src, "#[derive(Debug, Clone, Copy, PartialEq, Eq)]");
+        uwriteln!(src, "pub enum TrId {{");
+        for key in &keys {
+            uwriteln!(src, "{},", key_to_pascal_case(key));
+        }
+        uwriteln!(src, "}}");
+        uwriteln!(src, "");
+    }
+
     for (lang, translations) in all_translations {
         let mut map_builder = phf_codegen::Map::new();
 
@@ -130,25 +190,19 @@ fn generate_rust_code(
 
         uwriteln!(
             src,
-            "static {}_TRANSLATIONS: slint_keyos_platform::phf::Map<&'static str, &'static str> = {};",
+            "static {}_TRANSLATIONS: {phf}::Map<&'static str, &'static str> = {};",
             lang.to_uppercase(),
-            map_builder.build().to_string().replace("::phf::", "slint_keyos_platform::phf::")
+            map_builder.build().to_string().replace("::phf::", &format!("{phf}::"))
         );
         uwriteln!(src, "");
     }
 
-    let keys: Vec<&String> = all_translations
-        .get("en")
-        .or_else(|| all_translations.values().next())
-        .map(|translations| translations.keys().collect())
-        .unwrap();
-
-    uwriteln!(src, "impl crate::TrId {{");
+    uwriteln!(src, "impl {trid} {{");
     uwriteln!(src, "pub fn as_str(self) -> &'static str {{");
     uwriteln!(src, "match self {{");
     for key in &keys {
         let enum_variant = key_to_pascal_case(key);
-        uwriteln!(src, "crate::TrId::{enum_variant} => \"{key}\",");
+        uwriteln!(src, "{trid}::{enum_variant} => \"{key}\",");
     }
     uwriteln!(src, "}}");
     uwriteln!(src, "}}");
@@ -166,35 +220,65 @@ fn generate_rust_code(
         pub fn get_locale() -> &'static str {{
             &LOCALE.read().unwrap()
         }}
-
-        pub fn try_lookup(id: &str) -> Option<&'static str> {{
-            let locale = LOCALE.read().unwrap();
-            match *locale {{
     "
     );
 
+    // Set the active locale from a runtime string (e.g. a request's locale field), matching it
+    // against the known catalog locales so `set_locale` still receives a `'static`. An unknown
+    // locale leaves the current one untouched.
+    uwriteln!(src, "pub fn set_locale_str(locale: &str) {{");
+    uwriteln!(src, "let matched: Option<&'static str> = match locale {{");
+    for lang in all_translations.keys() {
+        uwriteln!(src, "\"{lang}\" => Some(\"{lang}\"),");
+    }
+    uwriteln!(src, "_ => None,");
+    uwriteln!(src, "}};");
+    uwriteln!(src, "if let Some(locale) = matched {{ set_locale(locale); }}");
+    uwriteln!(src, "}}");
+    uwriteln!(src, "");
+
+    // The per-locale match lives here; the process-global lookups below delegate to it against the
+    // current `LOCALE`, and callers with a request-scoped locale use the `_in` variants directly.
+    uwriteln!(src, "pub fn try_lookup_in(locale: &str, id: &str) -> Option<&'static str> {{");
+    uwriteln!(src, "match locale {{");
     for lang in all_translations.keys() {
         uwriteln!(src, "\"{lang}\" => {}_TRANSLATIONS.get(id).copied(),", lang.to_uppercase());
     }
+    uwriteln!(src, "_ => None,");
+    uwriteln!(src, "}}");
+    uwriteln!(src, "}}");
+    uwriteln!(src, "");
 
     uwriteln!(
         src,
         "
-                _ => None,
-            }}
+        pub fn try_lookup(id: &str) -> Option<&'static str> {{
+            try_lookup_in(get_locale(), id)
         }}
 
         pub fn lookup(id: &str) -> String {{
             try_lookup(id).unwrap_or(id).to_string()
         }}
 
-        pub fn lookup_id(id: crate::TrId) -> &'static str {{
+        pub fn lookup_id(id: {trid}) -> &'static str {{
             try_lookup(id.as_str()).unwrap()
         }}
     "
     );
 
-    if include_time_localization {
+    // Resolve against an explicit locale without touching the process-global `LOCALE`, so a request
+    // that carries its own locale need not mutate shared state (and concurrent requests in different
+    // locales can't clobber each other). An unknown locale, or a key missing from it, falls back to
+    // English.
+    uwriteln!(src, "pub fn lookup_id_in(locale: &str, id: {trid}) -> &'static str {{");
+    uwriteln!(
+        src,
+        "try_lookup_in(locale, id.as_str()).or_else(|| try_lookup_in(\"en\", id.as_str())).unwrap()"
+    );
+    uwriteln!(src, "}}");
+    uwriteln!(src, "");
+
+    if options.include_time_localization {
         uwriteln!(
             src,
             "
@@ -294,10 +378,13 @@ fn generate_rust_code(
         );
     }
 
-    // TODO: we can remove crate::TR config once all apps have migrated
-    uwriteln!(
-        src,
-        "
+    // The `init_tr!` macro wires the Slint `TR`/`TR2` globals, so it only makes sense for a Slint
+    // app. A headless service has no Slint runtime and just closes `mod tr` here.
+    if options.slint {
+        // TODO: we can remove crate::TR config once all apps have migrated
+        uwriteln!(
+            src,
+            "
         #[macro_export]
         macro_rules! init_tr {{
             ($ui:expr) => {{
@@ -319,10 +406,11 @@ fn generate_rust_code(
                 }});
             }};
         }}
+        "
+        );
+    }
 
-        }}
-    "
-    );
+    uwriteln!(src, "}}");
 
     std::fs::write(output_path, String::from(src))?;
     Ok(())

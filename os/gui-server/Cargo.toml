@@ -17,11 +17,13 @@ camera = { workspace = true }
 fs = { workspace = true }
 gui-server-api = { workspace = true }
 haptics = { workspace = true }
+i18n = { path = "../../i18n" }
 libblur = { workspace = true, default-features = false }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 num-derive = "0.4.2"
 num-traits = "0.2.18"
+phf = { version = "0.11" }
 power-manager = { workspace = true }
 rgb-led = { workspace = true }
 security = { workspace = true }
@@ -50,6 +52,9 @@ rayon = "1.10.0"
 shared_memory = { version = "0.12.4", features = ["logging"] }
 softbuffer = { workspace = true }                                          # Fork with added support for transparent pixels on macOS
 winit = { version = "0.30.2", features = ["rwh_05"] }
+
+[build-dependencies]
+localizer-codegen = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

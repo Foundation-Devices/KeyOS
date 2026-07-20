@@ -23,6 +23,7 @@ log = { workspace = true }
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 num-derive = "0.4"
 num-traits = "0.2"
+phf = { version = "0.11" }
 power-manager = { workspace = true }
 rand = "0.8"
 regex = { workspace = true }
@@ -39,6 +40,9 @@ xous = { path = "../../xous/xous-rs" }
 [target.'cfg(not(keyos))'.dependencies]
 secp256k1 = "0.29"
 sha2 = { workspace = true }
+
+[build-dependencies]
+localizer-codegen = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

@@ -20,7 +20,7 @@ impl Gui {
     pub(crate) fn queue_permission_request(&mut self, request_id: u16) {
         // An already-decided request is answered here even while locked; this is how a grant
         // approved in Settings after the app connected reaches its connection.
-        if resolve_or_prompt_info(&self.app_manager, request_id).is_none() {
+        if resolve_or_prompt_info(&self.app_manager, self.locale.lang(), request_id).is_none() {
             return;
         }
         self.pending_permission_requests.push_back(request_id);
@@ -41,10 +41,13 @@ impl Gui {
             _ => return,
         };
 
+        // Read the subscription-backed locale once for the whole drain (it is `Copy`, so this
+        // does not borrow `self` across the queue mutation below).
+        let locale = self.locale;
         while let Some(request_id) = self.pending_permission_requests.pop_front() {
             // Re-resolve at show time: the subgroup may have been decided while this request
             // waited, and one prompt per subgroup means it is then answered silently.
-            let Some(info) = resolve_or_prompt_info(&self.app_manager, request_id) else {
+            let Some(info) = resolve_or_prompt_info(&self.app_manager, locale.lang(), request_id) else {
                 continue;
             };
             let Some(modal_pid) = self.launch_app(ALERTS_APP_ID) else {
@@ -53,18 +56,29 @@ impl Gui {
                 continue;
             };
 
-            // TODO(SFT-7229): localize the prompt strings (and the subgroup labels they name).
+            // Resolve the prompt strings in the device locale (unknown locales fall back to
+            // English), matching the subgroup label the app manager already localized.
+            let lang = locale.lang();
+            // The app name is attacker-controlled; cap it so it can't overflow the fixed-height
+            // prompt. The subgroup label is OS-owned (localized by the app manager) and bounded.
+            let body = i18n::replace_placeholders(
+                crate::tr::lookup_id_in(lang, crate::tr::TrId::PermissionPromptSubheader),
+                &[cap_app_name(&info.app_name).as_str(), info.label.as_str()],
+            );
             let alert = InvokeAlert {
                 app_title: None,
-                title: "Permission Request".to_string(),
+                title: crate::tr::lookup_id_in(lang, crate::tr::TrId::PermissionPromptHeader).to_string(),
                 icon: "alert".to_string(),
-                // The app name is attacker-controlled; cap it so it can't overflow the
-                // fixed-height prompt. The subgroup label is OS-owned and bounded.
-                line1: format!("{} wants permission: {}.", cap_app_name(&info.app_name), info.label),
-                line2: Some("Allow this permission?".to_string()),
-                button1_title: "Allow Always".to_string(),
-                button2_title: Some("Not Now".to_string()),
-                button3_title: Some("Never Allow".to_string()),
+                line1: body,
+                line2: None,
+                button1_title: crate::tr::lookup_id_in(lang, crate::tr::TrId::PermissionPromptAllowAlways)
+                    .to_string(),
+                button2_title: Some(
+                    crate::tr::lookup_id_in(lang, crate::tr::TrId::PermissionPromptNotNow).to_string(),
+                ),
+                button3_title: Some(
+                    crate::tr::lookup_id_in(lang, crate::tr::TrId::PermissionPromptNeverAllow).to_string(),
+                ),
             };
             let prompt = PendingPermissionPrompt {
                 request_id: Some(request_id),
@@ -80,6 +94,17 @@ impl Gui {
             );
             return;
         }
+    }
+}
+
+impl server::ScalarEventHandler<settings::global::Locale> for Gui {
+    fn handle(
+        &mut self,
+        msg: settings::global::Locale,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.locale = msg;
     }
 }
 
@@ -162,7 +187,11 @@ fn resolve_permission(request_id: u16, allow: bool) {
 /// that needs the user's decision. The sender's app id was captured at park time rather than
 /// re-derived from a possibly recycled pid, so the prompt and the eventual grant always
 /// describe the same recorded target.
-fn resolve_or_prompt_info(app_manager: &AppManagerApi, request_id: u16) -> Option<PermissionRequestInfo> {
+fn resolve_or_prompt_info(
+    app_manager: &AppManagerApi,
+    locale: &str,
+    request_id: u16,
+) -> Option<PermissionRequestInfo> {
     let (Ok(data), Ok(sender_app_id)) =
         (xous::get_permission_request_data(request_id), xous::get_permission_request_app_id(request_id))
     else {
@@ -177,7 +206,7 @@ fn resolve_or_prompt_info(app_manager: &AppManagerApi, request_id: u16) -> Optio
         sender_app_id.0,
         data.server_sid.to_array(),
         data.message_id,
-        "en",
+        locale,
     ) {
         PermissionRequestInfoResult::AlreadyApproved => {
             resolve_permission(request_id, true);
