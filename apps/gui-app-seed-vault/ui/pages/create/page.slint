@@ -47,17 +47,6 @@ export component CreatePage inherits BasePage {
     property <bool> length-error: false;
     property <string> learn-more-url: "";
 
-    property <bool> index-input-has-focus: false;
-    property <bool> length-input-has-focus: false;
-    property <bool> generated-inputs-have-focus: index-input-has-focus || length-input-has-focus;
-
-    // Trigger auto-scroll when index/length inputs gain focus
-    changed generated-inputs-have-focus => {
-        if (generated-inputs-have-focus && new-seed.seed-type == SeedViewType.password-generated) {
-            content-scroll.viewport-y = -350px;
-        }
-    }
-
     property <[SeedViewType]> seed-view-types: [
         SeedViewType.bitcoin-12,
         SeedViewType.bitcoin-24,
@@ -180,10 +169,6 @@ export component CreatePage inherits BasePage {
                                 minimum: "0";
                                 maximum: "2147483647";  // BIP32 hardened indices use bit 31 as flag, so max is 2^31-1
 
-                                changed has-focus => {
-                                    index-input-has-focus = self.has-focus;
-                                }
-
                                 edited(text) => {
                                     new-seed.indexed-seed.index = text;
 
@@ -212,10 +197,6 @@ export component CreatePage inherits BasePage {
                                 minimum: "10";
                                 maximum: "80";
 
-                                changed has-focus => {
-                                    length-input-has-focus = self.has-focus;
-                                }
-
                                 edited(text) => {
                                     password-length = text;
 
@@ -240,11 +221,6 @@ export component CreatePage inherits BasePage {
                                         self.edited(self.text);
                                     }
                                 }
-                            }
-
-                            // Conditional spacer for keyboard scrolling
-                            if (generated-inputs-have-focus && new-seed.seed-type == SeedViewType.password-generated): Rectangle {
-                                height: 250px;
                             }
                         }
                     }

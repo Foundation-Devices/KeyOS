@@ -56,17 +56,9 @@ export component DetailsPage inherits BasePage {
     property <bool> has-error: label-error || (CB.is-password(seed.seed-type) && password-error);
     property <bool> label-error: false;
     property <bool> password-error: false;
-    property <bool> password-has-focus: false;
     property <CallbackResult> result: {
         success: true,
     };
-
-    // Trigger auto-scroll when password input gains focus
-    changed password-has-focus => {
-        if (password-has-focus) {
-            content-scroll.viewport-y = -150px;
-        }
-    }
 
     VerticalLayout {
         AppHeader {
@@ -231,10 +223,6 @@ export component DetailsPage inherits BasePage {
                             self.has-notice = text == "";
                             password-error = self.has-notice;
                         }
-
-                        changed has-focus => {
-                            password-has-focus = self.has-focus;
-                        }
                     }
 
                     if props.version != EditPageVersion.archive: CardColorPicker {
@@ -243,11 +231,6 @@ export component DetailsPage inherits BasePage {
                         changed(index) => {
                             new-color = index;
                         }
-                    }
-
-                    // Conditional spacer for keyboard scrolling
-                    if password-has-focus: Rectangle {
-                        height: 250px;
                     }
                 }
             }

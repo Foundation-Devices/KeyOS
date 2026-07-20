@@ -38,14 +38,6 @@ export component PasswordPage inherits BasePage {
     property <bool> has-errors: label-error || password-error;
     property <bool> label-error: true;
     property <bool> password-error: new-seed.password.password == "";
-    property <bool> password-has-focus: password-input.has-focus;
-
-    // Trigger auto-scroll when password input gains focus
-    changed password-has-focus => {
-        if (password-has-focus) {
-            content-scroll.viewport-y = -150px;
-        }
-    }
 
     VerticalLayout {
         AppHeader {
@@ -130,11 +122,6 @@ export component PasswordPage inherits BasePage {
                             // }
                             password-error = self.has-notice;
                         }
-                    }
-
-                    // Conditional spacer for keyboard scrolling
-                    if password-has-focus: Rectangle {
-                        height: 250px;
                     }
                 }
             }
