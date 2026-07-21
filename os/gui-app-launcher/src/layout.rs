@@ -100,7 +100,7 @@ impl LauncherConfig {
                 pages.push(LauncherPage { items });
             }
         }
-        Self::enforce_page_capacity(&mut pages);
+        Self::compact_pages(&mut pages);
 
         // Settings, Bitcoin, and Scan QR live in the dock by default: when neither
         // the saved dock nor a saved page placed them, insert each at its canonical
@@ -126,9 +126,7 @@ impl LauncherConfig {
             }
         }
 
-        if pages.is_empty() {
-            pages.push(LauncherPage { items: Vec::new() });
-        }
+        Self::compact_pages(&mut pages);
 
         Self { pages, dock }
     }
@@ -149,7 +147,11 @@ impl LauncherConfig {
         to_index: usize,
     ) -> bool {
         if source_collection_id == target_collection_id {
-            return self.reorder_collection(source_collection_id, from_index, to_index);
+            let moved = self.reorder_collection(source_collection_id, from_index, to_index);
+            if moved {
+                self.compact_page_list();
+            }
+            return moved;
         }
 
         let Some(item) = self.remove_item_from_collection(source_collection_id, from_index) else {
@@ -166,6 +168,7 @@ impl LauncherConfig {
                 self.dock[swap_index] = displaced_item;
                 return false;
             }
+            self.compact_page_list();
             return true;
         }
 
@@ -176,6 +179,7 @@ impl LauncherConfig {
             return false;
         }
 
+        self.compact_page_list();
         true
     }
 
@@ -249,6 +253,25 @@ impl LauncherConfig {
         while page_index < pages.len() {
             Self::rebalance_page_slots(pages, page_index);
             page_index += 1;
+        }
+    }
+
+    fn compact_page_list(&mut self) { Self::compact_pages(&mut self.pages); }
+
+    fn compact_pages(pages: &mut Vec<LauncherPage>) {
+        loop {
+            pages.retain(|page| !page.items.is_empty());
+
+            if pages.is_empty() {
+                pages.push(LauncherPage { items: Vec::new() });
+                return;
+            }
+
+            Self::enforce_page_capacity(pages);
+
+            if pages.iter().all(|page| !page.items.is_empty()) {
+                return;
+            }
         }
     }
 
@@ -662,6 +685,34 @@ mod tests {
         assert_eq!(page_item_slots(&launcher.pages[0].items), [0]);
         assert_eq!(page_item_ids(&launcher.pages[1].items), ["x", "b"]);
         assert_eq!(page_item_slots(&launcher.pages[1].items), [0, 4]);
+    }
+
+    #[test]
+    fn moving_last_item_off_page_removes_empty_page() {
+        let mut launcher = test_launcher(vec![test_page(&["a"]), test_page(&["b"])], &[]);
+
+        assert!(launcher.move_item("page-0", 0, "page-1", 1));
+
+        assert_eq!(launcher.pages.len(), 1);
+        assert_eq!(page_item_ids(&launcher.pages[0].items), ["b", "a"]);
+        assert_eq!(page_item_slots(&launcher.pages[0].items), [0, 1]);
+    }
+
+    #[test]
+    fn saved_sparse_layout_does_not_keep_empty_leading_page() {
+        let mut sparse_page = vec![String::new(); STANDARD_PAGE_CAPACITY];
+        sparse_page[STANDARD_PAGE_CAPACITY - 1] = "a".to_string();
+        let persistent = PersistentState {
+            page_orders: vec![sparse_page],
+            layout_version: LAYOUT_VERSION,
+            ..Default::default()
+        };
+
+        let config = LauncherConfig::from_persistent(&persistent, vec![test_item("a")]);
+
+        assert_eq!(config.pages.len(), 1);
+        assert_eq!(page_item_ids(&config.pages[0].items), ["a"]);
+        assert_eq!(page_item_slots(&config.pages[0].items), [0]);
     }
 
     #[test]
