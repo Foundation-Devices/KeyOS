@@ -44,7 +44,7 @@ impl LoadDefault for settings::global::SystemTheme {
 }
 
 impl LoadDefault for settings::global::ScreenBrightness {
-    fn load_default() -> Self { Self(100) }
+    fn load_default() -> Self { Self(70) }
 }
 
 impl LoadDefault for settings::global::OnboardingStatus {

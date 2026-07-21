@@ -16,6 +16,7 @@ use server::MessageId as _;
 use utralib::HW_LCDC_BASE;
 use xous::{arch::irq::IrqNumber, MemoryRange, ScalarMessage, CID};
 
+use super::DEFAULT_BACKLIGHT_LEVEL_PERCENT;
 use crate::{
     handlers::OnVsyncMessage,
     layers::{Layer, LayerPixelFormat, LayerStack},
@@ -23,8 +24,6 @@ use crate::{
 };
 
 spi::use_api!();
-
-pub(crate) const DEFAULT_BACKLIGHT_LEVEL_PERCENT: u8 = 80;
 
 pub const MAX_LAYERS: usize = 4;
 

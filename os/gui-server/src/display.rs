@@ -12,6 +12,7 @@ pub(crate) use emulator::*;
 #[cfg(keyos)]
 pub(crate) use lcdc::*;
 
+pub(crate) const DEFAULT_BACKLIGHT_LEVEL_PERCENT: u8 = 70;
 pub(crate) const DIM_LEVEL_DIVIDER: u8 = 5;
 
 impl crate::Gui {

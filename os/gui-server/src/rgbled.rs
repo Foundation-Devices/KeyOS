@@ -12,8 +12,7 @@ rgb_led::use_api!();
 #[cfg(not(keyos))]
 use crate::Gui;
 
-/// See [`crate::display::lcdc::LCD_DEFAULT_BACKLIGHT_LEVEL_PERCENT`]
-const RGB_BRIGHTNESS_DEFAULT: f32 = 0.8;
+const RGB_BRIGHTNESS_DEFAULT: f32 = crate::display::DEFAULT_BACKLIGHT_LEVEL_PERCENT as f32 / 100.0;
 
 const RGB_CONNECTION_TIMEOUT_MS: u64 = 1000;
 
