@@ -232,11 +232,12 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "load_app",
-            "description": "Upload an arbitrary app directory into keyos/sideloaded-apps/<app-id> on the device over usb-debug. The directory must contain app.elf and manifest.json; icon.bin and resources/ are uploaded when present. Replaces those files if the app already exists.",
+            "description": "Upload an arbitrary app directory into keyos/sideloaded-apps/<app-id> on the device over usb-debug (or keyos/apps/gui-app-emu-flux/sideloaded-apps/<app-id> with flux=true, for apps run by the Flux emulator). The directory must contain app.elf and manifest.json; icon.bin and resources/ are uploaded when present. Replaces those files if the app already exists.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "app_path": { "type": "string", "description": "Local app bundle directory containing app.elf, manifest.json, and optional icon.bin/resources" }
+                    "app_path": { "type": "string", "description": "Local app bundle directory containing app.elf, manifest.json, and optional icon.bin/resources" },
+                    "flux": { "type": "boolean", "description": "Upload as a Flux child app (Legacy mode), launched by the Flux emulator instead of the system launcher" }
                 },
                 "required": ["app_path"]
             }
@@ -357,7 +358,7 @@ fn tool_definitions() -> Value {
         // HID APDU tool
         {
             "name": "send_apdu",
-            "description": "Send an ISO 7816 APDU over USB HID. Auto-detects CTAP/FIDO mode (VID=0x1307, CTAPHID_MSG framing) or Ledger mode (VID=0x2c97, Ledger HID framing). Returns hex-encoded RAPDU.",
+            "description": "Send an ISO 7816 APDU over USB HID. Auto-detects CTAP/FIDO mode (VID=0x1307, CTAPHID_MSG framing) or Legacy mode (VID=0x2c97, Legacy HID framing). Returns hex-encoded RAPDU.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -493,7 +494,7 @@ fn handle_list_ports() -> Value {
             let pid = desc.product_id();
             let label = match (vid, pid) {
                 (0x1307, 0x0165) => "Passport Prime",
-                (0x2c97, 0x0007) => "Passport Prime (Flux/legacy)",
+                (0x2c97, 0x7011) => "Passport Prime (Flux/legacy)",
                 (0x03eb, 0x6124) => "SAM-BA bootloader",
                 _ => continue,
             };
@@ -899,11 +900,16 @@ fn handle_load_app(state: &McpState, args: &Value) -> Value {
         Some(path) => PathBuf::from(path),
         None => return error_result("Missing required parameter: app_path"),
     };
+    let kind = match args.get("flux").and_then(|v| v.as_bool()).unwrap_or(false) {
+        true => crate::load_app::SideloadKind::Flux,
+        false => crate::load_app::SideloadKind::Standard,
+    };
 
-    match crate::load_app::load_app(dev, &app_path) {
+    match crate::load_app::load_app(dev, &app_path, kind) {
         Ok(report) => text_result(&format!(
-            "Loaded {} into keyos/sideloaded-apps/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
+            "Loaded {} into {}/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
             report.app_id,
+            kind.device_dir(),
             report.app_id,
             report.elf_bytes,
             report.manifest_bytes,
@@ -989,7 +995,7 @@ fn handle_send_apdu(state: &mut McpState, args: &Value) -> Value {
         match crate::hid::open_hid() {
             Ok((dev, mode)) => {
                 let mode_str = match mode {
-                    crate::hid::HidMode::Ledger => "Ledger",
+                    crate::hid::HidMode::Legacy => "Legacy",
                     crate::hid::HidMode::Fido => "CTAP/FIDO",
                 };
                 eprintln!("[mcp] HID device opened in {mode_str} mode");

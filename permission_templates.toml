@@ -80,3 +80,20 @@
     "AesGcmTag",
     "AesClear",
 ]
+[flux-app]
+# Headless Flux child apps: the emulator-server syscall channel plus the os/fs
+# message subset FileBacked needs to persist each app's own NVM to its AppData.
+"os/gui-app-emu-flux" = ["SendSeph", "RecvSeph", "SyscallBuffer"]
+"os/fs" = [
+    "CreateDirMessage",
+    "CloseDir",
+    "OpenFileMessage",
+    "CloseFile",
+    "ReadFile",
+    "SeekFile",
+    "WriteFile",
+    "TruncateFile",
+    "Flush",
+    "Rename",
+    "Remove",
+]

@@ -111,6 +111,7 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
     "gui-app-alerts",
     "gui-app-authenticator",
     "gui-app-bitcoin",
+    "gui-app-emu-flux-server",
     "gui-app-file-browser",
     "gui-app-onboarding",
     "gui-app-qr-scanner",
@@ -130,9 +131,9 @@ const DEV_APPS: &[&str] = &[
     "gui-app-update-test",
 ];
 
-const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &[];
+const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &["app-flux-ethereum", "app-flux-solana"];
 
-const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[];
+const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[/*"app-flux-ethereum"*/];
 
 // Services whose exit should take the whole hosted system down with them. A service
 // belongs here when it runs a real hosted server (its `main` keeps listening), so an
@@ -205,6 +206,23 @@ enum Commands {
         #[command(flatten)]
         build_args: BuildArgs,
     },
+    /// Build one app crate into a signed, sideloadable bundle (no firmware image).
+    BuildApp {
+        /// App crate to bundle (e.g. app-flux-ethereum)
+        app: String,
+        /// Output parent directory; the bundle is written to <OUT>/<app-id-hex>/
+        /// (default: <target-root>/app-bundles)
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Developer signing key's cosign2.toml (e.g. from the SDK `foundation cert gen`, whose
+        /// publisher certificate is installed on the device). Defaults to the repo key, which is
+        /// not a trusted publisher (the bundle uploads but will not launch).
+        #[arg(long = "cosign2", value_name = "COSIGN2_TOML")]
+        cosign2: Option<PathBuf>,
+        /// Build for the simulator (hosted) instead of hardware; leaves the bundle unsigned.
+        #[arg(long)]
+        hosted: bool,
+    },
     /// Build a full flash-able firmware image, combining the bootloader, the recovery and normal images.
     /// Run the following first (in this order):
     ///     - build-bootloader
@@ -270,7 +288,7 @@ enum Commands {
     },
 }
 
-#[derive(Args, Clone)]
+#[derive(Args, Clone, Default)]
 struct BuildArgs {
     /// Services to include in the image. If not set, a default set of services will be included.
     /// Services are processes that start with the kernel.
@@ -358,6 +376,15 @@ fn main() {
         Commands::BuildChargeBoot => build_charge_boot(),
         Commands::Build { build_args, dont_sign } => {
             build(build_args, dont_sign);
+        }
+        Commands::BuildApp { app, out, cosign2, hosted } => {
+            let builder = if hosted { Builder::hosted() } else { Builder::hardware() };
+            let out = out.unwrap_or_else(|| builder.get_target_root().join("app-bundles"));
+            let bundle_dir = builder.build_app(&app, &out, cosign2);
+            println!();
+            println!("App bundle ready at {}", bundle_dir.display());
+            println!("Sideload it (device unlocked, Developer Mode on) with:");
+            println!("    passport-drive load_app {}", bundle_dir.display());
         }
         Commands::BuildFirmwareImage { samba_crypt_args } => {
             create_boot_image(samba_crypt_args);

@@ -1,0 +1,427 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import {
+    Palette,
+    Size,
+    Utils,
+    GradientStop,
+    CurrentTheme,
+} from "@ui/theme.slint";
+import { Images } from "@ui/images.slint";
+import {
+    Button,
+    Panel,
+    Icon,
+    NavHeader,
+    AppHeader,
+    TextMd,
+    TextLg,
+    HeadingLg,
+    HeadingMd,
+    TextSm,
+    IconButton,
+    BasePage,
+    TimerLoader,
+} from "@ui/widgets.slint";
+import { UIColors } from "@ui/palettes/ui-colors.slint";
+import { Navigate, Animate } from "../../gen/navigate.slint";
+import { Callbacks, Global, AppEntryValue } from "../../globals.slint";
+import { MainProps } from "./props.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+component FluxContainer inherits Rectangle {
+    clip: true;
+    border-radius: Size.sz12;
+    border-width: 1px;
+    height: 600px;
+    background: transparent;
+
+    @children
+
+    // Restore the rounded border because a child image doesn't respect the `clip: true` properly
+    Rectangle {
+        height: root.height;
+        border-radius: root.border-radius;
+        border-width: root.border-width;
+        border-color: #C69574;
+        background: transparent;
+    }
+}
+
+component BottomBar inherits Rectangle {
+    property <[[GradientStop]]> gradients: [
+        [{ color: #C98B78, stop: 0% }, { color: #8D5444, stop: 50% }, { color: #5D382D, stop: 100% }],
+        [{ color: #00C36A, stop: 0% }, { color: #008AA8, stop: 100% }],
+        [{ color: #C781EB, stop: 0% }, { color: #6FF6B9, stop: 100% }],
+        [{ color: #E49342, stop: 0% }, { color: #8D5444, stop: 100% }],
+    ];
+
+    height: 64px;
+    width: 472px;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+
+    property <int> current-bg-gradient: 0;
+
+    Image {
+        in property <[GradientStop]> border-gradient: [
+            { color: UIColors.light-copper-200, stop: 0% },
+            { color: UIColors.light-copper-700, stop: 100% },
+        ];
+        source: Utils.line-card(
+            root.width, root.height,
+            UIColors.transparent,
+            gradients[current-bg-gradient],
+            24px, 2px,
+            self.border-gradient,
+            0px, [],
+            "top-open");
+        width: root.width;
+        height: root.height;
+    }
+
+    VerticalLayout {
+        alignment: center;
+
+        HorizontalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            padding-left: 16px;
+            // 16px banner inset plus 32px so the centered label stays optically
+            // centered under the bar, balancing the shield on the left.
+            padding-right: 48px;
+            spacing: 8px;
+
+            Icon {
+                name: "shield2";
+                color: white;
+                size: Size.sz8;
+            }
+
+            TextSm {
+                horizontal-stretch: 1;
+                horizontal-alignment: center;
+                text: TR2.lookup(TrId.CoinEmulatedSecureContainer);
+                color: white;
+            }
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            current-bg-gradient = mod(current-bg-gradient + 1, gradients.length);
+        }
+    }
+}
+
+component AppTile inherits VerticalLayout {
+    in property <AppEntryValue> app;
+    property <string> name: app.name;
+    property <string> app-id: app.app-id;
+
+    visible: app-id != "";
+
+    width: 216px;
+    height: 210px;
+
+    private property <bool> is-pressed: false;
+
+    function icon(n: string) -> string {
+        if (n == "Ethereum") {
+            return "ethereum";
+        } else if (n == "Monero") {
+            return "monero";
+        } else if (n == "Solana") {
+            return "solana";
+        } else if (n == "XRP") {
+            return "xrp";
+        } else if (n == "Cardano") {
+            return "cardano";
+        } else if (n == "Dogecoin") {
+            return "dogecoin";
+        } else if (n == "Tether") {
+            return "tether";
+        } else if (n == "Zcash") {
+            return "chain";
+        } else {
+            return "chain";
+        }
+    }
+
+    horizontal-stretch: 1;
+
+    card := Rectangle {
+        border-radius: Size.sz12;
+        background: CurrentTheme.is-dark ? UIColors.neutral-1000 : UIColors.neutral-75;
+
+        Image {
+            in property <[GradientStop]> border-gradient: [
+                { color: CurrentTheme.is-dark ? #323232 : UIColors.primary-white, stop: 50% },
+                { color: CurrentTheme.is-dark ? UIColors.bronze-500 : #C69574, stop: 100% }
+            ];
+
+            source: Utils.line-card(
+                root.width, root.height,
+                CurrentTheme.is-dark ? UIColors.neutral-1000 : UIColors.neutral-75,
+                [],
+                Size.sz12,
+                1px,self.border-gradient,
+                0px, [],
+                "");
+            width: root.width;
+            height: root.height;
+        }
+
+        layout := VerticalLayout {
+            vertical-stretch: 1;
+            padding: 10px;
+            alignment: center;
+            spacing: 24px;
+
+            HorizontalLayout {
+                alignment: center;
+
+                pill-icon := Rectangle {
+                    Image {
+                        in property <[GradientStop]> bg-gradient: [{ color: #7D7D7D, stop: 5% }, { color: #333333, stop: 100% }];
+                        in property <[GradientStop]> border-gradient: [{ color: #D1D1D1, stop: 0% }, { color: #6F6F6F, stop: 100% }];
+
+                        source: Utils.line-card(
+                            96px, 96px,
+                            #2B2A2A,
+                            self.bg-gradient,
+                            48px, 1px,
+                            self.border-gradient,
+                            0px, [],
+                            "lines radial-bg");
+                        width: 96px;
+                        height: 96px;
+                    }
+
+                    Icon {
+                        name: app-id == "add-app" ? "plus" : icon(name);
+                        size: Size.sz14;
+                        color: Palette.white;
+                    }
+                }
+            }
+
+            TextMd {
+                text: name;
+                horizontal-alignment: center;
+                visible: app-id != "";
+            }
+        }
+
+        touchArea := TouchArea {
+            clicked => {
+                if (app-id == "add-app") {
+                    Navigate.settings({ });
+                } else if (app-id != "") {
+                    if (Callbacks.app-clicked(app-id)) {
+                        Global.app-running = true;
+                    }
+                }
+            }
+        }
+    }
+
+    states [
+        pressed when touchArea.pressed && app-id != "": {
+            layout.padding-top: 12px;
+            layout.padding-bottom: 8px;
+            card.background: Palette.background-pressed;
+        }
+    ]
+}
+
+export component MainPage inherits BasePage {
+    in property <MainProps> props;
+
+    private property <int> selected-page: 0;
+    private property <int> apps-per-page: 6;
+    // +1 for the synthetic Add App tile; * 1.0 forces float division so the
+    // ceiling is right (7 enabled apps plus Add App need a second page).
+    private property <int> total-pages: Math.ceil((Global.apps.length + 1) * 1.0 / apps-per-page);
+
+    function get-app-at(index: int) -> AppEntryValue {
+        if (index < Global.apps.length) {
+            return Global.apps[index];
+        }
+        if (index == Global.apps.length) {
+            return { name: TR2.lookup(TrId.MainAddApp), app-id: "add-app" };
+        }
+        return { name: "", app-id: "" };
+    }
+
+    function get-app-index(row: int, col: int) -> int {
+        return selected-page * apps-per-page + row * 2 + col;
+    }
+
+    VerticalLayout {
+        spacing: Size.sz3;
+        alignment: stretch;
+
+        // Running display state
+        if (Global.app-running && Global.crashed-pid == 0): VerticalLayout {
+            vertical-stretch: 1;
+
+            AppHeader {
+                title: TR2.lookup(TrId.MainTitle);
+            }
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+                alignment: center;
+                padding: 4px;
+
+                VerticalLayout {
+                    padding-top: 16px;
+                    spacing: Size.sz3;
+
+                    FluxContainer {
+                        Image {
+                            source: Global.display-image;
+                            width: 480px;
+                            height: 600px;
+                            image-rendering: ImageRendering.pixelated;
+                            image-fit: ImageFit.cover;
+                        }
+
+                        if Global.display-image.width == 0: HorizontalLayout {
+                            alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                TimerLoader {
+                                    size: 48px;
+                                }
+                            }
+                        }
+
+                        TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            pointer-event(event) => {
+                                if (event.kind == PointerEventKind.down) {
+                                    Callbacks.display-touched(self.mouse-x, self.mouse-y, true);
+                                }
+                                if (event.kind == PointerEventKind.up) {
+                                    Callbacks.display-touched(self.mouse-x, self.mouse-y, false);
+                                }
+                            }
+                        }
+                    }
+
+                    BottomBar { }
+                }
+            }
+        }
+
+        // Crash panel
+        if (Global.crashed-pid != 0): Panel {
+            vertical-stretch: 1;
+            background: Palette.transparent;
+
+            VerticalLayout {
+                spacing: Size.sz4;
+                alignment: start;
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+
+                HeadingLg {
+                    text: TR2.lookup(TrId.LauncherAppCrashHeader);
+                    horizontal-alignment: center;
+                    color: Palette.content-primary;
+                }
+
+                Rectangle {
+                    height: 8px;
+                }
+
+                TextLg {
+                    text: TR2.format(TrId.LauncherAppCrashContent, [Callbacks.pid-to-title(Global.crashed-pid), "\{Global.exit-code}"]);
+                    horizontal-alignment: center;
+                    color: Palette.content-tertiary;
+                    vertical-stretch: 0;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                HorizontalLayout {
+                    vertical-stretch: 0;
+                    alignment: center;
+
+                    Button {
+                        width: 100%;
+                        label: TR2.lookup(TrId.CommonButtonDismiss);
+                        importance: primary;
+                        clicked => {
+                            Global.crashed-pid = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Launcher grid
+        if (Global.crashed-pid == 0 && !Global.app-running): VerticalLayout {
+            NavHeader {
+                title: TR2.lookup(TrId.MainTitle);
+                left-icon: "cog";
+                clicked => {
+                    Navigate.settings({ });
+                }
+            }
+
+            vertical-stretch: 1;
+            alignment: stretch;
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+                alignment: center;
+                padding: Size.sz4;
+
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    SwipeGestureHandler {
+                        property <length> swipe-threshold: 50px;
+                        property <length> dx: self.current-position.x - self.pressed-position.x;
+                        handle-swipe-left: true;
+                        handle-swipe-right: true;
+                        swiped => {
+                            if (total-pages > 1) {
+                                if (dx > swipe-threshold && selected-page > 0) {
+                                    selected-page -= 1;
+                                } else if (dx < -swipe-threshold && selected-page < total-pages - 1) {
+                                    selected-page += 1;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: Size.sz4;
+
+                            for i in 3: HorizontalLayout {
+                                spacing: Size.sz4;
+                                alignment: stretch;
+
+                                AppTile {
+                                    app: get-app-at(get-app-index(i, 0));
+                                }
+
+                                AppTile {
+                                    app: get-app-at(get-app-index(i, 1));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

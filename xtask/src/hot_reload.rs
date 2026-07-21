@@ -7,7 +7,11 @@ use crate::builder::{get_package_metadata, workspace_root, Builder};
 
 pub fn reload_service(crate_name: String) {
     println!("Building {} for hosted mode...", crate_name);
-    Builder::hosted().build_local_crate(&crate_name);
+    let builder = Builder::hosted();
+    let app_bin = builder.build_local_crate(&crate_name);
+    // The simulator execs apps from their staged bundle, so a rebuilt app must be re-staged or the
+    // sim keeps running the old ELF. Services have no staged bundle and are left untouched.
+    builder.restage_hosted_app(&crate_name, &app_bin);
 
     println!("Signalling simulator to reload {}...", crate_name);
 

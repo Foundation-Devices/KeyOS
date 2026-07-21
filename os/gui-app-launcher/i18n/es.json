@@ -98,6 +98,8 @@
   "removeApp.failedContent": "Passport could not remove {0}.",
   "removeApp.failedHeader": "Unable to remove app",
   "removeApp.header": "Remove App?",
+  "removeLegacy.content": "This permanently deletes Legacy Mode. To restore access to Legacy Mode and its emulated apps, a firmware recovery is required.",
+  "removeLegacy.header": "Delete Legacy Mode?",
   "scan.content": "Scan any QR code,\nPassport will take care of it.",
   "scan.title": "Scan QR",
   "selectApp.2fa": "2FA",

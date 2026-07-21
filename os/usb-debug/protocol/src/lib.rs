@@ -136,6 +136,7 @@ const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
 const CMD_INSTALL_CERTIFICATE: u8 = 0x10;
 const CMD_GET_TRUSTED_PUBLISHER_COUNT: u8 = 0x11;
+const CMD_LOAD_FLUX_APP_BEGIN: u8 = 0x12;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
@@ -182,6 +183,11 @@ pub enum Command {
     LoadAppBegin {
         app_id: [u8; 16],
     },
+    /// Like [`Command::LoadAppBegin`], but the bundle lands in the Flux sideload
+    /// directory, so the app registers as a Flux child run by the Flux emulator.
+    LoadFluxAppBegin {
+        app_id: [u8; 16],
+    },
     LoadAppFileBegin {
         filename: String,
         size: u64,
@@ -210,6 +216,7 @@ impl Command {
             Command::LaunchApp { .. } => CMD_LAUNCH_APP,
             Command::GetDeveloperMode => CMD_GET_DEVELOPER_MODE,
             Command::LoadAppBegin { .. } => CMD_LOAD_APP_BEGIN,
+            Command::LoadFluxAppBegin { .. } => CMD_LOAD_FLUX_APP_BEGIN,
             Command::LoadAppFileBegin { .. } => CMD_LOAD_APP_FILE_BEGIN,
             Command::LoadAppChunk(_) => CMD_LOAD_APP_CHUNK,
             Command::LoadAppEnd => CMD_LOAD_APP_END,
@@ -253,7 +260,7 @@ impl Command {
             Command::LaunchApp { app_id } => {
                 out.extend_from_slice(app_id);
             }
-            Command::LoadAppBegin { app_id } => {
+            Command::LoadAppBegin { app_id } | Command::LoadFluxAppBegin { app_id } => {
                 out.extend_from_slice(app_id);
             }
             Command::LoadAppFileBegin { filename, size } => {
@@ -320,6 +327,10 @@ impl Command {
             CMD_LOAD_APP_BEGIN => {
                 let bytes: &[u8; 16] = exact_payload(cmd, payload)?;
                 Ok(Command::LoadAppBegin { app_id: *bytes })
+            }
+            CMD_LOAD_FLUX_APP_BEGIN => {
+                let bytes: &[u8; 16] = exact_payload(cmd, payload)?;
+                Ok(Command::LoadFluxAppBegin { app_id: *bytes })
             }
             CMD_LOAD_APP_FILE_BEGIN => {
                 let size_bytes: &[u8; 8] = payload.first_chunk().ok_or(ProtocolError::TruncatedPayload {
@@ -569,6 +580,12 @@ mod tests {
                 0xff,
             ],
         });
+        roundtrip(Command::LoadFluxAppBegin {
+            app_id: [
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+                0xff,
+            ],
+        });
         roundtrip(Command::LoadAppFileBegin { filename: "app.elf".to_string(), size: 123 });
         roundtrip(Command::LoadAppFileBegin { filename: "manifest.json".to_string(), size: 456 });
         roundtrip(Command::LoadAppFileBegin { filename: "icon.bin".to_string(), size: 789 });
@@ -639,6 +656,10 @@ mod tests {
         assert!(matches!(
             Command::decode(&[CMD_LOAD_APP_BEGIN, 0, 1]),
             Err(ProtocolError::TruncatedPayload { cmd: CMD_LOAD_APP_BEGIN, need: 16, got: 2 })
+        ));
+        assert!(matches!(
+            Command::decode(&[CMD_LOAD_FLUX_APP_BEGIN, 0, 1]),
+            Err(ProtocolError::TruncatedPayload { cmd: CMD_LOAD_FLUX_APP_BEGIN, need: 16, got: 2 })
         ));
     }
 

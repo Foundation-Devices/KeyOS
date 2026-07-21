@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use app_manifest::{ApprovalBehavior, Manifest, Message, RequiredSignature};
+use app_manifest::{ApprovalBehavior, Manifest, Message, RequiredSignature, RequiredType};
 use xous::MessageId;
 
 /// Each permission subgroup (a message's full `permissionGroup` value) mapped to the [`TrId`] of its
@@ -76,6 +76,7 @@ static GROUP_LABELS: &[(&str, &str)] = &[
 pub(crate) struct MessageMetadata {
     subgroup: String,
     required_signature: RequiredSignature,
+    required_type: Option<RequiredType>,
     approval: ApprovalBehavior,
 }
 
@@ -85,6 +86,7 @@ impl MessageMetadata {
     fn from_message(message: &Message) -> Option<Self> {
         if message.permission_group.is_none()
             && message.required_signature.is_none()
+            && message.required_type.is_none()
             && message.approval == ApprovalBehavior::NotUserGrantable
         {
             return None;
@@ -92,9 +94,14 @@ impl MessageMetadata {
         Some(Self {
             subgroup: message.permission_group.clone().unwrap_or_default(),
             required_signature: message.required_signature(),
+            required_type: message.required_type,
             approval: message.approval,
         })
     }
+
+    /// Whether this message is restricted to Flux child apps. The OS decides which apps qualify
+    /// (from their install location), so an ordinary app declaring it is still refused.
+    pub(crate) fn requires_flux(&self) -> bool { matches!(self.required_type, Some(RequiredType::Flux)) }
 
     /// The full subgroup key (e.g. `cryptography.hardware-hashing`), the unit the permission UI
     /// groups and grants by.
@@ -110,10 +117,11 @@ impl MessageMetadata {
     /// The subgroup's display name, localized in `locale` (unknown locales fall back to English).
     /// An unmapped subgroup falls back to its raw key.
     pub(crate) fn subgroup_label(&self, locale: &str) -> &str {
-        match self.subgroup_tr_id() {
-            Some(id) => crate::tr::lookup_id_in(locale, id),
-            None => self.subgroup(),
+        if let Some(id) = self.subgroup_tr_id() {
+            return crate::tr::lookup_id_in(locale, id);
         }
+        // An unknown subgroup falls back to its raw key.
+        self.subgroup()
     }
 
     /// The top-level group: the part of the subgroup before the first `.`.

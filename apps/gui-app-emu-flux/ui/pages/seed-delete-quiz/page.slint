@@ -1,0 +1,118 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette } from "@ui/theme.slint";
+import {
+    Button,
+    NavHeader,
+    BasePage,
+    PageBody,
+    ButtonSection,
+    ContentSection,
+    HeadingLg,
+    TextMd,
+    WrappedIcon,
+} from "@ui/widgets.slint";
+import { SeedVerifyQuiz, SeedWordChallenge } from "@ui/pages.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Callbacks, Global } from "../../globals.slint";
+import { SeedDeleteQuizProps } from "./props.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+enum Phase {
+    Confirm,
+    Quiz,
+}
+
+export component SeedDeleteQuizPage inherits BasePage {
+    in property <SeedDeleteQuizProps> props;
+
+    private property <Phase> phase: Phase.Confirm;
+
+    // One challenge per seed word (12 or 24), generated once when the page opens.
+    property <[SeedWordChallenge]> challenges;
+    init => {
+        root.challenges = Callbacks.generate-seed-word-challenges();
+    }
+
+    // Confirmation phase
+    if (phase == Phase.Confirm): VerticalLayout {
+        NavHeader {
+            title: TR2.lookup(TrId.RemoveSeedTitle);
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        PageBody {
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        outer-icon: "jumbo-circle";
+                        inner-icon: "alert";
+                    }
+                }
+
+                HeadingLg {
+                    text: TR2.lookup(TrId.RemoveSeedHeader);
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    // Imported seeds need a written backup; derived seeds are recreated from the
+                    // device master key, so deletion is reversible.
+                    text: Global.seed-is-imported
+                        ? TR2.lookup(TrId.RemoveSeedContent)
+                        : TR2.lookup(TrId.RemoveDerivedSeedContent);
+                    horizontal-alignment: center;
+                    color: Palette.content-secondary;
+                    wrap: word-wrap;
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonCancel);
+                    importance: secondary;
+                    clicked => {
+                        Navigate.backward();
+                    }
+                }
+
+                Button {
+                    label: Global.seed-is-imported ? TR2.lookup(TrId.RemoveSeedConfirmBackup) : TR2.lookup(TrId.CommonButtonContinue);
+                    importance: primary;
+                    clicked => {
+                        if (Global.seed-is-imported) {
+                            // Imported: verify the full seed word by word before deleting.
+                            phase = Phase.Quiz;
+                        } else {
+                            // Derived: recoverable from the master key, delete without a quiz.
+                            if (Callbacks.remove-seed()) {
+                                Navigate.seed-delete({ replace: true });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Quiz phase: full word-by-word verification, shared with onboarding.
+    if (phase == Phase.Quiz): SeedVerifyQuiz {
+        challenges: root.challenges;
+        tr-id-prefix: "onboarding.backupManualVerify.";
+        regenerate-challenge(word-index) => {
+            Callbacks.regenerate-seed-word-challenge(word-index)
+        }
+        verified => {
+            if (Callbacks.remove-seed()) {
+                Navigate.seed-delete({ replace: true });
+            }
+        }
+        back => {
+            phase = Phase.Confirm;
+        }
+    }
+}

@@ -693,6 +693,10 @@
       "failedHeader": "Unable to remove app",
       "header": "Remove App?"
     },
+    "removeLegacy": {
+      "content": "This permanently deletes Legacy Mode. To restore access to Legacy Mode and its emulated apps, a firmware recovery is required.",
+      "header": "Delete Legacy Mode?"
+    },
     "scan": {
       "content": "Scan any QR code,\nPassport will take care of it.",
       "title": "Scan QR"
@@ -719,7 +723,7 @@
     "intro": {
       "content": "Legacy Mode lets you manage assets beyond Bitcoin, directly on Passport Prime. Create a new seed or import one from an existing wallet to get started.",
       "createNewSeed": "Create new Seed",
-      "enter24Words": "Enter 24 words",
+      "enterSeedWords": "Enter Seed words",
       "header": "Welcome to Legacy Mode",
       "loadFromVault": "Load from Vault"
     },
@@ -729,6 +733,15 @@
     },
     "recoverWords": {
       "title": "Seed Words"
+    },
+    "removeDerivedSeed": {
+      "content": "This app seed was derived from your Master Key, and can be re-created at any time.\n\nTo keep an external backup, view the seed words in the app settings before continuing."
+    },
+    "removeSeed": {
+      "confirmBackup": "Yes, I have a backup",
+      "content": "Removing your seed will delete it from this device. Make sure you have a backup of your seed words before continuing.",
+      "header": "Are you sure?",
+      "title": "Remove Seed"
     },
     "settings": {
       "appSelection": "App Selection",

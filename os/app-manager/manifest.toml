@@ -19,6 +19,7 @@ template = ["fs-generic", "crypto-sha"]
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
     "Remove",
+    "RemoveAppData",
     "RegisterAppResources",
 ]
 "os/nameserver" = ["AddManifest", "RemoveManifest"]

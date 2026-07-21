@@ -1,14 +1,14 @@
-# Legacy Mode HID — Ledger-Compatible APDU Interface
+# Legacy Mode HID: Wallet-Compatible APDU Interface
 
 When a Flux app launches, `gui-app-emu-flux` registers a second HID interface that
-speaks the Ledger HID transport protocol. This allows unmodified host wallets
-(MoneroGUI, Ledger Live, Speculos-compatible tools, etc.) to communicate with the
+speaks the Legacy HID transport protocol. This allows unmodified host wallets
+(MoneroGUI and other compatible host wallets) to communicate with the
 Flux app over standard ISO 7816 APDUs.
 
 **Lifecycle:**
 
 1. Flux app starts → `start_hid()` registers the Legacy HID interface, switches
-   VID:PID to `0x2C97:0x0007` (Ledger Flex), and promotes the interface to
+   VID:PID to `0x2C97:0x7011` (Legacy Flux), and promotes the interface to
    position 0. The USB bus re-enumerates.
 2. Flux app exits → normal VID:PID (`0x1307:0x0165`) is restored and the Legacy
    HID interface is removed. The USB bus re-enumerates again.
@@ -65,13 +65,13 @@ A1 01       Collection (Application)
 C0          End Collection
 ```
 
-> Usage Page `0xFFA0` is the vendor-defined page used by Ledger devices.
+> Usage Page `0xFFA0` is the vendor-defined page used by Legacy devices.
 > This is distinct from the FIDO Alliance page `0xF1D0` used by the CTAP/U2F
 > interface on Interface 0 (normal mode).
 
 ## APDU-over-HID Framing Protocol
 
-ISO 7816 APDUs are split across 64-byte HID reports using the Ledger HID
+ISO 7816 APDUs are split across 64-byte HID reports using the Legacy HID
 transport framing. Each report carries a 2-byte channel ID, a tag byte (`0x05`
 for APDU), and a 2-byte big-endian sequence number.
 
@@ -129,7 +129,7 @@ sequenceDiagram
     participant HID as Legacy HID<br/>(gui-app-emu-flux)
     participant App as Flux App
 
-    Note over Host,App: Flux app launched — VID:PID is now 0x2C97:0x0007
+    Note over Host,App: Flux app launched: VID:PID is now 0x2C97:0x7011
 
     Host->>HID: HID OUT report [ch][0x05][seq=0][len][APDU...]
     Note right of HID: Reassembler collects<br/>packets until complete
@@ -200,7 +200,7 @@ graph TD
   the most recent incoming APDU so that response packets are framed with the
   matching channel ID.
 - **SEPH bridge:** APDUs enter the Flux app as `CapduEvent` (tag `0x16`) TLV packets
-  via the SEPH FIFO, exactly as they would on a real Ledger device. Responses exit
+  via the SEPH FIFO, exactly as they would on real hardware. Responses exit
   as `Rapdu` (tag `0x53`) packets.
 - **Fixed IF 0:** Legacy HID registers with interface number 0 so host wallets see
-  the Ledger-compatible layout they expect.
+  the Legacy-compatible layout they expect.

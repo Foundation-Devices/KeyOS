@@ -15,7 +15,7 @@ use securam_manager::SecuramManager;
 #[cfg(not(feature = "production"))]
 use security::FirmwareTimestamp;
 use security::{
-    messages::*, AccessDenied, BluetoothChallengeSecret, DeviceId, GetDeviceIdError, LockoutOptions,
+    messages::*, AccessDenied, AppSeed, BluetoothChallengeSecret, DeviceId, GetDeviceIdError, LockoutOptions,
     LoginFailed, MasterKeyState, OsVersionInfo, Pin, ScChallengeError, ScError, ScProof, SecurityWord, Seed,
 };
 use xous::{keyos, DropDeallocate, MemoryFlags};
@@ -75,7 +75,7 @@ pub struct Server {
 
     pub compatibility: Compatibility,
 
-    pending_app_seed_request: Vec<server::ArchiveResponse<Result<[u8; 32], AccessDenied>>>,
+    pending_app_seed_request: Vec<server::ArchiveResponse<Result<AppSeed, AccessDenied>>>,
 
     #[cfg(not(feature = "recovery-os"))]
     disk_encryption_keys_ready: bool,
@@ -1003,7 +1003,7 @@ impl Server {
         sender: xous::PID,
         auth_hash: &AuthPinHash,
         xor_hash: &XorPinHash,
-    ) -> Result<[u8; 32], AccessDenied> {
+    ) -> Result<AppSeed, AccessDenied> {
         let master_seed =
             self.get_seed(auth_hash, xor_hash, &read_otp_key()).map_err(|_| AccessDenied)?.to_vec();
         let sender_app_id =
@@ -1016,7 +1016,7 @@ impl Server {
             .try_into()
             .expect("incorrect slice length");
 
-        Ok(app_seed)
+        Ok(AppSeed::new(app_seed))
     }
 }
 

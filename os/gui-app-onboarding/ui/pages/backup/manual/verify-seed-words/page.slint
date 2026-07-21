@@ -1,251 +1,35 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {
-    Button,
-    TextLg,
-    Icon,
-    JumboIcon,
-    Shield,
-    HeadingMd,
-    TextMd,
-    TimerCircularProgress,
-    HeadingSm,
-    HeadingLg,
-    Input,
-    ButtonSection,
-    NavHeader,
-} from "@ui/widgets.slint";
+import { SeedVerifyQuiz } from "@ui/pages.slint";
 import { OnboardingBasePage } from "../../../../widgets/base-page.slint";
-import { Font } from "@ui/fonts.slint";
-import { Palette, Size, Utils, UISize, Importance } from "@ui/theme.slint";
 import { VerifySeedWordsProps } from "props.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
 import {
     SeedGlobal,
     SeedWordChallenge,
 } from "../../../../onboarding-callbacks.slint";
-import { TR2, TrId } from "../../../../gen/tr.slint";
-import {
-    ProgressIndicator,
-} from "../../../../widgets/progress-indicator.slint";
-
-enum WordState { Pending, Success, Failure }
 
 export component VerifySeedWordsPage inherits OnboardingBasePage {
     in property <VerifySeedWordsProps> props;
 
-    property <[int]> mnemonic-order;
-    property <SeedWordChallenge> current-challenge;
-
-    property <WordState> word-state: WordState.Pending;
-    property <int> current-page: 0;
-
+    // One challenge per word in shuffled order, generated once when the screen opens.
+    property <[SeedWordChallenge]> challenges;
     init => {
-        mnemonic-order = SeedGlobal.generate-mnemonic-order();
-        current-challenge = SeedGlobal.get-seed-word-challenge(mnemonic-order[current-page]);
+        root.challenges = SeedGlobal.generate-seed-verify-challenges();
     }
 
-    function subheader() -> string {
-        if (word-state == WordState.Pending) {
-            return TR2.lookup(TrId.BackupManualVerifyChooseWord);
-        } else if (word-state == WordState.Failure) {
-            return TR2.lookup(TrId.BackupManualVerifyIncorrectRestart);
-        } else {
-            return TR2.lookup(TrId.BackupManualVerifyCorrect);
+    SeedVerifyQuiz {
+        challenges: root.challenges;
+        tr-id-prefix: "backupManualVerify.";
+        regenerate-challenge(word-index) => {
+            SeedGlobal.regenerate-seed-verify-challenge(word-index)
         }
-    }
-
-    function subheader-color() -> brush {
-        if (word-state == WordState.Pending) {
-            return Palette.content-tertiary;
-        } else if (word-state == WordState.Failure) {
-            return Palette.content-copper-brand;
-        } else {
-            return Palette.content-brand;
+        verified => {
+            Navigate.backup-created({ });
         }
-    }
-
-    function verify-selection(selected-index: int) -> bool {
-        if (selected-index == current-challenge.correct-option-index) {
-            if (current-page == mnemonic-order.length - 1) {
-                Navigate.backup-created({ });
-            }
-            word-state = WordState.Success;
-            return true;
-        } else {
-            word-state = WordState.Failure;
-            return false;
-        }
-    }
-
-    function button-label() -> string {
-        if (word-state == WordState.Failure) {
-            return TR2.lookup(TrId.CommonButtonRetry);
-        }
-        if (word-state == WordState.Success && current-page == mnemonic-order.length - 1) {
-            return TR2.lookup(TrId.CommonButtonFinish);
-        }
-        return TR2.lookup(TrId.CommonButtonNext);
-    }
-
-    VerticalLayout {
-        NavHeader {
-            title: TR2.lookup(TrId.BackupManualVerifyTitle);
-
-            clicked => {
-                Navigate.backward();
-            }
-        }
-
-        VerticalLayout {
-            padding-bottom: Size.sz4;
-            padding-left: Size.sz4;
-            padding-right: Size.sz4;
-
-            correct-seed := VerticalLayout {
-                spacing: Size.sz16;
-                padding-top: Size.sz12;
-
-                alignment: start;
-
-                VerticalLayout {
-                    alignment: start;
-                    spacing: Size.sz3;
-                    HeadingSm {
-                        text: TR2.lookup(TrId.BackupManualVerifyTapOnWord);
-                        color: Palette.content-secondary;
-                        horizontal-alignment: center;
-                    }
-
-                    HeadingLg {
-                        text: "#\{current-challenge.mnemonic-index + 1}";
-                        color: Palette.content-secondary;
-                        horizontal-alignment: center;
-                    }
-                }
-
-                VerticalLayout {
-                    alignment: start;
-                    spacing: Size.sz6;
-                    TextMd {
-                        text: subheader();
-                        color: subheader-color();
-                        horizontal-alignment: center;
-                    }
-
-                    HorizontalLayout {
-                        spacing: Size.sz6;
-                        option-a := Button {
-                            importance: secondary;
-                            label: current-challenge.options[0];
-                            width: 212px;
-
-                            clicked => {
-                                if (word-state != WordState.Pending) {
-                                    return;
-                                }
-                                if (verify-selection(0)) {
-                                    self.importance = Importance.primary;
-                                } else {
-                                    self.importance = Importance.notice;
-                                }
-                            }
-                        }
-
-                        option-b := Button {
-                            importance: secondary;
-                            label: current-challenge.options[1];
-                            width: 212px;
-
-                            clicked => {
-                                if (word-state != WordState.Pending) {
-                                    return;
-                                }
-                                if (verify-selection(1)) {
-                                    self.importance = Importance.primary;
-                                } else {
-                                    self.importance = Importance.notice;
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: Size.sz6;
-                        option-c := Button {
-                            importance: secondary;
-                            label: current-challenge.options[2];
-                            width: 212px;
-
-                            clicked => {
-                                if (word-state != WordState.Pending) {
-                                    return;
-                                }
-                                if (verify-selection(2)) {
-                                    self.importance = Importance.primary;
-                                } else {
-                                    self.importance = Importance.notice;
-                                }
-                            }
-                        }
-
-                        option-d := Button {
-                            importance: secondary;
-                            label: current-challenge.options[3];
-                            width: 212px;
-
-                            clicked => {
-                                if (word-state != WordState.Pending) {
-                                    return;
-                                }
-                                if (verify-selection(3)) {
-                                    self.importance = Importance.primary;
-                                } else {
-                                    self.importance = Importance.notice;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            ButtonSection {
-                HorizontalLayout {
-                    alignment: center;
-                    ProgressIndicator {
-                        current: current-page;
-                        total: mnemonic-order.length;
-                    }
-                }
-
-                Button {
-                    icon: word-state == WordState.Failure ? "reload" : "";
-                    label: button-label();
-                    importance: primary;
-                    enabled: word-state != WordState.Pending;
-
-                    clicked => {
-                        if (word-state == WordState.Success) {
-                            current-page += 1;
-                        }
-                        if (current-page <= mnemonic-order.length - 1) {
-                            current-challenge = SeedGlobal.get-seed-word-challenge(
-                                mnemonic-order[current-page]);
-                        } else {
-                            // This should be short-circuited by verify-selection,
-                            // but fits with the check that the current-page is in bounds.
-                            Navigate.backup-created({ });
-                        }
-
-                        word-state = WordState.Pending;
-                        option-a.importance = Importance.secondary;
-                        option-b.importance = Importance.secondary;
-                        option-c.importance = Importance.secondary;
-                        option-d.importance = Importance.secondary;
-                    }
-                }
-            }
+        back => {
+            Navigate.backward();
         }
     }
 }

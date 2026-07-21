@@ -66,6 +66,12 @@ pub struct Message {
     /// [`RequiredSignature::Foundation`]. Set explicitly to override.
     #[serde(rename = "requiredSignature", default, skip_serializing_if = "Option::is_none")]
     pub required_signature: Option<RequiredSignature>,
+    /// Restricts this permission to a specific kind of sender app; absent means any app. `flux`
+    /// limits it to Flux child apps (a fact the OS derives from the app's install location, not a
+    /// self-assertion), so a message the emulator exposes only to its children stays unreachable
+    /// to an ordinary sideloaded app.
+    #[serde(rename = "requiredType", default, skip_serializing_if = "Option::is_none")]
+    pub required_type: Option<RequiredType>,
     /// How the permission is granted to a sideloaded app. Defaults to
     /// [`ApprovalBehavior::NotUserGrantable`] when a message declares no `approval`.
     #[serde(default, skip_serializing_if = "ApprovalBehavior::is_not_user_grantable")]
@@ -96,6 +102,15 @@ pub enum RequiredSignature {
     ThirdParty,
     /// Only Foundation-signed processes (built-in services and Foundation apps).
     Foundation,
+}
+
+/// Restricts a message permission to a specific kind of sender app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RequiredType {
+    /// Only a Flux child app (run by the Flux emulator) may hold this permission. The OS decides
+    /// which apps are Flux children from their install directory, so it cannot be self-asserted.
+    Flux,
 }
 
 /// How a message permission is granted to a sideloaded app.

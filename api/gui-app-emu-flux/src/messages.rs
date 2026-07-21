@@ -1,20 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use server::{AsScalar, FromScalar, SimpleMemoryMessage};
+use server::SimpleMemoryMessage;
 use xous::MemoryRange;
-
-#[derive(Debug, server::Message)]
-#[response(u32)]
-pub struct SvcCall(pub u32, pub u32);
-
-impl AsScalar<2> for SvcCall {
-    fn as_scalar(&self) -> [u32; 2] { [self.0, self.1] }
-}
-
-impl FromScalar<2> for SvcCall {
-    fn from_scalar([a, b]: [u32; 2]) -> Self { Self(a, b) }
-}
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SendSeph(pub Vec<u8>);

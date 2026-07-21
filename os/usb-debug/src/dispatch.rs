@@ -191,7 +191,18 @@ impl DebugProtocol {
                     Response::Err
                 }
             },
-            Command::LoadAppBegin { app_id } => self.load_app_begin(app_id),
+            Command::LoadAppBegin { app_id } => self.load_app_begin(app_id, app_manager::SIDELOADED_APPS_DIR),
+            Command::LoadFluxAppBegin { app_id } => {
+                // A sideloaded Flux app lives under the emulator's directory and is run by it, so
+                // refuse to sideload one when the emulator itself is not installed, rather than
+                // recreating its directory underneath.
+                let emu_elf = format!("{}/app.elf", app_manager::FLUX_EMULATOR_APP_DIR);
+                if self.fs.metadata(emu_elf, Location::System).is_err() {
+                    log::warn!("debug: LOAD_FLUX_APP rejected: the Flux emulator is not installed");
+                    return Response::Err;
+                }
+                self.load_app_begin(app_id, app_manager::SIDELOADED_FLUX_APPS_DIR)
+            }
             Command::LoadAppFileBegin { filename, size } => self.load_app_file_begin(&filename, size),
             Command::LoadAppChunk(data) => self.load_app_chunk(&data),
             Command::LoadAppEnd => self.load_app_end(),
@@ -417,7 +428,7 @@ impl DebugProtocol {
         Ok(())
     }
 
-    fn load_app_begin(&mut self, app_id: [u8; 16]) -> Response {
+    fn load_app_begin(&mut self, app_id: [u8; 16], sideload_root: &str) -> Response {
         if let Some(response) = self.reject_load_app_if_locked("LOAD_APP_BEGIN") {
             return response;
         }
@@ -429,7 +440,7 @@ impl DebugProtocol {
         self.abort_load_app_session("LOAD_APP_BEGIN");
 
         let app_id_dir = app_id_dir_name(&app_id);
-        let app_dir = format!("keyos/sideloaded-apps/{app_id_dir}");
+        let app_dir = format!("{sideload_root}/{app_id_dir}");
         match self.fs.remove(&app_dir, Location::System) {
             Ok(()) | Err(FsError::FileNotFound) => {}
             Err(e) => {
@@ -438,8 +449,8 @@ impl DebugProtocol {
             }
         }
 
-        self.upload = Some(UploadSession { app_dir, current_file: None });
-        log::info!("debug: load_app begin {app_id_dir}");
+        self.upload = Some(UploadSession { app_dir: app_dir.clone(), current_file: None });
+        log::info!("debug: load_app begin {app_dir}");
         Response::Ack
     }
 
@@ -681,6 +692,7 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::LaunchApp { .. }
             | Command::GetDeveloperMode
             | Command::LoadAppBegin { .. }
+            | Command::LoadFluxAppBegin { .. }
             | Command::LoadAppFileBegin { .. }
             | Command::LoadAppChunk(_)
             | Command::LoadAppEnd

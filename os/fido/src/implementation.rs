@@ -183,7 +183,7 @@ pub fn wait() -> (Security, [u8; 32]) {
     let security = Security::default();
     let seed = security.app_seed().expect("app seed");
 
-    (security, seed)
+    (security, *seed.as_bytes())
 }
 
 impl FidoServer {

@@ -31,6 +31,7 @@ MountAirlock = { id = 28, type = "blockingScalar", cfg = "not(feature = \"recove
 FormatAirlock = { id = 29, type = "blockingScalar", cfg = "not(feature = \"recovery-os\")", approval = "autoAllow" }
 FormatUsb = { id = 30, type = "blockingScalar", approval = "autoAllow" }
 RegisterAppResources = { id = 31, type = "blockingArchive" }
+RemoveAppData = { id = 32, type = "blockingArchive" }
 GetUsbReadAccess = { id = 100, type = "blockingScalar", permissionGroup = "file-system.usb-files", approval = "grantOnFirstUse" }
 GetUsbWriteAccess = { id = 101, type = "blockingScalar", permissionGroup = "file-system.usb-files", approval = "grantOnFirstUse" }
 GetUserReadAccess = { id = 102, type = "blockingScalar", permissionGroup = "file-system.user-files", approval = "grantOnFirstUse" }

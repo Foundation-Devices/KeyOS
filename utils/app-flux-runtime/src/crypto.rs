@@ -2074,7 +2074,7 @@ pub unsafe extern "C" fn cx_aes_no_throw(
     let encrypt = (mode & CX_AES_ENCRYPT) != 0;
     let cbc = (mode & CX_AES_CHAIN_CBC) != 0;
 
-    // Ledger's cx_aes_no_throw is defined as cx_aes_iv_no_throw with a
+    // The cx_aes_no_throw reference is defined as cx_aes_iv_no_throw with a
     // sixteen-zero initial IV.
     let mut prev = [0u8; 16];
 

@@ -25,5 +25,8 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 xous = { workspace = true }
 
+[dev-dependencies]
+hex = { workspace = true }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

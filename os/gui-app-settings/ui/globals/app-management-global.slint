@@ -22,6 +22,9 @@ export struct InstalledApp {
     publisher: string,
     can_launch: bool,
     can_remove: bool,
+    // A Flux child app runs inside the Flux emulator, so it has no direct-launch
+    // affordance here: the play button and Open App button are hidden for it.
+    is_flux: bool,
     version: string,
     size: string,
     description: string,

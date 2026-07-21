@@ -295,6 +295,16 @@ impl<P: CheckedPermissions> FileSystem<P> {
         self.conn.send_blocking_archive(RegisterAppResources { app_id, root, app_dir: app_dir.into() })
     }
 
+    /// Remove all AppData belonging to `app_id`, not just the caller's own. Wipes
+    /// the app's persisted data (including any stored seed) so it does not survive a
+    /// reinstall.
+    pub fn remove_app_data(&self, app_id: xous::AppId) -> Result<(), Error>
+    where
+        P: MessageAllowed<RemoveAppData>,
+    {
+        self.conn.send_blocking_archive(RemoveAppData { app_id })
+    }
+
     fn ensure_read_access(&self, location: Location) -> Result<(), Error> {
         if self.read_access_granted.contains(location) {
             return Ok(());

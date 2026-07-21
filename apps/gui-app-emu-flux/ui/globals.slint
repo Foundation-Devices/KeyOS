@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Word-position challenge shared with onboarding's verify quiz.
+import { SeedWordChallenge } from "@ui/pages.slint";
+export { SeedWordChallenge }
+export struct AppEntryValue {
+    name: string,
+    app-id: string,
+}
+
+export struct SettingsEntryValue {
+    name: string,
+    app-id: string,
+    enabled: bool,
+}
+
+export global Callbacks {
+    callback app-clicked(string) -> bool;
+    pure callback pid-to-title(int) -> string;
+    callback display-touched(length, length, bool);
+    callback app-toggled(string, bool);
+    callback theme-changed();
+    callback back-from-running();
+    callback confirm-seed-import([string]) -> bool;
+    pure callback validate-seed-word(string) -> bool;
+    pure callback validate-full-seed([string]) -> bool;
+    callback derive-new-seed();
+    callback confirm-seed-derive() -> bool;
+    /// Returns the seed words (12 or 24) for the currently-configured seed.
+    pure callback get-seed-words() -> [string];
+    /// Returns a standard SeedQR image (4-digit BIP39 indices).
+    pure callback get-standard-seed-qr() -> image;
+    /// Returns a compact SeedQR image (raw entropy bytes).
+    pure callback get-compact-seed-qr() -> image;
+    /// Generates one word-position challenge per seed word (12 or 24) for the deletion quiz. Not
+    /// pure: each call draws fresh random decoys, so the page calls it once from `init`.
+    callback generate-seed-word-challenges() -> [SeedWordChallenge];
+    /// Re-roll one word's challenge (fresh decoys, reshuffled order) after a wrong guess; not
+    /// pure, as each call is a fresh draw. The argument is the word's 0-based seed position.
+    callback regenerate-seed-word-challenge(int) -> SeedWordChallenge;
+    /// Clears the seed config from persistent storage and navigates to intro.
+    callback remove-seed() -> bool;
+}
+
+export global Global {
+    in property <int> crashed-pid: 0;
+    in property <int> exit-code: 0;
+    in property <[AppEntryValue]> apps: [];
+    in property <bool> app-running: false;
+    in property <image> display-image;
+    in property <[SettingsEntryValue]> all-apps: [];
+    in property <bool> seed-configured: false;
+    /// True when the seed was manually imported, false when derived from the device
+    /// master key. Gates the remove-seed flow: imported seeds are verified word by word
+    /// before deletion; derived seeds are recoverable and deleted without a quiz.
+    in property <bool> seed-is-imported: false;
+}

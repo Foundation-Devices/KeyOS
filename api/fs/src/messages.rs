@@ -67,6 +67,8 @@ pub struct MapFileMessage {
 pub enum AppResourcesRoot {
     BuiltIn,
     Sideloaded,
+    /// A sideloaded Flux child app: its bundle lives under the emulator's own sideload dir.
+    SideloadedFlux,
 }
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -139,6 +141,16 @@ pub struct SeekFile {
 pub struct Remove {
     pub path: String,
     pub location: Location,
+}
+
+/// Remove all AppData for `app_id`, not just the caller's own (unlike `Remove`,
+/// which is scoped to the calling app). Wipes the app's persisted data, including
+/// any stored seed.
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<(), Error>)]
+pub struct RemoveAppData {
+    #[rkyv(with = WithAppId)]
+    pub app_id: AppId,
 }
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

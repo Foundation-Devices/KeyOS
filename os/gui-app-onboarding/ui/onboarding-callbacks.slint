@@ -7,7 +7,8 @@ import { FwUpdateState, FwUpdateError } from "@ui/pages/fw-update-page.slint";
 import {
     KeycardBackupError,
 } from "@ui/pages/keycard-backup/keycard-backup-error.slint";
-
+import { SeedWordChallenge } from "@ui/pages.slint";
+export { SeedWordChallenge }
 export enum SecurityCheckState { Idle, Loading, Passed, Failed, Error }
 
 export enum FirmwareCheckState { Idle, Loading, NoUpdateAvailable, UpdateAvailable, Failed }
@@ -71,12 +72,6 @@ export enum MasterSeedState { Idle, SavingToSE, EncryptingFs, Success, Failed }
 
 export enum RestoreBackupState { Idle, NotFound, Downloading, Restoring, Restored, Error }
 
-export struct SeedWordChallenge {
-    mnemonic-index: int,       // Which word position we're verifying (0-based)
-    options: [string],         // The 4 multiple choice options
-    correct-option-index: int  // Which option is correct (0-3)
-}
-
 export global SeedGlobal {
     in property <MasterSeedState> master-seed-state;
     in property <RestoreBackupState> restore-backup-state;
@@ -104,10 +99,13 @@ export global SeedGlobal {
     // ========== Manual seed Backup ==========
     // Get the seed words for display
     pure callback get-seed-words() -> [string];
-    // Shuffled sequence of mnemonic word positions to quiz the user on
-    callback generate-mnemonic-order() -> [int];
-    // Fetch the challenge for the given mnemonic position
-    callback get-seed-word-challenge(mnemonic-index: int) -> SeedWordChallenge;
+    // One challenge per word, in shuffled quiz order, for the shared verify quiz. Not pure: each
+    // call draws fresh random decoys, so the page calls it once from `init` (not a property
+    // binding, which slint would cache and could re-evaluate).
+    callback generate-seed-verify-challenges() -> [SeedWordChallenge];
+    /// Re-roll one word's challenge (fresh decoys, reshuffled order) after a wrong guess; not
+    /// pure, as each call is a fresh draw. The argument is the word's 0-based seed position.
+    callback regenerate-seed-verify-challenge(int) -> SeedWordChallenge;
     // Get QR code images
     pure callback get-standard-seed-qr() -> image;
     pure callback get-compact-seed-qr() -> image;

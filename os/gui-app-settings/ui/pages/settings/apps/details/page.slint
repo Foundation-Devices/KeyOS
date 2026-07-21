@@ -379,6 +379,9 @@ export component AppDetailsPage inherits BasePage {
             Button {
                 label: TR2.lookup(TrId.AppsOpenApp);
                 importance: Importance.primary;
+                // A Flux child only runs inside the Flux emulator; opening it from here
+                // makes no sense, so the button disappears rather than sits disabled.
+                visible: !AppManagementGlobal.selected-app.is_flux;
                 enabled: AppManagementGlobal.selected-app.can_launch;
                 clicked => {
                     AppManagementGlobal.launch-installed-app(props.app_id);

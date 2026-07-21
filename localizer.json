@@ -27,6 +27,22 @@
       "include": ["common.button", "common.time"]
     },
     {
+      "name": "legacy",
+      "path": "apps/gui-app-emu-flux",
+      "include": [
+        "common.button",
+        "common.recoverWords",
+        "launcher.appCrash",
+        "settings.viewSeedWords",
+        "settings.accessSeedWords",
+        "settings.eraseDeviceAreYouSure",
+        "settings.backupManualMainModal",
+        "onboarding.backupManualVerify",
+        "onboarding.recoverWords.fillerText",
+        "keycardBackup.manual.modalBewareHeader"
+      ]
+    },
+    {
       "name": "lock",
       "path": "os/gui-app-lock-screen",
       "include": ["common.keyboard", "common.changePin"]

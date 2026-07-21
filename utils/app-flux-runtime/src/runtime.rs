@@ -8,8 +8,6 @@ use std::sync::{
     OnceLock,
 };
 
-use gui_app_emu_flux::syscall_id::*;
-
 const CX_OK: u32 = 0x00000000;
 const CX_INTERNAL_ERROR: u32 = 0xFFFFFF85;
 const CX_INVALID_PARAMETER: u32 = 0xFFFFFF88;
@@ -26,10 +24,6 @@ macro_rules! use_flux_runtime_api {
 
         pub(crate) fn flux_api() -> &'static FluxApi { &FLUX_API }
 
-        fn flux_svc_call(syscall_id: u32, parameters: *mut core::ffi::c_void) -> Option<u32> {
-            flux_api().svc_call(syscall_id, parameters).ok()
-        }
-
         fn flux_io_seph_send(data: &[u8]) { flux_api().io_seph_send(data); }
 
         fn flux_io_seph_recv(max_len: usize) -> Option<Vec<u8>> { flux_api().io_seph_recv(max_len) }
@@ -40,48 +34,96 @@ macro_rules! use_flux_runtime_api {
     };
 }
 
-pub type SvcCallHook = fn(u32, *mut core::ffi::c_void) -> Option<u32>;
+/// Define a Flux child app's entry point. Expands to the runtime API and hooks
+/// ([`use_flux_runtime_api!`]), the build-time app module (`APP_VERSION` + the NVM region), the
+/// `#[no_mangle] os_registry_get_current_app_tag` the SDK's `get_version` calls (so the child
+/// answers the host's GET_APP_AND_VERSION probe itself), and a `main` that starts logging, installs
+/// the runtime hooks, restores NVM, then calls the C `$entry`. `$name` is the app name reported to
+/// the host; it matches the app's manifest `appName.en` (the one thing not derivable at build time).
+#[macro_export]
+macro_rules! flux_app {
+    ($name:expr,entry = $entry:ident) => {
+        $crate::use_flux_runtime_api!();
+
+        // build.rs writes APP_VERSION and the app's NVM region (nvm_base, NVM_LEN) here.
+        mod __flux_app_gen {
+            include!(concat!(env!("OUT_DIR"), "/flux_app_gen.rs"));
+        }
+
+        // The app's os/fs permission set, derived from this crate's manifest. app-flux-runtime is a
+        // library with no manifest, so it can't name a scoped type; deriving it here keeps init_nvm's
+        // compile-time check that the child only touches the fs messages its manifest grants.
+        mod __flux_fs_permissions {
+            use fs::messages::*;
+            #[derive(Clone, Default, server::Permissions)]
+            #[server_name = "os/fs"]
+            pub struct FluxAppFsPermissions;
+        }
+
+        extern "C" {
+            fn $entry();
+        }
+
+        /// Answer the SDK's GET_APP_AND_VERSION query directly (the emulator no longer intercepts
+        /// it): name from the macro, version measured from the app's Makefile by build.rs.
+        #[no_mangle]
+        pub extern "C" fn os_registry_get_current_app_tag(tag: u32, buffer: *mut u8, max_len: u32) -> u32 {
+            // SAFETY: the SDK's os_io hands us a buffer of at least `max_len` writable bytes.
+            unsafe {
+                $crate::runtime::registry_app_tag(tag, $name, __flux_app_gen::APP_VERSION, buffer, max_len)
+            }
+        }
+
+        fn main() {
+            log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
+            log::set_max_level(log::LevelFilter::Info);
+            log::info!("{} v{} starting", $name, __flux_app_gen::APP_VERSION);
+            $crate::runtime::init($crate::runtime::RuntimeHooks::new(
+                flux_io_seph_send,
+                flux_io_seph_recv,
+                flux_syscall_buffer,
+            ));
+
+            // Back the app's NVM region with the emulator's persistent store, so upstream's
+            // storage_init() defaults apply on first run and later Settings choices survive a
+            // relaunch.
+            //
+            // SAFETY: nvm_base()/NVM_LEN describe the app's sole N_ region, measured by build.rs, so
+            // init_nvm stays in bounds; it is the app's own single-threaded storage.
+            unsafe {
+                $crate::runtime::init_nvm::<__flux_fs_permissions::FluxAppFsPermissions>(
+                    __flux_app_gen::nvm_base(),
+                    __flux_app_gen::NVM_LEN,
+                );
+            }
+
+            // SAFETY: $entry is the C app's entry point; the runtime and NVM are set up above, and it
+            // runs on this thread for the app's lifetime.
+            unsafe {
+                $entry();
+            }
+        }
+    };
+}
+
 pub type SendSephHook = fn(&[u8]);
 pub type RecvSephHook = fn(usize) -> Option<Vec<u8>>;
 pub type SyscallBufferHook = fn(u32, u32, &mut [u8]) -> usize;
-pub type NvmWriteHook = fn(*mut core::ffi::c_void, *const core::ffi::c_void, u32);
-pub type CurrentAppTagHook = fn(u32) -> Option<&'static [u8]>;
 
 #[derive(Clone, Copy)]
 pub struct RuntimeHooks {
-    svc_call: SvcCallHook,
     io_seph_send: SendSephHook,
     io_seph_recv: RecvSephHook,
     syscall_buffer: SyscallBufferHook,
-    nvm_write: NvmWriteHook,
-    current_app_tag: CurrentAppTagHook,
 }
 
 impl RuntimeHooks {
     pub fn new(
-        svc_call: SvcCallHook,
         io_seph_send: SendSephHook,
         io_seph_recv: RecvSephHook,
         syscall_buffer: SyscallBufferHook,
     ) -> Self {
-        Self {
-            svc_call,
-            io_seph_send,
-            io_seph_recv,
-            syscall_buffer,
-            nvm_write: nvm_write_memory,
-            current_app_tag: |_| None,
-        }
-    }
-
-    pub fn with_nvm_write(mut self, nvm_write: NvmWriteHook) -> Self {
-        self.nvm_write = nvm_write;
-        self
-    }
-
-    pub fn with_current_app_tag(mut self, current_app_tag: CurrentAppTagHook) -> Self {
-        self.current_app_tag = current_app_tag;
-        self
+        Self { io_seph_send, io_seph_recv, syscall_buffer }
     }
 }
 
@@ -100,10 +142,6 @@ fn hooks() -> &'static RuntimeHooks {
     })
 }
 
-pub(crate) fn svc_call(syscall_id: u32, parameters: *mut core::ffi::c_void) -> u32 {
-    (hooks().svc_call)(syscall_id, parameters).unwrap_or(0)
-}
-
 pub(crate) fn syscall_buffer(id: u32, arg: u32, data: &mut [u8]) -> usize {
     (hooks().syscall_buffer)(id, arg, data)
 }
@@ -111,6 +149,10 @@ pub(crate) fn syscall_buffer(id: u32, arg: u32, data: &mut [u8]) -> usize {
 fn send_seph(data: &[u8]) { (hooks().io_seph_send)(data); }
 
 fn recv_seph(max_len: usize) -> Option<Vec<u8>> { (hooks().io_seph_recv)(max_len) }
+
+// NVM now lives in `crate::nvm`, fs-backed and per-app. Re-exported so the children's
+// `runtime::init_nvm(...)` call sites keep resolving.
+pub use crate::nvm::init_nvm;
 
 pub fn nvm_write_memory(dst: *mut core::ffi::c_void, src: *const core::ffi::c_void, len: u32) {
     if dst.is_null() || len == 0 {
@@ -124,8 +166,6 @@ pub fn nvm_write_memory(dst: *mut core::ffi::c_void, src: *const core::ffi::c_vo
         }
     }
 }
-
-pub fn nvm_write_noop(_dst: *mut core::ffi::c_void, _src: *const core::ffi::c_void, _len: u32) {}
 
 /// Storage for the SDK's try_context pointer.
 /// The SDK's TRY/CATCH/THROW mechanism uses try_context_get/set to manage
@@ -156,56 +196,6 @@ fn capture_touch_state(data: &[u8]) {
         LAST_TOUCH_Y.store(y as usize, Ordering::Relaxed);
         log::trace!("capture_touch: state={state}, x={x}, y={y}");
     }
-}
-
-#[no_mangle]
-pub extern "C" fn SVC_Call(syscall_id: u32, parameters: *mut core::ffi::c_void) -> u32 {
-    log::trace!("SVC_Call(syscall_id: {:08x}, parameters: {:?})", syscall_id, parameters);
-    match syscall_id {
-        SYSCALL_IO_SEPH_SEND_ID => {
-            let parameters: &[u32] = unsafe { core::slice::from_raw_parts(parameters as *const u32, 2) };
-            let buffer = parameters[0] as *const u8;
-            let length = parameters[1] as usize;
-            let data: &[u8] = unsafe { core::slice::from_raw_parts(buffer, length) };
-            if !data.is_empty() {
-                log::debug!("SVC io_seph_send: tag=0x{:02x} len={}", data[0], length);
-            }
-            send_seph(data);
-            0
-        }
-        SYSCALL_IO_SEPH_RECV_ID => {
-            let parameters: &[u32] = unsafe { core::slice::from_raw_parts(parameters as *const u32, 3) };
-            let buffer = parameters[0] as *mut u8;
-            let maxlength = parameters[1] as usize;
-            let _flags = parameters[2];
-            let dest: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(buffer, maxlength) };
-            if let Some(data) = recv_seph(maxlength) {
-                let data_len = data.len();
-                if data_len > 0 && data_len <= maxlength {
-                    log::debug!("SVC io_seph_recv: tag=0x{:02x} len={}", data[0], data_len);
-                    capture_touch_state(&data);
-                    dest[..data_len].copy_from_slice(&data);
-                    data_len as u32
-                } else {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    0
-                }
-            } else {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                0
-            }
-        }
-        _ => {
-            log::debug!("SVC_Call: id=0x{:08x}", syscall_id);
-            svc_call(syscall_id, parameters)
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn SVC_cx_call(syscall_id: u32, parameters: *mut u32) -> u32 {
-    log::warn!("SVC_cx_call(syscall_id: 0x{:08x}, parameters: {:?})", syscall_id, parameters);
-    svc_call(syscall_id, parameters as *mut core::ffi::c_void)
 }
 
 #[no_mangle]
@@ -264,7 +254,7 @@ pub extern "C" fn io_seph_send(buf: *const u8, len: u16) {
 
 #[no_mangle]
 pub extern "C" fn nvm_write(dst: *mut core::ffi::c_void, src: *const core::ffi::c_void, len: u32) {
-    (hooks().nvm_write)(dst, src, len);
+    crate::nvm::nvm_write_persist(dst, src, len);
 }
 
 #[no_mangle]
@@ -513,13 +503,27 @@ pub extern "C" fn os_pki_load_certificate(
     0
 }
 
-#[no_mangle]
-pub extern "C" fn os_registry_get_current_app_tag(tag: u32, buffer: *mut u8, max_len: u32) -> u32 {
-    let Some(value) = (hooks().current_app_tag)(tag) else {
-        return 0;
+/// `bolos_tag_e` selectors for `os_registry_get_current_app_tag`, from the SDK's `os_app.h`.
+const BOLOS_TAG_APPNAME: u32 = 0x01;
+const BOLOS_TAG_APPVERSION: u32 = 0x02;
+
+/// Copy the app's name or version (per `tag`) into `buffer`, at most `max_len` bytes, and return the
+/// count written (no length prefix, no NUL; the SDK's `get_version` adds the prefix). The `flux_app!`
+/// macro wires this into the `#[no_mangle] os_registry_get_current_app_tag` the SDK calls, so a Flux
+/// child answers the host's GET_APP_AND_VERSION probe itself: name from the macro, version from
+/// build.rs.
+///
+/// # Safety
+/// `buffer` must be valid for writes of `max_len` bytes (the SDK's `os_io` guarantees this).
+pub unsafe fn registry_app_tag(tag: u32, name: &str, version: &str, buffer: *mut u8, max_len: u32) -> u32 {
+    let value = match tag {
+        BOLOS_TAG_APPNAME => name.as_bytes(),
+        BOLOS_TAG_APPVERSION => version.as_bytes(),
+        _ => return 0,
     };
     let copy_len = value.len().min(max_len as usize);
     if !buffer.is_null() && copy_len > 0 {
+        // SAFETY: copy_len <= max_len bytes, which the caller guarantees `buffer` holds.
         unsafe { core::ptr::copy_nonoverlapping(value.as_ptr(), buffer, copy_len) };
     }
     copy_len as u32
@@ -637,30 +641,43 @@ pub extern "C" fn os_io_tx_cmd(type_: u8, buffer: *const u8, length: u16, _timeo
     if buffer.is_null() || length == 0 {
         return 0;
     }
-    let raw = unsafe { core::slice::from_raw_parts(buffer, length as usize) };
+    let length = length as usize;
 
     if type_ == 0x10 {
-        let len = raw.len();
-        let mut packet = Vec::with_capacity(3 + len);
+        // SAFETY: `buffer` is the C caller's APDU payload, readable for `length` bytes (it was
+        // checked non-null with `length > 0` above), and the caller keeps it alive for this call.
+        let raw = unsafe { core::slice::from_raw_parts(buffer, length) };
+        let mut packet = Vec::with_capacity(3 + length);
         packet.push(0x53);
-        packet.push((len >> 8) as u8);
-        packet.push(len as u8);
+        packet.push((length >> 8) as u8);
+        packet.push(length as u8);
         packet.extend_from_slice(raw);
-        log::debug!("os_io_tx_cmd: RAW_APDU -> Rapdu ({} bytes): {:02x?}", len, &raw[..len.min(16)]);
+        log::debug!("os_io_tx_cmd: RAW_APDU -> Rapdu ({} bytes): {:02x?}", length, &raw[..length.min(16)]);
         send_seph(&packet);
         return length as i32;
     }
 
-    if raw.len() < 3 {
+    if length < 3 {
         return 0;
     }
-    let payload_len = u16::from_be_bytes([raw[1], raw[2]]) as usize;
-    let total = 3 + payload_len;
-    if total > raw.len() {
-        send_seph(raw);
-    } else {
-        send_seph(&raw[..total]);
+    // Take the packet's length from its own header rather than from `length`, which can overrun
+    // the buffer: io_seph_send passes `length + 1` for a buffer it declares as `length`. Every
+    // other caller passes an exact length, and agrees with the header either way.
+    //
+    // SAFETY: `buffer` is the C caller's SEPH packet, readable for at least `length` bytes, and
+    // `length >= 3` was checked just above, so reading the 3-byte header is in bounds. The caller
+    // keeps `buffer` alive for the duration of this call.
+    let header = unsafe { core::slice::from_raw_parts(buffer, 3) };
+    let claimed = 3 + u16::from_be_bytes([header[1], header[2]]) as usize;
+    if claimed > length {
+        log::warn!(
+            "os_io_tx_cmd: seph packet claims {claimed} bytes but only {length} were passed; truncating"
+        );
     }
+    // SAFETY: same `buffer` as the header read above; the length is capped at `length`, the byte
+    // count the caller declared readable, so the slice stays in bounds even when the header claims
+    // more than was passed.
+    send_seph(unsafe { core::slice::from_raw_parts(buffer, claimed.min(length)) });
     0
 }
 
@@ -821,3 +838,42 @@ pub static _bss: u8 = 0;
 #[allow(non_upper_case_globals)]
 #[no_mangle]
 pub static _ebss: u8 = 0;
+
+/// Build the standard newlib character-classification table. `isXXX(c)` macros
+/// index `(_ctype_ + 1)[c]`, so slot 0 is the EOF entry and slots 1..=256 map
+/// chars 0..=255 to their class bit-mask.
+const fn ctype_table() -> [u8; 257] {
+    const UP: u8 = 0x01; // upper
+    const LO: u8 = 0x02; // lower
+    const NU: u8 = 0x04; // digit
+    const SP: u8 = 0x08; // space
+    const PU: u8 = 0x10; // punct
+    const CN: u8 = 0x20; // control
+    const XD: u8 = 0x40; // hex digit
+    const BL: u8 = 0x80; // blank (space char)
+
+    let mut table = [0u8; 257];
+    let mut c = 0u16;
+    while c < 256 {
+        let class = match c as u8 {
+            0..=8 | 14..=31 | 127 => CN,
+            9..=13 => CN | SP,
+            32 => SP | BL,
+            b'!'..=b'/' | b':'..=b'@' | b'['..=b'`' | b'{'..=b'~' => PU,
+            b'0'..=b'9' => NU | XD,
+            b'A'..=b'F' => UP | XD,
+            b'G'..=b'Z' => UP,
+            b'a'..=b'f' => LO | XD,
+            b'g'..=b'z' => LO,
+            _ => 0,
+        };
+        table[(c + 1) as usize] = class;
+        c += 1;
+    }
+    table
+}
+
+/// newlib's ctype table, referenced by the SDK's `isprint`/`isXXX` calls.
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+pub static _ctype_: [u8; 257] = ctype_table();

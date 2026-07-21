@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn reassemble_multi_packet_apdu() {
-        // 141-byte APDU (from LEDGER_HID.md GET_PUBLIC_KEY response example)
+        // 141-byte APDU (from the HID wire spec GET_PUBLIC_KEY response example)
         let apdu: Vec<u8> = (0u8..141).collect();
         let channel_id: u16 = 0xbe02;
 
@@ -383,11 +383,11 @@ mod tests {
         }
     }
 
-    // -- Wire example tests (from LEDGER_HID.md) --
+    // -- Wire example tests (from the HID wire spec) --
 
     #[test]
     fn wire_example_get_app_configuration_request() {
-        // From LEDGER_HID.md: a5 02 05 00 00 00 05 e0 06 00 00 00 + zero padding
+        // From the HID wire spec: a5 02 05 00 00 00 05 e0 06 00 00 00 + zero padding
         let mut report = [0u8; REPORT_SIZE];
         report[..12]
             .copy_from_slice(&[0xa5, 0x02, 0x05, 0x00, 0x00, 0x00, 0x05, 0xe0, 0x06, 0x00, 0x00, 0x00]);
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn wire_example_get_app_configuration_response() {
-        // From LEDGER_HID.md: a5 02 05 00 00 00 06 02 01 0f 00 90 00 + zero padding
+        // From the HID wire spec: a5 02 05 00 00 00 06 02 01 0f 00 90 00 + zero padding
         let apdu = [0x02, 0x01, 0x0f, 0x00, 0x90, 0x00];
         let reports = fragment(0xa502, &apdu).unwrap();
         assert_eq!(reports.len(), 1);

@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gui-app-emu-flux-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[dependencies]
+ab_glyph = { version = "0.2", default-features = false, features = ["std"] }
+anyhow = { workspace = true }
+app-manager = { workspace = true }
+app-manifest = { path = "../../os/app-manifest" }
+bip39 = "2.2"
+crc32fast = "1.4"
+flate2 = "1.1"
+fs = { workspace = true }
+fw-utils = { workspace = true }
+gui-app-emu-flux = { workspace = true }
+gui-server-api = { workspace = true }
+haptics = { workspace = true }
+hex = { workspace = true }
+legacy-hid = { path = "../../os/legacy-hid" }
+log = { workspace = true }
+log-server = { workspace = true }
+rand = { workspace = true }
+rkyv = { workspace = true }
+security = { workspace = true }
+seed-quiz = { path = "../../utils/seed-quiz" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+server = { workspace = true }
+settings = { workspace = true }
+slint-keyos-platform = { workspace = true }
+thiserror = { workspace = true }
+usb = { workspace = true }
+xous = { workspace = true }
+zeroize = { version = "1.8.1", features = ["alloc"] }
+
+[target.'cfg(keyos)'.dependencies]
+armv7 = { workspace = true }
+atsama5d27 = { workspace = true }
+utralib = { workspace = true, features = ["atsama5d27"] }
+uuid = { version = "1.10", features = ["v4"] }
+
+[build-dependencies]
+slint-keyos-platform-build = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

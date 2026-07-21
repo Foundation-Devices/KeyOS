@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "@ui/theme.slint";
+import {
+    NavHeader,
+    MenuBooleanItem,
+    MenuSection,
+    MenuSectionLayout,
+    HLine,
+    BasePage,
+    PageBody,
+    MenuActionItem,
+    ContentSection,
+} from "@ui/widgets.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Callbacks, Global } from "../../globals.slint";
+import { SettingsProps } from "./props.slint";
+import { MenuSectionContainer } from "../../../../../ui/ui/widgets.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component SettingsPage inherits BasePage {
+    in property <SettingsProps> props;
+
+    VerticalLayout {
+        NavHeader {
+            title: TR2.lookup(TrId.SettingsTitle);
+            clicked => {
+                Navigate.backward();
+            }
+        }
+
+        PageBody {
+            ContentSection {
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    if (Global.seed-configured): MenuSection {
+                        title: TR2.lookup(TrId.SettingsSeedManagement);
+
+                        MenuSectionLayout {
+                            MenuActionItem {
+                                first: true;
+                                label: TR2.lookup(TrId.SettingsViewSeed);
+                                clicked => {
+                                    Navigate.seed-words-warning({ });
+                                }
+                            }
+
+                            HLine { }
+
+                            MenuActionItem {
+                                last: true;
+                                label: TR2.lookup(TrId.SettingsRemoveSeed);
+                                clicked => {
+                                    Navigate.seed-delete-quiz({ });
+                                }
+                            }
+                        }
+                    }
+
+                    MenuSection {
+                        title: TR2.lookup(TrId.SettingsAppSelection);
+                        MenuSectionLayout {
+                            for entry[index] in Global.all-apps: VerticalLayout {
+                                if (index > 0): HLine { }
+                                MenuBooleanItem {
+                                    label: entry.name;
+                                    checked: entry.enabled;
+                                    changed(checked) => {
+                                        Callbacks.app-toggled(entry.app-id, checked);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -89,6 +89,21 @@ impl Default for Seed {
     fn default() -> Self { Seed::TwentyFour([0; 32]) }
 }
 
+/// The 32-byte per-app seed the security element derives for a calling app.
+///
+/// A distinct type (annotated like [`Seed`]) so the zeroize-on-drop treatment follows the
+/// bytes wherever an `AppSeed` flows, and a call site can't quietly pass an unrelated array
+/// where a seed is expected. Raw `[u8; 32]` copies a caller makes from `as_bytes` still escape
+/// scrubbing (Rust move semantics), so this narrows the exposure window rather than closing it.
+#[derive(Clone, ZeroizeOnDrop, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AppSeed([u8; 32]);
+
+impl AppSeed {
+    pub fn new(bytes: [u8; 32]) -> Self { Self(bytes) }
+
+    pub fn as_bytes(&self) -> &[u8; 32] { &self.0 }
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum ParseSeedQrError {
     #[error("Invalid UTF-8 in word index: {0}")]
@@ -302,7 +317,7 @@ impl<P: server::CheckedPermissions> Security<P> {
         self.conn.send_blocking_archive(SetSeed(seed))
     }
 
-    pub fn app_seed(&self) -> Result<[u8; 32], AccessDenied>
+    pub fn app_seed(&self) -> Result<AppSeed, AccessDenied>
     where
         P: server::MessageAllowed<GetAppSeed>,
     {

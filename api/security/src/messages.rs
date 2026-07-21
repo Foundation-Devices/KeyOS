@@ -5,9 +5,9 @@ use server::{AsScalar, FromScalar};
 use zeroize::ZeroizeOnDrop;
 
 use crate::{
-    AccessDenied, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, GetDeviceIdError, LockoutOptions,
-    LoginFailed, MasterKeyState, OsVersionInfo, PinEntryMode, PinError, ScChallengeError, ScProof,
-    SecurityWord, Seed,
+    AccessDenied, AppSeed, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, GetDeviceIdError,
+    LockoutOptions, LoginFailed, MasterKeyState, OsVersionInfo, PinEntryMode, PinError, ScChallengeError,
+    ScProof, SecurityWord, Seed,
 };
 
 #[derive(Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -52,7 +52,7 @@ pub struct GetSeed;
 pub struct SetSeed(pub Seed);
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(Result<[u8; 32], AccessDenied>)]
+#[response(Result<AppSeed, AccessDenied>)]
 pub struct GetAppSeed;
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "@ui/theme.slint";
+import {
+    Button,
+    NavHeader,
+    Icon,
+    HeadingLg,
+    TextMd,
+    JumboIconPageBody,
+    WrappedIcon,
+    ButtonSection,
+    ContentSection,
+} from "@ui/widgets.slint";
+import { Navigate, Animate } from "../../gen/navigate.slint";
+import { Callbacks } from "../../globals.slint";
+import { SeedDeleteProps } from "./props.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component SeedDeletePage inherits JumboIconPageBody {
+    in property <SeedDeleteProps> props;
+
+    ContentSection {
+        HorizontalLayout {
+            alignment: center;
+
+            WrappedIcon {
+                name: "jumbo-circle";
+                inner-icon: "check";
+            }
+        }
+
+        HeadingLg {
+            text: TR2.lookup(TrId.SettingsDeleteSuccessHeader);
+            horizontal-alignment: center;
+        }
+    }
+
+    ButtonSection {
+        Button {
+            label: TR2.lookup(TrId.CommonButtonContinue);
+            importance: primary;
+            clicked => {
+                Navigate.intro({ replace: true });
+            }
+        }
+    }
+}

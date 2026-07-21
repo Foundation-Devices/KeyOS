@@ -21,7 +21,7 @@ pub const PASSPORT_PID: u16 = 0x0165;
 
 /// Legacy VID:PID used while a Flux app overrides the USB identity.
 pub const LEGACY_VID: u16 = 0x2c97;
-pub const LEGACY_PID: u16 = 0x0007;
+pub const LEGACY_PID: u16 = 0x7011;
 
 /// USB read chunk size. Protocol frames may be larger than this; the reader
 /// accumulates chunks until a short packet or ZLP terminates the frame.

@@ -2,19 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { ViewSeedWordsProps } from "props.slint";
-import {
-    Button,
-    BasePage,
-    PageBody,
-    ContentSection,
-    ButtonSection,
-    SeedWords,
-    QrPages,
-} from "@ui/widgets.slint";
-import { Palette, Size } from "@ui/theme.slint";
-
-import { BackupGlobal } from "../../../../globals/backup-global.slint";
-import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
+import { BasePage } from "@ui/widgets.slint";
+import { ViewSeed } from "@ui/pages.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { Callbacks } from "../../../../callbacks.slint";
@@ -22,54 +11,18 @@ import { Callbacks } from "../../../../callbacks.slint";
 export component ViewSeedWordsPage inherits BasePage {
     in property <ViewSeedWordsProps> props;
 
-    private property <bool> qr-view: false;
-
-    VerticalLayout {
-        SettingsNavHeader {
-            title: TR2.lookup(TrId.ViewSeedWordsTitle);
-            left-icon: "chevron-left";
-            right-icon: qr-view ? "list" : "scan-qr";
-
-            clicked => {
-                Navigate.backward();
-            }
-
-            right-clicked => {
-                qr-view = !qr-view;
-            }
-        }
-
-        VerticalLayout {
-            padding-top: qr-view ? Size.sz2 : Size.sz16;
-            padding-bottom: Size.sz4;
-
-            if !qr-view: SeedWords {
-                words: Callbacks.get-seed-words();
-            }
-
-            if qr-view: QrPages {
-                model: [
-                    {
-                        code: Callbacks.get-standard-seed-qr(),
-                        header: TR2.lookup(TrId.ViewSeedWordsStandardSeedQr),
-                    },
-                    {
-                        code: Callbacks.get-compact-seed-qr(),
-                        header: TR2.lookup(TrId.ViewSeedWordsCompactSeedQr),
-                    },
-                ];
-            }
-
-            ButtonSection {
-                padding: Size.sz6;
-                Button {
-                    label: TR2.lookup(TrId.CommonButtonDone);
-
-                    clicked => {
-                        Navigate.backward();
-                    }
-                }
-            }
+    ViewSeed {
+        words: Callbacks.get-seed-words();
+        standard-qr: Callbacks.get-standard-seed-qr();
+        compact-qr: Callbacks.get-compact-seed-qr();
+        strings: {
+            title: TR2.lookup(TrId.ViewSeedWordsTitle),
+            standard-qr-header: TR2.lookup(TrId.ViewSeedWordsStandardSeedQr),
+            compact-qr-header: TR2.lookup(TrId.ViewSeedWordsCompactSeedQr),
+            done: TR2.lookup(TrId.CommonButtonDone),
+        };
+        back => {
+            Navigate.backward();
         }
     }
 }

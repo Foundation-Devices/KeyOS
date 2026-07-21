@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use app_manager::{
     AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, InstalledAppPermissionSubgroup,
     LaunchError, PermissionRequestInfo, PermissionRequestInfoResult, ThirdPartyCertificateInfo,
+    SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR,
 };
 use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
@@ -21,7 +22,15 @@ use crate::{
 };
 
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
-pub const SIDELOADED_APPS_DIR: &str = "/keyos/sideloaded-apps";
+/// The sideload bundle roots (shared with usb-debug via `app_manager`) whose dir names must
+/// equal the app id (see `sideloaded_app_dir_matches_app_id`).
+const SIDELOAD_ROOTS: &[&str] = &[SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR];
+/// The Flux emulator host's AppId: the 16 ASCII bytes of `gui-app-emu-flux`.
+pub(crate) const FLUX_EMULATOR_APP_ID: AppId = AppId(*b"gui-app-emu-flux");
+/// Built-in apps the OS permits the user to permanently delete, as a deliberate exception
+/// to the "only sideloaded apps are removable" rule. The trusted OS binary decides this,
+/// never the app's own (signed-but-self-asserted) manifest.
+const REMOVABLE_BUILTIN: &[AppId] = &[FLUX_EMULATOR_APP_ID];
 // SDK-generated 256x256 RGBA icons are archived RawImage values: 256 KiB of
 // pixels plus rkyv header/alignment overhead. Leave margin for format drift.
 const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
@@ -100,7 +109,6 @@ pub(crate) struct AppInfo {
     /// The verified manifest JSON as scanned, handed verbatim to the name server at launch.
     manifest_bytes: Vec<u8>,
     source: AppSource,
-    #[cfg_attr(not(keyos), allow(dead_code))]
     is_flux: bool,
     binary_size: Option<u64>,
     /// The developer key that signed this sideloaded app's manifest, captured at scan; trust is
@@ -165,10 +173,11 @@ impl AppRegistry {
             cache.add_manifest(manifest).expect("system manifests must not declare colliding servers");
         }
 
-        // App location is the source of truth for trust classification: firmware-shipped apps
-        // live under /keyos/apps and verify against the official keys, while sideloaded apps
-        // live under /keyos/sideloaded-apps and only need a valid developer signature here.
-        // The simulator reads the same dirs through fs and signs nothing.
+        // App location is the source of truth for both trust classification and the Flux
+        // tag: firmware-shipped apps live under /keyos/apps and verify against the official
+        // keys, while sideloaded apps live under the sideload roots and only need a valid
+        // developer signature here. The simulator reads the same dirs through fs and signs
+        // nothing.
         Self::scan_apps_dir(&mut installed_apps, &mut cache, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false);
         Self::scan_apps_dir(&mut installed_apps, &mut cache, FLUX_APPS_DIR, AppSource::BuiltIn, true);
         Self::scan_apps_dir(
@@ -177,6 +186,13 @@ impl AppRegistry {
             SIDELOADED_APPS_DIR,
             AppSource::ThirdParty,
             false,
+        );
+        Self::scan_apps_dir(
+            &mut installed_apps,
+            &mut cache,
+            SIDELOADED_FLUX_APPS_DIR,
+            AppSource::ThirdParty,
+            true,
         );
 
         let diff = AppRegistryDiff::new(&self.installed_apps, &installed_apps);
@@ -326,7 +342,8 @@ impl AppRegistry {
                 app_id: format!("0x{}", app_info.id),
                 publisher,
                 can_launch,
-                can_remove: app_info.is_third_party(),
+                can_remove: app_info.is_removable(),
+                is_flux: app_info.is_flux,
                 version: app_info.manifest.version.clone().unwrap_or_default(),
                 size_bytes,
                 description: app_info.description(),
@@ -391,13 +408,20 @@ impl AppRegistry {
 
     pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
 
+    /// AppIds of every installed Flux child (built-in or sideloaded). The emulator host
+    /// itself is not flux, so this returns the children only. Each child persists its NVM
+    /// to its own AppData, a tree that removing the emulator does not otherwise touch.
+    pub(crate) fn flux_child_app_ids(&self) -> Vec<AppId> {
+        self.installed_apps.values().filter(|a| a.is_flux).map(|a| a.id).collect()
+    }
+
     pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
         self.running_apps.values().any(|running_app| running_app.info.id == *app_id)
     }
 
-    pub(crate) fn sideloaded_bundle_dir(&self, app_id: AppId) -> Option<String> {
+    pub(crate) fn removable_bundle_dir(&self, app_id: AppId) -> Option<String> {
         let app_info = self.installed_apps.get(&app_id)?;
-        if !app_info.is_third_party() {
+        if !app_info.is_removable() {
             return None;
         }
 
@@ -587,7 +611,11 @@ impl AppInfo {
         &self,
         entry: &crate::permission_catalog::MessageMetadata,
     ) -> MessageAvailability {
-        if !entry.signature_satisfied_by(self.source.signature()) {
+        // A message restricted to Flux children is reachable only by an app the OS classified as
+        // one (from its install directory, not a manifest claim); any other app is refused.
+        if entry.requires_flux() && !self.is_flux {
+            MessageAvailability::Unavailable
+        } else if !entry.signature_satisfied_by(self.source.signature()) {
             MessageAvailability::Unavailable
         } else if entry.is_auto_allow() {
             MessageAvailability::AutoAllow
@@ -614,6 +642,12 @@ impl AppInfo {
                 let Some(entry) = permission_grants.message_metadata(server, message) else {
                     continue;
                 };
+                // Ungrouped messages are internal plumbing granted on signature alone (e.g. the
+                // Flux emulator's child channel); they carry no user-facing label, so keep them out
+                // of the permission UI. effective_permissions still enforces them.
+                if entry.subgroup().is_empty() {
+                    continue;
+                }
                 let (groups, approved) = match self.message_availability(entry) {
                     MessageAvailability::AutoAllow => (&mut basic, true),
                     MessageAvailability::ApprovalBased => (
@@ -725,9 +759,10 @@ impl AppInfo {
             return None;
         }
 
-        let root = match self.source {
-            AppSource::BuiltIn => AppResourcesRoot::BuiltIn,
-            AppSource::ThirdParty => AppResourcesRoot::Sideloaded,
+        let root = match (self.source, self.is_flux) {
+            (AppSource::BuiltIn, _) => AppResourcesRoot::BuiltIn,
+            (AppSource::ThirdParty, true) => AppResourcesRoot::SideloadedFlux,
+            (AppSource::ThirdParty, false) => AppResourcesRoot::Sideloaded,
         };
         let app_dir = match self.source {
             AppSource::BuiltIn => app_dir.to_string(),
@@ -754,6 +789,8 @@ impl AppInfo {
     }
 
     fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
+
+    fn is_removable(&self) -> bool { self.is_third_party() || REMOVABLE_BUILTIN.contains(&self.id) }
 }
 
 /// File `entry`'s subgroup under its top-level group, creating either level on first sight.
@@ -856,7 +893,7 @@ fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, sour
         return true;
     };
 
-    if !app_dir.starts_with(SIDELOADED_APPS_DIR) {
+    if !SIDELOAD_ROOTS.iter().any(|root| app_dir.starts_with(root)) {
         return true;
     }
 
@@ -885,7 +922,7 @@ fn sideloaded_app_dir_name(app_dir: &str) -> Option<&str> {
 }
 
 fn sideloaded_path_suffix(path: &str) -> Option<&str> {
-    path.strip_prefix(SIDELOADED_APPS_DIR).and_then(|path| path.strip_prefix('/'))
+    SIDELOAD_ROOTS.iter().find_map(|root| path.strip_prefix(root).and_then(|path| path.strip_prefix('/')))
 }
 
 #[cfg(test)]
@@ -1066,6 +1103,7 @@ mod tests {
                     cfg: None,
                     permission_group: Some("peripherals.camera-use".to_string()),
                     required_signature: Some(app_manifest::RequiredSignature::ThirdParty),
+                    required_type: None,
                     approval: app_manifest::ApprovalBehavior::GrantOnFirstUse,
                 },
             )]),
@@ -1190,6 +1228,40 @@ mod tests {
         assert!(!apps[0].can_launch);
         assert_eq!(apps[0].description, "Example description");
         assert_eq!(apps[0].version, "1.2.3");
+    }
+
+    #[test]
+    fn sideloaded_flux_dir_name_must_match_app_id() {
+        let app_id = decode_app_id_str(THIRD_PARTY_APP_ID).unwrap();
+
+        let matching = format!("{SIDELOADED_FLUX_APPS_DIR}/{THIRD_PARTY_APP_DIR}");
+        assert!(sideloaded_app_dir_matches_app_id(Some(&matching), &app_id, AppSource::ThirdParty));
+
+        let mismatched = format!("{SIDELOADED_FLUX_APPS_DIR}/ffffffffffffffffffffffffffffffff");
+        assert!(!sideloaded_app_dir_matches_app_id(Some(&mismatched), &app_id, AppSource::ThirdParty));
+    }
+
+    #[test]
+    fn list_apps_filters_and_tags_sideloaded_flux_apps() {
+        let flux_elf = format!("{SIDELOADED_FLUX_APPS_DIR}/{THIRD_PARTY_APP_DIR}/app.elf");
+        let mut flux_app = app_info(THIRD_PARTY_APP_ID, "Monero", Some(&flux_elf));
+        flux_app.is_flux = true;
+        let built_in_id = "0x426974636f696e2057616c6c65740000";
+        let built_in = built_in_app_info(built_in_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf"));
+        let mut registry = registry_with(vec![flux_app, built_in]);
+        let grants = PermissionGrantStore::default();
+
+        let third_party = registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only(), &grants);
+        assert_eq!(third_party.len(), 1);
+        assert!(third_party[0].is_flux, "Settings sees the sideloaded flux app tagged as flux");
+        assert!(third_party[0].can_remove);
+
+        let flux = registry.list_apps("en", &[], &app_manager::AppFilter::flux_only(), &grants);
+        assert_eq!(flux.len(), 1, "the emulator grid sees the sideloaded flux app");
+        assert_eq!(flux[0].name, "Monero");
+
+        let standard = registry.list_apps("en", &[], &app_manager::AppFilter::standard_only(), &grants);
+        assert!(standard.iter().all(|app| app.name != "Monero"), "the launcher never sees flux apps");
     }
 
     #[test]

@@ -512,6 +512,7 @@ fn installed_app(app: app_manager::InstalledAppInfo, lang: &str) -> InstalledApp
         publisher: app.publisher.into(),
         can_launch: app.can_launch,
         can_remove: app.can_remove,
+        is_flux: app.is_flux,
         version: app.version.into(),
         size: format_app_size(app.size_bytes, lang).into(),
         description: app.description.into(),

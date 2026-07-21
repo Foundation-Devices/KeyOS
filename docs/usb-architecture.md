@@ -32,7 +32,7 @@ graph TD
 
     DEV --> CFG
 
-    IF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Ledger APDU Transport"]
+    IF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Legacy APDU Transport"]
     IF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
     IF2["<b>Interface 2 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
     IF3["<b>Interface 3 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
@@ -78,7 +78,7 @@ graph TD
 ## USB Descriptor Tree — Legacy Mode (Flux Emulator Active)
 
 When a Flux app launches, `gui-app-emu-flux` asks `os/legacy-hid` to switch the
-device to the Ledger Flex VID:PID. The interface layout does not shift: Legacy
+device to the Legacy Flux VID:PID. The interface layout does not shift: Legacy
 HID is already fixed at Interface 0, Mass Storage is Interface 1, CTAP HID is
 Interface 2, and usb-debug is Interface 3 when Developer Mode is enabled. The
 VID:PID change triggers a USB disconnect / re-enumeration. When the Flux app
@@ -86,12 +86,12 @@ exits, the normal identity is restored (another re-enumeration).
 
 ```mermaid
 graph TD
-    DEV2["<b>Device Descriptor</b><br/>VID: 0x2C97 | PID: 0x0007<br/>Class: 0xEF · Sub: 0x02 · Proto: 0x01<br/>USB 2.1 · Self-Powered"]
+    DEV2["<b>Device Descriptor</b><br/>VID: 0x2C97 | PID: 0x7011<br/>Class: 0xEF · Sub: 0x02 · Proto: 0x01<br/>USB 2.1 · Self-Powered"]
     CFG2["<b>Configuration 1</b><br/>4 Interfaces<br/><i>3 when Developer Mode is off</i>"]
 
     DEV2 --> CFG2
 
-    LIF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Ledger APDU Transport"]
+    LIF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Legacy APDU Transport"]
     LIF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
     LIF2["<b>Interface 2 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
     LIF3["<b>Interface 3 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
@@ -130,7 +130,7 @@ graph TD
 
 > The Legacy HID interface (blue) is Interface 0 in both identities. The Legacy
 > VID:PID is what makes host wallets (e.g. MoneroGUI) treat it like a real
-> Ledger Flex.
+> Legacy Flux.
 
 ## KeyOS Server Mapping
 
@@ -143,7 +143,7 @@ graph LR
     CTAP["<b>os/ctap-hid</b><br/>CTAP2 / U2F<br/>Authenticator"]
     DBG["<b>os/usb-debug</b><br/>Debug Commands<br/>+ Log Streaming"]
     MSE["<b>os/mass-storage-<br/>emulation</b><br/>Airlock Filesystem"]
-    LEGACY["<b>os/legacy-hid</b><br/>Legacy HID<br/>Ledger APDU Transport"]
+    LEGACY["<b>os/legacy-hid</b><br/>Legacy HID<br/>Legacy APDU Transport"]
     FLUX["<b>gui-app-emu-flux</b><br/>Flux emulator<br/><i>subscribes while active</i>"]
 
     USB -- "IF 0 · HID 0x03" --- LEGACY
@@ -322,8 +322,8 @@ that is gone.
 
 ---
 
-See [Legacy Mode HID — Ledger-Compatible APDU Interface](legacy-mode-hid.md) for
-the full protocol reference on the Ledger-compatible HID interface used by Flux apps.
+See [Legacy Mode HID: Wallet-Compatible APDU Interface](legacy-mode-hid.md) for
+the full protocol reference on the Legacy-compatible HID interface used by Flux apps.
 
 ---
 
@@ -353,7 +353,7 @@ over USB. It is the most feature-complete host tool.
   - Device discovery: `list_ports`.
   - SAM-BA bootloader mode: flash read / write / verify (via `sambuca` crate).
   - HID APDU exchange: CTAP/FIDO mode (normal VID:PID, usage page `0xF1D0`) and
-    Ledger mode (VID `0x2C97`, usage page `0xFFA0` on Interface 0).
+    Legacy mode (VID `0x2C97`, usage page `0xFFA0` on Interface 0).
 
 **MCP tools for SAM-BA mode:** `samba_list_devices`, `samba_connect`,
 `samba_disconnect`, `samba_version`, `samba_read_u32`, `samba_write_u32`,
@@ -413,7 +413,7 @@ The SDK CLI for Flux app developers.
 | `0x0F` GET_PROCESS_LIST | x | | |
 | Log Streaming (TYPE 0x01) | x | x | |
 | SAM-BA Flash R/W | x | | |
-| HID APDU (CTAP + Ledger) | x | | |
+| HID APDU (CTAP + Legacy) | x | | |
 
 ---
 
@@ -422,14 +422,19 @@ The SDK CLI for Flux app developers.
 | Mode | VID:PID | When |
 |------|---------|------|
 | Normal | `0x1307:0x0165` | Standard boot, no Flux app running |
-| Legacy | `0x2C97:0x0007` | While the Flux emulator is on screen (Ledger Flex identity) |
+| Legacy | `0x2C97:0x7011` | While the Flux emulator is on screen (Legacy Flux identity) |
 
 The device switches between identities at runtime. When a Flux app launches,
 `gui-app-emu-flux` calls `LegacyHidApi::set_legacy_mode(true)`; `os/legacy-hid`
-then calls `set_custom_vid_pid(0x2C97, 0x0007)` and the USB bus re-enumerates
-with the Ledger Flex identity. When the Flux app exits, the normal VID:PID is
+then calls `set_custom_vid_pid(0x2C97, 0x7011)` and the USB bus re-enumerates
+with the Legacy Flux identity. When the Flux app exits, the normal VID:PID is
 restored and the bus re-enumerates again. Each transition is visible to the host
 as a USB disconnect followed by a new device appearing.
+
+The product id's high byte (`0x70`) is the model marker the host reads; the bare
+`0x0007` is the bootloader identity, which modern host stacks refuse to exchange
+APDUs with. Present `0x70xx` (the low byte is a USB-interface bitmask the host
+ignores) so the device is seen as app-mode.
 
 The host tools try the normal VID:PID first, then fall back to the Legacy one.
 

@@ -101,6 +101,9 @@ pub struct InstalledAppInfo {
     pub publisher: String,
     pub can_launch: bool,
     pub can_remove: bool,
+    /// Whether this is a Flux child app: it runs inside the Flux emulator, so
+    /// direct-launch affordances (e.g. an Open App button) don't apply to it.
+    pub is_flux: bool,
     pub version: String,
     pub size_bytes: u64,
     pub description: String,

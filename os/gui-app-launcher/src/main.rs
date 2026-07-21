@@ -63,22 +63,22 @@ const FILES_APP_ID: &str = "0x46696c652042726f7773657200000000";
 const AUTHENTICATOR_APP_ID: &str = "0x41757468656e74696361746f72203246";
 const KEYS_APP_ID: &str = "0x5365637572697479204b657973000000";
 const VAULT_APP_ID: &str = "0x53656564205661756c74000000000000";
+const LEGACY_APP_ID: &str = "0x6775692d6170702d656d752d666c7578";
 
-/// Built-in user-facing apps that should appear in the launcher.
-const KNOWN_APP_IDS: &[&str] =
-    &[FILES_APP_ID, VAULT_APP_ID, KEYS_APP_ID, AUTHENTICATOR_APP_ID, BITCOIN_APP_ID, SETTINGS_APP_ID_STR];
+/// Built-in user-facing apps that should appear in the launcher, each with the
+/// TrId of its label. Declaration order sets the built-ins' launcher rank.
+const KNOWN_APPS: &[(&str, TrId)] = &[
+    (FILES_APP_ID, TrId::MainFileBrowser),
+    (VAULT_APP_ID, TrId::MainSeedVault),
+    (KEYS_APP_ID, TrId::MainSecurityKeys),
+    (AUTHENTICATOR_APP_ID, TrId::Main2FaCodes),
+    (BITCOIN_APP_ID, TrId::MainBitcoin),
+    (SETTINGS_APP_ID_STR, TrId::MainSettings),
+    (LEGACY_APP_ID, TrId::MainLegacy),
+];
 
 fn known_app_label(app_id: &str) -> Option<String> {
-    let tr_id = match app_id {
-        FILES_APP_ID => TrId::MainFileBrowser,
-        VAULT_APP_ID => TrId::MainSeedVault,
-        KEYS_APP_ID => TrId::MainSecurityKeys,
-        AUTHENTICATOR_APP_ID => TrId::Main2FaCodes,
-        BITCOIN_APP_ID => TrId::MainBitcoin,
-        SETTINGS_APP_ID_STR => TrId::MainSettings,
-        _ => return None,
-    };
-    Some(tr::lookup_id(tr_id).to_string())
+    KNOWN_APPS.iter().find(|(id, _)| *id == app_id).map(|(_, tr_id)| tr::lookup_id(*tr_id).to_string())
 }
 
 const FLATLINE_POINTS: [PricePoint; 2] = [
@@ -226,7 +226,7 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
 
     let mut items: Vec<LauncherItem> = Vec::new();
     for entry in app_manager.list_apps(lang, app_manager::AppFilter::standard_only()) {
-        let is_known = KNOWN_APP_IDS.contains(&entry.app_id.as_str());
+        let is_known = KNOWN_APPS.iter().any(|(id, _)| *id == entry.app_id.as_str());
         let is_sideloaded = entry.can_remove;
         // Registry entries that are neither known user apps nor sideloaded are
         // hidden support/dev apps, even in simulator builds.
@@ -262,10 +262,10 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
 /// Canonical placement order for fresh layouts; apps not listed here sort
 /// after the built-ins, alphabetically by label.
 fn default_rank(item_id: &str) -> usize {
-    if let Some(index) = KNOWN_APP_IDS.iter().position(|id| *id == item_id) {
+    if let Some(index) = KNOWN_APPS.iter().position(|(id, _)| *id == item_id) {
         index
     } else if item_id == SCAN_QR_ACTION_ID {
-        KNOWN_APP_IDS.len()
+        KNOWN_APPS.len()
     } else {
         usize::MAX
     }
@@ -641,6 +641,12 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<LauncherCallbacks>().on_remove_item_requested({
         move |item_id| {
             confirm_and_remove_launcher_item(state, item_id.as_str());
+        }
+    });
+
+    ui.global::<LauncherCallbacks>().on_delete_legacy_confirmed({
+        move || {
+            delete_legacy_confirmed(state);
         }
     });
 
@@ -1132,6 +1138,17 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
         clear_rearrange_state(&ui);
     }
 
+    // Legacy is a built-in exception: deleting it is irreversible and cascades to its emulated
+    // apps, so it confirms with a centered destructive modal (matching the Figma pop-up) instead
+    // of the generic sideloaded bottom-sheet alert. The removal runs once the user confirms.
+    if app_id.as_str() == LEGACY_APP_ID {
+        let ui = state.borrow().ui();
+        let launcher_state = ui.global::<State>();
+        launcher_state.set_pending_delete_item_id(item.id.clone().into());
+        launcher_state.set_delete_legacy_active(true);
+        return;
+    }
+
     let result = {
         let gui = state.borrow().gui.clone();
         gui.invoke_alert(InvokeAlert {
@@ -1150,6 +1167,17 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
     if !matches!(result, AlertResult::Button1Pressed) {
         return;
     }
+
+    remove_launcher_item(state, &item);
+}
+
+/// Decode a removable launcher item's AppId and ask app-manager to remove it, refreshing the
+/// launcher on success and surfacing an error modal on failure. The item must be a removable app.
+fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
+    let LauncherTarget::App { app_id } = item.target.clone() else {
+        log::warn!("Ignoring removal for non-app launcher item: {}", item.id);
+        return;
+    };
 
     let app_id = match app_manager::decode_app_id_str(app_id.as_str()) {
         Ok(app_id) => app_id,
@@ -1190,6 +1218,26 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
             show_remove_app_error(state, &item.label);
         }
     }
+}
+
+/// Run the Legacy removal after the user confirms in the centered delete modal, dismissing the
+/// modal first. Operates on the item snapshotted when the modal was shown.
+fn delete_legacy_confirmed(state: StoredValue<AppState>) {
+    let item_id = {
+        let ui = state.borrow().ui();
+        let launcher_state = ui.global::<State>();
+        launcher_state.set_delete_legacy_active(false);
+        let id = launcher_state.get_pending_delete_item_id().to_string();
+        launcher_state.set_pending_delete_item_id("".into());
+        id
+    };
+
+    let Some(item) = state.borrow().launcher_item_by_id(&item_id).cloned() else {
+        log::warn!("delete-legacy confirmed but launcher item {item_id} is gone");
+        return;
+    };
+
+    remove_launcher_item(state, &item);
 }
 
 fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {

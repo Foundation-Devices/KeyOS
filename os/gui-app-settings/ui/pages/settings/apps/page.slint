@@ -122,9 +122,12 @@ component AppListCard inherits Rectangle {
         }
 
         launch-column := Rectangle {
-            width: root.app.can_launch ? Size.sz10 : 0px;
+            // Flux children never get a play button: they only run inside the Flux emulator.
+            property <bool> show-launch: root.app.can_launch && !root.app.is_flux;
+
+            width: self.show-launch ? Size.sz10 : 0px;
             height: parent.height;
-            visible: root.app.can_launch;
+            visible: self.show-launch;
             background: Palette.transparent;
 
             VerticalLayout {

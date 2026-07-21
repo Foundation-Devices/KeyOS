@@ -21,15 +21,15 @@ target_excludes := '--exclude atsama5d27 ' + \
     '--exclude log-usb-serial ' + \
     '--exclude usb-debug'
 
-# Flux app sources are temporarily absent from this repository.
-flux_excludes := ''
+# Apps that link the external C SDK; they do not link on the host.
+flux_excludes := '--exclude app-flux-ethereum ' + \
+    '--exclude app-flux-solana'
 
 check_excludes := target_excludes + ' ' + flux_excludes
 
 # Excluded from the test run only: softbuffer's windowing test (needs a display),
 # tar's vendored integration test, and qbsdiff whose test rewrites a tracked asset.
-test_only_excludes := '--exclude gui-app-emu-flux ' + \
-    '--exclude softbuffer ' + \
+test_only_excludes := '--exclude softbuffer ' + \
     '--exclude tar ' + \
     '--exclude qbsdiff'
 
@@ -237,6 +237,11 @@ build-bl-unsigned:
 
 build-all args="":
     cargo xtask build-all {{args}}
+
+# Check upstream for a newer release of a Flux app and repin its build.rs.
+# Usage: just update-flux ethereum   (append --check to only report).
+update-flux app *args:
+    ./scripts/update-flux.sh {{app}} {{args}}
 
 build-repro:
     cargo xtask build-all --production-bootloader --production-firmware

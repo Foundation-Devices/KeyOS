@@ -193,6 +193,12 @@ fn app_resources_path(app_id: xous::AppId, root: AppResourcesRoot, app_dir: &str
             }
             "keyos/sideloaded-apps"
         }
+        AppResourcesRoot::SideloadedFlux => {
+            if app_dir != app_id.to_string() {
+                return None;
+            }
+            "keyos/apps/gui-app-emu-flux/sideloaded-apps"
+        }
     };
 
     Some(format!("{root}/{app_dir}/resources"))
@@ -221,6 +227,11 @@ mod tests {
             app_resources_path(APP_ID, AppResourcesRoot::Sideloaded, "00112233445566778899aabbccddeeff")
                 .as_deref(),
             Some("keyos/sideloaded-apps/00112233445566778899aabbccddeeff/resources")
+        );
+        assert_eq!(
+            app_resources_path(APP_ID, AppResourcesRoot::SideloadedFlux, "00112233445566778899aabbccddeeff")
+                .as_deref(),
+            Some("keyos/apps/gui-app-emu-flux/sideloaded-apps/00112233445566778899aabbccddeeff/resources")
         );
 
         assert!(app_resources_path(APP_ID, AppResourcesRoot::BuiltIn, "").is_none());

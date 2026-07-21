@@ -147,6 +147,22 @@ pub struct LedgerGlyphOptions<'a> {
     pub chain_icon_stub_dir: Option<&'a str>,
 }
 
+/// Marker recording which git ref a clone under `out_dir` was made from, kept
+/// beside the checkout (not inside it) so patching or `git clean` can't drop it.
+fn clone_ref_marker(out_dir: &str, name: &str) -> PathBuf {
+    Path::new(out_dir).join(format!("{name}.git-ref"))
+}
+
+/// Whether the clone of `name` under `out_dir` was made from `git_ref`.
+fn clone_matches_ref(out_dir: &str, name: &str, git_ref: &str) -> bool {
+    fs::read_to_string(clone_ref_marker(out_dir, name)).map(|s| s.trim() == git_ref).unwrap_or(false)
+}
+
+/// Record the git ref a fresh clone of `name` was made from.
+fn record_clone_ref(out_dir: &str, name: &str, git_ref: &str) {
+    let _ = fs::write(clone_ref_marker(out_dir, name), git_ref);
+}
+
 pub fn prepare_ledger_app(
     out_dir: &str,
     app_name: &str,
@@ -156,12 +172,25 @@ pub fn prepare_ledger_app(
     options: LedgerAppOptions<'_>,
 ) -> PathBuf {
     let app_path = Path::new(out_dir).join(app_name);
+    // Re-clone when the pinned ref changed since the last build. Otherwise the
+    // stale checkout is reused and the app is built at the old version even though
+    // the pinned ref names the new one, so the reported version (read from the
+    // rebuilt source below) and the compiled Settings page would disagree.
+    if app_path.exists() && !clone_matches_ref(out_dir, app_name, app_git_ref) {
+        let _ = fs::remove_dir_all(&app_path);
+    }
     if !app_path.exists() {
-        let local_app_path = find_local_ledger_repo(local_path_env_var, app_name);
+        // Use the local mirror only when it actually has the pinned ref; a stale
+        // mirror misses newly pinned tags. Filter once here so the app clone and
+        // the submodule copy share one validated source: a rejected mirror must
+        // not seed submodules from a stale tree while the app comes from upstream.
+        let local_app_path =
+            find_local_ledger_repo(local_path_env_var, app_name).filter(|p| local_has_ref(p, app_git_ref));
         clone_ledger_app(&app_path, app_name, app_git_ref, local_app_path.as_deref());
         if matches!(options.submodules, LedgerAppSubmodules::Init) {
             prepare_ledger_app_submodules(&app_path, local_app_path.as_deref());
         }
+        record_clone_ref(out_dir, app_name, app_git_ref);
     }
 
     clean_ledger_app_build_dir(&app_path);
@@ -173,6 +202,87 @@ pub fn prepare_ledger_app(
     }
 
     app_path
+}
+
+/// The app's version, read from `APPVERSION_M/N/P` in its upstream Makefile (the
+/// same source the app's own Settings page shows). Errs when those fields are
+/// absent, so a broken clone fails the build instead of reporting a wrong version.
+fn flux_app_version(app_path: &Path) -> Result<String, String> {
+    let makefile =
+        fs::read_to_string(app_path.join("Makefile")).map_err(|e| format!("Makefile unreadable: {e}"))?;
+    let field = |key: &str| {
+        makefile.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name.trim() == key).then(|| value.trim().to_owned())
+        })
+    };
+    match (field("APPVERSION_M"), field("APPVERSION_N"), field("APPVERSION_P")) {
+        (Some(m), Some(n), Some(p)) => Ok(format!("{m}.{n}.{p}")),
+        _ => Err("Makefile has no APPVERSION_M/N/P".to_owned()),
+    }
+}
+
+/// The app's single BOLOS NVM region in `archive`: its symbol name and byte size,
+/// measured with `nm_bin` (`--print-size`). BOLOS storage globals are named `N_*`.
+/// Panics on none or more than one, since the runtime mirrors exactly one region.
+fn sole_nvm_region(archive: &Path, nm_bin: &str) -> (String, usize) {
+    let output = Command::new(nm_bin)
+        .arg("--print-size")
+        .arg(archive)
+        .output()
+        .unwrap_or_else(|e| panic!("{nm_bin} on {} failed: {e}", archive.display()));
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let mut regions: Vec<(String, usize)> = listing
+        .lines()
+        .filter_map(|line| {
+            // A defined data symbol prints "addr size type name"; undefined ones lack
+            // the size/type columns, so a 4-field split already excludes them.
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [_addr, size, type_, name] = fields[..] else { return None };
+            let is_data = matches!(type_, "b" | "B" | "d" | "D" | "r" | "R");
+            (is_data && name.starts_with("N_"))
+                .then(|| usize::from_str_radix(size, 16).ok().map(|len| (name.to_owned(), len)))
+                .flatten()
+        })
+        .collect();
+    regions.sort();
+    regions.dedup();
+    match regions.as_slice() {
+        [(name, len)] => (name.clone(), *len),
+        [] => panic!("no N_ NVM region found in {}", archive.display()),
+        many => panic!(
+            "multiple N_ NVM regions in {} ({}); the runtime mirrors only one",
+            archive.display(),
+            many.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "),
+        ),
+    }
+}
+
+/// Generate `flux_nvm_gen.rs` in `OUT_DIR` (for the app's `main.rs` to `include!`)
+/// exposing the app's BOLOS NVM region as `nvm_base()` and `NVM_LEN`, both taken
+/// from `archive` so the mirrored size always matches the C struct instead of a
+/// hand-copied number. Call after the archive is built; `nm_bin` is the `nm` for
+/// the archive's target (host `nm` for hosted, `arm-none-eabi-nm` for ARM).
+/// Emit `flux_app_gen.rs` for the `flux_app!` macro to include: the app's `APP_VERSION` (parsed from
+/// its upstream Makefile) and its NVM region (`nvm_base()` / `NVM_LEN`, measured from the compiled
+/// archive so the mirrored size can't drift from the C struct). Bundling both keeps a single
+/// build-time source of app metadata.
+pub fn generate_flux_app_module(out_dir: &str, app_path: &Path, archive: &Path, nm_bin: &str) {
+    let version = flux_app_version(app_path)
+        .unwrap_or_else(|reason| panic!("flux app version undeterminable: {reason}"));
+    let (region, len) = sole_nvm_region(archive, nm_bin);
+    let generated = format!(
+        "// generated by build.rs -- do not edit\n\
+         /// The app's version, from its upstream Makefile; answered to the host's\n\
+         /// GET_APP_AND_VERSION probe via `os_registry_get_current_app_tag`.\n\
+         pub const APP_VERSION: &str = \"{version}\";\n\
+         extern \"C\" {{\n    static mut {region}: u8;\n}}\n\
+         /// Base of the app's NVM region; `init_nvm` reads and writes `NVM_LEN` bytes\n\
+         /// through it, and `NVM_LEN` is its measured size, so it stays in bounds.\n\
+         pub fn nvm_base() -> *mut u8 {{ core::ptr::addr_of_mut!({region}) }}\n\
+         pub const NVM_LEN: usize = {len};\n"
+    );
+    write_if_changed(&Path::new(out_dir).join("flux_app_gen.rs"), &generated);
 }
 
 pub fn generate_ledger_glyphs(
@@ -228,6 +338,111 @@ pub fn generate_ledger_glyphs(
     append_glyph_stubs(app_path, &glyphs_h_path, options);
 }
 
+/// SDK ref whose NBGL subsystem the emulator uses. From SDK v26 the NBGL engine
+/// (obj, draw, fonts, screen, touch, pools) is served by the OS behind syscalls
+/// and its sources are gone from the app-side tree; the app-side glue that
+/// remains is built for the v26 engine and its changed `nbgl_obj_s` layout. The
+/// emulator instead links NBGL into the app, so it needs the whole subsystem at
+/// one self-consistent version. When the engine sources are missing, replace all
+/// of `lib_nbgl/src` and `lib_nbgl/include` with this ref's, which ships both the
+/// engine and matching glue/headers.
+const NBGL_ENGINE_GIT_REF: &str = "v25.11.5";
+
+/// A sentinel engine source: present in the pre-v26 tree, absent from v26.
+const NBGL_ENGINE_SENTINEL: &str = "lib_nbgl/src/nbgl_obj.c";
+
+/// Reset `lib_nbgl/src` and `lib_nbgl/include` to the clone's committed (pristine
+/// SDK) state, so the swap is deterministic regardless of a prior build's edits
+/// or an earlier partial restore. Reverts tracked files and drops untracked ones.
+fn reset_nbgl_tree(sdk_path: &Path) {
+    let paths = ["lib_nbgl/src", "lib_nbgl/include"];
+    let checkout = Command::new("git")
+        .arg("-C")
+        .arg(sdk_path)
+        .arg("checkout")
+        .arg("--")
+        .args(paths)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to reset lib_nbgl: {e}"));
+    if !checkout.status.success() {
+        panic!("Failed to reset lib_nbgl: {}", String::from_utf8_lossy(&checkout.stderr));
+    }
+    let clean = Command::new("git")
+        .arg("-C")
+        .arg(sdk_path)
+        .args(["clean", "-fdq"])
+        .args(paths)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to clean lib_nbgl: {e}"));
+    if !clean.status.success() {
+        panic!("Failed to clean lib_nbgl: {}", String::from_utf8_lossy(&clean.stderr));
+    }
+}
+
+/// Recursively list `lib_nbgl/src` (or `/include`) at `NBGL_ENGINE_GIT_REF`,
+/// returning paths relative to that subdir (e.g. `fonts/nbgl_font_...inc`).
+fn nbgl_dir_files_at_ref(sdk_path: &Path, subdir: &str) -> Vec<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(sdk_path)
+        .args(["ls-tree", "-r", "--name-only"])
+        .arg(format!("{NBGL_ENGINE_GIT_REF}:lib_nbgl/{subdir}"))
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to list lib_nbgl/{subdir} at {NBGL_ENGINE_GIT_REF}: {e}"));
+    if !out.status.success() {
+        panic!(
+            "Failed to list lib_nbgl/{subdir} at {NBGL_ENGINE_GIT_REF}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+}
+
+/// Restore one file from `NBGL_ENGINE_GIT_REF` into the working tree.
+fn restore_file_at_ref(sdk_path: &Path, rel_path: &str) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(sdk_path)
+        .arg("show")
+        .arg(format!("{NBGL_ENGINE_GIT_REF}:{rel_path}"))
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to read {rel_path} at {NBGL_ENGINE_GIT_REF}: {e}"));
+    if !out.status.success() {
+        panic!(
+            "Failed to restore {rel_path} from {NBGL_ENGINE_GIT_REF}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let dst = sdk_path.join(rel_path);
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|e| panic!("Failed to create {}: {e}", parent.display()));
+    }
+    fs::write(&dst, &out.stdout).unwrap_or_else(|e| panic!("Failed to write {}: {e}", dst.display()));
+}
+
+/// When the NBGL engine sources are absent (SDK v26+), replace the whole
+/// `lib_nbgl/src` and `lib_nbgl/include` with `NBGL_ENGINE_GIT_REF`'s, so the
+/// linked NBGL subsystem is self-consistent (engine, glue, and the `nbgl_obj_s`
+/// layout all match). No-op for SDK trees that still ship the engine.
+/// Returns true when the swap was performed (the SDK is v26+ and shipped no
+/// engine); false when the tree already ships the engine (pre-v26), leaving it
+/// untouched.
+fn restore_nbgl_engine_sources(sdk_path: &Path) -> bool {
+    reset_nbgl_tree(sdk_path);
+    if sdk_path.join(NBGL_ENGINE_SENTINEL).exists() {
+        return false;
+    }
+    for subdir in ["src", "include"] {
+        let dir = sdk_path.join("lib_nbgl").join(subdir);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("Failed to create {}: {e}", dir.display()));
+        for name in nbgl_dir_files_at_ref(sdk_path, subdir) {
+            restore_file_at_ref(sdk_path, &format!("lib_nbgl/{subdir}/{name}"));
+        }
+    }
+    true
+}
+
 pub fn prepare_ledger_sdk(
     out_dir: &str,
     sdk_git_ref: &str,
@@ -235,16 +450,26 @@ pub fn prepare_ledger_sdk(
     options: LedgerSdkOptions,
 ) -> PathBuf {
     let sdk_path = Path::new(out_dir).join(LEDGER_SECURE_SDK_NAME);
+    // Re-clone when the pinned SDK ref changed, so a version bump doesn't build
+    // the app against the previously cloned SDK.
+    if sdk_path.exists() && !clone_matches_ref(out_dir, LEDGER_SECURE_SDK_NAME, sdk_git_ref) {
+        let _ = fs::remove_dir_all(&sdk_path);
+    }
     if !sdk_path.exists() {
         clone_ledger_sdk(&sdk_path, sdk_git_ref);
+        record_clone_ref(out_dir, LEDGER_SECURE_SDK_NAME, sdk_git_ref);
     }
 
+    let nbgl_restored = restore_nbgl_engine_sources(&sdk_path);
     (options.patch_sdk)(&sdk_path);
     ensure_common_sdk_c_fixes(&sdk_path);
-    if options.ensure_nbgl_font_data {
+    // The restored (v25) NBGL sources need the same font-data and draw-text
+    // patches as a natively shipped v25 tree, so apply them whenever the swap
+    // ran, independent of the per-app opt-in flags (which predate the restore).
+    if nbgl_restored || options.ensure_nbgl_font_data {
         let _ = ensure_nbgl_font_data(&sdk_path);
     }
-    if options.ensure_nbgl_draw_text_override {
+    if nbgl_restored || options.ensure_nbgl_draw_text_override {
         let _ = ensure_nbgl_draw_text_override(&sdk_path);
     }
     if let Some(extra_source_fixes) = options.extra_source_fixes {
@@ -710,7 +935,13 @@ fn common_arm_include_dirs(sdk_path: &Path, app_path: &Path) -> Vec<PathBuf> {
 }
 
 fn clone_ledger_sdk(sdk_path: &Path, sdk_git_ref: &str) {
-    let local_sdk_path = find_local_ledger_repo("LEDGER_SDK_PATH", LEDGER_SECURE_SDK_NAME);
+    // Use the local mirror only when it has both the pinned SDK ref and the NBGL
+    // engine ref. Missing the SDK ref fails the checkout below; missing the NBGL
+    // ref (e.g. a shallow/single-tag mirror with v26 but not v25.11.5) later
+    // panics restore_nbgl_engine_sources on its `git ls-tree NBGL_ENGINE_GIT_REF`.
+    // If either is absent, fall back to the upstream clone, which has both.
+    let local_sdk_path = find_local_ledger_repo("LEDGER_SDK_PATH", LEDGER_SECURE_SDK_NAME)
+        .filter(|p| local_has_ref(p, sdk_git_ref) && local_has_ref(p, NBGL_ENGINE_GIT_REF));
 
     let mut clone_cmd = Command::new("git");
     clone_cmd.arg("clone");
@@ -765,6 +996,7 @@ fn copy_app_icon(out_dir: &str, crate_name: &str, app_path: &Path, app_icon: &st
 }
 
 pub fn collect_icon_files(dir: &Path, icon_files: &mut Vec<PathBuf>) {
+    let start = icon_files.len();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -773,6 +1005,10 @@ pub fn collect_icon_files(dir: &Path, icon_files: &mut Vec<PathBuf>) {
             }
         }
     }
+    // read_dir order is filesystem-dependent; sort the entries this call appended so
+    // the generated glyph sources are reproducible, without reordering any entries the
+    // caller collected from earlier directories. Matches collect_c_files/collect_c_dirs.
+    icon_files[start..].sort();
 }
 
 fn is_supported_icon_file(path: &Path) -> bool {
@@ -844,7 +1080,24 @@ fn find_local_ledger_repo(local_path_env_var: &str, repo_name: &str) -> Option<P
     })
 }
 
+/// Whether a local git repo has `git_ref` available so a `--local` clone can
+/// check it out. A stale local mirror misses newly pinned tags; the caller then
+/// clones from upstream instead of failing.
+fn local_has_ref(repo: &Path, git_ref: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--verify", "--quiet"])
+        .arg(format!("{git_ref}^{{commit}}"))
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
 fn clone_ledger_app(app_path: &Path, app_name: &str, app_git_ref: &str, local_app_path: Option<&Path>) {
+    // Precondition: `local_app_path`, if set, is a mirror already known to hold
+    // the pinned ref; the caller drops stale mirrors so this clone and the
+    // submodule copy share one validated source.
     let mut clone_cmd = Command::new("git");
     clone_cmd.arg("clone").arg("--branch").arg(app_git_ref).arg("--single-branch");
     if let Some(local_path) = local_app_path {
@@ -1130,28 +1383,17 @@ fn disable_ledger_manifest_use_cases(sdk_path: &Path) {
         return;
     }
 
-    let ledger_manifest_block = r#"  # Retrieve the use-cases from the TOML file
-  APP_USE_CASES := $(shell ledger-manifest "$(APP_MANIFEST_FILE)" -ouc -j | jq -r 'keys | join(" ")')
-
-  # Function to extract flags for a specific use case
-  define get_flags_for_use_case
-    $(shell ledger-manifest "$(APP_MANIFEST_FILE)" -ouc $1)
-  endef
-"#;
-    let keyos_block = r#"  # KeyOS static builds do not run Ledger's manifest tooling.
-  APP_USE_CASES :=
-
-  define get_flags_for_use_case
-  endef
-"#;
-
-    if content.contains(keyos_block) {
+    // KeyOS builds statically and has no `ledger-manifest` CLI, so neutralize the
+    // two `$(shell ledger-manifest ...)` calls the SDK Makefile makes to read the
+    // app's use-cases. Match the shell-call text, not the surrounding indentation,
+    // which differs across SDK versions.
+    let use_cases_shell =
+        r#"$(shell ledger-manifest "$(APP_MANIFEST_FILE)" -ouc -j | jq -r 'keys | join(" ")')"#;
+    let flags_shell = r#"$(shell ledger-manifest "$(APP_MANIFEST_FILE)" -ouc $1)"#;
+    if !content.contains(use_cases_shell) && !content.contains(flags_shell) {
         return;
     }
-    if !content.contains(ledger_manifest_block) {
-        panic!("Failed to find Ledger manifest block in {}", makefile_path.display());
-    }
-    content = content.replace(ledger_manifest_block, keyos_block);
+    content = content.replace(use_cases_shell, "").replace(flags_shell, "");
     fs::write(&makefile_path, content)
         .unwrap_or_else(|e| panic!("Failed to write {}: {e}", makefile_path.display()));
 }
@@ -1352,5 +1594,24 @@ pub fn ensure_nbgl_font_data(sdk_path: &Path) -> Result<(), String> {
         content.replace("__attribute__((section(\"._nbgl_fonts_\")))", "/* section removed for KeyOS */");
 
     fs::write(&nbgl_fonts, content).map_err(|e| format!("Failed to write {}: {e}", nbgl_fonts.display()))?;
+
+    // The restored (pre-v26) nbgl_fonts.h falls back to `#define LANGUAGE_PACK
+    // void` when HAVE_LANGUAGE_PACK is unset, which the app build leaves unset.
+    // The v26 core `ux_loc.h` (kept) always typedefs LANGUAGE_PACK to a struct,
+    // so that macro clobbers the typedef (`} void;`). Include ux_loc.h in the
+    // fallback branch to pull in the real type instead.
+    let nbgl_fonts_h = sdk_path.join("lib_nbgl/include/nbgl_fonts.h");
+    if nbgl_fonts_h.exists() {
+        let header = fs::read_to_string(&nbgl_fonts_h)
+            .map_err(|e| format!("Failed to read {}: {e}", nbgl_fonts_h.display()))?;
+        let patched = header.replace(
+            "#ifndef HAVE_LANGUAGE_PACK\n#define LANGUAGE_PACK void\n#endif  // HAVE_LANGUAGE_PACK",
+            "#ifndef HAVE_LANGUAGE_PACK\n#include \"ux_loc.h\"  // KeyOS: v26 core provides the LANGUAGE_PACK type\n#endif  // HAVE_LANGUAGE_PACK",
+        );
+        if patched != header {
+            fs::write(&nbgl_fonts_h, patched)
+                .map_err(|e| format!("Failed to write {}: {e}", nbgl_fonts_h.display()))?;
+        }
+    }
     Ok(())
 }

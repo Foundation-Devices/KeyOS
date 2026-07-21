@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x6775692d6170702d656d752d666c7578"
+extends = "../../api/gui-app-emu-flux"
+
+[appName]
+en = "Legacy"
+
+[appDescription]
+en = "Legacy mode."
+
+[servers."os/gui-app-emu-flux"]
+AppDisconnected = { id = 4, type = "scalar" }
+
+[permissions]
+template = ["gui-app", "navigable", "fs-generic"]
+"os/app-manager" = ["LaunchAppBlocking", "GetAppName", "ListApps", "SubscribeAppEvents"]
+"os/security" = ["GetAppSeed"]
+"os/gui-server" = ["GetPendingNavRequest", "SwitchToLauncher"]
+"os/haptics" = ["Vibrate"]
+"os/legacy-hid" = ["WriteHidApdu", "SetLegacyMode", "SubscribeIncomingApdu"]

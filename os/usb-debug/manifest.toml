@@ -32,6 +32,7 @@ template = ["fs-generic"]
     "GetOsVersionInfo",
 ]
 "os/fs" = [
+    "GetSystemReadAccess",
     "GetSystemWriteAccess",
 ]
 "os/settings" = [

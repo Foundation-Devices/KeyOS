@@ -733,25 +733,32 @@ fn init_seed_global(state: StoredValue<AppState>) {
             .unwrap_or_default()
     });
 
-    seed_global.on_generate_mnemonic_order(move || {
-        state
+    seed_global.on_generate_seed_verify_challenges(move || {
+        // The seed is set before verification runs, so building the quiz can only fail
+        // on a bug (missing seed or a bad conversion). Panic to surface that rather than
+        // hand the UI a short or empty quiz that could pass the backup check without
+        // actually checking every word.
+        let challenges: Vec<SeedWordChallenge> = state
             .borrow()
-            .mnemonic_order()
-            .map(|order| {
-                slint::ModelRc::new(slint::VecModel::from(
-                    order.into_iter().map(|i| i as i32).collect::<Vec<_>>(),
-                ))
-            })
-            .inspect_err(|e| log::error!("Failed to generate mnemonic order: {e}"))
-            .unwrap_or_default()
+            .seed_verify_challenges()
+            .expect("seed must be available to build the verify quiz")
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        slint::ModelRc::new(slint::VecModel::from(challenges))
     });
 
-    seed_global.on_get_seed_word_challenge(move |mnemonic_index| {
-        usize::try_from(mnemonic_index)
-            .map_err(|_| anyhow::anyhow!("mnemonic_index {mnemonic_index} is negative"))
-            .and_then(|idx| state.borrow().get_seed_word_challenge(idx).map(Into::into))
-            .inspect_err(|e| log::error!("Failed to get seed word challenge: {e}"))
-            .unwrap_or_default()
+    seed_global.on_regenerate_seed_verify_challenge(move |word_index| {
+        // A wrong guess re-rolls just that word. The seed is still set (verification is
+        // mid-flight) and the index came from a challenge we handed out, so both failure
+        // modes are bugs: panic rather than hand the quiz an empty challenge, which it
+        // would treat as a word with no correct option.
+        let challenge = state
+            .borrow()
+            .seed_verify_challenge(word_index as usize)
+            .expect("seed must be available to regenerate a verify challenge")
+            .expect("regenerated word index must be in range");
+        challenge.into()
     });
 
     seed_global.on_get_standard_seed_qr(move || {
@@ -855,13 +862,12 @@ fn init_connect_wallet(state: StoredValue<AppState>) {
     .detach();
 }
 
-impl From<state::seed_challenge::SeedWordChallenge> for SeedWordChallenge {
-    fn from(s: state::seed_challenge::SeedWordChallenge) -> SeedWordChallenge {
-        let options = ModelRc::from(s.options.map(SharedString::from));
+impl From<seed_quiz::SeedWordChallenge> for SeedWordChallenge {
+    fn from(c: seed_quiz::SeedWordChallenge) -> SeedWordChallenge {
         crate::SeedWordChallenge {
-            correct_option_index: s.correct_option_index as i32,
-            options,
-            mnemonic_index: s.mnemonic_index as i32,
+            correct_option_index: c.correct_option_index as i32,
+            options: ModelRc::from(c.options.map(SharedString::from)),
+            word_index: c.word_index as i32,
         }
     }
 }

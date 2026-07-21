@@ -13,9 +13,12 @@ pub fn pki_get_info_bypass(key_usage: *mut u8) -> u32 {
     0
 }
 
-pub fn pki_verify_bypass() -> u32 {
-    log::debug!("os_pki_verify: bypassing PKI (not available on KeyOS)");
-    1
+/// KeyOS has no PKI chain to verify against, so this fails closed: a host-supplied
+/// signature over transaction metadata is treated as unverified rather than
+/// trusted, and the calling app falls back to showing the raw data.
+pub fn pki_verify_fail_closed() -> u32 {
+    log::debug!("os_pki_verify: no PKI on KeyOS, failing closed (unverified)");
+    0
 }
 
 pub fn keyos_trace(id: u32) {
@@ -39,9 +42,10 @@ macro_rules! define_pki_bypass_stubs {
             $crate::stubs::pki_get_info_bypass(key_usage)
         }
 
-        /// Verify a signature against a previously loaded PKI certificate.
-        /// On KeyOS, Flux apps are already verified at install time, so we
-        /// return true (valid) to let the calling code proceed normally.
+        /// Verify a signature against a previously loaded PKI certificate. KeyOS
+        /// cannot authenticate host-supplied transaction metadata (no PKI roots),
+        /// so this fails closed: the app treats the data as unverified instead of
+        /// trusting a signature it cannot check.
         #[no_mangle]
         pub extern "C" fn os_pki_verify(
             _hash: *const u8,
@@ -49,7 +53,7 @@ macro_rules! define_pki_bypass_stubs {
             _sig: *const u8,
             _sig_len: u32,
         ) -> u32 {
-            $crate::stubs::pki_verify_bypass()
+            $crate::stubs::pki_verify_fail_closed()
         }
     };
 }

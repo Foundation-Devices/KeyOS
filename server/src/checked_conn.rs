@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     archive_event_handler, lend_mut, scalar_async_response_handler, scalar_event_handler, send_archive,
     send_archive_nowait, send_blocking_archive, send_blocking_scalar, send_move, send_move_nowait,
-    send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive, subscribe_scalar,
+    send_scalar, send_scalar_async, send_scalar_nowait, subscribe_archive, subscribe_scalar, try_lend_mut,
     try_send_blocking_archive, try_send_blocking_scalar, try_send_move, try_send_scalar,
     try_send_scalar_async, Archive, ArchiveEventHandler, ArchiveSubscription, BlockingArchive,
     BlockingScalar, BlockingScalarResponseHandler, LendMut, Move, Scalar, ScalarEventHandler,
@@ -323,6 +323,16 @@ impl<P: CheckedPermissions> CheckedConn<P> {
         P: MessageAllowed<M>,
     {
         lend_mut(self.cid.0, msg)
+    }
+
+    /// Like [`lend_mut`](Self::lend_mut), but returns the transport error instead
+    /// of panicking when the server is gone.
+    pub fn try_lend_mut<M>(&self, msg: M) -> Result<M::Response, xous::Error>
+    where
+        M: LendMut,
+        P: MessageAllowed<M>,
+    {
+        try_lend_mut(self.cid.0, msg)
     }
 
     // ==================== Move Messages ====================

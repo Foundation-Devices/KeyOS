@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { BasePage } from "@ui/widgets.slint";
+import { ViewSeed } from "@ui/pages.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Callbacks } from "../../globals.slint";
+import { ViewSeedWordsProps } from "./props.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component ViewSeedWordsPage inherits BasePage {
+    in property <ViewSeedWordsProps> props;
+
+    ViewSeed {
+        words: Callbacks.get-seed-words();
+        standard-qr: Callbacks.get-standard-seed-qr();
+        compact-qr: Callbacks.get-compact-seed-qr();
+        strings: {
+            title: TR2.lookup(TrId.SettingsViewSeedWordsTitle),
+            standard-qr-header: TR2.lookup(TrId.SettingsViewSeedWordsStandardSeedQr),
+            compact-qr-header: TR2.lookup(TrId.SettingsViewSeedWordsCompactSeedQr),
+            done: TR2.lookup(TrId.CommonButtonDone),
+        };
+        back => {
+            Navigate.backward();
+        }
+    }
+}

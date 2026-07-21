@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use fs::messages::Remove;
+use fs::messages::{Remove, RemoveAppData};
 use server::BlockingArchiveHandler;
 use {
     crate::{Error, Location, Server},
@@ -65,6 +65,27 @@ impl BlockingArchiveHandler<Remove> for Server {
         // Use recursive removal for both files and directories
         self.remove_recursive(&path, msg.location)?;
         self.flush_fs(msg.location).inspect_err(|e| log::error!("Failed to flush fs: {:?}", e))?;
+        Ok(())
+    }
+}
+
+impl BlockingArchiveHandler<RemoveAppData> for Server {
+    fn handle(
+        &mut self,
+        msg: RemoveAppData,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> <RemoveAppData as server::BlockingArchive>::Response {
+        // Gated by MessageAllowed<RemoveAppData> (granted only to the app
+        // manager), so this trusts msg.app_id and wipes that app's whole AppData
+        // tree rather than scoping to the caller as the AppData location does.
+        let path = format!("appdata/{}", msg.app_id);
+        match self.remove_recursive(&path, Location::AppData) {
+            // The app may never have written AppData; that is not an error.
+            Ok(()) | Err(Error::FileNotFound) => {}
+            Err(e) => return Err(e),
+        }
+        self.flush_fs(Location::AppData).inspect_err(|e| log::error!("Failed to flush fs: {:?}", e))?;
         Ok(())
     }
 }

@@ -210,7 +210,16 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             return RemoveInstalledAppResult::Running;
         }
 
-        let Some(app_dir) = self.app_registry.sideloaded_bundle_dir(app_id) else {
+        // Removing the Legacy emulator wipes every Flux child's AppData below. A child can still
+        // be running even when the emulator process itself was reaped or crashed, so refuse while
+        // any child is running rather than delete its NVM out from under it.
+        if app_id == crate::registry::FLUX_EMULATOR_APP_ID
+            && self.app_registry.flux_child_app_ids().iter().any(|id| self.app_registry.is_running(id))
+        {
+            return RemoveInstalledAppResult::Running;
+        }
+
+        let Some(app_dir) = self.app_registry.removable_bundle_dir(app_id) else {
             return if self.app_registry.contains_app(app_id) {
                 RemoveInstalledAppResult::NotSideloaded
             } else {
@@ -218,20 +227,47 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             };
         };
 
-        info!("removing sideloaded app 0x{} from {app_dir}", hex::encode(app_id.0));
+        info!("removing app 0x{} from {app_dir}", hex::encode(app_id.0));
 
         if !self.permission_grants.remove_app_grants(app_id) {
-            error!("failed to revoke permission grants for sideloaded app 0x{}", hex::encode(app_id.0));
+            error!("failed to revoke permission grants for app 0x{}", hex::encode(app_id.0));
             return RemoveInstalledAppResult::InternalError;
         }
         self.transient_permission_denies.remove(&app_id);
+
+        // Wipe the app's AppData before removing the bundle so a later install
+        // reusing this AppId can't inherit the removed app's persisted data.
+        // Fail the removal if the wipe fails rather than report the app gone
+        // while its data is still on disk.
+        if let Err(e) = FileSystem::default().remove_app_data(app_id) {
+            error!("failed to remove AppData for app 0x{}: {e:?}", hex::encode(app_id.0));
+            return RemoveInstalledAppResult::InternalError;
+        }
+
+        // Flux children persist their NVM to their own AppData (nvm.bin), which removing
+        // the emulator does not otherwise reach: the bundle removal below deletes only the
+        // built-in children's bundles, and sideloaded children live under a separate root.
+        // Wipe every installed Flux child's AppData so no child's data outlives its host.
+        if app_id == crate::registry::FLUX_EMULATOR_APP_ID {
+            for child_id in self.app_registry.flux_child_app_ids() {
+                if let Err(e) = FileSystem::default().remove_app_data(child_id) {
+                    error!("failed to remove AppData for Flux child 0x{}: {e:?}", hex::encode(child_id.0));
+                    return RemoveInstalledAppResult::InternalError;
+                }
+                // Drop each child's registered manifest from the name server too. A child
+                // launched before this removal otherwise keeps its manifest, and the server
+                // ownership and permissions riding on it, registered until reboot: stale state
+                // outliving the bundle that is about to be deleted.
+                self.app_registry.clear_registered_manifest(child_id);
+            }
+        }
 
         let remove_result = FileSystem::default().remove(&app_dir, fs::Location::System);
 
         match remove_result {
             Ok(()) | Err(fs::Error::FileNotFound) => {}
             Err(e) => {
-                error!("failed to remove sideloaded app bundle {app_dir}: {e:?}");
+                error!("failed to remove app bundle {app_dir}: {e:?}");
                 return RemoveInstalledAppResult::InternalError;
             }
         }
@@ -240,7 +276,7 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
 
         match self.rescan_and_cache() {
             Ok(()) => {
-                info!("removed sideloaded app 0x{}", hex::encode(app_id.0));
+                info!("removed app 0x{}", hex::encode(app_id.0));
                 RemoveInstalledAppResult::Removed
             }
             Err(e) => {

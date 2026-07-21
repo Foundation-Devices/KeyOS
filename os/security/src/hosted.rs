@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use security::{messages::*, PinEntryMode, Seed, MAX_LOGIN_ATTEMPTS};
+use security::{messages::*, AppSeed, PinEntryMode, Seed, MAX_LOGIN_ATTEMPTS};
 use security::{
     AccessDenied, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, LoginFailed, MasterKeyState,
     ScProof, SecurityWord,
@@ -240,7 +240,7 @@ impl server::BlockingArchiveHandler<GetAppSeed> for Server {
             .map_err(|_| AccessDenied)?
             .try_into()
             .expect("incorrect slice length");
-        Ok(app_seed)
+        Ok(AppSeed::new(app_seed))
     }
 }
 

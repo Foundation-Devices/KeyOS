@@ -10,6 +10,8 @@ edition = "2021"
 aes = "0.8"
 crc32fast = "1.4"
 curve25519-dalek = { workspace = true }
+file-backed = { workspace = true }
+fs = { workspace = true }
 getrandom = { workspace = true }
 gui-app-emu-flux = { workspace = true }
 hmac = "0.12"

@@ -1,0 +1,270 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size, Importance } from "../theme.slint";
+import { NavHeader } from "../widgets/app-header.slint";
+import { Button } from "../widgets/button.slint";
+import { ButtonSection } from "../widgets/base-page.slint";
+import { HeadingSm, HeadingLg, TextMd, TextSm } from "../widgets/txt.slint";
+import { TR } from "../i18n/i18n.slint";
+
+/// A single word-position challenge: pick the word that belongs at `word-index`.
+export struct SeedWordChallenge {
+    /// 0-based position in the mnemonic being tested.
+    word-index: int,
+    /// Four candidate words, exactly one correct.
+    options: [string],
+    /// Index into `options` of the correct answer.
+    correct-option-index: int,
+}
+
+enum WordState { Pending, Success, Failure }
+
+// "N/total" progress with a fill bar. A dot per word would overflow at 24.
+component QuizProgress inherits VerticalLayout {
+    in property <int> current;
+    in property <int> total;
+
+    // Float to avoid integer-division truncation.
+    property <float> fill-frac: (current + 1) * 1.0 / total;
+
+    alignment: center;
+    spacing: Size.sz0_5;
+
+    TextSm {
+        text: "\{current + 1}/\{total}";
+        color: Palette.content-tertiary;
+        horizontal-alignment: center;
+    }
+
+    Rectangle {
+        height: Size.sz3;
+        width: 120px;
+        background: Palette.content-disabled;
+        border-radius: self.height / 2;
+
+        Rectangle {
+            // At least a dot wide so the first step still shows.
+            width: Math.max(parent.height, parent.width * fill-frac);
+            height: parent.height;
+            background: Palette.content-brand;
+            border-radius: self.height / 2;
+            x: 0;
+        }
+    }
+}
+
+/// Word-by-word seed verification quiz, shared by onboarding backup-verify and
+/// the Legacy remove-seed flow. The host supplies one challenge per word (already
+/// in the order to quiz) and a `tr-id-prefix` naming its catalog subtree; the
+/// component looks up its own strings and fires `verified` once every word passes.
+export component SeedVerifyQuiz inherits VerticalLayout {
+    /// One challenge per word, in the order to present them. `challenges.length`
+    /// is the word count. Retrying a wrong word replaces its entry in place via
+    /// `regenerate-challenge`, so the retry shows a fresh set of options.
+    in-out property <[SeedWordChallenge]> challenges;
+    /// Catalog key prefix for the quiz's own strings, e.g. "backupManualVerify.".
+    /// Onboarding and Legacy store them under different subtrees; the buttons come
+    /// from the shared "common.button.*".
+    in property <string> tr-id-prefix;
+
+    /// Every word answered correctly.
+    callback verified();
+    /// Back navigation requested from the header.
+    callback back();
+    /// Re-roll one word's decoys after a wrong guess. The argument is the word's
+    /// seed position (`SeedWordChallenge.word-index`); the host returns a fresh
+    /// challenge for that same word, with new decoys and a reshuffled option order.
+    callback regenerate-challenge(int) -> SeedWordChallenge;
+
+    property <int> total: challenges.length;
+    property <int> current-page: 0;
+    property <SeedWordChallenge> current-challenge: challenges[current-page];
+    property <WordState> word-state: WordState.Pending;
+    // -1 = nothing selected yet; otherwise the index the user tapped.
+    property <int> selected-option-index: -1;
+
+    // Only the tapped button changes, so a wrong tap never reveals the correct
+    // word: the quiz is a real verification gate, not a giveaway.
+    pure function option-importance(idx: int) -> Importance {
+        if (idx != selected-option-index) {
+            return Importance.secondary;
+        }
+        return idx == current-challenge.correct-option-index ? Importance.primary : Importance.notice;
+    }
+
+    function subheader() -> string {
+        if (word-state == WordState.Failure) {
+            return TR.lookup(tr-id-prefix + "incorrectRestart");
+        } else if (word-state == WordState.Success) {
+            return TR.lookup(tr-id-prefix + "correct");
+        }
+        return TR.lookup(tr-id-prefix + "chooseWord");
+    }
+
+    function subheader-color() -> brush {
+        if (word-state == WordState.Failure) {
+            return Palette.content-copper-brand;
+        } else if (word-state == WordState.Success) {
+            return Palette.content-brand;
+        }
+        return Palette.content-tertiary;
+    }
+
+    function button-label() -> string {
+        if (word-state == WordState.Failure) {
+            return TR.lookup("common.button.retry");
+        }
+        if (word-state == WordState.Success && current-page == total - 1) {
+            return TR.lookup("common.button.finish");
+        }
+        return TR.lookup("common.button.next");
+    }
+
+    function verify-selection(idx: int) {
+        selected-option-index = idx;
+        if (idx == current-challenge.correct-option-index) {
+            word-state = WordState.Success;
+            // Last word: complete immediately, no extra tap.
+            if (current-page == total - 1) {
+                verified();
+            }
+        } else {
+            word-state = WordState.Failure;
+        }
+    }
+
+    NavHeader {
+        title: TR.lookup(tr-id-prefix + "title");
+        clicked => {
+            back();
+        }
+    }
+
+    // Only render the quiz when there are challenges. An empty model means
+    // challenge generation failed; showing the header alone keeps the user on a
+    // back-out path instead of indexing an empty challenge and getting stuck.
+    if (total > 0): VerticalLayout {
+        padding-bottom: Size.sz4;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+
+        VerticalLayout {
+            spacing: Size.sz16;
+            padding-top: Size.sz12;
+            alignment: start;
+
+            VerticalLayout {
+                alignment: start;
+                spacing: Size.sz3;
+
+                HeadingSm {
+                    text: TR.lookup(tr-id-prefix + "tapOnWord");
+                    color: Palette.content-secondary;
+                    horizontal-alignment: center;
+                }
+
+                HeadingLg {
+                    text: "#\{current-challenge.word-index + 1}";
+                    color: Palette.content-secondary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: start;
+                spacing: Size.sz6;
+
+                TextMd {
+                    text: subheader();
+                    color: subheader-color();
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    spacing: Size.sz6;
+
+                    Button {
+                        importance: option-importance(0);
+                        label: current-challenge.options[0];
+                        width: 212px;
+                        clicked => {
+                            if (word-state == WordState.Pending) {
+                                verify-selection(0);
+                            }
+                        }
+                    }
+
+                    Button {
+                        importance: option-importance(1);
+                        label: current-challenge.options[1];
+                        width: 212px;
+                        clicked => {
+                            if (word-state == WordState.Pending) {
+                                verify-selection(1);
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Size.sz6;
+
+                    Button {
+                        importance: option-importance(2);
+                        label: current-challenge.options[2];
+                        width: 212px;
+                        clicked => {
+                            if (word-state == WordState.Pending) {
+                                verify-selection(2);
+                            }
+                        }
+                    }
+
+                    Button {
+                        importance: option-importance(3);
+                        label: current-challenge.options[3];
+                        width: 212px;
+                        clicked => {
+                            if (word-state == WordState.Pending) {
+                                verify-selection(3);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ButtonSection {
+            HorizontalLayout {
+                alignment: center;
+                QuizProgress {
+                    current: current-page;
+                    total: total;
+                }
+            }
+
+            Button {
+                icon: word-state == WordState.Failure ? "reload" : "";
+                label: button-label();
+                importance: primary;
+                enabled: word-state != WordState.Pending;
+                clicked => {
+                    // Success advances to the next word (the last word already
+                    // completed in verify-selection). Failure stays on this word and
+                    // re-rolls its options instead of restarting the quiz: a deliberate
+                    // UX decision (SFT-6104), since the quiz confirms the user's own
+                    // backup and treats a wrong tap as a slip to retry, not an adversary
+                    // to lock out.
+                    if (word-state == WordState.Success && current-page < total - 1) {
+                        current-page += 1;
+                    } else if (word-state == WordState.Failure) {
+                        challenges[current-page] = regenerate-challenge(current-challenge.word-index);
+                    }
+                    selected-option-index = -1;
+                    word-state = WordState.Pending;
+                }
+            }
+        }
+    }
+}

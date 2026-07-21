@@ -209,25 +209,11 @@ impl Builder {
         }
     }
 
-    pub fn hosted() -> Builder {
-        Builder::new(BuildArgs {
-            services: Vec::new(),
-            apps: Vec::new(),
-            flux_apps: Vec::new(),
-            hosted: true,
-            verbose_loader: false,
-            verbose_kernel: false,
-            log_serial: false,
-            log_usb_debug: false,
-            log_usb_file: false,
-            with_systemview: false,
-            integration_test: false,
-            is_recovery: false,
-            ci: false,
-            reproducible: false,
-            production_firmware: false,
-        })
-    }
+    pub fn hosted() -> Builder { Builder::new(BuildArgs { hosted: true, ..Default::default() }) }
+
+    /// A builder for the hardware target with no services/apps queued: for one-off single-crate
+    /// builds like `build_app`, which drive `build_local_crate` directly.
+    pub fn hardware() -> Builder { Builder::new(BuildArgs::default()) }
 
     pub fn images_path() -> PathBuf {
         let path = "target/armv7a-unknown-xous-elf/release/images";
@@ -235,7 +221,7 @@ impl Builder {
         path.parse().unwrap()
     }
 
-    fn get_target_root(&self) -> PathBuf {
+    pub(crate) fn get_target_root(&self) -> PathBuf {
         let mut root = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| project_root().join("target"));
@@ -249,6 +235,13 @@ impl Builder {
     fn get_apps_path(&self) -> PathBuf { self.get_target_root().join(KEYOS_APPS_DIR) }
 
     fn get_flux_apps_path(&self) -> PathBuf { self.get_target_root().join(FLUX_APPS_DIR) }
+
+    /// The staged-app directories and the crate set bundled into each: regular apps under
+    /// `keyos/apps`, Flux child apps under the emulator's `apps` dir. build() bundles each set, and
+    /// restage_hosted_app looks a crate up in each.
+    fn staged_app_sets(&self) -> [(PathBuf, &Vec<CrateSpec>); 2] {
+        [(self.get_apps_path(), &self.apps), (self.get_flux_apps_path(), &self.flux_apps)]
+    }
 
     /// Create base cargo command with environment variables
     fn base_cargo_command(&self) -> Command {
@@ -490,12 +483,9 @@ impl Builder {
         // append, so wiping inside it would erase the main apps' icons.
         let app_icons_dir = self.get_target_root().join(APP_ICONS_DIR);
         fs::remove_dir_all(&app_icons_dir).ok();
-        let apps_path = self.get_apps_path();
-        self.build_and_bundle_apps(&apps_path, &self.apps, sign_apps, signing_mode, &app_icons_dir);
-
-        // ------ build and bundle the filesystem flux ------
-        let flux_apps_path = self.get_flux_apps_path();
-        self.build_and_bundle_apps(&flux_apps_path, &self.flux_apps, sign_apps, signing_mode, &app_icons_dir);
+        for (apps_path, apps) in self.staged_app_sets() {
+            self.build_and_bundle_apps(&apps_path, apps, sign_apps, signing_mode, &app_icons_dir);
+        }
 
         // ------ build the kernel ------
         let built_kernel = self
@@ -639,76 +629,110 @@ impl Builder {
 
         println!("App names: {:#?}", app_bins);
 
-        struct AppInfo {
-            app_name: String,
-            elf_path: PathBuf,
-            manifest_path: PathBuf,
-        }
         let mut app_data = vec![];
         for (app_src, app_bin) in apps.iter().zip(app_bins) {
             let app_name = app_src.name().to_string();
-
             println!("Bundling app {}", app_name);
-
-            let out_elf_dir = apps_dir.join(filesystem_app_dir_name(&app_name));
-            fs::create_dir_all(&out_elf_dir).unwrap();
-
-            let elf_path = out_elf_dir.join("app.elf");
-            self.strip_elf(&app_bin, elf_path.as_os_str().to_str().unwrap());
-
-            let mut manifest: Manifest = load_manifest(&app_name);
-            if matches!(app_src, CrateSpec::Local(_)) {
-                let icon_dest = app_icons_dir.join(format!("{}.bin", hex::encode(manifest.app_id)));
-                stage_bundled_icon(&app_name, &icon_dest);
-            }
-            manifest.file_hashes = bundle_file_hashes(&out_elf_dir);
-            let manifest_path = out_elf_dir.join("manifest.json");
-            serde_json::to_writer(
-                fs::File::create(&manifest_path).expect("Couldn't open target manifest file"),
-                &manifest,
-            )
-            .expect("Json serialization failed");
-
-            app_data.push(AppInfo { app_name, elf_path, manifest_path });
+            let bundle_dir = apps_dir.join(filesystem_app_dir_name(&app_name));
+            // Built-ins stage their icon in the shared app-icons dir as <app-id>.bin (the device
+            // reads it from CommonAssets); only local crates ship one, and prebuilt crates none.
+            let icon_dest = matches!(app_src, CrateSpec::Local(_))
+                .then(|| app_icons_dir.join(format!("{}.bin", hex::encode(load_manifest(&app_name).app_id))));
+            app_data.push(self.bundle_app(&app_name, &app_bin, &bundle_dir, icon_dest.as_deref()));
         }
 
         if sign_apps && !matches!(signing_mode, SigningMode::None) {
-            let cosign2_config_path = project_root().join("cosign2.toml");
-            let cosign2 = Cosign2::new(Some(cosign2_config_path))
+            let cosign2 = Cosign2::new(Some(project_root().join("cosign2.toml")))
                 .context("Creating cosign2 command")
                 .expect("Could not create cosign2 command");
-
-            // Crate base args that each app will share.
-            let mut args = vec!["--in-place"];
-            match signing_mode {
-                SigningMode::None => panic!("invalid signing mode"),
-                SigningMode::Developer => args.push("--developer"),
-                SigningMode::Official => {}
-            };
-
-            // Sign app.elf and the manifest separately. fileHashes was taken from the unsigned elf,
-            // so signing the elf doesn't invalidate it and the two signatures are independent.
             for data in &app_data {
-                let app_version = crate_version(&data.app_name).to_string();
-                for path in [&data.elf_path, &data.manifest_path] {
-                    let mut args = args.clone();
-                    let path_str = path.to_str().unwrap();
-                    args.extend_from_slice(&["-i", path_str]);
-                    args.extend_from_slice(&["--binary-version", &app_version]);
-
-                    println!("Signing `{path_str}` with `cosign2`");
-                    let exit_status = cosign2
-                        .sign(args)
-                        .context("Running cosign2 command")
-                        .expect("Could not run cosign2 command");
-                    if !exit_status.success() {
-                        panic!("Failed to sign {}", data.app_name);
-                    }
-                }
+                sign_bundle(&cosign2, signing_mode, data);
             }
         } else {
             println!("[!] App signing was skipped");
         }
+    }
+
+    /// Build one app crate into a signed, sideloadable bundle: a directory named by the app id
+    /// holding `app.elf`, `manifest.json` (with `fileHashes`), and `icon.bin` when the crate ships
+    /// one. Signs with the developer key from `cosign2_config`, or the repo `cosign2.toml` (which is
+    /// not a trusted publisher) when none is given; a hosted build is left unsigned. Returns the
+    /// bundle directory. Whether the app is a Flux child is decided by the device directory it lands
+    /// in, not by anything here.
+    pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> PathBuf {
+        let app_bin = self.build_local_crate(app_name);
+        let app_id_hex = hex::encode(load_manifest(app_name).app_id);
+        let bundle_dir = out.join(&app_id_hex);
+        fs::remove_dir_all(&bundle_dir).ok();
+        // A standalone bundle carries its icon inside as `icon.bin`, where the registry looks for a
+        // third-party app's icon.
+        let icon_dest = bundle_dir.join("icon.bin");
+        let bundled = self.bundle_app(app_name, &app_bin, &bundle_dir, Some(&icon_dest));
+
+        // Hosted (raw host) binaries can't carry a cosign2 header; the simulator execs them by path.
+        if self.target.is_some() {
+            let cosign2_config = cosign2_config.unwrap_or_else(|| {
+                println!(
+                    "[!] No --cosign2 key given: signing with the repo cosign2.toml, which is not a \
+                     trusted publisher. The bundle uploads but will not launch until a matching \
+                     publisher certificate is installed on the device."
+                );
+                project_root().join("cosign2.toml")
+            });
+            let cosign2 = Cosign2::new(Some(cosign2_config))
+                .context("Creating cosign2 command")
+                .expect("Could not create cosign2 command");
+            sign_bundle(&cosign2, SigningMode::Developer, &bundled);
+        }
+
+        bundle_dir
+    }
+
+    /// Bundle one already-built app into `bundle_dir`: strip its ELF to `app.elf`, stage `icon.bin`
+    /// to `icon_dest` when given, and write `manifest.json` with `fileHashes`. The caller
+    /// wipes/creates the parent as needed; `icon_dest` is where the icon lands (inside the bundle
+    /// for standalone bundles, the shared app-icons dir for built-ins) or `None` to stage no icon.
+    fn bundle_app(
+        &self,
+        app_name: &str,
+        app_bin: &str,
+        bundle_dir: &Path,
+        icon_dest: Option<&Path>,
+    ) -> BundledApp {
+        fs::create_dir_all(bundle_dir)
+            .unwrap_or_else(|e| panic!("Could not create {}: {e}", bundle_dir.display()));
+        let elf_path = bundle_dir.join("app.elf");
+        self.strip_elf(app_bin, elf_path.to_str().unwrap());
+        if let Some(icon_dest) = icon_dest {
+            stage_bundled_icon(app_name, icon_dest);
+        }
+        // fileHashes must be taken after the icon is staged, so an in-bundle icon.bin is covered.
+        let mut manifest: Manifest = load_manifest(app_name);
+        manifest.file_hashes = bundle_file_hashes(bundle_dir);
+        let manifest_path = bundle_dir.join("manifest.json");
+        serde_json::to_writer(
+            fs::File::create(&manifest_path).expect("Couldn't open target manifest file"),
+            &manifest,
+        )
+        .expect("Json serialization failed");
+        BundledApp { app_name: app_name.to_string(), elf_path, manifest_path }
+    }
+
+    /// After a hosted rebuild, re-stage an app that already has a bundle under the hosted apps tree
+    /// so the simulator (which execs from the staged bundle) picks up the new ELF. A no-op for a
+    /// crate with no staged bundle, e.g. a service.
+    pub(crate) fn restage_hosted_app(&self, crate_name: &str, app_bin: &str) {
+        let dir_name = filesystem_app_dir_name(crate_name);
+        let Some(bundle_dir) = self
+            .staged_app_sets()
+            .into_iter()
+            .map(|(apps_path, _)| apps_path.join(dir_name))
+            .find(|dir| dir.join("app.elf").exists())
+        else {
+            return;
+        };
+        println!("Re-staging app bundle at {}", bundle_dir.display());
+        self.bundle_app(crate_name, app_bin, &bundle_dir, None);
     }
 
     fn update_nameserver_system_manifests(&self) {
@@ -1075,6 +1099,37 @@ pub fn load_manifest(crate_name: &str) -> Manifest {
         "fileHashes is generated by the build; remove it from {crate_name}'s manifest.toml"
     );
     manifest
+}
+
+/// One app bundled and ready to sign: the paths cosign2 signs in place.
+struct BundledApp {
+    app_name: String,
+    elf_path: PathBuf,
+    manifest_path: PathBuf,
+}
+
+/// Sign a bundle's `app.elf` and `manifest.json` in place with `cosign2`. The two are signed
+/// separately: `fileHashes` was taken from the unsigned elf, so signing the elf does not
+/// invalidate it and the signatures are independent.
+fn sign_bundle(cosign2: &Cosign2, mode: SigningMode, bundled: &BundledApp) {
+    let mut base = vec!["--in-place"];
+    match mode {
+        SigningMode::None => panic!("invalid signing mode"),
+        SigningMode::Developer => base.push("--developer"),
+        SigningMode::Official => {}
+    }
+    let app_version = crate_version(&bundled.app_name).to_string();
+    for path in [&bundled.elf_path, &bundled.manifest_path] {
+        let path_str = path.to_str().unwrap();
+        let mut args = base.clone();
+        args.extend_from_slice(&["-i", path_str, "--binary-version", app_version.as_str()]);
+        println!("Signing `{path_str}` with `cosign2`");
+        let exit_status =
+            cosign2.sign(args).context("Running cosign2 command").expect("Could not run cosign2 command");
+        if !exit_status.success() {
+            panic!("Failed to sign {}", bundled.app_name);
+        }
+    }
 }
 
 /// Convert a built-in app's source icon into `dest` as a raw `icon.bin`. The source is

@@ -1004,6 +1004,7 @@ mod tests {
             cfg: None,
             permission_group: permission_group.map(str::to_owned),
             required_signature,
+            required_type: None,
             approval,
         }
     }

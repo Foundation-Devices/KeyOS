@@ -26,11 +26,11 @@ pub struct Args {
     /// Do not run `cargo build -p passport-drive --release` before testing.
     #[arg(long)]
     skip_build_passport_drive: bool,
-    /// Legacy launcher tap coordinate for the Ethereum tile.
-    #[arg(long, value_parser = parse_tap_point, default_value = "356,210")]
-    ethereum_tap: TapPoint,
-    /// Legacy launcher tap coordinate for the Solana tile.
+    /// Legacy launcher tap coordinate for the Ethereum tile (left).
     #[arg(long, value_parser = parse_tap_point, default_value = "124,210")]
+    ethereum_tap: TapPoint,
+    /// Legacy launcher tap coordinate for the Solana tile (right).
+    #[arg(long, value_parser = parse_tap_point, default_value = "356,210")]
     solana_tap: TapPoint,
 }
 
@@ -55,7 +55,17 @@ struct TestCase {
 
 enum Expected {
     SuccessLen(usize),
-    Challenge { len: usize, fixed_value: &'static str },
+    /// GET_APP_AND_VERSION: SW=9000 and a `format(1) | name_len(1) | name | ...`
+    /// body whose name matches. The Flux child answers this itself: its SDK's
+    /// get_version reads the name and version from the generated os_registry tag,
+    /// so a host session layer (e.g. Rabby's DMK) accepts the app.
+    AppAndVersion {
+        name: &'static str,
+    },
+    Challenge {
+        len: usize,
+        fixed_value: &'static str,
+    },
     NonSuccess,
 }
 
@@ -189,10 +199,10 @@ fn preflight(passport_drive: &Path) -> Result<()> {
     println!("Checking Flux test preconditions...");
 
     let ports = run_passport_drive(passport_drive, &["list-ports"])?;
-    if !ports.contains("VID:2c97 PID:0007") {
+    if !ports.contains("VID:2c97 PID:7011") {
         bail!(
             "Flux tests must start from the Legacy Mode launcher.\n\
-             Expected Passport Prime Flux/legacy USB identity VID:2c97 PID:0007.\n\
+             Expected Passport Prime Flux/legacy USB identity VID:2c97 PID:7011.\n\
              Detected USB devices:\n{}",
             ports.trim_end()
         );
@@ -343,6 +353,20 @@ fn validate(case: &TestCase, rapdu: &Rapdu) -> Result<()> {
                 bail!("{} expected {} bytes, got {}", case.id, len, rapdu.bytes.len());
             }
         }
+        Expected::AppAndVersion { name } => {
+            if rapdu.sw() != "9000" {
+                bail!("{} expected SW=9000, got SW={}", case.id, rapdu.sw());
+            }
+            let mut prefix = vec![0x01u8, name.len() as u8];
+            prefix.extend_from_slice(name.as_bytes());
+            if !rapdu.payload().starts_with(&prefix) {
+                bail!(
+                    "{} expected GET_APP_AND_VERSION for {name:?}, got payload {}",
+                    case.id,
+                    rapdu.payload_hex()
+                );
+            }
+        }
         Expected::Challenge { len, fixed_value } => {
             if rapdu.sw() != "9000" {
                 bail!("{} expected SW=9000, got SW={}", case.id, rapdu.sw());
@@ -369,9 +393,9 @@ impl Rapdu {
         format!("{:02x}{:02x}", self.bytes[self.bytes.len() - 2], self.bytes[self.bytes.len() - 1])
     }
 
-    fn payload_hex(&self) -> String {
-        self.bytes[..self.bytes.len() - 2].iter().map(|b| format!("{b:02x}")).collect()
-    }
+    fn payload(&self) -> &[u8] { &self.bytes[..self.bytes.len() - 2] }
+
+    fn payload_hex(&self) -> String { self.payload().iter().map(|b| format!("{b:02x}")).collect() }
 }
 
 impl FluxApp {
@@ -402,7 +426,11 @@ impl FluxApp {
     fn tests(self) -> &'static [TestCase] {
         match self {
             FluxApp::Ethereum => &[
-                TestCase { id: "ETH-APP-01", apdu: "b001000000", expected: Expected::SuccessLen(7) },
+                TestCase {
+                    id: "ETH-APP-01",
+                    apdu: "b001000000",
+                    expected: Expected::AppAndVersion { name: "Ethereum" },
+                },
                 TestCase { id: "ETH-CONFIG-01", apdu: "e006000000", expected: Expected::SuccessLen(6) },
                 TestCase {
                     id: "ETH-RNG-01",
@@ -422,8 +450,14 @@ impl FluxApp {
                 TestCase { id: "ETH-NEG-01", apdu: "0006000000", expected: Expected::NonSuccess },
             ],
             FluxApp::Solana => &[
-                TestCase { id: "SOL-APP-01", apdu: "b001000000", expected: Expected::SuccessLen(19) },
-                TestCase { id: "SOL-CONFIG-01", apdu: "e004000000", expected: Expected::SuccessLen(7) },
+                TestCase {
+                    id: "SOL-APP-01",
+                    apdu: "b001000000",
+                    expected: Expected::AppAndVersion { name: "Solana" },
+                },
+                // 5 base config bytes (blind-sign, pubkey-display, major, minor, patch)
+                // plus 2 for the Transaction Check settings the newer app reports.
+                TestCase { id: "SOL-CONFIG-01", apdu: "e004000000", expected: Expected::SuccessLen(9) },
                 TestCase {
                     id: "SOL-RNG-01",
                     apdu: "e020000000",

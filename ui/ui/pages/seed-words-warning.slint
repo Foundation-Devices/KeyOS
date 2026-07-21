@@ -1,0 +1,122 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Size, Importance } from "../theme.slint";
+import { NavHeader } from "../widgets/app-header.slint";
+import { Button } from "../widgets/button.slint";
+import { HeadingMd } from "../widgets/txt.slint";
+import { CheckboxGroup } from "../widgets/checkbox-group.slint";
+import {
+    GlowShieldPage,
+    ShieldSection,
+    ShieldContent,
+    OverlayImage,
+} from "../widgets/shield-page.slint";
+import { TR } from "../i18n/i18n.slint";
+
+/// The gate before View Seed: three acknowledgement checkboxes. Shared by
+/// settings and Legacy; `view-seed` fires once all three are checked and the
+/// user continues, `back` on header back. Resolves its own strings under
+/// `tr-id-prefix`, so each caller passes only its catalog namespace.
+export component SeedWordsWarning inherits GlowShieldPage {
+    /// Catalog key prefix for this screen's strings, e.g. "accessSeedWords.".
+    in property <string> tr-id-prefix;
+    callback view-seed();
+    callback back();
+
+    private property <bool> step-1-checked: false;
+    private property <bool> step-2-checked: false;
+    private property <bool> step-3-checked: false;
+    private property <bool> can-continue: step-1-checked && step-2-checked && step-3-checked;
+
+    NavHeader {
+        y: 0;
+        clicked => {
+            back();
+        }
+    }
+
+    ShieldSection {
+        ShieldContent {
+            spacing: Size.sz5;
+
+            HeadingMd {
+                vertical-stretch: 0;
+                text: TR.lookup(root.tr-id-prefix + "title");
+                horizontal-alignment: center;
+            }
+
+            VerticalLayout {
+                spacing: Size.sz4;
+
+                CheckboxGroup {
+                    model: [
+                        {
+                            name: TR.lookup(root.tr-id-prefix + "contentStep1"),
+                            checked: root.step-1-checked,
+                            enabled: true
+                        }
+                    ];
+                    label-right: true;
+                    disabled-labels-dimmed: true;
+                    horizontal-spacing: Size.sz4;
+                    changed => {
+                        root.step-1-checked = !root.step-1-checked;
+                        if (!root.step-1-checked) {
+                            root.step-2-checked = false;
+                            root.step-3-checked = false;
+                        }
+                    }
+                }
+
+                CheckboxGroup {
+                    model: [
+                        {
+                            name: TR.lookup(root.tr-id-prefix + "contentStep2"),
+                            checked: root.step-2-checked,
+                            enabled: root.step-1-checked
+                        }
+                    ];
+                    label-right: true;
+                    disabled-labels-dimmed: true;
+                    horizontal-spacing: Size.sz4;
+                    changed => {
+                        root.step-2-checked = !root.step-2-checked;
+                        if (!root.step-2-checked) {
+                            root.step-3-checked = false;
+                        }
+                    }
+                }
+
+                CheckboxGroup {
+                    model: [
+                        {
+                            name: TR.lookup(root.tr-id-prefix + "contentStep3"),
+                            checked: root.step-3-checked,
+                            enabled: root.step-2-checked
+                        }
+                    ];
+                    label-right: true;
+                    disabled-labels-dimmed: true;
+                    horizontal-spacing: Size.sz4;
+                    changed => {
+                        root.step-3-checked = !root.step-3-checked;
+                    }
+                }
+            }
+        }
+
+        Button {
+            label: TR.lookup(root.tr-id-prefix + "viewSeedWords");
+            importance: Importance.primary;
+            enabled: root.can-continue;
+            clicked => {
+                view-seed();
+            }
+        }
+    }
+
+    OverlayImage {
+        image: "images/three-d/master-key";
+    }
+}

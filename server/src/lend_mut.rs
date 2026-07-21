@@ -88,6 +88,12 @@ pub fn handle_lend_mut<M: LendMut, S: LendMutHandler<M>>(
 
 /// Send a [`LendMut`] message.
 pub fn lend_mut<M: LendMut>(cid: xous::CID, msg: M) -> M::Response {
+    try_lend_mut(cid, msg).expect("lend_mut: send_message failed")
+}
+
+/// Send a [`LendMut`] message, returning the transport error instead of panicking
+/// when it cannot be delivered (e.g. the server is gone).
+pub fn try_lend_mut<M: LendMut>(cid: xous::CID, msg: M) -> Result<M::Response, xous::Error> {
     let msg: SimpleMemoryMessage = msg.into();
     let result = xous::send_message(
         cid,
@@ -97,13 +103,13 @@ pub fn lend_mut<M: LendMut>(cid: xous::CID, msg: M) -> M::Response {
             offset: xous::MemoryAddress::new(msg.arg1),
             valid: xous::MemoryAddress::new(msg.arg2),
         }),
-    );
+    )?;
     match result {
-        Ok(xous::Result::MemoryReturned(_range, arg1, arg2)) => M::Response::from_usize_pair(
+        xous::Result::MemoryReturned(_range, arg1, arg2) => Ok(M::Response::from_usize_pair(
             arg1.map(|v| v.get()).unwrap_or_default(),
             arg2.map(|v| v.get()).unwrap_or_default(),
-        ),
-        _ => panic!("Unexpected return from send_message: {result:?}"),
+        )),
+        other => panic!("Unexpected return from send_message: {other:?}"),
     }
 }
 

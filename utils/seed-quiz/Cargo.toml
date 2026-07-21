@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "seed-quiz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bip39 = "2.2"
+rand = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

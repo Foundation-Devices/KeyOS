@@ -190,7 +190,12 @@ impl HidInEndpoint {
     fn write_apdu(&mut self, channel_id: u16, apdu: &[u8]) {
         match hid::fragment(channel_id, apdu) {
             Ok(reports) => {
-                log::trace!("Rapdu: fragmented {} bytes into {} HID reports", apdu.len(), reports.len());
+                log::debug!(
+                    "Response APDU out ({} bytes) as {} HID reports: {:02x?}",
+                    apdu.len(),
+                    reports.len(),
+                    apdu
+                );
                 for (i, report) in reports.iter().enumerate() {
                     self.buffer.as_slice_mut::<u8>()[..hid::REPORT_SIZE].copy_from_slice(report);
                     match self.endpoint.write_buf(*self.buffer, hid::REPORT_SIZE) {
@@ -262,7 +267,7 @@ impl ArchiveHandler<DeliverHidApdu> for LegacyHidServer {
             return;
         };
         // Inbound APDUs only ever arrive while the host is talking to the
-        // Legacy USB identity (0x2C97:0x0007), and that identity is only
+        // Legacy USB identity (0x2C97:0x7011), and that identity is only
         // advertised while gui-app-emu-flux is on screen — so by the time
         // an APDU lands here we always have a subscriber. With no
         // subscribers the APDU is unreachable and we just drop it.
@@ -300,8 +305,10 @@ impl BlockingScalarHandler<SetLegacyMode> for LegacyHidServer {
         {
             let mut usb_api = UsbDeviceEmulation::default();
             if _active {
-                log::info!("Legacy Mode: switching USB identity to 0x2c97:0x0007");
-                usb_api.set_custom_vid_pid(Some(0x2c97), Some(0x0007));
+                // App-mode PID: hosts read the model from the high byte (0x70);
+                // a bare 0x0007 reads as the bootloader identity they won't drive.
+                log::info!("Legacy Mode: switching USB identity to 0x2c97:0x7011");
+                usb_api.set_custom_vid_pid(Some(0x2c97), Some(0x7011));
             } else {
                 log::info!("Legacy Mode: reverting USB identity to boot default");
                 usb_api.set_custom_vid_pid(None, None);

@@ -1,0 +1,76 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Palette, Size } from "../theme.slint";
+import { NavHeader } from "../widgets/app-header.slint";
+import { Button } from "../widgets/button.slint";
+import { ButtonSection } from "../widgets/base-page.slint";
+import { SeedWords } from "../widgets/seed-words.slint";
+import { QrPages } from "../widgets/qr-pages.slint";
+
+/// Localized strings for the View Seed screen. Passed in because settings and
+/// Legacy store them under different catalog keys.
+export struct ViewSeedStrings {
+    title: string,
+    standard-qr-header: string,
+    compact-qr-header: string,
+    done: string,
+}
+
+/// The View Seed screen: the mnemonic words with a header toggle to the two
+/// SeedQR pages (standard and compact). Shared by settings and the Legacy app.
+export component ViewSeed inherits VerticalLayout {
+    in property <[string]> words;
+    in property <image> standard-qr;
+    in property <image> compact-qr;
+    in property <ViewSeedStrings> strings;
+
+    /// Header back or Done tapped.
+    callback back();
+
+    private property <bool> qr-view: false;
+
+    NavHeader {
+        title: strings.title;
+        left-icon: "chevron-left";
+        right-icon: qr-view ? "list" : "scan-qr";
+        clicked => {
+            back();
+        }
+        right-clicked => {
+            qr-view = !qr-view;
+        }
+    }
+
+    VerticalLayout {
+        padding-top: qr-view ? Size.sz2 : Size.sz16;
+        padding-bottom: Size.sz4;
+
+        if !qr-view: SeedWords {
+            words: root.words;
+        }
+
+        if qr-view: QrPages {
+            model: [
+                {
+                    code: standard-qr,
+                    header: strings.standard-qr-header,
+                },
+                {
+                    code: compact-qr,
+                    header: strings.compact-qr-header,
+                },
+            ];
+        }
+
+        ButtonSection {
+            padding: Size.sz6;
+            Button {
+                label: strings.done;
+                clicked => {
+                    back();
+                }
+            }
+        }
+    }
+}

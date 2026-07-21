@@ -12,6 +12,7 @@ import {
     TimerLoader,
     HeadingMd,
     TextSm,
+    ConfirmationModal,
 } from "@ui/widgets.slint";
 
 export component AppWindow inherits BaseWindow {
@@ -68,6 +69,28 @@ export component AppWindow inherits BaseWindow {
         }
 
         TouchArea { }
+    }
+
+    // Centered destructive confirmation for deleting Legacy (matches the Figma pop-up): copper
+    // alert icon, red Delete, Cancel above. Removal runs on confirm; the modal blocks the grid.
+    if State.delete-legacy-active: ConfirmationModal {
+        width: parent.width;
+        height: parent.height;
+        z: 1000;
+        icon: "alert";
+        icon-color: Palette.content-lightcopper-brand;
+        critical: true;
+        title: TR2.lookup(TrId.RemoveLegacyHeader);
+        text: TR2.lookup(TrId.RemoveLegacyContent);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDelete);
+        cancel-clicked => {
+            State.delete-legacy-active = false;
+            State.pending-delete-item-id = "";
+        }
+        confirm-clicked => {
+            LauncherCallbacks.delete-legacy-confirmed();
+        }
     }
 }
 

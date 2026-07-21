@@ -14,7 +14,7 @@ pub struct TestArgs {
 
 #[derive(Subcommand)]
 enum TestCommand {
-    /// Run Flux Ledger-HID APDU smoke tests through passport-drive
+    /// Run Flux Legacy-HID APDU smoke tests through passport-drive
     Flux(flux::Args),
 }
 

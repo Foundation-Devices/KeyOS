@@ -6,7 +6,7 @@ use std::time::Duration;
 use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 use xous::DropDeallocate;
 
-use crate::messages::{RecvSeph, SendSeph, SvcCall, SyscallBuffer};
+use crate::messages::{RecvSeph, SendSeph, SyscallBuffer};
 
 pub const SERVER_NAME: &str = "os/gui-app-emu-flux";
 const PAGE_SIZE: usize = 4096;
@@ -39,25 +39,23 @@ impl<P: CheckedPermissions> FluxApi<P> {
         Some(Self { conn: CheckedConn::try_connect_with_timeout(timeout)? })
     }
 
-    pub fn svc_call(&self, syscall_id: u32, parameters: *mut core::ffi::c_void) -> Result<u32, xous::Error>
-    where
-        P: MessageAllowed<SvcCall>,
-    {
-        self.conn.try_send_blocking_scalar(SvcCall(syscall_id, parameters as u32))
-    }
-
     pub fn io_seph_send(&self, data: &[u8])
     where
         P: MessageAllowed<SendSeph>,
     {
-        self.conn.send_archive(SendSeph(data.to_vec()));
+        if let Err(e) = self.conn.try_send_archive(SendSeph(data.to_vec())) {
+            exit_flux_host_gone("io_seph_send", e);
+        }
     }
 
     pub fn io_seph_recv(&self, max_len: usize) -> Option<Vec<u8>>
     where
         P: MessageAllowed<RecvSeph>,
     {
-        self.conn.send_blocking_archive(RecvSeph(max_len))
+        match self.conn.try_send_blocking_archive(RecvSeph(max_len)) {
+            Ok(response) => response,
+            Err(e) => exit_flux_host_gone("io_seph_recv", e),
+        }
     }
 
     /// Send a syscall buffer message (LendMut) for operations that need shared memory.
@@ -92,7 +90,12 @@ impl<P: CheckedPermissions> FluxApi<P> {
         shared[..copy_len].copy_from_slice(&data[..copy_len]);
 
         let msg = SyscallBuffer { buf: *mem, syscall_id, arg };
-        let result = self.conn.lend_mut(msg);
+        // Like the SEPH paths above, exit cleanly rather than panic if the emulator
+        // host is gone (e.g. it was reaped) when a buffer syscall lands.
+        let result = match self.conn.try_lend_mut(msg) {
+            Ok(r) => r,
+            Err(e) => exit_flux_host_gone("syscall_buffer", e),
+        };
 
         // Copy output data back from the shared buffer
         let shared = mem.as_slice::<u8>();
@@ -100,4 +103,15 @@ impl<P: CheckedPermissions> FluxApi<P> {
 
         result
     }
+}
+
+/// Exit the Flux child cleanly when its emulator host (`os/gui-app-emu-flux`) is gone.
+///
+/// A child only exists to be driven by the emulator and blocks in `io_seph_recv`. When the
+/// host disappears the child can't be terminated by the emulator (app-manager owns it, so
+/// `terminate_pid` is denied), so it self-exits. A clean `exit(0)` avoids the spurious "app
+/// crashed" dialog that panicking on `ServerNotFound` would otherwise trigger.
+fn exit_flux_host_gone(op: &str, err: xous::Error) -> ! {
+    log::info!("Flux emulator host unavailable during {op} ({err:?}); exiting Flux app");
+    xous::terminate_process(0);
 }

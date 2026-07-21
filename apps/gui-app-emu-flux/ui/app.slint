@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Images, Utils, CurrentTheme } from "@ui/theme.slint";
+import { BaseWindow } from "@ui/widgets.slint";
+import { TR } from "@ui/i18n/i18n.slint";
+import { Router } from "./gen/router.slint";
+import {
+    Callbacks,
+    Global,
+    AppEntryValue,
+    SettingsEntryValue,
+} from "globals.slint";
+
+export { Utils, Images, TR, CurrentTheme }
+export { Callbacks, Global, AppEntryValue, SettingsEntryValue }
+export * from "gen/exports.slint";
+
+export component AppWindow inherits BaseWindow {
+    private property <bool> _is-dark: CurrentTheme.is-dark;
+    changed _is-dark => {
+        Callbacks.theme-changed();
+    }
+    Router { }
+}

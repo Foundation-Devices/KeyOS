@@ -1,116 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import {
-    Button,
-    ButtonSection,
-    GlowShieldPage,
-    HeadingMd,
-    OverlayImage,
-    ShieldContent,
-    ShieldSection,
-    TextSm,
-    CheckboxGroup,
-} from "@ui/widgets.slint";
-import { Importance, Palette, Size } from "@ui/theme.slint";
-
+import { SeedWordsWarning } from "@ui/pages.slint";
 import { SeedWordsWarningProps } from "./props.slint";
-import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
-import { TR2, TrId } from "../../../../gen/tr.slint";
 
-export component SeedWordsWarningPage inherits GlowShieldPage {
+export component SeedWordsWarningPage inherits SeedWordsWarning {
     in property <SeedWordsWarningProps> props;
-    private property <bool> step-1-checked: false;
-    private property <bool> step-2-checked: false;
-    private property <bool> step-3-checked: false;
-    private property <bool> can-continue: step-1-checked && step-2-checked && step-3-checked;
 
-    SettingsNavHeader {
-        y: 0;
+    tr-id-prefix: "accessSeedWords.";
+
+    // Replace so this gate leaves the history stack: "Done" on the seed
+    // words returns to the backup menu, not back into this warning.
+    view-seed => {
+        Navigate.view-seed-words({ replace: true });
     }
-
-    ShieldSection {
-        ShieldContent {
-            spacing: Size.sz5;
-
-            HeadingMd {
-                vertical-stretch: 0;
-                text: TR2.lookup(TrId.AccessSeedWordsTitle);
-                horizontal-alignment: center;
-            }
-
-            VerticalLayout {
-                spacing: Size.sz4;
-
-                CheckboxGroup {
-                    model: [
-                        {
-                            name: TR2.lookup(TrId.AccessSeedWordsContentStep1),
-                            checked: root.step-1-checked,
-                            enabled: true
-                        }
-                    ];
-                    label-right: true;
-                    disabled-labels-dimmed: true;
-                    horizontal-spacing: Size.sz4;
-                    changed => {
-                        root.step-1-checked = !root.step-1-checked;
-                        if (!root.step-1-checked) {
-                            root.step-2-checked = false;
-                            root.step-3-checked = false;
-                        }
-                    }
-                }
-
-                CheckboxGroup {
-                    model: [
-                        {
-                            name: TR2.lookup(TrId.AccessSeedWordsContentStep2),
-                            checked: root.step-2-checked,
-                            enabled: root.step-1-checked
-                        }
-                    ];
-                    label-right: true;
-                    disabled-labels-dimmed: true;
-                    horizontal-spacing: Size.sz4;
-                    changed => {
-                        root.step-2-checked = !root.step-2-checked;
-                        if (!root.step-2-checked) {
-                            root.step-3-checked = false;
-                        }
-                    }
-                }
-
-                CheckboxGroup {
-                    model: [
-                        {
-                            name: TR2.lookup(TrId.AccessSeedWordsContentStep3),
-                            checked: root.step-3-checked,
-                            enabled: root.step-2-checked
-                        }
-                    ];
-                    label-right: true;
-                    disabled-labels-dimmed: true;
-                    horizontal-spacing: Size.sz4;
-                    changed => {
-                        root.step-3-checked = !root.step-3-checked;
-                    }
-                }
-            }
-        }
-
-        Button {
-            label: TR2.lookup(TrId.AccessSeedWordsViewSeedWords);
-            importance: Importance.primary;
-            enabled: root.can-continue;
-            clicked => {
-                Navigate.view-seed-words({ });
-            }
-        }
-    }
-
-    OverlayImage {
-        image: "images/three-d/master-key";
+    back => {
+        Navigate.backward();
     }
 }

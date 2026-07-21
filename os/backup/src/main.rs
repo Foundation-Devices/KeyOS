@@ -155,7 +155,7 @@ impl BackupServer {
             Some(key) => Ok(key),
             None => {
                 let app_seed = self.security.app_seed()?;
-                Ok(self.backup_key.insert(BackupKey::from_app_seed(app_seed)).clone())
+                Ok(self.backup_key.insert(BackupKey::from_app_seed(*app_seed.as_bytes())).clone())
             }
         }
     }

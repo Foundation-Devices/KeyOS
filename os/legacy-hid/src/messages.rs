@@ -9,7 +9,7 @@ pub struct WriteHidApdu {
     pub data: Vec<u8>,
 }
 
-/// Toggle the Legacy Mode USB identity (0x2C97:0x0007) and trigger a
+/// Toggle the Legacy Mode USB identity (0x2C97:0x7011) and trigger a
 /// host-visible re-enumeration. Blocking so the caller knows when the
 /// controller reset has completed.
 #[derive(Debug, server::Message)]

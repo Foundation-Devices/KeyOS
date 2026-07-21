@@ -124,7 +124,15 @@ where
             dirty: !restored,
             _marker: PhantomData::default(),
         };
-        state.save();
+        // The initial save is the only persist that can run before a caller has
+        // confirmed its fs location is mounted (every explicit save and guard-Drop runs
+        // during active operation, when the location is up). Degrade gracefully here so
+        // constructing against a not-yet-ready or unformatted AppData location logs and
+        // continues instead of crashing; a genuine persistence failure still surfaces as
+        // a panic on the next explicit save.
+        if let Err(e) = state.try_save() {
+            log::warn!("FileBacked: initial save failed (fs not ready?), continuing: {e}");
+        }
         (state, restored)
     }
 
@@ -186,9 +194,13 @@ where
         Ok(())
     }
 
+    /// Persist to disk, panicking on failure. These writes go to local AppData and
+    /// can only fail on a genuine bug or unrecoverable condition, not a transient
+    /// error worth threading through every caller (CLAUDE.md, panic over
+    /// fallibility). Callers that must handle a failure use `try_save` directly.
     pub fn save(&mut self) {
         if let Err(e) = self.try_save() {
-            log::error!("Failed to save file: {}", e);
+            panic!("FileBacked: failed to persist to local fs: {e}");
         }
     }
 

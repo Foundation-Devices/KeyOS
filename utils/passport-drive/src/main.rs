@@ -200,12 +200,16 @@ enum CliCommand {
     LoadApp {
         /// Directory containing app.elf, manifest.json, and optional icon.bin/resources
         app_path: PathBuf,
+        /// Upload as a Flux child app (lands in keyos/apps/gui-app-emu-flux/sideloaded-apps
+        /// and is launched by the Flux emulator instead of the system launcher)
+        #[arg(long)]
+        flux: bool,
     },
     /// Start MCP server mode (JSON-RPC over stdio for AI integration)
     Mcp,
     /// Send one ISO 7816 APDU over HID and print the RAPDU
     SendApdu {
-        /// Hex-encoded APDU bytes, without Ledger HID framing
+        /// Hex-encoded APDU bytes, without Legacy HID framing
         apdu_hex: String,
         /// HID read timeout in milliseconds
         #[arg(long, default_value = "10000")]
@@ -356,7 +360,7 @@ fn do_send_apdu(apdu_hex: &str, timeout_ms: i32) -> Result<()> {
 
     let (device, mode) = hid::open_hid()?;
     let mode_str = match mode {
-        hid::HidMode::Ledger => "Ledger",
+        hid::HidMode::Legacy => "Legacy",
         hid::HidMode::Fido => "CTAP/FIDO",
     };
     eprintln!("Opened HID device in {mode_str} mode");
@@ -383,7 +387,7 @@ fn do_list_ports() -> Result<()> {
         let pid = desc.product_id();
         let label = match (vid, pid) {
             (0x1307, 0x0165) => "Passport Prime",
-            (0x2c97, 0x0007) => "Passport Prime (Flux/legacy)",
+            (0x2c97, 0x7011) => "Passport Prime (Flux/legacy)",
             (0x03eb, 0x6124) => "SAM-BA bootloader",
             _ => continue,
         };
@@ -702,12 +706,14 @@ fn main() -> Result<()> {
         }
         CliCommand::GetVersion => do_get_version(&client)?,
         CliCommand::GetProcessList => do_get_process_list(&client)?,
-        CliCommand::LoadApp { app_path } => {
+        CliCommand::LoadApp { app_path, flux } => {
+            let kind = if flux { load_app::SideloadKind::Flux } else { load_app::SideloadKind::Standard };
             eprintln!("Uploading app from {}...", app_path.display());
-            let report = load_app::load_app(&client, &app_path)?;
+            let report = load_app::load_app(&client, &app_path, kind)?;
             eprintln!(
-                "Loaded {} into keyos/sideloaded-apps/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
+                "Loaded {} into {}/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
                 report.app_id,
+                kind.device_dir(),
                 report.app_id,
                 report.elf_bytes,
                 report.manifest_bytes,
