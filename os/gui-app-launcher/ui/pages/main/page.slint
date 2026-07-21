@@ -356,7 +356,7 @@ component LauncherCollectionItem inherits Rectangle {
             if !root.is-dragging && State.loading-item-id == root.item.id: TimerLoader {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                size: 28px;
+                size: 56px;
                 loader-color: CurrentTheme.is-dark ? #54cad8aa : #0ea6b3aa;
                 active-color: Palette.content-brand;
             }
