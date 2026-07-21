@@ -3,63 +3,55 @@
 
 //! MCP (Model Context Protocol) server mode for passport-drive.
 //!
-//! Speaks MCP JSON-RPC 2.0 over stdin/stdout.
+//! Speaks MCP over stdio or Streamable HTTP via the rmcp SDK.
 //! Provides tools for AI integration (Claude Code).
 
 use std::collections::VecDeque;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64::Engine;
 use hidapi::HidDevice;
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::transport::stdio;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt};
 use rusb::UsbContext as _;
-use serde_json::{json, Value};
+use serde::Deserialize;
+use tokio::net::TcpListener;
 use usb_debug_protocol::{
     Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient, INSTALL_CERTIFICATE_BYTES_MAX,
 };
 
-use crate::{
-    launch_app_failure_message, launch_app_transport_error_message, LOG_TERMINATOR, SCREEN_HEIGHT,
-    SCREEN_WIDTH,
-};
+use crate::{launch_app_failure_message, launch_app_transport_error_message, LOG_TERMINATOR};
 
 const MAX_LOG_LINES: usize = 2000;
 const TAP_HOLD_MS: u16 = 50;
+const APDU_TIMEOUT_MS: i32 = 10_000;
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-// Log drain helper
+const INSTRUCTIONS: &str = "\
+Drives a Passport Prime over USB. Call connect first; most tools fail without it.
 
-/// Drain pending log frames from the USB transport and parse 0x1E-terminated
-/// records into the MCP state's log buffer.
-fn drain_logs(state: &mut McpState) {
-    let transport = match state.device.as_ref() {
-        Some(t) => t,
-        None => return,
-    };
+The server may be configured to confine file access to a base directory, usually the workspace root.
+Where it is, a path that resolves outside that directory is rejected, symlinks followed. Where it is
+not, any path the server process can read works. Relative paths resolve against that base directory
+where one is set, so a path relative to it is always safe to pass.";
 
-    while let Ok(data) = transport.read_logs(Duration::ZERO) {
-        for &b in &data {
-            if b == LOG_TERMINATOR {
-                let text = String::from_utf8_lossy(&state.record_buf).trim_end().to_string();
-                state.record_buf.clear();
-                if text.is_empty() {
-                    continue;
-                }
-                state.log_buffer.push_back(text);
-                while state.log_buffer.len() > MAX_LOG_LINES {
-                    state.log_buffer.pop_front();
-                }
-            } else {
-                state.record_buf.push(b);
-                if state.record_buf.len() > 16384 {
-                    state.record_buf.drain(..state.record_buf.len() - 4096);
-                }
-            }
-        }
-    }
-}
+/// One process drives one physical device, so the state is process-wide.
+static STATE: LazyLock<Mutex<McpState>> = LazyLock::new(|| Mutex::new(McpState::new()));
+
+/// Recovers a poisoned lock, or else one panicking tool call bricks every later one.
+fn state() -> MutexGuard<'static, McpState> { STATE.lock().unwrap_or_else(|e| e.into_inner()) }
 
 // MCP state
 
@@ -72,6 +64,7 @@ struct McpState {
     hid_device: Option<HidDevice>,
 }
 
+#[derive(Clone)]
 struct FlashParams {
     instance: u32,
     ioset: u32,
@@ -99,399 +92,199 @@ impl McpState {
     fn require_sambuca(&mut self) -> Result<&mut sambuca::Sambuca, String> {
         self.sambuca.as_mut().ok_or_else(|| "SAM-BA not connected. Call samba_connect first.".to_string())
     }
-}
 
-// Tool definitions
+    fn require_flash_params(&self) -> Result<FlashParams, String> {
+        self.flash_params
+            .clone()
+            .ok_or_else(|| "Flash not initialized. Call samba_init_flash first.".to_string())
+    }
 
-fn tool_definitions() -> Value {
-    json!([
-        {
-            "name": "list_ports",
-            "description": "List connected Passport Prime USB devices (normal, Flux/legacy, and SAM-BA modes).",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "connect",
-            "description": "Connect to the Passport Prime device over USB vendor interface. Auto-detects the device.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "disconnect",
-            "description": "Disconnect from the device.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "get_logs",
-            "description": "Get recent log lines streamed from the device.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "max_lines": { "type": "number", "description": "Max lines to return (default 100)" },
-                    "filter": { "type": "string", "description": "Optional substring filter" }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "clear_logs",
-            "description": "Clear the in-memory log buffer.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "screenshot",
-            "description": format!("Capture a screenshot from the device screen ({SCREEN_WIDTH}×{SCREEN_HEIGHT} px). Returns a base64-encoded PNG."),
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "tap",
-            "description": format!("Tap (press + release) at the given screen coordinates. Screen is {SCREEN_WIDTH}×{SCREEN_HEIGHT} px, origin at top-left."),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "x": { "type": "number", "description": "X coordinate (0–479)" },
-                    "y": { "type": "number", "description": "Y coordinate (0–799)" }
-                },
-                "required": ["x", "y"]
-            }
-        },
-        {
-            "name": "swipe",
-            "description": "Send a timed swipe gesture. Coordinates are physical touch coordinates; the LCD is y=0..799 and the virtual button strip extends below it.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "start_x": { "type": "number", "description": "Start X coordinate" },
-                    "start_y": { "type": "number", "description": "Start Y coordinate" },
-                    "end_x": { "type": "number", "description": "End X coordinate" },
-                    "end_y": { "type": "number", "description": "End Y coordinate" },
-                    "duration_ms": { "type": "number", "description": "Gesture duration in milliseconds (default 300)" },
-                    "steps": { "type": "number", "description": "Number of drag events (default 15)" }
-                },
-                "required": ["start_x", "start_y", "end_x", "end_y"]
-            }
-        },
-        {
-            "name": "power_button",
-            "description": "Simulate a short or long power button press on the device.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "long": { "type": "boolean", "description": "true = long press, false = short press" }
-                },
-                "required": ["long"]
-            }
-        },
-        {
-            "name": "send_debug_command",
-            "description": "Send a single-byte kernel debug command via USB. Commands: h=help i=irqs m=mmu p=processes t=processes(compact) s=servers c=cache a=appids o=memory-ownership k=consistency-check. Returns the kernel output directly.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Single character, e.g. \"p\" for process list" }
-                },
-                "required": ["command"]
-            }
-        },
-        {
-            "name": "reboot_to_samba",
-            "description": "Reboot the device into SAM-BA bootloader mode. Device will disconnect and reappear as SAM-BA device (VID:PID 03eb:6124).",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "input_text",
-            "description": "Type text into the focused input field on the device. Injects key press/release events for each character, bypassing the on-screen keyboard.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "text": { "type": "string", "description": "Text to type into the focused input field" }
-                },
-                "required": ["text"]
-            }
-        },
-        {
-            "name": "launch_app",
-            "description": "Launch a Flux app by its 16-byte hex app ID. Returns whether it was launched or already running, plus the PID.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "app_id": { "type": "string", "description": "32-character hex app ID (with optional 0x prefix)" }
-                },
-                "required": ["app_id"]
-            }
-        },
-        {
-            "name": "close_app",
-            "description": "Close/kill an app by PID. Uses gui-server's graceful close mechanism. Only works for app processes (not system services).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "pid": { "type": "number", "description": "Process ID to close" }
-                },
-                "required": ["pid"]
-            }
-        },
-        {
-            "name": "load_app",
-            "description": "Upload an arbitrary app directory into keyos/sideloaded-apps/<app-id> on the device over usb-debug (or keyos/apps/gui-app-emu-flux/sideloaded-apps/<app-id> with flux=true, for apps run by the Flux emulator). The directory must contain app.elf and manifest.json; icon.bin and resources/ are uploaded when present. Replaces those files if the app already exists.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "app_path": { "type": "string", "description": "Local app bundle directory containing app.elf, manifest.json, and optional icon.bin/resources" },
-                    "flux": { "type": "boolean", "description": "Upload as a Flux child app (Legacy mode), launched by the Flux emulator instead of the system launcher" }
-                },
-                "required": ["app_path"]
-            }
-        },
-        {
-            "name": "install_certificate",
-            "description": "Send a local publisher certificate over usb-debug and install it as a trusted publisher.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "certificate_path": { "type": "string", "description": "Local PEM certificate file to install as a trusted publisher" }
-                },
-                "required": ["certificate_path"]
-            }
-        },
-        // SAM-BA tools
-        {
-            "name": "samba_list_devices",
-            "description": "List SAM-BA bootloader devices (SAMA5D2, VID:PID 03eb:6124). Device must be in SAM-BA mode.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "samba_connect",
-            "description": "Connect to a SAM-BA bootloader device. Auto-detects the port.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "samba_disconnect",
-            "description": "Disconnect from the SAM-BA device.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "samba_version",
-            "description": "Get SAM-BA bootloader version string.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "samba_read_u32",
-            "description": "Read a 32-bit value from a memory address.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "address": { "type": "number", "description": "Memory address" }
-                },
-                "required": ["address"]
-            }
-        },
-        {
-            "name": "samba_write_u32",
-            "description": "Write a 32-bit value to a memory address.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "address": { "type": "number", "description": "Memory address" },
-                    "value": { "type": "number", "description": "Value to write (32-bit)" }
-                },
-                "required": ["address", "value"]
-            }
-        },
-        {
-            "name": "samba_init_flash",
-            "description": "Initialize the SDMMC flash applet. Must be called before flash read/write/verify.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "instance": { "type": "number", "description": "SDMMC instance (default: 0)" },
-                    "partition": { "type": "number", "description": "Partition number (default: 0)" }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "samba_flash_info",
-            "description": "Get flash applet information (buffer address, buffer size, page size).",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "samba_read_flash",
-            "description": "Read data from flash. Requires samba_init_flash first. Returns base64-encoded data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "offset": { "type": "number", "description": "Byte offset in flash (page-aligned)" },
-                    "length": { "type": "number", "description": "Number of bytes to read (page-aligned)" }
-                },
-                "required": ["offset", "length"]
-            }
-        },
-        {
-            "name": "samba_write_flash",
-            "description": "Write data to flash. Requires samba_init_flash first. Data must be base64-encoded.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "offset": { "type": "number", "description": "Byte offset in flash (page-aligned)" },
-                    "data_base64": { "type": "string", "description": "Data to write (base64-encoded)" }
-                },
-                "required": ["offset", "data_base64"]
-            }
-        },
-        {
-            "name": "samba_verify_flash",
-            "description": "Verify flash contents against provided data. Returns true if match.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "offset": { "type": "number", "description": "Byte offset in flash" },
-                    "data_base64": { "type": "string", "description": "Expected data (base64-encoded)" }
-                },
-                "required": ["offset", "data_base64"]
-            }
-        },
-        {
-            "name": "samba_reboot",
-            "description": "Reboot the device to normal mode (exit SAM-BA mode).",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        // HID APDU tool
-        {
-            "name": "send_apdu",
-            "description": "Send an ISO 7816 APDU over USB HID. Auto-detects CTAP/FIDO mode (VID=0x1307, CTAPHID_MSG framing) or Legacy mode (VID=0x2c97, Legacy HID framing). Returns hex-encoded RAPDU.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "apdu_hex": { "type": "string", "description": "Hex-encoded APDU bytes, e.g. '0003000000' for U2F_VERSION" }
-                },
-                "required": ["apdu_hex"]
-            }
-        },
-        // Device info
-        {
-            "name": "get_version",
-            "description": "Get the KeyOS version string running on the device (same value shown on Settings → About → KeyOS, e.g. \"1.3.0\"). Useful for SDK compatibility checks.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        // Process monitoring
-        {
-            "name": "get_process_list",
-            "description": "Get the list of running processes on the device with PID, name, CPU%, RAM usage, and thread states. Returns the compact process list.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        // Developer Mode probe (used by `foundation sideload` to fail early
-        // when the gated usb-debug interface is not reachable).
-        {
-            "name": "get_developer_mode",
-            "description": "Probe the Developer Mode gated usb-debug interface. Returns 'enabled' if reachable; otherwise the request fails.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        {
-            "name": "get_trusted_publisher_count",
-            "description": "Return the number of currently trusted publisher certificates installed on the device.",
-            "inputSchema": { "type": "object", "properties": {}, "required": [] }
-        },
-        // Kernel debug
-        {
-            "name": "send_kernel_command",
-            "description": "Send a single-byte kernel debug command via USB and return the output. Commands: h=help, i=IRQ stats, m=MMU state, p=process list (verbose), t=process list (compact), s=server list, c=cache stats, a=app IDs (maps app IDs to PIDs), o=memory ownership, k=consistency check. Note: 't' output is also available via get_process_list.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Single character kernel debug command (h/i/m/p/t/s/c/a/o/k)" }
-                },
-                "required": ["command"]
+    /// Drain pending log frames from the USB transport and parse 0x1E-terminated records into the
+    /// log buffer.
+    fn drain_logs(&mut self) {
+        let Some(transport) = self.device.as_ref() else {
+            return;
+        };
+
+        while let Ok(data) = transport.read_logs(Duration::ZERO) {
+            for &b in &data {
+                if b == LOG_TERMINATOR {
+                    let text = String::from_utf8_lossy(&self.record_buf).trim_end().to_string();
+                    self.record_buf.clear();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    self.log_buffer.push_back(text);
+                    while self.log_buffer.len() > MAX_LOG_LINES {
+                        self.log_buffer.pop_front();
+                    }
+                } else {
+                    self.record_buf.push(b);
+                    if self.record_buf.len() > 16384 {
+                        self.record_buf.drain(..self.record_buf.len() - 4096);
+                    }
+                }
             }
         }
-    ])
+    }
 }
 
 // Result helpers
 
-fn text_result(s: &str) -> Value { json!({ "content": [{ "type": "text", "text": s }] }) }
+fn text_result(s: &str) -> CallToolResult { CallToolResult::success(vec![ContentBlock::text(s)]) }
 
-fn image_result(base64_data: &str) -> Value {
-    json!({ "content": [{ "type": "image", "data": base64_data, "mimeType": "image/png" }] })
+// Tool parameters
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetLogsParams {
+    /// Max lines to return (default 100)
+    max_lines: Option<u64>,
+    /// Optional substring filter
+    filter: Option<String>,
 }
 
-fn error_result(msg: &str) -> Value {
-    json!({ "content": [{ "type": "text", "text": format!("Error: {msg}") }], "isError": true })
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TapParams {
+    /// X coordinate (0-479)
+    x: u16,
+    /// Y coordinate (0-799)
+    y: u16,
 }
 
-fn format_rapdu(rapdu: &[u8]) -> Value {
-    let hex: String = rapdu.iter().map(|b| format!("{b:02x}")).collect();
-    let sw = if rapdu.len() >= 2 {
-        format!("{:02x}{:02x}", rapdu[rapdu.len() - 2], rapdu[rapdu.len() - 1])
-    } else {
-        "(no SW)".to_string()
-    };
-    text_result(&format!("RAPDU ({} bytes, SW={}): {}", rapdu.len(), sw, hex))
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SwipeParams {
+    /// Start X coordinate
+    start_x: u16,
+    /// Start Y coordinate
+    start_y: u16,
+    /// End X coordinate
+    end_x: u16,
+    /// End Y coordinate
+    end_y: u16,
+    /// Gesture duration in milliseconds (default 300)
+    duration_ms: Option<u16>,
+    /// Number of drag events (default 15)
+    steps: Option<u8>,
 }
 
-fn bgra_to_png_base64(bgra: &[u8]) -> Result<String, String> {
-    let png_data = crate::screenshot::bgra_to_png(bgra)?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&png_data))
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct PowerButtonParams {
+    /// true = long press, false = short press
+    long: bool,
 }
 
-// Tool dispatch
-
-fn handle_tool(state: &mut McpState, name: &str, args: &Value) -> Value {
-    match name {
-        "list_ports" => handle_list_ports(),
-        "connect" => handle_connect(state, args),
-        "disconnect" => handle_disconnect(state),
-        "get_logs" => handle_get_logs(state, args),
-        "clear_logs" => handle_clear_logs(state),
-        "screenshot" => handle_screenshot(state, args),
-        "tap" => handle_tap(state, args),
-        "swipe" => handle_swipe(state, args),
-        "power_button" => handle_power_button(state, args),
-        "send_debug_command" => handle_send_debug_command(state, args),
-        "send_kernel_command" => handle_send_kernel_command(state, args),
-        "reboot_to_samba" => handle_reboot_to_samba(state, args),
-        "input_text" => handle_input_text(state, args),
-        "launch_app" => handle_launch_app(state, args),
-        "close_app" => handle_close_app(state, args),
-        "load_app" => handle_load_app(state, args),
-        "install_certificate" => handle_install_certificate(state, args),
-        "samba_list_devices" => handle_samba_list_devices(),
-        "samba_connect" => handle_samba_connect(state),
-        "samba_disconnect" => handle_samba_disconnect(state),
-        "samba_version" => handle_samba_version(state),
-        "samba_read_u32" => handle_samba_read_u32(state, args),
-        "samba_write_u32" => handle_samba_write_u32(state, args),
-        "samba_init_flash" => handle_samba_init_flash(state, args),
-        "samba_flash_info" => handle_samba_flash_info(state),
-        "samba_read_flash" => handle_samba_read_flash(state, args),
-        "samba_write_flash" => handle_samba_write_flash(state, args),
-        "samba_verify_flash" => handle_samba_verify_flash(state, args),
-        "samba_reboot" => handle_samba_reboot(state),
-        "send_apdu" => handle_send_apdu(state, args),
-        "get_process_list" => handle_get_process_list(state),
-        "get_version" => handle_get_version(state),
-        "get_developer_mode" => handle_get_developer_mode(state),
-        "get_trusted_publisher_count" => handle_get_trusted_publisher_count(state),
-        _ => error_result(&format!("Unknown tool: {name}")),
-    }
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct KernelCommandParams {
+    /// Single character kernel debug command (h/i/m/p/t/s/c/a/o/k)
+    command: String,
 }
 
-// Runtime tool handlers
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct InputTextParams {
+    /// Text to type into the focused input field
+    text: String,
+}
 
-fn handle_list_ports() -> Value {
-    let context = match rusb::Context::new() {
-        Ok(context) => context,
-        Err(e) => return error_result(&format!("Failed to initialize USB context: {e}")),
-    };
-    let devices = match context.devices() {
-        Ok(d) => d,
-        Err(e) => return error_result(&format!("Failed to enumerate USB devices: {e}")),
-    };
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct LaunchAppParams {
+    /// 32-character hex app ID (with optional 0x prefix)
+    app_id: String,
+}
 
-    let mut lines = Vec::new();
-    for dev in devices.iter() {
-        if let Ok(desc) = dev.device_descriptor() {
-            let vid = desc.vendor_id();
-            let pid = desc.product_id();
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CloseAppParams {
+    /// Process ID to close
+    pid: u16,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct LoadAppParams {
+    /// Local app bundle directory containing app.elf, manifest.json, and optional
+    /// icon.bin/resources. Must resolve inside the server's base directory when access is confined.
+    app_path: String,
+    /// Upload as a Flux child app (Legacy mode), launched by the Flux emulator instead of the
+    /// system launcher
+    flux: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct InstallCertificateParams {
+    /// Local PEM certificate file to install as a trusted publisher. Must resolve inside the
+    /// server's base directory when access is confined.
+    certificate_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaReadU32Params {
+    /// Memory address
+    address: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaWriteU32Params {
+    /// Memory address
+    address: u32,
+    /// Value to write (32-bit)
+    value: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaInitFlashParams {
+    /// SDMMC instance (default: 0)
+    instance: Option<u32>,
+    /// Partition number (default: 0)
+    partition: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaReadFlashParams {
+    /// Byte offset in flash (page-aligned)
+    offset: u64,
+    /// Number of bytes to read (page-aligned)
+    length: usize,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaWriteFlashParams {
+    /// Byte offset in flash (page-aligned)
+    offset: u64,
+    /// Data to write (base64-encoded)
+    data_base64: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SambaVerifyFlashParams {
+    /// Byte offset in flash
+    offset: u64,
+    /// Expected data (base64-encoded)
+    data_base64: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SendApduParams {
+    /// Hex-encoded APDU bytes, e.g. '0003000000' for U2F_VERSION
+    apdu_hex: String,
+}
+
+// Tools
+
+#[derive(Clone)]
+pub struct PassportServer;
+
+#[tool_router]
+impl PassportServer {
+    /// List connected Passport Prime USB devices (normal, Flux/legacy, and SAM-BA modes).
+    #[tool]
+    fn list_ports(&self) -> Result<CallToolResult, String> {
+        let context = rusb::Context::new().map_err(|e| format!("Failed to initialize USB context: {e}"))?;
+        let devices = context.devices().map_err(|e| format!("Failed to enumerate USB devices: {e}"))?;
+
+        let mut lines = Vec::new();
+        for dev in devices.iter() {
+            let Ok(desc) = dev.device_descriptor() else {
+                continue;
+            };
+            let (vid, pid) = (desc.vendor_id(), desc.product_id());
             let label = match (vid, pid) {
                 (0x1307, 0x0165) => "Passport Prime",
                 (0x2c97, 0x7011) => "Passport Prime (Flux/legacy)",
@@ -504,409 +297,267 @@ fn handle_list_ports() -> Value {
                 dev.address()
             ));
         }
-    }
 
-    if lines.is_empty() {
-        text_result("No Passport Prime USB devices found.")
-    } else {
-        text_result(&lines.join("\n"))
-    }
-}
-
-fn handle_connect(state: &mut McpState, _args: &Value) -> Value {
-    if state.device.is_some() {
-        return error_result("Already connected. Call disconnect first.");
-    }
-
-    match UsbDebugClient::open() {
-        Ok(client) => {
-            state.device = Some(client);
-            text_result("Connected via USB vendor interface. Logs and debug commands on single interface.")
+        if lines.is_empty() {
+            return Ok(text_result("No Passport Prime USB devices found."));
         }
-        Err(e) => error_result(&format!("Failed to connect: {e}")),
-    }
-}
-
-fn handle_disconnect(state: &mut McpState) -> Value {
-    state.device.take();
-    state.log_buffer.clear();
-    state.record_buf.clear();
-    text_result("Disconnected.")
-}
-
-fn handle_get_logs(state: &mut McpState, args: &Value) -> Value {
-    drain_logs(state);
-
-    let max_lines = args.get("max_lines").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-    let filter = args.get("filter").and_then(|v| v.as_str());
-
-    let iter = state.log_buffer.iter().filter(|l| filter.map_or(true, |f| l.contains(f)));
-    let logs: Vec<String> = if max_lines > 0 {
-        iter.rev().take(max_lines).cloned().collect::<Vec<_>>().into_iter().rev().collect()
-    } else {
-        iter.cloned().collect()
-    };
-
-    if logs.is_empty() {
-        return text_result("(no logs)");
-    }
-    text_result(&logs.join("\n"))
-}
-
-fn handle_clear_logs(state: &mut McpState) -> Value {
-    // Drain pending logs first, then clear everything.
-    if let Some(transport) = &state.device {
-        while transport.read_logs(Duration::ZERO).is_ok() {}
-    }
-    state.log_buffer.clear();
-    state.record_buf.clear();
-    text_result("Log buffer cleared.")
-}
-
-fn handle_screenshot(state: &McpState, _args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let payload = match dev.send(Command::Screenshot, Duration::from_secs(20)) {
-        Ok(p) => p,
-        Err(e) => return error_result(&format!("Screenshot failed: {e}")),
-    };
-
-    match bgra_to_png_base64(&payload) {
-        Ok(b64) => image_result(&b64),
-        Err(e) => error_result(&e),
-    }
-}
-
-fn handle_tap(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let x = match args.get("x").and_then(|v| v.as_u64()) {
-        Some(v) => v as u16,
-        None => return error_result("Missing required parameter: x"),
-    };
-    let y = match args.get("y").and_then(|v| v.as_u64()) {
-        Some(v) => v as u16,
-        None => return error_result("Missing required parameter: y"),
-    };
-    if let Err(e) = dev.send(
-        Command::Swipe { start_x: x, start_y: y, end_x: x, end_y: y, duration_ms: TAP_HOLD_MS, steps: 0 },
-        Duration::from_millis(u64::from(TAP_HOLD_MS) + 5_000),
-    ) {
-        return error_result(&format!("Tap failed: {e}"));
+        Ok(text_result(&lines.join("\n")))
     }
 
-    text_result(&format!("Tapped at ({x}, {y})."))
-}
+    /// Connect to the Passport Prime device over USB vendor interface. Auto-detects the device.
+    #[tool]
+    fn connect(&self) -> Result<CallToolResult, String> {
+        let mut state = state();
+        if state.device.is_some() {
+            return Err("Already connected. Call disconnect first.".to_string());
+        }
 
-fn required_u16_arg(args: &Value, name: &str) -> Result<u16, String> {
-    let value = args
-        .get(name)
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| format!("Missing required parameter: {name}"))?;
-    u16::try_from(value).map_err(|_| format!("{name} must fit in u16"))
-}
-
-fn optional_u16_arg(args: &Value, name: &str, default: u16) -> Result<u16, String> {
-    let Some(value) = args.get(name).and_then(|v| v.as_u64()) else {
-        return Ok(default);
-    };
-    u16::try_from(value).map_err(|_| format!("{name} must fit in u16"))
-}
-
-fn optional_u8_arg(args: &Value, name: &str, default: u8) -> Result<u8, String> {
-    let Some(value) = args.get(name).and_then(|v| v.as_u64()) else {
-        return Ok(default);
-    };
-    u8::try_from(value).map_err(|_| format!("{name} must fit in u8"))
-}
-
-fn handle_swipe(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let start_x = match required_u16_arg(args, "start_x") {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-    let start_y = match required_u16_arg(args, "start_y") {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-    let end_x = match required_u16_arg(args, "end_x") {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-    let end_y = match required_u16_arg(args, "end_y") {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-    let duration_ms = match optional_u16_arg(args, "duration_ms", 300) {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-    let steps = match optional_u8_arg(args, "steps", 15) {
-        Ok(v) => v,
-        Err(e) => return error_result(&e),
-    };
-
-    if let Err(e) = dev.send(
-        Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps },
-        Duration::from_millis(u64::from(duration_ms) + 5_000),
-    ) {
-        return error_result(&format!("Swipe failed: {e}"));
+        state.device = Some(UsbDebugClient::open().map_err(|e| format!("Failed to connect: {e}"))?);
+        Ok(text_result("Connected via USB vendor interface. Logs and debug commands on single interface."))
     }
 
-    text_result(&format!(
-        "Swipe ({start_x}, {start_y}) -> ({end_x}, {end_y}) over {duration_ms}ms with {steps} steps."
-    ))
-}
-
-fn handle_power_button(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let long = match args.get("long").and_then(|v| v.as_bool()) {
-        Some(p) => p,
-        None => return error_result("Missing required parameter: long"),
-    };
-
-    if let Err(e) = dev.send(Command::PowerButton { long }, Duration::from_secs(5)) {
-        return error_result(&format!("Power button failed: {e}"));
+    /// Disconnect from the device.
+    #[tool]
+    fn disconnect(&self) -> CallToolResult {
+        let mut state = state();
+        state.device.take();
+        state.log_buffer.clear();
+        state.record_buf.clear();
+        text_result("Disconnected.")
     }
 
-    text_result(&format!("Power button {} press.", if long { "long" } else { "short" }))
-}
+    /// Get recent log lines streamed from the device.
+    #[tool]
+    fn get_logs(
+        &self,
+        Parameters(GetLogsParams { max_lines, filter }): Parameters<GetLogsParams>,
+    ) -> CallToolResult {
+        let mut state = state();
+        state.drain_logs();
 
-fn handle_input_text(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
+        let max_lines = max_lines.unwrap_or(100) as usize;
+        let matching = state.log_buffer.iter().filter(|l| filter.as_ref().is_none_or(|f| l.contains(f)));
+        let logs: Vec<&String> = if max_lines > 0 {
+            let mut tail: Vec<&String> = matching.rev().take(max_lines).collect();
+            tail.reverse();
+            tail
+        } else {
+            matching.collect()
+        };
 
-    let text = match args.get("text").and_then(|v| v.as_str()) {
-        Some(t) => t,
-        None => return error_result("Missing required parameter: text"),
-    };
-    match dev.send(Command::InputText(text.to_string()), Duration::from_secs(10)) {
-        Ok(_) => text_result(&format!("Typed {} character(s).", text.chars().count())),
-        Err(e) => error_result(&format!("Input text failed: {e}")),
+        if logs.is_empty() {
+            return text_result("(no logs)");
+        }
+        text_result(&logs.iter().map(|l| l.as_str()).collect::<Vec<_>>().join("\n"))
     }
-}
 
-fn handle_send_debug_command(state: &McpState, args: &Value) -> Value {
-    // Forward to send_kernel_command for backwards compatibility.
-    handle_send_kernel_command(state, args)
-}
-
-fn handle_send_kernel_command(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let command = match args.get("command").and_then(|v| v.as_str()) {
-        Some(c) if c.len() == 1 => c.as_bytes()[0],
-        _ => return error_result("command must be a single character (h/i/m/p/t/s/c/a/o/k)"),
-    };
-
-    match dev.send(Command::KernelCmd { cmd_byte: command }, Duration::from_secs(5)) {
-        Ok(payload) => text_result(&String::from_utf8_lossy(&payload)),
-        Err(e) => error_result(&format!("Kernel command failed: {e}")),
+    /// Clear the in-memory log buffer.
+    #[tool]
+    fn clear_logs(&self) -> CallToolResult {
+        let mut state = state();
+        // Drain pending logs first, then clear everything.
+        if let Some(transport) = &state.device {
+            while transport.read_logs(Duration::ZERO).is_ok() {}
+        }
+        state.log_buffer.clear();
+        state.record_buf.clear();
+        text_result("Log buffer cleared.")
     }
-}
 
-fn handle_get_version(state: &McpState) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
+    /// Capture a screenshot from the device screen (480x800 px). Returns a base64-encoded PNG.
+    #[tool]
+    fn screenshot(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::Screenshot, Duration::from_secs(20))
+            .map_err(|e| format!("Screenshot failed: {e}"))?;
 
-    match dev.send(Command::GetVersion, Duration::from_secs(5)) {
-        Ok(payload) => text_result(&String::from_utf8_lossy(&payload)),
-        Err(e) => error_result(&format!("get_version request failed: {e}")),
+        let png = crate::screenshot::bgra_to_png(&payload)?;
+        let base64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        Ok(CallToolResult::success(vec![ContentBlock::image(base64, "image/png")]))
     }
-}
 
-fn handle_get_developer_mode(state: &McpState) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
+    /// Tap (press + release) at the given screen coordinates. Screen is 480x800 px, origin at top-left.
+    #[tool]
+    fn tap(&self, Parameters(TapParams { x, y }): Parameters<TapParams>) -> Result<CallToolResult, String> {
+        state()
+            .require_device()?
+            .send(
+                Command::Swipe {
+                    start_x: x,
+                    start_y: y,
+                    end_x: x,
+                    end_y: y,
+                    duration_ms: TAP_HOLD_MS,
+                    steps: 0,
+                },
+                Duration::from_millis(u64::from(TAP_HOLD_MS) + 5_000),
+            )
+            .map_err(|e| format!("Tap failed: {e}"))?;
 
-    match dev.send(Command::GetDeveloperMode, Duration::from_secs(5)) {
-        Ok(payload) => {
-            // Wire format: single-byte payload, 0x00 = off, 0x01 = on.
-            // Anything else is a protocol-level violation; treat as error.
-            match payload.first().copied() {
-                Some(0) => text_result("disabled"),
-                Some(1) => text_result("enabled"),
-                Some(other) => {
-                    error_result(&format!("get_developer_mode: unexpected payload byte 0x{other:02x}"))
-                }
-                None => error_result("get_developer_mode: empty payload"),
+        Ok(text_result(&format!("Tapped at ({x}, {y}).")))
+    }
+
+    /// Send a timed swipe gesture. Coordinates are physical touch coordinates; the LCD is y=0..799 and the
+    /// virtual button strip extends below it. Equal start and end coordinates hold the press in
+    /// place for duration_ms, which is how to long-press.
+    #[tool]
+    fn swipe(
+        &self,
+        Parameters(SwipeParams { start_x, start_y, end_x, end_y, duration_ms, steps }): Parameters<
+            SwipeParams,
+        >,
+    ) -> Result<CallToolResult, String> {
+        let duration_ms = duration_ms.unwrap_or(300);
+        let steps = steps.unwrap_or(15);
+
+        state()
+            .require_device()?
+            .send(
+                Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps },
+                Duration::from_millis(u64::from(duration_ms) + 5_000),
+            )
+            .map_err(|e| format!("Swipe failed: {e}"))?;
+
+        Ok(text_result(&format!(
+            "Swipe ({start_x}, {start_y}) -> ({end_x}, {end_y}) over {duration_ms}ms with {steps} steps."
+        )))
+    }
+
+    /// Simulate a short or long power button press on the device.
+    #[tool]
+    fn power_button(
+        &self,
+        Parameters(PowerButtonParams { long }): Parameters<PowerButtonParams>,
+    ) -> Result<CallToolResult, String> {
+        state()
+            .require_device()?
+            .send(Command::PowerButton { long }, Duration::from_secs(5))
+            .map_err(|e| format!("Power button failed: {e}"))?;
+
+        Ok(text_result(&format!("Power button {} press.", if long { "long" } else { "short" })))
+    }
+
+    /// Send a single-byte kernel debug command via USB and return the output. Commands: h=help, i=IRQ stats,
+    /// m=MMU state, p=process list (verbose), t=process list (compact), s=server list, c=cache stats, a=app
+    /// IDs (maps app IDs to PIDs), o=memory ownership, k=consistency check. Note: 't' output is also
+    /// available via get_process_list.
+    #[tool]
+    fn send_kernel_command(
+        &self,
+        Parameters(KernelCommandParams { command }): Parameters<KernelCommandParams>,
+    ) -> Result<CallToolResult, String> {
+        let [cmd_byte] = command.as_bytes() else {
+            return Err("command must be a single character (h/i/m/p/t/s/c/a/o/k)".to_string());
+        };
+
+        let payload = state()
+            .require_device()?
+            .send(Command::KernelCmd { cmd_byte: *cmd_byte }, Duration::from_secs(5))
+            .map_err(|e| format!("Kernel command failed: {e}"))?;
+        Ok(text_result(&String::from_utf8_lossy(&payload)))
+    }
+
+    /// Reboot the device into SAM-BA bootloader mode. Device will disconnect and reappear as SAM-BA device
+    /// (VID:PID 03eb:6124).
+    #[tool]
+    fn reboot_to_samba(&self) -> Result<CallToolResult, String> {
+        let mut state = state();
+        // The device drops off the bus mid-request, so a transport error here is expected.
+        let _ = state.require_device()?.send(Command::RebootSamba, Duration::from_secs(5));
+        state.device.take();
+
+        Ok(text_result("Device rebooting to SAM-BA mode. Use samba_connect to connect to it."))
+    }
+
+    /// Type text into the focused input field on the device. Injects key press/release events for each
+    /// character, bypassing the on-screen keyboard.
+    #[tool]
+    fn input_text(
+        &self,
+        Parameters(InputTextParams { text }): Parameters<InputTextParams>,
+    ) -> Result<CallToolResult, String> {
+        state()
+            .require_device()?
+            .send(Command::InputText(text.clone()), Duration::from_secs(10))
+            .map_err(|e| format!("Input text failed: {e}"))?;
+
+        Ok(text_result(&format!("Typed {} character(s).", text.chars().count())))
+    }
+
+    /// Launch a Flux app by its 16-byte hex app ID. Returns whether it was launched or already running, plus
+    /// the PID.
+    #[tool]
+    fn launch_app(
+        &self,
+        Parameters(LaunchAppParams { app_id }): Parameters<LaunchAppParams>,
+    ) -> Result<CallToolResult, String> {
+        let trimmed = app_id.trim();
+        let bytes = hex::decode(trimmed.strip_prefix("0x").unwrap_or(trimmed))
+            .map_err(|e| format!("Invalid hex app_id: {e}"))?;
+        let app_id: [u8; 16] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("app_id must be 16 bytes (32 hex chars), got {} bytes", bytes.len()))?;
+
+        let payload =
+            state().require_device()?.send(Command::LaunchApp { app_id }, Duration::from_secs(10)).map_err(
+                |e| format!("Failed to launch app: {}", launch_app_transport_error_message(&e.to_string())),
+            )?;
+
+        let result =
+            LaunchAppResult::decode(&payload).map_err(|e| format!("Invalid launch_app response: {e}"))?;
+        match result.status {
+            LaunchAppStatus::Launched => {
+                Ok(text_result(&format!("App launched successfully with PID {}", result.pid)))
             }
+            LaunchAppStatus::AlreadyRunning => Ok(text_result(&format!(
+                "App is already running with PID {}. Newly uploaded code will not run until the app is closed and launched again.",
+                result.pid
+            ))),
+            status => Err(format!(
+                "Launch failed: {}",
+                launch_app_failure_message(status).unwrap_or("unknown launch failure")
+            )),
         }
-        Err(e) => error_result(&format!("get_developer_mode request failed: {e}")),
-    }
-}
-
-fn handle_get_trusted_publisher_count(state: &McpState) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    match dev.send(Command::GetTrustedPublisherCount, Duration::from_secs(5)) {
-        Ok(payload) => match trusted_publisher_count_from_payload(&payload) {
-            Ok(count) => text_result(&count.to_string()),
-            Err(e) => error_result(&e),
-        },
-        Err(e) => error_result(&format!("get_trusted_publisher_count request failed: {e}")),
-    }
-}
-
-fn trusted_publisher_count_from_payload(payload: &[u8]) -> Result<u16, String> {
-    let bytes: [u8; 2] = payload.try_into().map_err(|_| {
-        format!("get_trusted_publisher_count: expected 2 payload bytes, got {}", payload.len())
-    })?;
-    Ok(u16::from_le_bytes(bytes))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::trusted_publisher_count_from_payload;
-
-    #[test]
-    fn trusted_publisher_count_decodes_little_endian_payload() {
-        assert_eq!(trusted_publisher_count_from_payload(&[0x34, 0x12]).unwrap(), 0x1234);
     }
 
-    #[test]
-    fn trusted_publisher_count_rejects_short_payload() {
-        assert!(trusted_publisher_count_from_payload(&[0x34]).is_err());
-    }
-
-    #[test]
-    fn trusted_publisher_count_rejects_long_payload() {
-        assert!(trusted_publisher_count_from_payload(&[0x34, 0x12, 0x00]).is_err());
-    }
-}
-
-fn handle_get_process_list(state: &McpState) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    match dev.send(Command::GetProcessList, Duration::from_secs(5)) {
-        Ok(payload) => text_result(&String::from_utf8_lossy(&payload)),
-        Err(e) => error_result(&format!("Process list request failed: {e}")),
-    }
-}
-
-fn handle_reboot_to_samba(state: &mut McpState, _args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let _ = dev.send(Command::RebootSamba, Duration::from_secs(5));
-    state.device.take();
-
-    text_result("Device rebooting to SAM-BA mode. Use samba_connect to connect to it.")
-}
-
-fn handle_launch_app(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let hex_str = match args.get("app_id").and_then(|v| v.as_str()) {
-        Some(s) => s.trim().strip_prefix("0x").unwrap_or(s.trim()),
-        None => return error_result("app_id is required (32-character hex string)"),
-    };
-
-    let bytes = match hex::decode(hex_str) {
-        Ok(b) if b.len() == 16 => {
-            let mut arr = [0u8; 16];
-            arr.copy_from_slice(&b);
-            arr
+    /// Close/kill an app by PID. Uses gui-server's graceful close mechanism. Only works for app processes
+    /// (not system services).
+    #[tool]
+    fn close_app(
+        &self,
+        Parameters(CloseAppParams { pid }): Parameters<CloseAppParams>,
+    ) -> Result<CallToolResult, String> {
+        if pid == 0 {
+            return Err("pid must be a positive integer (1-65535)".to_string());
         }
-        Ok(b) => {
-            return error_result(&format!("app_id must be 16 bytes (32 hex chars), got {} bytes", b.len()))
-        }
-        Err(e) => return error_result(&format!("Invalid hex app_id: {e}")),
-    };
 
-    match dev.send(Command::LaunchApp { app_id: bytes }, Duration::from_secs(10)) {
-        Ok(payload) => match LaunchAppResult::decode(&payload) {
-            Ok(result) => match result.status {
-                LaunchAppStatus::Launched => {
-                    text_result(&format!("App launched successfully with PID {}", result.pid))
-                }
-                LaunchAppStatus::AlreadyRunning => text_result(&format!(
-                    "App is already running with PID {}. Newly uploaded code will not run until the app is closed and launched again.",
-                    result.pid
-                )),
-                status => {
-                    let reason = launch_app_failure_message(status).unwrap_or("unknown launch failure");
-                    error_result(&format!("Launch failed: {reason}"))
-                }
-            },
-            Err(e) => error_result(&format!("Invalid launch_app response: {e}")),
-        },
-        Err(e) => error_result(&format!(
-            "Failed to launch app: {}",
-            launch_app_transport_error_message(&e.to_string())
-        )),
+        state()
+            .require_device()?
+            .send(Command::CloseApp { pid }, Duration::from_secs(5))
+            .map_err(|e| format!("Failed to close app: {e}"))?;
+
+        Ok(text_result(&format!("Process {pid} close requested successfully")))
     }
-}
 
-fn handle_close_app(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
+    /// Upload an arbitrary app directory into keyos/sideloaded-apps/<app-id> on the device over
+    /// usb-debug (or keyos/apps/gui-app-emu-flux/sideloaded-apps/<app-id> with flux=true, for apps
+    /// run by the Flux emulator). The directory must contain app.elf and manifest.json; icon.bin
+    /// and resources/ are uploaded when present. Replaces those files if the app already exists.
+    #[tool]
+    fn load_app(
+        &self,
+        Parameters(LoadAppParams { app_path, flux }): Parameters<LoadAppParams>,
+    ) -> Result<CallToolResult, String> {
+        let kind = match flux.unwrap_or(false) {
+            true => crate::load_app::SideloadKind::Flux,
+            false => crate::load_app::SideloadKind::Standard,
+        };
+        let report = crate::load_app::load_app(state().require_device()?, &PathBuf::from(app_path), kind)
+            .map_err(|e| format!("load_app failed: {e:#}"))?;
 
-    let pid = match args.get("pid").and_then(|v| v.as_u64()) {
-        Some(p) if p > 0 && p <= 0xFFFF => p as u16,
-        _ => return error_result("pid must be a positive integer (1-65535)"),
-    };
-
-    match dev.send(Command::CloseApp { pid }, Duration::from_secs(5)) {
-        Ok(_) => text_result(&format!("Process {pid} close requested successfully")),
-        Err(e) => error_result(&format!("Failed to close app: {e}")),
-    }
-}
-
-fn handle_load_app(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
-
-    let app_path = match args.get("app_path").and_then(|v| v.as_str()) {
-        Some(path) => PathBuf::from(path),
-        None => return error_result("Missing required parameter: app_path"),
-    };
-    let kind = match args.get("flux").and_then(|v| v.as_bool()).unwrap_or(false) {
-        true => crate::load_app::SideloadKind::Flux,
-        false => crate::load_app::SideloadKind::Standard,
-    };
-
-    match crate::load_app::load_app(dev, &app_path, kind) {
-        Ok(report) => text_result(&format!(
+        Ok(text_result(&format!(
             "Loaded {} into {}/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
             report.app_id,
             kind.device_dir(),
@@ -916,626 +567,430 @@ fn handle_load_app(state: &McpState, args: &Value) -> Value {
             report.icon_bytes.unwrap_or(0),
             report.resource_files,
             report.resource_bytes
-        )),
-        Err(e) => error_result(&format!("load_app failed: {e:#}")),
+        )))
     }
-}
 
-fn handle_install_certificate(state: &McpState, args: &Value) -> Value {
-    let dev = match state.require_device() {
-        Ok(d) => d,
-        Err(e) => return error_result(&e),
-    };
+    /// Send a local publisher certificate over usb-debug and install it as a trusted publisher.
+    #[tool]
+    fn install_certificate(
+        &self,
+        Parameters(InstallCertificateParams { certificate_path }): Parameters<InstallCertificateParams>,
+    ) -> Result<CallToolResult, String> {
+        let path = PathBuf::from(certificate_path);
+        crate::check_jail(&path).map_err(|e| format!("{e:#}"))?;
+        let metadata =
+            fs::metadata(&path).map_err(|e| format!("Could not read certificate {}: {e}", path.display()))?;
+        if metadata.len() == 0 {
+            return Err(format!("certificate is empty: {}", path.display()));
+        }
+        if metadata.len() > INSTALL_CERTIFICATE_BYTES_MAX as u64 {
+            return Err(format!(
+                "certificate is too large: {} bytes (maximum {INSTALL_CERTIFICATE_BYTES_MAX} bytes)",
+                metadata.len()
+            ));
+        }
+        let certificate_pem =
+            fs::read(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
 
-    let certificate_path = match args.get("certificate_path").and_then(|v| v.as_str()) {
-        Some(path) => PathBuf::from(path),
-        None => return error_result("Missing required parameter: certificate_path"),
-    };
+        state()
+            .require_device()?
+            .send(Command::InstallCertificate { certificate_pem }, Duration::from_secs(10))
+            .map_err(|e| format!("install_certificate failed: {e}"))?;
 
-    let certificate_pem = match read_certificate_for_install(&certificate_path) {
-        Ok(bytes) => bytes,
-        Err(e) => return error_result(&format!("Could not read certificate: {e:#}")),
-    };
-
-    match dev.send(Command::InstallCertificate { certificate_pem }, Duration::from_secs(10)) {
-        Ok(_) => text_result(&format!(
-            "Installed {} as a trusted publisher certificate.",
-            certificate_path.display()
-        )),
-        Err(e) => error_result(&format!("install_certificate failed: {e}")),
+        Ok(text_result(&format!("Installed {} as a trusted publisher certificate.", path.display())))
     }
-}
 
-fn read_certificate_for_install(certificate_path: &PathBuf) -> Result<Vec<u8>> {
-    let metadata = fs::metadata(certificate_path)
-        .with_context(|| format!("reading metadata for {}", certificate_path.display()))?;
-    if metadata.len() == 0 {
-        anyhow::bail!("certificate is empty: {}", certificate_path.display());
+    /// List SAM-BA bootloader devices (SAMA5D2, VID:PID 03eb:6124). Device must be in SAM-BA mode.
+    #[tool]
+    fn samba_list_devices(&self) -> Result<CallToolResult, String> {
+        let context = rusb::Context::new().map_err(|e| format!("Failed to initialize USB context: {e}"))?;
+        let devices = context.devices().map_err(|e| format!("Failed to enumerate USB devices: {e}"))?;
+
+        let samba: Vec<String> = devices
+            .iter()
+            .filter_map(|dev| {
+                let desc = dev.device_descriptor().ok()?;
+                (desc.vendor_id() == 0x03eb && desc.product_id() == 0x6124).then(|| {
+                    format!(
+                        "Bus {:03} Device {:03} (VID:{:04x} PID:{:04x})",
+                        dev.bus_number(),
+                        dev.address(),
+                        desc.vendor_id(),
+                        desc.product_id()
+                    )
+                })
+            })
+            .collect();
+
+        if samba.is_empty() {
+            return Ok(text_result("No SAM-BA devices found. Is the device in bootloader mode?"));
+        }
+        Ok(text_result(&samba.join("\n")))
     }
-    if metadata.len() > INSTALL_CERTIFICATE_BYTES_MAX as u64 {
-        anyhow::bail!(
-            "certificate is too large: {} bytes (maximum {} bytes)",
-            metadata.len(),
-            INSTALL_CERTIFICATE_BYTES_MAX
+
+    /// Connect to a SAM-BA bootloader device. Auto-detects the port.
+    #[tool]
+    fn samba_connect(&self) -> Result<CallToolResult, String> {
+        let mut state = state();
+        if state.sambuca.is_some() {
+            return Err("Already connected to SAM-BA. Call samba_disconnect first.".to_string());
+        }
+
+        state.sambuca =
+            Some(sambuca::Sambuca::new().map_err(|e| format!("Failed to connect to SAM-BA device: {e}"))?);
+        Ok(text_result("Connected to SAM-BA device."))
+    }
+
+    /// Disconnect from the SAM-BA device.
+    #[tool]
+    fn samba_disconnect(&self) -> CallToolResult {
+        let mut state = state();
+        state.sambuca = None;
+        state.flash_params = None;
+        text_result("Disconnected from SAM-BA device.")
+    }
+
+    /// Get SAM-BA bootloader version string.
+    #[tool]
+    fn samba_version(&self) -> Result<CallToolResult, String> {
+        let version =
+            state().require_sambuca()?.version().map_err(|e| format!("Failed to read version: {e}"))?;
+        Ok(text_result(&format!("SAM-BA version: {version}")))
+    }
+
+    /// Read a 32-bit value from a memory address.
+    #[tool]
+    fn samba_read_u32(
+        &self,
+        Parameters(SambaReadU32Params { address }): Parameters<SambaReadU32Params>,
+    ) -> Result<CallToolResult, String> {
+        let val = state().require_sambuca()?.read_u32(address).map_err(|e| format!("Read failed: {e}"))?;
+        Ok(text_result(&format!("0x{address:08x}: 0x{val:08x} ({val})")))
+    }
+
+    /// Write a 32-bit value to a memory address.
+    #[tool]
+    fn samba_write_u32(
+        &self,
+        Parameters(SambaWriteU32Params { address, value }): Parameters<SambaWriteU32Params>,
+    ) -> Result<CallToolResult, String> {
+        state().require_sambuca()?.write_u32(address, value).map_err(|e| format!("Write failed: {e}"))?;
+        Ok(text_result(&format!("Wrote 0x{value:08x} to 0x{address:08x}.")))
+    }
+
+    /// Initialize the SDMMC flash applet. Must be called before flash read/write/verify.
+    #[tool]
+    fn samba_init_flash(
+        &self,
+        Parameters(SambaInitFlashParams { instance, partition }): Parameters<SambaInitFlashParams>,
+    ) -> Result<CallToolResult, String> {
+        let params = FlashParams {
+            instance: instance.unwrap_or(0),
+            ioset: 1,
+            partition: partition.unwrap_or(0),
+            bus_width: 8,
+            voltage: 3,
+        };
+
+        let mut state = state();
+        state
+            .require_sambuca()?
+            .initialize_flash_applet(
+                params.instance,
+                params.ioset,
+                params.partition,
+                params.bus_width,
+                params.voltage,
+            )
+            .map_err(|e| format!("Flash init failed: {e}"))?;
+
+        let msg = format!(
+            "Flash applet initialized.\n  Instance: {}\n  IO set: {}\n  Partition: {}\n  Bus width: {}\n  Voltage: {}",
+            params.instance, params.ioset, params.partition, params.bus_width, params.voltage,
         );
+        state.flash_params = Some(params);
+        Ok(text_result(&msg))
     }
 
-    fs::read(certificate_path).with_context(|| format!("reading {}", certificate_path.display()))
-}
-
-// HID APDU handler
-
-fn handle_send_apdu(state: &mut McpState, args: &Value) -> Value {
-    let apdu_hex = match args.get("apdu_hex").and_then(|v| v.as_str()) {
-        Some(h) => h.trim(),
-        None => return error_result("Missing required parameter: apdu_hex"),
-    };
-    let timeout_ms: i32 = 10000;
-
-    // Parse hex string into bytes
-    let hex_clean: String = apdu_hex.chars().filter(|c| !c.is_whitespace()).collect();
-    if hex_clean.len() % 2 != 0 {
-        return error_result("apdu_hex must have an even number of hex characters");
-    }
-    let apdu_bytes: Vec<u8> = match (0..hex_clean.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex_clean[i..i + 2], 16))
-        .collect::<std::result::Result<Vec<u8>, _>>()
-    {
-        Ok(b) => b,
-        Err(e) => return error_result(&format!("Invalid hex in apdu_hex: {e}")),
-    };
-
-    if apdu_bytes.len() < 4 {
-        return error_result("APDU must be at least 4 bytes (CLA INS P1 P2)");
+    /// Get flash applet information (buffer address, buffer size, page size).
+    #[tool]
+    fn samba_flash_info(&self) -> CallToolResult {
+        let Some(params) = &state().flash_params else {
+            return text_result("Flash applet not initialized. Call samba_init_flash first.");
+        };
+        text_result(&format!(
+            "Flash applet initialized:\n  Instance: {}\n  IO set: {}\n  Partition: {}\n  Bus width: {}\n  Voltage: {}",
+            params.instance, params.ioset, params.partition, params.bus_width, params.voltage,
+        ))
     }
 
-    // Auto-open HID device on first call (or reopen if stale)
-    if state.hid_device.is_none() {
-        match crate::hid::open_hid() {
-            Ok((dev, mode)) => {
-                let mode_str = match mode {
-                    crate::hid::HidMode::Legacy => "Legacy",
-                    crate::hid::HidMode::Fido => "CTAP/FIDO",
-                };
-                eprintln!("[mcp] HID device opened in {mode_str} mode");
-                state.hid_device = Some(dev);
-            }
-            Err(e) => return error_result(&format!("Failed to open HID device: {e}")),
+    /// Read data from flash. Requires samba_init_flash first. Returns base64-encoded data.
+    #[tool]
+    fn samba_read_flash(
+        &self,
+        Parameters(SambaReadFlashParams { offset, length }): Parameters<SambaReadFlashParams>,
+    ) -> Result<CallToolResult, String> {
+        let mut state = state();
+        let params = state.require_flash_params()?;
+        let mut applet = open_flash_applet(&mut state, &params)?;
+
+        let mut buf = Vec::new();
+        applet.read_flash(offset, length, &mut buf, |_| {}).map_err(|e| format!("Flash read failed: {e}"))?;
+
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+        Ok(text_result(&format!("Read {} bytes from offset 0x{offset:x}.\nData (base64): {b64}", buf.len())))
+    }
+
+    /// Write data to flash. Requires samba_init_flash first. Data must be base64-encoded.
+    #[tool]
+    fn samba_write_flash(
+        &self,
+        Parameters(SambaWriteFlashParams { offset, data_base64 }): Parameters<SambaWriteFlashParams>,
+    ) -> Result<CallToolResult, String> {
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&data_base64)
+            .map_err(|e| format!("Invalid base64: {e}"))?;
+
+        let mut state = state();
+        let params = state.require_flash_params()?;
+        let mut applet = open_flash_applet(&mut state, &params)?;
+
+        applet.write_flash(offset, &data, |_| {}).map_err(|e| format!("Flash write failed: {e}"))?;
+        Ok(text_result(&format!("Wrote {} bytes to offset 0x{offset:x}.", data.len())))
+    }
+
+    /// Verify flash contents against provided data. Returns true if match.
+    #[tool]
+    fn samba_verify_flash(
+        &self,
+        Parameters(SambaVerifyFlashParams { offset, data_base64 }): Parameters<SambaVerifyFlashParams>,
+    ) -> Result<CallToolResult, String> {
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&data_base64)
+            .map_err(|e| format!("Invalid base64: {e}"))?;
+
+        let mut state = state();
+        let params = state.require_flash_params()?;
+        let mut applet = open_flash_applet(&mut state, &params)?;
+
+        let stats =
+            applet.verify_flash(offset, &data, |_| {}, true).map_err(|e| format!("Verify failed: {e}"))?;
+
+        if stats.num_chunks_patched == 0 {
+            return Ok(text_result("Verification PASSED: flash matches data."));
+        }
+        Ok(text_result(&format!(
+            "Verification FAILED: patched {} chunk(s) ({} attempts).",
+            stats.num_chunks_patched, stats.num_attempts
+        )))
+    }
+
+    /// Reboot the device to normal mode (exit SAM-BA mode).
+    #[tool]
+    fn samba_reboot(&self) -> Result<CallToolResult, String> {
+        let mut state = state();
+        let sambuca = state.require_sambuca()?;
+
+        sambuca.write_u32(0xF804_8054, 0x6683_0000).map_err(|e| format!("Failed to reset boot bits: {e}"))?;
+        sambuca
+            .write_u32(0xF804_8000, 0xA500_0001)
+            .map_err(|e| format!("Failed to kick reset controller: {e}"))?;
+
+        state.sambuca = None;
+        state.flash_params = None;
+        Ok(text_result("Device rebooting to normal mode."))
+    }
+
+    /// Send an ISO 7816 APDU over USB HID. Auto-detects CTAP/FIDO mode (VID=0x1307, CTAPHID_MSG framing) or
+    /// Legacy mode (VID=0x2c97, Legacy HID framing). Returns hex-encoded RAPDU.
+    #[tool]
+    fn send_apdu(
+        &self,
+        Parameters(SendApduParams { apdu_hex }): Parameters<SendApduParams>,
+    ) -> Result<CallToolResult, String> {
+        let hex_clean: String = apdu_hex.chars().filter(|c| !c.is_whitespace()).collect();
+        let apdu = hex::decode(&hex_clean).map_err(|e| format!("Invalid hex in apdu_hex: {e}"))?;
+        if apdu.len() < 4 {
+            return Err("APDU must be at least 4 bytes (CLA INS P1 P2)".to_string());
+        }
+
+        let mut state = state();
+        if state.hid_device.is_none() {
+            let (dev, mode) =
+                crate::hid::open_hid().map_err(|e| format!("Failed to open HID device: {e}"))?;
+            let mode_str = match mode {
+                crate::hid::HidMode::Legacy => "Legacy",
+                crate::hid::HidMode::Fido => "CTAP/FIDO",
+            };
+            eprintln!("[mcp] HID device opened in {mode_str} mode");
+            state.hid_device = Some(dev);
+        }
+
+        let device = state.hid_device.as_ref().expect("opened above");
+        if let Ok(rapdu) = crate::hid::exchange_apdu(device, &apdu, APDU_TIMEOUT_MS) {
+            return Ok(text_result(&format_rapdu(&rapdu)));
+        }
+
+        // The handle goes stale whenever the device re-enumerates, so retry once on a fresh one.
+        let (dev, _) = crate::hid::open_hid().map_err(|e| format!("Failed to reopen HID device: {e}"))?;
+        state.hid_device = Some(dev);
+        let device = state.hid_device.as_ref().expect("opened above");
+        let rapdu = crate::hid::exchange_apdu(device, &apdu, APDU_TIMEOUT_MS)
+            .map_err(|e| format!("APDU exchange failed: {e}"))?;
+        Ok(text_result(&format_rapdu(&rapdu)))
+    }
+
+    /// Get the KeyOS version string running on the device (same value shown on Settings -> About -> KeyOS,
+    /// e.g. "1.3.0"). Useful for SDK compatibility checks.
+    #[tool]
+    fn get_version(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::GetVersion, Duration::from_secs(5))
+            .map_err(|e| format!("get_version request failed: {e}"))?;
+        Ok(text_result(&String::from_utf8_lossy(&payload)))
+    }
+
+    /// Get the list of running processes on the device with PID, name, CPU%, RAM usage, and thread states.
+    /// Returns the compact process list.
+    #[tool]
+    fn get_process_list(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::GetProcessList, Duration::from_secs(5))
+            .map_err(|e| format!("Process list request failed: {e}"))?;
+        Ok(text_result(&String::from_utf8_lossy(&payload)))
+    }
+
+    /// Probe the Developer Mode gated usb-debug interface. Returns 'enabled' if reachable; otherwise the
+    /// request fails.
+    #[tool]
+    fn get_developer_mode(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::GetDeveloperMode, Duration::from_secs(5))
+            .map_err(|e| format!("get_developer_mode request failed: {e}"))?;
+
+        // Wire format: single-byte payload, 0x00 = off, 0x01 = on.
+        match payload.first() {
+            Some(0) => Ok(text_result("disabled")),
+            Some(1) => Ok(text_result("enabled")),
+            Some(other) => Err(format!("get_developer_mode: unexpected payload byte 0x{other:02x}")),
+            None => Err("get_developer_mode: empty payload".to_string()),
         }
     }
 
-    let device = state.hid_device.as_ref().unwrap();
-    match crate::hid::exchange_apdu(device, &apdu_bytes, timeout_ms) {
-        Ok(rapdu) => format_rapdu(&rapdu),
-        Err(_) => {
-            // Handle might be stale — retry once with a fresh device.
-            state.hid_device = None;
-            match crate::hid::open_hid() {
-                Ok((dev, _)) => state.hid_device = Some(dev),
-                Err(e) => return error_result(&format!("Failed to reopen HID device: {e}")),
-            }
-            let device = state.hid_device.as_ref().unwrap();
-            match crate::hid::exchange_apdu(device, &apdu_bytes, timeout_ms) {
-                Ok(rapdu) => format_rapdu(&rapdu),
-                Err(e) => error_result(&format!("APDU exchange failed: {e}")),
-            }
-        }
+    /// Return the number of currently trusted publisher certificates installed on the device.
+    #[tool]
+    fn get_trusted_publisher_count(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::GetTrustedPublisherCount, Duration::from_secs(5))
+            .map_err(|e| format!("get_trusted_publisher_count request failed: {e}"))?;
+        let bytes: [u8; 2] = payload.as_slice().try_into().map_err(|_| {
+            format!("get_trusted_publisher_count: expected 2 payload bytes, got {}", payload.len())
+        })?;
+        Ok(text_result(&u16::from_le_bytes(bytes).to_string()))
     }
 }
 
-// SAM-BA tool handlers
-
-fn handle_samba_list_devices() -> Value {
-    let context = match rusb::Context::new() {
-        Ok(context) => context,
-        Err(e) => return error_result(&format!("Failed to initialize USB context: {e}")),
-    };
-    let devices = match context.devices() {
-        Ok(d) => d,
-        Err(e) => return error_result(&format!("Failed to enumerate USB devices: {e}")),
-    };
-
-    let samba: Vec<String> = devices
-        .iter()
-        .filter_map(|dev| {
-            let desc = dev.device_descriptor().ok()?;
-            if desc.vendor_id() == 0x03eb && desc.product_id() == 0x6124 {
-                Some(format!(
-                    "Bus {:03} Device {:03} (VID:{:04x} PID:{:04x})",
-                    dev.bus_number(),
-                    dev.address(),
-                    desc.vendor_id(),
-                    desc.product_id()
-                ))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if samba.is_empty() {
-        text_result("No SAM-BA devices found. Is the device in bootloader mode?")
-    } else {
-        text_result(&samba.join("\n"))
+#[tool_handler]
+impl ServerHandler for PassportServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+            .with_instructions(INSTRUCTIONS)
     }
 }
 
-fn handle_samba_connect(state: &mut McpState) -> Value {
-    if state.sambuca.is_some() {
-        return error_result("Already connected to SAM-BA. Call samba_disconnect first.");
-    }
-
-    match sambuca::Sambuca::new() {
-        Ok(s) => {
-            state.sambuca = Some(s);
-            text_result("Connected to SAM-BA device.")
-        }
-        Err(e) => error_result(&format!("Failed to connect to SAM-BA device: {e}")),
-    }
+/// The applet borrows the connection, so it has to be rebuilt for every flash operation.
+fn open_flash_applet<'a>(
+    state: &'a mut McpState,
+    params: &FlashParams,
+) -> Result<sambuca::FlashApplet<'a>, String> {
+    state
+        .require_sambuca()?
+        .initialize_flash_applet(
+            params.instance,
+            params.ioset,
+            params.partition,
+            params.bus_width,
+            params.voltage,
+        )
+        .map_err(|e| format!("Flash re-init failed: {e}"))
 }
 
-fn handle_samba_disconnect(state: &mut McpState) -> Value {
-    state.sambuca = None;
-    state.flash_params = None;
-    text_result("Disconnected from SAM-BA device.")
+fn format_rapdu(rapdu: &[u8]) -> String {
+    let hex: String = rapdu.iter().map(|b| format!("{b:02x}")).collect();
+    let sw = match rapdu {
+        [.., a, b] => format!("{a:02x}{b:02x}"),
+        _ => "(no SW)".to_string(),
+    };
+    format!("RAPDU ({} bytes, SW={}): {}", rapdu.len(), sw, hex)
 }
 
-fn handle_samba_version(state: &mut McpState) -> Value {
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-    match sambuca.version() {
-        Ok(v) => text_result(&format!("SAM-BA version: {v}")),
-        Err(e) => error_result(&format!("Failed to read version: {e}")),
-    }
+// MCP server entry point
+
+/// One physical device serves one agent at a time, so a single-threaded runtime is enough for both
+/// transports.
+fn runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Failed to build the tokio runtime")
 }
 
-fn handle_samba_read_u32(state: &mut McpState, args: &Value) -> Value {
-    let address = match args.get("address").and_then(|v| v.as_u64()) {
-        Some(a) => a as u32,
-        None => return error_result("Missing required parameter: address"),
-    };
-
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    match sambuca.read_u32(address) {
-        Ok(val) => text_result(&format!("0x{address:08x}: 0x{val:08x} ({val})")),
-        Err(e) => error_result(&format!("Read failed: {e}")),
-    }
-}
-
-fn handle_samba_write_u32(state: &mut McpState, args: &Value) -> Value {
-    let address = match args.get("address").and_then(|v| v.as_u64()) {
-        Some(a) => a as u32,
-        None => return error_result("Missing required parameter: address"),
-    };
-    let value = match args.get("value").and_then(|v| v.as_u64()) {
-        Some(v) => v as u32,
-        None => return error_result("Missing required parameter: value"),
-    };
-
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    match sambuca.write_u32(address, value) {
-        Ok(()) => text_result(&format!("Wrote 0x{value:08x} to 0x{address:08x}.")),
-        Err(e) => error_result(&format!("Write failed: {e}")),
-    }
-}
-
-fn handle_samba_init_flash(state: &mut McpState, args: &Value) -> Value {
-    let instance = args.get("instance").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let partition = args.get("partition").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    let params = FlashParams { instance, ioset: 1, partition, bus_width: 8, voltage: 3 };
-
-    match sambuca.initialize_flash_applet(
-        params.instance,
-        params.ioset,
-        params.partition,
-        params.bus_width,
-        params.voltage,
-    ) {
-        Ok(_applet) => {
-            let msg = format!(
-                "Flash applet initialized.\n  Instance: {}\n  IO set: {}\n  Partition: {}\n  Bus width: {}\n  Voltage: {}",
-                params.instance, params.ioset, params.partition, params.bus_width, params.voltage,
-            );
-            state.flash_params = Some(params);
-            text_result(&msg)
-        }
-        Err(e) => error_result(&format!("Flash init failed: {e}")),
-    }
-}
-
-fn handle_samba_flash_info(state: &mut McpState) -> Value {
-    match &state.flash_params {
-        Some(params) => {
-            text_result(&format!(
-                "Flash applet initialized:\n  Instance: {}\n  IO set: {}\n  Partition: {}\n  Bus width: {}\n  Voltage: {}",
-                params.instance, params.ioset, params.partition, params.bus_width, params.voltage,
-            ))
-        }
-        None => text_result("Flash applet not initialized. Call samba_init_flash first."),
-    }
-}
-
-/// Copy flash params out of state so we can mutably borrow sambuca without conflicts.
-fn copy_flash_params(state: &McpState) -> Option<FlashParams> {
-    state.flash_params.as_ref().map(|p| FlashParams {
-        instance: p.instance,
-        ioset: p.ioset,
-        partition: p.partition,
-        bus_width: p.bus_width,
-        voltage: p.voltage,
+/// Serve MCP over stdio until the client disconnects.
+pub fn run(jail: Option<PathBuf>) -> Result<()> {
+    crate::init_jail(jail)?;
+    runtime()?.block_on(async {
+        let service = PassportServer.serve(stdio()).await.context("Failed to start the MCP server")?;
+        service.waiting().await.context("MCP server failed")?;
+        Ok(())
     })
 }
 
-fn handle_samba_read_flash(state: &mut McpState, args: &Value) -> Value {
-    let offset = match args.get("offset").and_then(|v| v.as_u64()) {
-        Some(o) => o,
-        None => return error_result("Missing required parameter: offset"),
-    };
-    let length = match args.get("length").and_then(|v| v.as_u64()) {
-        Some(l) => l as usize,
-        None => return error_result("Missing required parameter: length"),
-    };
+/// Serve MCP over Streamable HTTP until the process is killed.
+///
+/// Runs stateless: each request gets a fresh handler, which is safe because the device state is
+/// process-wide rather than per-handler.
+pub fn run_http(addr: SocketAddr, jail: Option<PathBuf>) -> Result<()> {
+    crate::init_jail(jail)?;
+    runtime()?.block_on(async move {
+        let config = StreamableHttpServerConfig::default().with_stateful_mode(false).with_json_response(true);
+        // Host validation blunts DNS rebinding, but its defaults are loopback only. The address we
+        // were told to bind is by definition one clients will ask for, so allow that too.
+        let mut allowed_hosts = config.allowed_hosts.clone();
+        allowed_hosts.push(addr.to_string());
+        let config = config.with_allowed_hosts(allowed_hosts);
 
-    let params = match copy_flash_params(state) {
-        Some(p) => p,
-        None => return error_result("Flash not initialized. Call samba_init_flash first."),
-    };
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
+        let service = StreamableHttpService::new(
+            || Ok(PassportServer),
+            Arc::new(LocalSessionManager::default()),
+            config,
+        );
 
-    let mut applet = match sambuca.initialize_flash_applet(
-        params.instance,
-        params.ioset,
-        params.partition,
-        params.bus_width,
-        params.voltage,
-    ) {
-        Ok(a) => a,
-        Err(e) => return error_result(&format!("Flash re-init failed: {e}")),
-    };
+        let listener = TcpListener::bind(addr).await.with_context(|| format!("Failed to bind {addr}"))?;
+        eprintln!("[mcp] serving Streamable HTTP on http://{addr}");
 
-    let mut buf = Vec::new();
-    match applet.read_flash(offset, length, &mut buf, |_| {}) {
-        Ok(()) => {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
-            text_result(&format!("Read {} bytes from offset 0x{offset:x}.\nData (base64): {b64}", buf.len()))
-        }
-        Err(e) => error_result(&format!("Flash read failed: {e}")),
-    }
-}
-
-fn handle_samba_write_flash(state: &mut McpState, args: &Value) -> Value {
-    let offset = match args.get("offset").and_then(|v| v.as_u64()) {
-        Some(o) => o,
-        None => return error_result("Missing required parameter: offset"),
-    };
-    let data_b64 = match args.get("data_base64").and_then(|v| v.as_str()) {
-        Some(d) => d,
-        None => return error_result("Missing required parameter: data_base64"),
-    };
-
-    let data = match base64::engine::general_purpose::STANDARD.decode(data_b64) {
-        Ok(d) => d,
-        Err(e) => return error_result(&format!("Invalid base64: {e}")),
-    };
-
-    let params = match copy_flash_params(state) {
-        Some(p) => p,
-        None => return error_result("Flash not initialized. Call samba_init_flash first."),
-    };
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    let mut applet = match sambuca.initialize_flash_applet(
-        params.instance,
-        params.ioset,
-        params.partition,
-        params.bus_width,
-        params.voltage,
-    ) {
-        Ok(a) => a,
-        Err(e) => return error_result(&format!("Flash re-init failed: {e}")),
-    };
-
-    match applet.write_flash(offset, &data, |_| {}) {
-        Ok(()) => text_result(&format!("Wrote {} bytes to offset 0x{offset:x}.", data.len())),
-        Err(e) => error_result(&format!("Flash write failed: {e}")),
-    }
-}
-
-fn handle_samba_verify_flash(state: &mut McpState, args: &Value) -> Value {
-    let offset = match args.get("offset").and_then(|v| v.as_u64()) {
-        Some(o) => o,
-        None => return error_result("Missing required parameter: offset"),
-    };
-    let data_b64 = match args.get("data_base64").and_then(|v| v.as_str()) {
-        Some(d) => d,
-        None => return error_result("Missing required parameter: data_base64"),
-    };
-
-    let data = match base64::engine::general_purpose::STANDARD.decode(data_b64) {
-        Ok(d) => d,
-        Err(e) => return error_result(&format!("Invalid base64: {e}")),
-    };
-
-    let params = match copy_flash_params(state) {
-        Some(p) => p,
-        None => return error_result("Flash not initialized. Call samba_init_flash first."),
-    };
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    let mut applet = match sambuca.initialize_flash_applet(
-        params.instance,
-        params.ioset,
-        params.partition,
-        params.bus_width,
-        params.voltage,
-    ) {
-        Ok(a) => a,
-        Err(e) => return error_result(&format!("Flash re-init failed: {e}")),
-    };
-
-    match applet.verify_flash(offset, &data, |_| {}, true) {
-        Ok(stats) => {
-            if stats.num_chunks_patched == 0 {
-                text_result("Verification PASSED: flash matches data.")
-            } else {
-                text_result(&format!(
-                    "Verification FAILED: patched {} chunk(s) ({} attempts).",
-                    stats.num_chunks_patched, stats.num_attempts
-                ))
-            }
-        }
-        Err(e) => error_result(&format!("Verify failed: {e}")),
-    }
-}
-
-fn handle_samba_reboot(state: &mut McpState) -> Value {
-    let sambuca = match state.require_sambuca() {
-        Ok(s) => s,
-        Err(e) => return error_result(&e),
-    };
-
-    // Reset boot bits and kick reset controller
-    if let Err(e) = sambuca.write_u32(0xF804_8054, 0x6683_0000) {
-        return error_result(&format!("Failed to reset boot bits: {e}"));
-    }
-    if let Err(e) = sambuca.write_u32(0xF804_8000, 0xA500_0001) {
-        return error_result(&format!("Failed to kick reset controller: {e}"));
-    }
-
-    state.sambuca = None;
-    state.flash_params = None;
-    text_result("Device rebooting to normal mode.")
-}
-
-// MCP server main loop
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StdioMode {
-    Unknown,
-    Line,
-    Framed,
-}
-
-fn read_stdio_message<R: BufRead>(reader: &mut R, mode: &mut StdioMode) -> Result<Option<String>> {
-    loop {
-        match *mode {
-            StdioMode::Line => return read_line_message(reader),
-            StdioMode::Framed => return read_framed_message(reader),
-            StdioMode::Unknown => {
-                let buf = reader.fill_buf().context("Failed to read stdin")?;
-                if buf.is_empty() {
-                    return Ok(None);
-                }
-
-                let whitespace_len = buf.iter().take_while(|b| b.is_ascii_whitespace()).count();
-                if whitespace_len > 0 {
-                    reader.consume(whitespace_len);
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(accepted) => accepted,
+                // A failed accept is transient, a client vanishing mid-handshake or a momentary
+                // descriptor shortage, so keep serving. The pause stops an exhausted descriptor
+                // table from spinning this loop at full tilt.
+                Err(e) => {
+                    eprintln!("[mcp] accept failed: {e}");
+                    tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
                     continue;
                 }
-
-                *mode = if matches!(buf[0], b'{' | b'[') { StdioMode::Line } else { StdioMode::Framed };
-            }
+            };
+            let service = TowerToHyperService::new(service.clone());
+            tokio::spawn(async move {
+                if let Err(e) = http1::Builder::new().serve_connection(TokioIo::new(stream), service).await {
+                    eprintln!("[mcp] connection failed: {e}");
+                }
+            });
         }
-    }
-}
-
-fn read_line_message<R: BufRead>(reader: &mut R) -> Result<Option<String>> {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let bytes = reader.read_line(&mut line).context("Failed to read stdin")?;
-        if bytes == 0 {
-            return Ok(None);
-        }
-        if !line.trim().is_empty() {
-            return Ok(Some(line.clone()));
-        }
-    }
-}
-
-fn read_framed_message<R: BufRead>(reader: &mut R) -> Result<Option<String>> {
-    let mut content_length: Option<usize> = None;
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        let bytes = reader.read_line(&mut line).context("Failed to read MCP headers")?;
-        if bytes == 0 {
-            if content_length.is_some() {
-                anyhow::bail!("Unexpected EOF while reading MCP headers");
-            }
-            return Ok(None);
-        }
-
-        let header = line.trim_end_matches(&['\r', '\n'][..]);
-        if header.is_empty() {
-            break;
-        }
-
-        let (name, value) =
-            header.split_once(':').with_context(|| format!("Malformed MCP header: {header}"))?;
-        if name.eq_ignore_ascii_case("content-length") {
-            content_length = Some(
-                value
-                    .trim()
-                    .parse()
-                    .with_context(|| format!("Invalid MCP Content-Length header: {}", value.trim()))?,
-            );
-        }
-    }
-
-    let len = content_length.context("Missing MCP Content-Length header")?;
-    let mut body = vec![0; len];
-    reader.read_exact(&mut body).context("Failed to read MCP body")?;
-    String::from_utf8(body).context("MCP body was not valid UTF-8").map(Some)
-}
-
-fn write_stdio_response<W: Write>(writer: &mut W, mode: StdioMode, response: &Value) -> Result<()> {
-    let body = serde_json::to_vec(response).context("Failed to encode response")?;
-    match mode {
-        StdioMode::Framed => {
-            write!(writer, "Content-Length: {}\r\n\r\n", body.len()).context("Failed to write MCP header")?;
-            writer.write_all(&body).context("Failed to write MCP response")?;
-        }
-        StdioMode::Line | StdioMode::Unknown => {
-            writer.write_all(&body).context("Failed to write response")?;
-            writer.write_all(b"\n").context("Failed to write newline")?;
-        }
-    }
-    writer.flush().context("Failed to flush stdout")
-}
-
-pub fn run() -> Result<()> {
-    let stdin = io::stdin();
-    let mut reader = BufReader::new(stdin.lock());
-    let mut stdout = io::stdout();
-    let mut mode = StdioMode::Unknown;
-    let mut state = McpState::new();
-
-    while let Some(message) = read_stdio_message(&mut reader, &mut mode)? {
-        let request: Value = match serde_json::from_str(&message) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[mcp] Invalid JSON: {e}");
-                continue;
-            }
-        };
-
-        let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
-        let id = request.get("id").cloned();
-
-        // Notifications (no id) — don't send a response
-        if id.is_none() {
-            // e.g. "notifications/initialized", "notifications/cancelled"
-            continue;
-        }
-
-        let id = id.unwrap();
-        let params = request.get("params").cloned().unwrap_or(json!({}));
-
-        let response = match method {
-            "initialize" => {
-                // Echo back the protocol version from the client
-                let protocol_version =
-                    params.get("protocolVersion").and_then(|v| v.as_str()).unwrap_or("2024-11-05");
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "protocolVersion": protocol_version,
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "passport-drive",
-                            "version": "0.1.0"
-                        }
-                    }
-                })
-            }
-
-            "ping" => json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
-
-            "tools/list" => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "tools": tool_definitions()
-                    }
-                })
-            }
-
-            "tools/call" => {
-                let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
-                let result = handle_tool(&mut state, tool_name, &tool_args);
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": result
-                })
-            }
-
-            "resources/list" => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": { "resources": [] }
-                })
-            }
-
-            "prompts/list" => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": { "prompts": [] }
-                })
-            }
-
-            _ => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32601,
-                        "message": format!("Method not found: {method}")
-                    }
-                })
-            }
-        };
-
-        write_stdio_response(&mut stdout, mode, &response)?;
-    }
-
-    // Clean up
-    state.device.take();
-
-    Ok(())
+    })
 }

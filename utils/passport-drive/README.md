@@ -173,14 +173,19 @@ passport-drive samba reboot
 
 ## MCP Server Mode
 
-Run as a Model Context Protocol server over stdio for AI tool integration:
+Run as a Model Context Protocol server for AI tool integration, over stdio or
+Streamable HTTP:
 
 ```sh
-passport-drive mcp
+passport-drive mcp                        # stdio
+passport-drive mcp --http                 # HTTP on 127.0.0.1:8000
+passport-drive mcp --http 127.0.0.1:9000  # HTTP on an explicit address
 ```
 
-This speaks JSON-RPC 2.0 (newline-delimited JSON) on stdin/stdout and exposes
-24 tools for full device control. Configure in `.mcp.json`:
+Both transports expose the same 33 tools for full device control.
+
+stdio speaks JSON-RPC 2.0 (newline-delimited JSON) on stdin/stdout. Configure
+in `.mcp.json`:
 
 ```json
 {
@@ -192,6 +197,28 @@ This speaks JSON-RPC 2.0 (newline-delimited JSON) on stdin/stdout and exposes
     }
   }
 }
+```
+
+HTTP serves plain request/response JSON on a single endpoint, without SSE
+framing or session IDs, and is reached by pointing an MCP client at the bind
+address. Use it to drive the device from a client that cannot spawn a local
+process, without a stdio bridge in between:
+
+```sh
+passport-drive mcp --http 172.17.0.1:8000  # reachable from containers on the bridge
+```
+
+Anything that can route to the bind address can drive the device, which includes
+flashing firmware and installing trusted publisher certificates.
+
+`--jail <PATH>` confines file access to that directory. Every path the server
+opens is resolved first, symlinks included, and refused when the result lands
+outside; that covers the tool parameters and each file inside an app bundle.
+The server also moves into that directory, so relative paths from a caller resolve
+against it. Without it, paths are used as given.
+
+```sh
+passport-drive mcp --http 172.17.0.1:8000 --jail ./bundles
 ```
 
 ### MCP Tools
@@ -214,7 +241,7 @@ This speaks JSON-RPC 2.0 (newline-delimited JSON) on stdin/stdout and exposes
 | `tap` | Tap at coordinates (params: `x`, `y`, optional `timeout_ms`) |
 | `swipe` | Timed swipe gesture using physical touch coordinates (params: `start_x`, `start_y`, `end_x`, `end_y`, optional `duration_ms`, `steps`) |
 | `power_button` | Simulate short/long power button press (params: `long`) |
-| `send_debug_command` | Send single-char kernel debug command |
+| `send_kernel_command` | Send single-char kernel debug command (params: `command`) |
 | `reboot_to_samba` | Reboot device into SAM-BA bootloader mode |
 | `close_app` | Close/kill an app by PID via gui-server (params: `pid`) |
 

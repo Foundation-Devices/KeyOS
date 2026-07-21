@@ -346,8 +346,8 @@ over USB. It is the most feature-complete host tool.
   CLI and MCP server.
 - **MCP tools over the debug interface:** `connect`, `disconnect`, `get_logs`,
   `clear_logs`, `screenshot`, `tap`, `swipe`, `power_button`,
-  `send_debug_command`, `send_kernel_command`, `reboot_to_samba`, `input_text`,
-  `close_app`, `load_app`, `launch_app`, `get_developer_mode`, `get_version`,
+  `send_kernel_command`, `reboot_to_samba`, `input_text`, `close_app`,
+  `load_app`, `launch_app`, `get_developer_mode`, `get_version`,
   `get_process_list`.
 - **Additional capabilities:**
   - Device discovery: `list_ports`.

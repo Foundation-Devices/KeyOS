@@ -45,11 +45,18 @@ impl SideloadKind {
     }
 }
 
+/// Read a file from a bundle, refusing one that resolves outside the confinement root.
+fn read_bundle_file(path: &Path) -> Result<Vec<u8>> {
+    crate::check_jail(path)?;
+    std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))
+}
+
 pub(crate) fn load_app(
     transport: &UsbDebugClient,
     app_path: &Path,
     kind: SideloadKind,
 ) -> Result<LoadAppReport> {
+    crate::check_jail(app_path)?;
     let metadata =
         std::fs::metadata(app_path).with_context(|| format!("Cannot access {}", app_path.display()))?;
     ensure!(metadata.is_dir(), "{} is not a directory", app_path.display());
@@ -59,14 +66,9 @@ pub(crate) fn load_app(
     let icon_path = app_path.join("icon.bin");
     let resources_path = app_path.join("resources");
 
-    let elf = std::fs::read(&elf_path).with_context(|| format!("Cannot read {}", elf_path.display()))?;
-    let manifest =
-        std::fs::read(&manifest_path).with_context(|| format!("Cannot read {}", manifest_path.display()))?;
-    let icon = if icon_path.exists() {
-        Some(std::fs::read(&icon_path).with_context(|| format!("Cannot read {}", icon_path.display()))?)
-    } else {
-        None
-    };
+    let elf = read_bundle_file(&elf_path)?;
+    let manifest = read_bundle_file(&manifest_path)?;
+    let icon = if icon_path.exists() { Some(read_bundle_file(&icon_path)?) } else { None };
     let resource_files = collect_resource_files(&resources_path)?;
 
     ensure!(!elf.is_empty(), "{} is empty", elf_path.display());
@@ -83,8 +85,7 @@ pub(crate) fn load_app(
     }
     let mut resource_bytes = 0usize;
     for resource in &resource_files {
-        let data = std::fs::read(&resource.absolute_path)
-            .with_context(|| format!("Cannot read {}", resource.absolute_path.display()))?;
+        let data = read_bundle_file(&resource.absolute_path)?;
         resource_bytes += data.len();
         upload_file(transport, &format!("resources/{}", resource.relative_path), &data)?;
     }
@@ -208,11 +209,12 @@ fn collect_resource_files(resources_path: &Path) -> Result<Vec<ResourceFile>> {
 }
 
 fn collect_resource_files_inner(root: &Path, dir: &Path, files: &mut Vec<ResourceFile>) -> Result<()> {
+    crate::check_jail(dir)?;
     for entry in std::fs::read_dir(dir).with_context(|| format!("Cannot list {}", dir.display()))? {
         let entry = entry.with_context(|| format!("Cannot read entry in {}", dir.display()))?;
         let path = entry.path();
-        let metadata =
-            entry.metadata().with_context(|| format!("Cannot read metadata for {}", path.display()))?;
+        let metadata = std::fs::metadata(&path)
+            .with_context(|| format!("Cannot read metadata for {}", path.display()))?;
         if metadata.is_dir() {
             collect_resource_files_inner(root, &path, files)?;
         } else if metadata.is_file() {

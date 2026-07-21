@@ -12,10 +12,12 @@ mod mcp;
 pub(crate) mod screenshot;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use rusb::UsbContext;
 use serde::Deserialize;
@@ -28,6 +30,44 @@ pub(crate) const FB_SIZE: usize = (SCREEN_WIDTH * SCREEN_HEIGHT * 4) as usize;
 
 // Log protocol constant
 const LOG_TERMINATOR: u8 = 0x1E;
+
+/// Directory that file access is confined to, canonical. Unset means no restriction.
+static JAIL: OnceLock<PathBuf> = OnceLock::new();
+
+/// Canonicalize the confinement root once, so every later comparison is against a real directory.
+pub(crate) fn init_jail(jail: Option<PathBuf>) -> Result<()> {
+    let Some(jail) = jail else {
+        return Ok(());
+    };
+
+    let root = jail
+        .canonicalize()
+        .with_context(|| format!("Cannot resolve the jail directory {}", jail.display()))?;
+    ensure!(root.is_dir(), "The jail path is not a directory: {}", root.display());
+    // Relative paths then resolve inside the jail instead of wherever the server happened to be
+    // started. This is only about what they resolve against; check_jail is what confines them.
+    std::env::set_current_dir(&root)
+        .with_context(|| format!("Cannot enter the jail directory {}", root.display()))?;
+    JAIL.set(root).expect("the jail is initialized once per process");
+    Ok(())
+}
+
+/// Refuse a path that resolves outside the confinement root. Symlinks are followed first, so a link
+/// pointing out is caught rather than banned. Callers must check every path they open, and the
+/// error names the path as it was given so it stays recognisable to whoever passed it.
+pub(crate) fn check_jail(path: &Path) -> Result<()> {
+    let Some(jail) = JAIL.get() else {
+        return Ok(());
+    };
+
+    let real = path.canonicalize().with_context(|| format!("Cannot resolve {}", path.display()))?;
+    ensure!(
+        real.starts_with(jail),
+        "Path points outside the allowed directory: {}. Pass a path relative to the base directory.",
+        path.display()
+    );
+    Ok(())
+}
 
 pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'static str> {
     match status {
@@ -205,8 +245,15 @@ enum CliCommand {
         #[arg(long)]
         flux: bool,
     },
-    /// Start MCP server mode (JSON-RPC over stdio for AI integration)
-    Mcp,
+    /// Start MCP server mode for AI integration (JSON-RPC over stdio, or HTTP with --http)
+    Mcp {
+        /// Serve Streamable HTTP on this address instead of stdio
+        #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = "127.0.0.1:8000")]
+        http: Option<SocketAddr>,
+        /// Confine file access to paths that resolve under this directory
+        #[arg(long, value_name = "PATH")]
+        jail: Option<PathBuf>,
+    },
     /// Send one ISO 7816 APDU over HID and print the RAPDU
     SendApdu {
         /// Hex-encoded APDU bytes, without Legacy HID framing
@@ -629,8 +676,11 @@ fn main() -> Result<()> {
                 }
             };
         }
-        CliCommand::Mcp => {
-            return mcp::run();
+        CliCommand::Mcp { http, jail } => {
+            return match http {
+                Some(addr) => mcp::run_http(*addr, jail.clone()),
+                None => mcp::run(jail.clone()),
+            };
         }
         CliCommand::SendApdu { apdu_hex, timeout_ms } => {
             return do_send_apdu(apdu_hex, *timeout_ms);
@@ -730,7 +780,10 @@ fn main() -> Result<()> {
             eprintln!("Streaming logs (Ctrl+C to stop)...");
             do_logs_usb(&client, max_lines, filter.as_deref())?;
         }
-        CliCommand::Mcp | CliCommand::SendApdu { .. } | CliCommand::ListPorts | CliCommand::Samba(_) => {
+        CliCommand::Mcp { .. }
+        | CliCommand::SendApdu { .. }
+        | CliCommand::ListPorts
+        | CliCommand::Samba(_) => {
             unreachable!()
         }
     }
