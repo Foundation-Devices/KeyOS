@@ -2460,6 +2460,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "localizer-codegen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indoc",
+ "phf_codegen",
+ "serde_json",
+]
+
+[[package]]
 name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4308,9 +4318,9 @@ dependencies = [
  "image",
  "indoc",
  "itertools 0.13.0",
+ "localizer-codegen",
  "miette",
  "once_cell",
- "phf_codegen",
  "qrcode",
  "resvg 0.44.0",
  "rkyv",

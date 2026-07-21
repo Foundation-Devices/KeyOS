@@ -431,6 +431,7 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
             .join("themes")
             .join("default_theme.json"),
         stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
+        stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
         stage_dir.join("resources").join("icons").join("loader.svg"),
         stage_dir.join(".agents").join("skills").join("foundation-cli").join("SKILL.md"),
         stage_dir.join(".agents").join("skills").join("foundation-localize").join("SKILL.md"),
@@ -2210,6 +2211,8 @@ mod tests {
         fs::create_dir_all(stage_dir.join("ui").join("ui")).unwrap();
         fs::create_dir_all(stage_dir.join("resources").join("icons")).unwrap();
         fs::create_dir_all(stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols")).unwrap();
+        fs::create_dir_all(stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen"))
+            .unwrap();
 
         for path in [
             stage_dir.join("lib").join("keyos").join("Cargo.toml"),
@@ -2239,6 +2242,7 @@ mod tests {
                 .join("default_theme.json"),
             stage_dir.join("ui").join("ui").join("theme.slint"),
             stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
+            stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
             stage_dir.join("resources").join("icons").join("loader.svg"),
             stage_dir.join(".agents").join("skills").join("foundation-cli").join("SKILL.md"),
             stage_dir.join(".agents").join("skills").join("foundation-localize").join("SKILL.md"),

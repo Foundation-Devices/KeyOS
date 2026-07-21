@@ -155,6 +155,10 @@ source = "../utils/whence"
 dest = "lib/keyos/utils/whence"
 
 [[copy]]
+source = "../utils/localizer-codegen"
+dest = "lib/keyos/utils/localizer-codegen"
+
+[[copy]]
 source = "../worker"
 dest = "lib/keyos/worker"
 

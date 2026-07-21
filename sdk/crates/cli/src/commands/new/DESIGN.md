@@ -87,6 +87,8 @@ Shipped templates should use `sdk_keyos_root` for KeyOS source dependencies; the
 The generated project is centered on `app-config.toml`, which mirrors `foundation_core::AppConfig`.
 It also includes a pinned `Cargo.lock` so new apps reproduce the SDK-validated dependency graph instead of drifting with the latest crates.io resolution.
 
+The pinned lock must match resolution against the staged SDK layout (path-vendored `lib/keyos` and `lib/slint`), not the KeyOS development workspace. Whenever a dependency of any SDK-shipped crate changes (for example `slint-keyos-platform-build`), regenerate every `templates/*/files/Cargo.lock`: scaffold an app from each template against an SDK installed from the current tree, run `cargo metadata` in it, then copy the resulting lock back with the app's `name`/`version` lines restored to `{{app_name}}`/`{{version}}`. A stale lock forces a re-resolution on the user's first build, which fails without network access.
+
 That means the scaffolded config is expected to carry:
 
 - application naming fields
