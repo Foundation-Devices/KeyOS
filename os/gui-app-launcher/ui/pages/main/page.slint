@@ -933,6 +933,7 @@ component LauncherPaginator inherits Rectangle {
                     property <length> position: -root.current-page * root.page-span;
                     property <length> swipe-offset;
                     x: position + swipe-offset;
+                    y: root.rearrange-top-bleed;
                     spacing: root.page-gap;
 
                     animate position {
