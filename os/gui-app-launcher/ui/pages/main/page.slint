@@ -419,6 +419,7 @@ component LauncherCollectionItem inherits Rectangle {
 
         moved => {
             if (Math.abs(self.mouse-x - self.pressed-x) > 10px || Math.abs(self.mouse-y - self.pressed-y) > 10px) {
+                root.ignore-release-click = true;
                 hold-timer.running = false;
             }
             if (State.rearrange-mode) {
