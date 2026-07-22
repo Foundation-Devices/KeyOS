@@ -157,7 +157,7 @@ component AppTile inherits VerticalLayout {
 
         Image {
             in property <[GradientStop]> border-gradient: [
-                { color: CurrentTheme.is-dark ? #323232 : UIColors.primary-white, stop: 50% },
+                { color: CurrentTheme.is-dark ? UIColors.neutral-800 : UIColors.primary-white, stop: 50% },
                 { color: CurrentTheme.is-dark ? UIColors.bronze-500 : #C69574, stop: 100% }
             ];
 
