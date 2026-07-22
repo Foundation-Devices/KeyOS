@@ -21,7 +21,7 @@ use crate::builder::project_root;
 
 pub const DEFAULT_ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
 pub const ADDITIONAL_ICON_SIZES: &[(&str, &[usize])] = &[
-    ("alert", &[64]),
+    ("alert", &[64, 96]),
     ("decline-circle", &[64]),
     ("bitcoin", &[64]),
     ("plus", &[96]),
