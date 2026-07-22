@@ -421,6 +421,7 @@ component LauncherCollectionItem inherits Rectangle {
             if (Math.abs(self.mouse-x - self.pressed-x) > 10px || Math.abs(self.mouse-y - self.pressed-y) > 10px) {
                 root.ignore-release-click = true;
                 hold-timer.running = false;
+                root.ignore-release-click = true;
             }
             if (State.rearrange-mode) {
                 State.drag-pointer-abs-x = self.absolute-position.x + self.mouse-x;
@@ -493,6 +494,7 @@ component LauncherCollection inherits Rectangle {
         column-gap: 24px,
     };
     in property <bool> show-labels: true;
+    in property <bool> handles-background-input: true;
     in property <int> columns: 3;
     in property <int> slot-count: items.length;
     in property <length> slot-height: show-labels ? 160px : 128px;
@@ -657,7 +659,7 @@ component LauncherCollection inherits Rectangle {
     TouchArea {
         width: root.width;
         height: root.height;
-        enabled: State.rearrange-mode && State.drag-source-collection-id == "";
+        enabled: root.handles-background-input && State.rearrange-mode && State.drag-source-collection-id == "";
 
         clicked => {
             State.rearrange-mode = false;
@@ -894,6 +896,15 @@ component LauncherPaginator inherits Rectangle {
     function page-collection-slot-count(page-index: int) -> int {
         (page-index == 0 ? 2 : 3) * 3
     }
+    function commit-page-swipe(dx: length) {
+        if (dx > root.width / 4) {
+            root.current-page = Math.max(0, root.current-page - 1);
+        } else if (dx < -root.width / 4) {
+            root.current-page = Math.min(root.pages.length - 1, root.current-page + 1);
+        }
+    }
+    private property <bool> page-swiping: sgr.swiping || rearrange-sgr.swiping;
+    private property <length> page-swipe-dx: sgr.swiping ? sgr.current-position.x - sgr.pressed-position.x : rearrange-sgr.swiping ? rearrange-sgr.current-position.x - rearrange-sgr.pressed-position.x : 0px;
 
     VerticalLayout {
         width: root.width;
@@ -908,77 +919,115 @@ component LauncherPaginator inherits Rectangle {
             clip: false;
 
             Rectangle {
+                property <length> swipe-area-top: root.rearrange-top-bleed + root.swipe-hit-top;
                 y: -root.rearrange-top-bleed;
                 width: parent.width;
                 height: root.page-viewport-height + root.rearrange-top-bleed;
                 background: transparent;
                 clip: true;
 
-                sgr := SwipeGestureHandler {
-                    y: root.rearrange-top-bleed + root.swipe-hit-top;
+                rearrange-sgr := SwipeGestureHandler {
+                    enabled: State.rearrange-mode && State.drag-source-collection-id == "";
+                    y: parent.swipe-area-top;
                     width: parent.width;
                     height: max(0px, root.page-viewport-height - root.swipe-hit-top);
-                    handle-swipe-right: State.drag-source-collection-id == "" && root.current-page > 0;
-                    handle-swipe-left: State.drag-source-collection-id == "" && root.current-page < root.pages.length - 1;
+                    handle-swipe-right: root.current-page > 0;
+                    handle-swipe-left: root.current-page < root.pages.length - 1;
 
                     swiped => {
-                        if (self.current-position.x > self.pressed-position.x + self.width / 4) {
-                            root.current-page = Math.max(0, root.current-page - 1);
-                        } else if (self.current-position.x < self.pressed-position.x - self.width / 4) {
-                            root.current-page = Math.min(root.pages.length - 1, root.current-page + 1);
+                        root.commit-page-swipe(self.current-position.x - self.pressed-position.x);
+                    }
+
+                    background-touch := TouchArea {
+                        property <bool> moved-past-click-threshold: false;
+                        width: parent.width;
+                        height: parent.height;
+                        enabled: parent.enabled;
+
+                        clicked => {
+                            if (!self.moved-past-click-threshold) {
+                                State.rearrange-mode = false;
+                            }
+                        }
+
+                        moved => {
+                            if (Math.abs(self.mouse-x - self.pressed-x) > 10px || Math.abs(self.mouse-y - self.pressed-y) > 10px) {
+                                self.moved-past-click-threshold = true;
+                            }
+                        }
+
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                self.moved-past-click-threshold = false;
+                            }
                         }
                     }
                 }
 
-                HorizontalLayout {
-                    property <length> position: -root.current-page * root.page-span;
-                    property <length> swipe-offset;
-                    x: position + swipe-offset;
-                    y: root.rearrange-top-bleed;
-                    spacing: root.page-gap;
+                sgr := SwipeGestureHandler {
+                    enabled: !State.rearrange-mode && State.drag-source-collection-id == "";
+                    y: parent.swipe-area-top;
+                    width: parent.width;
+                    height: max(0px, root.page-viewport-height - root.swipe-hit-top);
+                    handle-swipe-right: root.current-page > 0;
+                    handle-swipe-left: root.current-page < root.pages.length - 1;
 
-                    animate position {
-                        duration: 200ms;
-                        easing: ease-in-out;
+                    swiped => {
+                        root.commit-page-swipe(self.current-position.x - self.pressed-position.x);
                     }
 
-                    states [
-                        swiping when sgr.swiping: {
-                            swipe-offset: sgr.current-position.x - sgr.pressed-position.x;
-                            out {
-                                animate swipe-offset {
-                                    duration: 200ms;
-                                    easing: ease-in-out;
+                    HorizontalLayout {
+                        property <length> position: -root.current-page * root.page-span;
+                        property <length> swipe-offset;
+                        x: position + swipe-offset;
+                        y: -root.swipe-hit-top;
+                        spacing: root.page-gap;
+
+                        animate position {
+                            duration: 200ms;
+                            easing: ease-in-out;
+                        }
+
+                        states [
+                            swiping when root.page-swiping: {
+                                swipe-offset: root.page-swipe-dx;
+                                // Animate only on release so the strip tracks the finger while dragging.
+                                out {
+                                    animate swipe-offset {
+                                        duration: 200ms;
+                                        easing: ease-in-out;
+                                    }
                                 }
                             }
-                        }
-                    ]
+                        ]
 
-                    for page[page-index] in root.pages: Rectangle {
-                        width: root.content-width;
-                        height: root.page-viewport-height;
+                        for page[page-index] in root.pages: Rectangle {
+                            width: root.content-width;
+                            height: root.page-viewport-height;
 
-                        if page-index == 0: PriceGraph {
-                            x: 0px;
-                            y: 0px;
-                            content-width: root.content-width;
-                        }
+                            if page-index == 0: PriceGraph {
+                                x: 0px;
+                                y: 0px;
+                                content-width: root.content-width;
+                            }
 
-                        LauncherCollection {
-                            x: root.collection-inset-x;
-                            y: root.page-collection-y(page-index);
-                            width: root.content-width - root.collection-inset-x * 2;
-                            height: root.page-collection-height(page-index);
-                            items: page.items;
-                            collection-id: page.id;
-                            show-labels: true;
-                            columns: 3;
-                            slot-height: 160px;
-                            row-gap: 24px;
-                            column-gap: 24px;
-                            slot-count: root.page-collection-slot-count(page-index);
-                            cross-target: root.dock-target;
-                            page-target: root.current-page != page-index ? root.active-target : root.empty-target;
+                            LauncherCollection {
+                                x: root.collection-inset-x;
+                                y: root.page-collection-y(page-index);
+                                width: root.content-width - root.collection-inset-x * 2;
+                                height: root.page-collection-height(page-index);
+                                items: page.items;
+                                collection-id: page.id;
+                                show-labels: true;
+                                handles-background-input: false;
+                                columns: 3;
+                                slot-height: 160px;
+                                row-gap: 24px;
+                                column-gap: 24px;
+                                slot-count: root.page-collection-slot-count(page-index);
+                                cross-target: root.dock-target;
+                                page-target: root.current-page != page-index ? root.active-target : root.empty-target;
+                            }
                         }
                     }
                 }
