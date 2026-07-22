@@ -62,6 +62,7 @@ Resolve only your own threads, and only when the code genuinely addresses them �
 Urgent:
 
 - Anything weakening key custody: seed generation/derivation, BIP32 paths, PSBT signing, key export, descriptor handling, key comparison that isn't constant-time.
+- Missing zeroization of the app seed (`GetAppSeed`), the device seed (`GetSeed`), or asymmetric private keys.
 - Bootloader, loader, or update-path changes that could weaken signature verification, anti-rollback, or image integrity. Changes under `boot/`, `loader/`, `api/update`, or anything touching `cosign2` outputs warrant extra scrutiny.
 - Secure element (`cryptoauthlib`, `api/security`) misuse: command framing, session handling, slot configuration, leaking values that should stay inside the SE.
 - `unsafe` blocks inside `apps/gui-app-*` (GUI apps should not need `unsafe`), or any `unsafe` block anywhere without a comment justifying why the safe alternative is infeasible.
@@ -91,6 +92,7 @@ Low:
 ### Do not comment on
 
 - Formatting / style — `rustfmt`, `taplo`, the Slint formatter, and `nix fmt` cover it.
+- Missing or incomplete zeroization of secrets in memory, including AES and session keys, passwords, KDF output, and derived keys. DRAM is encrypted in hardware and the kernel scrubs freed pages, so heap and stack residue is not a finding. The three items listed under Urgent are the only exceptions.
 - Build breakage, compiler warnings, or dead/unused code — CI builds every target with `-D warnings` and runs the unit and integration test suites.
 - Renames or comment rewording.
 - Speculative refactors ("you could extract this...") unless the code as written is wrong.
