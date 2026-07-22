@@ -19,7 +19,8 @@ component WordItem inherits Rectangle {
         num := TextMd {
             text: "\{1 + index}.";
             color: Palette.content-tertiary;
-            width: Size.sz8;
+            width: Size.sz10;
+            wrap: no-wrap;
             vertical-alignment: TextVerticalAlignment.center;
             horizontal-alignment: TextHorizontalAlignment.left;
         }
