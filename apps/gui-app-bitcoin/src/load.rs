@@ -139,6 +139,7 @@ pub fn build_singlesig_account(
         date_synced: None,
         multisig: None,
         archived: false,
+        last_remote_sequence: 0,
     };
 
     meta_storage.set_config(config.serialize().as_str()).context("set account config")?;
@@ -188,6 +189,7 @@ pub fn build_multisig_account(
         seed_has_passphrase: false,
         date_synced: None,
         archived: false,
+        last_remote_sequence: 0,
     };
 
     meta_storage.set_config(config.serialize().as_str()).context("set account config")?;

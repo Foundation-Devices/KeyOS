@@ -444,7 +444,7 @@ impl AppState {
         let handle = spawn_local({
             let id = id.clone();
             let bt_state = state.borrow().ql_status.clone();
-            let update = RemoteUpdate::new(Some(config), vec![]).serialize();
+            let update = config.to_remote_update();
             let message = SendAccountUpdate { account_id: id.to_string(), update };
             async move {
                 bt_state
@@ -494,6 +494,31 @@ impl AppState {
 
         if state.borrow().store.publish_tasks.get(&account_id).is_some_and(|t| !t.is_finished()) {
             log::info!("detected update collision. not applying incoming account update for {account_id}");
+            return Ok(());
+        }
+
+        // The phone publishes metadata edits (renames) as config-exchange payloads:
+        // sequence 0, or the pre-3.5 wire shape with no sequence at all.
+        // NgAccount::update rejects both as replays, so apply the rename here and
+        // let the publish echo resync the phone with the device config.
+        let is_config_exchange = match RemoteUpdate::deserialize(&update) {
+            Ok(remote) => remote.sequence == 0,
+            Err(_) => true,
+        };
+        if is_config_exchange {
+            let config = NgAccountConfig::from_remote(update).context("parse config exchange")?;
+            if config.id != account_id.to_string() {
+                anyhow::bail!("config exchange account id mismatch for {account_id}");
+            }
+            Self::update_account_config(state, account_id, |device_config| {
+                if device_config.network != config.network {
+                    log::warn!("config exchange network mismatch; ignoring");
+                    return;
+                }
+                // The name is the only field the phone can edit.
+                device_config.name = config.name;
+            })
+            .context("account not found")?;
             return Ok(());
         }
 

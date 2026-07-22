@@ -1104,6 +1104,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bip322"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9a160ac75a0c4885f0e69af525351e8d8cab51265fbc28eac15d885a9a0ac99"
+dependencies = [
+ "base64 0.22.1",
+ "bitcoin 0.32.7",
+ "sha2",
+ "snafu",
+]
+
+[[package]]
 name = "bip39"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8636,11 +8648,12 @@ dependencies = [
 [[package]]
 name = "ngwallet"
 version = "1.1.1"
-source = "git+https://github.com/Foundation-Devices/ngwallet?tag=3.4.0#6e2858ca1b2a5f857a42905fe91e3134e28d9027"
+source = "git+https://github.com/Foundation-Devices/ngwallet?tag=3.6.1#f71f5265dd22031ab96466494294497d42986840"
 dependencies = [
  "anyhow",
  "bdk_core",
  "bdk_wallet",
+ "bip322",
  "bip85",
  "bitcoin 0.32.7",
  "foundation-urtypes",
