@@ -1331,11 +1331,11 @@
       "title": "About"
     },
     "accessSeedWords": {
-      "ViewSeedWords": "View Seed Words",
       "contentStep1": "Foundation and other legitimate companies will never ask you to share these words.",
       "contentStep2": "Any request to share these words or enter them into an app or website is a scam.",
       "contentStep3": "Anyone with access to your seed words gains full control over your funds.",
-      "title": "Warning"
+      "title": "Warning",
+      "viewSeedWords": "View Seed Words"
     },
     "advancedBackups": {
       "saveSeed": "Back Up to Keycards",
