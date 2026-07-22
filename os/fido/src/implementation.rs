@@ -176,12 +176,16 @@ impl ScalarHandler<DisconnectHandlerMessage> for FidoServer {
 /// wait for:
 /// - backup restore to complete
 /// - secure element to unlock and give us our app_seed
+/// - the AppData filesystem to mount (holds the persisted key state)
 pub fn wait() -> (Security, [u8; 32]) {
     let settings = SettingsApi::default();
     settings.wait_for_onboarding_complete();
 
     let security = Security::default();
     let seed = security.app_seed().expect("app seed");
+
+    // AppData mounts asynchronously on the same unlock that releases app_seed.
+    FileSystem::default().wait_for_filesystem(fs::Location::AppData);
 
     (security, *seed.as_bytes())
 }
