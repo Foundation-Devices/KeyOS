@@ -4,6 +4,8 @@
 import { SeedWordsWarning } from "@ui/pages.slint";
 import { SeedWordsWarningProps } from "./props.slint";
 import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Callbacks } from "../../globals.slint";
 
 export component SeedWordsWarningPage inherits SeedWordsWarning {
     in property <SeedWordsWarningProps> props;
@@ -13,7 +15,9 @@ export component SeedWordsWarningPage inherits SeedWordsWarning {
     // Replace so this gate leaves the history stack: "Done" on the seed
     // words returns to settings, not back into this warning.
     view-seed => {
-        Navigate.view-seed-words({ replace: true });
+        if (Callbacks.verify-pin(TR2.lookup(TrId.SettingsViewSeedWordsTitle))) {
+            Navigate.view-seed-words({ replace: true });
+        }
     }
     back => {
         Navigate.backward();

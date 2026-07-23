@@ -8,6 +8,8 @@ use std::{cell::RefCell, collections::HashMap, collections::HashSet, rc::Rc};
 use slint_keyos_platform::{
     app,
     file_backed::JsonBacked,
+    gui_server_api::navigation::lockscreen::VerifyPinOptions,
+    navigation::verify_pin,
     slint::{ComponentHandle as _, Model as _, ModelRc, VecModel},
     spawn,
 };
@@ -578,6 +580,18 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
             true
         }
+    });
+
+    ui.global::<Callbacks>().on_verify_pin(|title| {
+        verify_pin::<gui_permissions::GuiPermissions>(VerifyPinOptions {
+            title: Some(title.into()),
+            want_security_words: false,
+        })
+        .map(|r| r.success)
+        .unwrap_or_else(|e| {
+            log::error!("verify_pin failed: {e}");
+            false
+        })
     });
 
     let weak_theme_changed = ui.as_weak();

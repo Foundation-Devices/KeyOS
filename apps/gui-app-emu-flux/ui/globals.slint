@@ -41,6 +41,9 @@ export global Callbacks {
     callback regenerate-seed-word-challenge(int) -> SeedWordChallenge;
     /// Clears the seed config from persistent storage and navigates to intro.
     callback remove-seed() -> bool;
+    /// Shows the lock-screen PIN modal with the given title; returns true once
+    /// the PIN is verified, false on wrong PIN exhaustion or cancel.
+    callback verify-pin(string) -> bool;
 }
 
 export global Global {
