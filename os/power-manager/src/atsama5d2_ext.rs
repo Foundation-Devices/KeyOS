@@ -238,7 +238,7 @@ impl ScalarEventSubscriptionHandler<StatusSubscribe> for PowerManagerServerExt {
 
 /// Battery percentage to keep hidden from the user as a reserve.
 /// The real SoC is remapped so that this threshold appears as 0% displayed.
-const STRATEGIC_BATTERY_RESERVE_PCT: u8 = 5;
+const STRATEGIC_BATTERY_RESERVE_PCT: u8 = 15;
 
 /// Map the raw battery SoC to the charge value shown to the user.
 /// Values at or below the reserve floor are clamped to 0. Above it they
