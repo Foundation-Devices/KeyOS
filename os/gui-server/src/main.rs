@@ -31,6 +31,9 @@ mod virtbutton;
 // `tr::TrId` and `tr::lookup_id` for the permission prompt strings, with no Slint dependency.
 include!(concat!(env!("OUT_DIR"), "/tr.rs"));
 
+#[cfg(not(feature = "recovery-os"))]
+use std::collections::VecDeque;
+
 use {
     crate::{
         animation::{BacklightAnimation, SwitchingAnimation},
@@ -56,7 +59,7 @@ use {
     log::{debug, error, warn},
     server::{ArchiveRequest, MessageId as _, Server, ServerContext},
     std::{
-        collections::{HashMap, VecDeque},
+        collections::HashMap,
         time::{Duration, Instant},
     },
     xous::{MemoryFlags, MemoryRange, SystemEvent, CID, PID},
@@ -174,7 +177,11 @@ pub(crate) enum GuiState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartupState {
+    // Only constructed on device builds of the full OS; recovery and hosted
+    // builds boot straight to WaitingForLauncherPID.
+    #[cfg_attr(any(feature = "recovery-os", not(keyos)), allow(dead_code))]
     InitialLockScreen,
+    #[cfg_attr(any(feature = "recovery-os", not(keyos)), allow(dead_code))]
     WaitingForOnboardingPID,
     WaitingForLauncherPID,
     Started,
