@@ -663,17 +663,17 @@ fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> S
         }
         Ok(app_manager::RemoveThirdPartyCertificateResult::AppRequiresKey(app_name)) => {
             i18n::replace_placeholders(
-                tr::lookup_id(TrId::AppsTrustedPublisherRemoveBlocked),
+                tr::lookup_id(TrId::AppsModalRemoveXFirstThenRetryHeader),
                 &[app_name.as_str()],
             )
             .into()
         }
         Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => {
-            tr::lookup_id(TrId::AppsTrustedPublisherRemoveFailed).into()
+            tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into()
         }
         Err(e) => {
             log::error!("failed to remove third-party certificate: {e:?}");
-            tr::lookup_id(TrId::AppsTrustedPublisherRemoveFailed).into()
+            tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into()
         }
     }
 }

@@ -156,7 +156,7 @@ export component TrustedPublishersPage inherits BasePage {
                                 x: Size.sz4;
                                 y: (parent.height - self.preferred-height) / 2;
                                 width: parent.width - (Size.sz4 * 2);
-                                text: TR2.lookup(TrId.AppsNoTrustedPublishers);
+                                text: TR2.lookup(TrId.AppsModalNoTrustedPublishersHeader);
                                 color: Palette.content-tertiary;
                             }
                         }
@@ -214,7 +214,7 @@ export component TrustedPublishersPage inherits BasePage {
 
     if invalid-certificate-visible: ErrorModal {
         icon: "alert";
-        title: TR2.lookup(TrId.AppsInvalidTrustedPublisherCertificate);
+        title: TR2.lookup(TrId.AppsModalInvalidTrustedPublisherCertificateHeader);
         text: "";
         confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
 

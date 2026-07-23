@@ -1319,6 +1319,7 @@
     "about": {
       "bleBootloader": "BLE Bootloader",
       "bleFirmware": "BLE Firmware",
+      "boardRevision": "Board Revision",
       "bootloader": "Bootloader",
       "device": "Device",
       "keyOs": "KeyOS",
@@ -1350,16 +1351,15 @@
     },
     "apps": {
       "appId": "App ID",
+      "automaticallyGranted": "Automatically Granted",
       "description": "Description",
       "detailsTitle": "App Details",
       "developerMode": "Developer Mode",
       "installTrustedPublisherCertificate": "Install Certificate",
       "installedApps": "Installed Apps",
-      "invalidTrustedPublisherCertificate": "Invalid Trusted Publisher certificate.",
       "mcpControl": "MCP Control",
       "noInstalledApps": "No installed apps",
       "noRequestedPermissions": "No requested permissions",
-      "noTrustedPublishers": "No Trusted Publishers",
       "publisher": "Publisher",
       "removeApp": "Remove App",
       "removeAppDialog": {
@@ -1387,17 +1387,29 @@
       "trustedPublisherKeyUsage": "Key Usage",
       "trustedPublisherName": "Name",
       "trustedPublisherPublicKey": "Public Key",
-      "trustedPublisherRemoveBlocked": "Remove {0} first, then try removing this Trusted Publisher again.",
-      "trustedPublisherRemoveFailed": "Unable to remove this Trusted Publisher.",
       "trustedPublisherSerialNumber": "Serial Number",
       "trustedPublisherSubject": "Subject",
       "trustedPublisherSupportUrl": "Support URL",
       "trustedPublishers": "Trusted Publishers",
       "trustedPublishersIntro": "Install public key certificates for Trusted Publishers.",
       "unableToRemoveApp": "Unable to remove App",
-      "unableToRemoveTrustedPublisher": "Unable to remove Trusted Publisher",
       "usbLogging": "USB Logging",
       "version": "Version"
+    },
+    "appsModalInvalidTrustedPublisherCertificate": {
+      "header": "Invalid Trusted Publisher certificate."
+    },
+    "appsModalNoTrustedPublishers": {
+      "header": "No Trusted Publishers"
+    },
+    "appsModalRemoveXFirstThenRetry": {
+      "header": "Remove {0} first, then try removing this Trusted Publisher again."
+    },
+    "appsModalTrustedPublisherRemoveFailed": {
+      "header": "Unable to remove this Trusted Publisher."
+    },
+    "appsModalUnableToRemoveTrustedPublisher": {
+      "header": "Unable to remove Trusted Publisher"
     },
     "autoShutdown": {
       "never": "Never",

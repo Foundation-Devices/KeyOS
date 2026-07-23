@@ -179,7 +179,7 @@ export component TrustedPublisherDetailsPage inherits BasePage {
 
     if remove-error-message != "": ErrorModal {
         icon: "alert";
-        title: TR2.lookup(TrId.AppsUnableToRemoveTrustedPublisher);
+        title: TR2.lookup(TrId.AppsModalUnableToRemoveTrustedPublisherHeader);
         text: root.remove-error-message;
         confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
 

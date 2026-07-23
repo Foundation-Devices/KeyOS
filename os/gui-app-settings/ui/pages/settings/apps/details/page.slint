@@ -367,7 +367,7 @@ export component AppDetailsPage inherits BasePage {
             // Auto-granted permissions, shown read-only (no switches): informational, so the user
             // sees what the app can do without a prompt.
             if AppManagementGlobal.selected-app.basic_permissions.length > 0: MenuSection {
-                title: TR2.lookup(TrId.AppsAutomaticPermissions);
+                title: TR2.lookup(TrId.AppsAutomaticallyGranted);
 
                 MenuSectionLayout {
                     PermissionGroupList {
