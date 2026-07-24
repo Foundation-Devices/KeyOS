@@ -14,11 +14,15 @@ export struct ViewSeedStrings {
     title: string,
     standard-qr-header: string,
     compact-qr-header: string,
+    next-words: string,
     done: string,
 }
 
 /// The View Seed screen: the mnemonic words with a header toggle to the two
 /// SeedQR pages (standard and compact). Shared by settings and the Legacy app.
+/// On all but the last words page the primary button reads `next-words` and
+/// advances the pager; on the last words page and the QR pages it reads `done`
+/// and fires `back`.
 export component ViewSeed inherits VerticalLayout {
     in property <[string]> words;
     in property <image> standard-qr;
@@ -29,6 +33,10 @@ export component ViewSeed inherits VerticalLayout {
     callback back();
 
     private property <bool> qr-view: false;
+    private property <int> words-page: 0;
+    // Matches SeedWords' default page size (2 columns x 6 rows).
+    private property <int> words-pages: Math.ceil(words.length / 12);
+    private property <bool> has-next-words: !qr-view && words-page < words-pages - 1;
 
     NavHeader {
         title: strings.title;
@@ -48,6 +56,7 @@ export component ViewSeed inherits VerticalLayout {
 
         if !qr-view: SeedWords {
             words: root.words;
+            current-page <=> root.words-page;
         }
 
         if qr-view: QrPages {
@@ -66,9 +75,13 @@ export component ViewSeed inherits VerticalLayout {
         ButtonSection {
             padding: Size.sz6;
             Button {
-                label: strings.done;
+                label: root.has-next-words ? strings.next-words : strings.done;
                 clicked => {
-                    back();
+                    if (root.has-next-words) {
+                        root.words-page += 1;
+                    } else {
+                        back();
+                    }
                 }
             }
         }
