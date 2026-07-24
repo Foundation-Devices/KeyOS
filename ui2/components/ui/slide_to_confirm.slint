@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { SlideToConfirmTheme } from "slide_to_confirm_theme.slint";
+import {
+    SlideToConfirmTheme,
+    SlideToConfirmSizeProps,
+} from "@theme/slide_to_confirm_theme.slint";
 
 export component SlideToConfirm {
     in property <string> label: "Slide";
@@ -20,13 +23,14 @@ export component SlideToConfirm {
         root.confirmed ? default-confirmed-thumb-color() : root.disabled ? Theme.palette-border : default-thumb-color();
     in property <color> thumb-label-color:
         root.confirmed ? default-confirmed-thumb-label-color() : default-thumb-label-color();
-    in property <string> font-family: SlideToConfirmTheme.size(root.size).font-family;
-    in property <length> font-size: SlideToConfirmTheme.size(root.size).font-size;
-    in property <length> control-height: SlideToConfirmTheme.size(root.size).control-height;
-    in property <length> thumb-width: SlideToConfirmTheme.size(root.size).thumb-width;
-    in property <length> thumb-padding-horizontal: SlideToConfirmTheme.size(root.size).thumb-padding-horizontal;
-    in property <length> icon-size: SlideToConfirmTheme.size(root.size).icon-size;
-    in property <length> border-radius: SlideToConfirmTheme.size(root.size).border-radius;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-height: theme-size.control-height;
+    in property <length> thumb-width: theme-size.thumb-width;
+    in property <length> thumb-padding-horizontal: theme-size.thumb-padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    in property <length> border-radius: theme-size.border-radius;
+    property <SlideToConfirmSizeProps> theme-size: SlideToConfirmTheme.size(root.size);
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.

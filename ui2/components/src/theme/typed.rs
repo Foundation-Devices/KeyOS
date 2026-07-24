@@ -8,10 +8,10 @@
 //! `StyleProps` at runtime.
 //!
 //! ```ignore
-//! use components::theme::{create_default_theme, ColorScheme, ComponentState};
+//! use components::theme::{create_schema_fallback_theme, ColorScheme, ComponentState};
 //! use components::{ButtonComponent, ButtonSize, ButtonVariant};
 //!
-//! let theme = create_default_theme();
+//! let theme = create_schema_fallback_theme();
 //! let style = theme.resolve::<ButtonComponent>(
 //!     ButtonVariant::Primary,
 //!     Some(ButtonSize::Md),
@@ -83,7 +83,7 @@ impl Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::create_default_theme;
+    use crate::theme::create_schema_fallback_theme;
 
     // Inline test component to keep this module's tests self-contained without
     // depending on the layout of ButtonComponent (which lives in `button.rs`).
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn typed_resolve_returns_same_style_as_string_resolve() {
-        let theme = create_default_theme();
+        let theme = create_schema_fallback_theme();
         let typed = theme.resolve::<ButtonTestComponent>(
             TestVariant::Primary,
             Some(TestSize::Md),

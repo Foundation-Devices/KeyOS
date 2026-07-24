@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { AccordionTheme } from "accordion_theme.slint";
+import {
+    AccordionTheme,
+    AccordionSizeProps,
+} from "@theme/accordion_theme.slint";
 
 export struct AccordionItemData {
     title: string,
@@ -16,11 +19,12 @@ export component Accordion {
     in property <[bool]> expanded-states: [];
     in property <bool> allow-multiple: false;
     in property <ControlSize> size: ControlSize.md;
-    in property <string> font-family: AccordionTheme.size(root.size).font-family;
-    in property <length> font-size: AccordionTheme.size(root.size).font-size;
-    in property <length> header-height: AccordionTheme.size(root.size).header-height;
-    in property <length> padding-horizontal: AccordionTheme.size(root.size).padding-horizontal;
-    in property <length> icon-size: AccordionTheme.size(root.size).icon-size;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> header-height: theme-size.header-height;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    property <AccordionSizeProps> theme-size: AccordionTheme.size(root.size);
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
@@ -130,27 +134,30 @@ export component Accordion {
                         }
                     }
 
-                    if root.item-expanded(index): VerticalLayout {
-                        spacing: 0px;
+                    // Keep the body in the item tree while it is collapsed. Slint's
+                    // partial renderer can otherwise borrow the tree while this
+                    // conditional subtree is being inserted or removed.
+                    expanded-content := Rectangle {
+                        height: root.item-expanded(index)
+                            ? body-text.preferred-height + root.actual-padding-horizontal * 1.5 + 1px
+                            : 0px;
+                        visible: root.item-expanded(index);
+                        clip: true;
 
                         Rectangle {
                             height: 1px;
                             background: root.expanded-divider-color;
                         }
 
-                        Rectangle {
-                            height: body-text.preferred-height + root.actual-padding-horizontal * 1.5;
-
-                            body-text := Text {
-                                x: root.actual-padding-horizontal;
-                                y: root.actual-padding-horizontal - 2px;
-                                width: parent.width - root.actual-padding-horizontal * 2;
-                                text: item.body;
-                                color: root.body-color;
-                                font-family: root.actual-font-family;
-                                font-size: root.actual-font-size;
-                                wrap: word-wrap;
-                            }
+                        body-text := Text {
+                            x: root.actual-padding-horizontal;
+                            y: root.actual-padding-horizontal - 1px;
+                            width: parent.width - root.actual-padding-horizontal * 2;
+                            text: item.body;
+                            color: root.body-color;
+                            font-family: root.actual-font-family;
+                            font-size: root.actual-font-size;
+                            wrap: word-wrap;
                         }
                     }
                 }

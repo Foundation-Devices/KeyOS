@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { CardTheme } from "card_theme.slint";
+import { CardTheme, CardSizeProps } from "@theme/card_theme.slint";
 
 export component Card {
     in property <string> eyebrow: "";
@@ -15,11 +15,12 @@ export component Card {
     in property <color> accent-color: Theme.palette-primary;
     in property <bool> interactive: false;
     in property <bool> selected: false;
-    in property <string> font-family: CardTheme.size-default.font-family;
-    in property <length> font-size: CardTheme.size-default.font-size;
-    in property <length> card-padding: CardTheme.size-default.card-padding;
-    in property <length> icon-size: CardTheme.size-default.icon-size;
-    in property <length> border-radius: CardTheme.size-default.border-radius;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> card-padding: theme-size.card-padding;
+    in property <length> icon-size: theme-size.icon-size;
+    in property <length> border-radius: theme-size.border-radius;
+    property <CardSizeProps> theme-size: CardTheme.size();
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.

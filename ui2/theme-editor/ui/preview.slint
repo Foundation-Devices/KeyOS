@@ -3,7 +3,14 @@
 
 import { Button } from "@components/button.slint";
 import { ButtonVariant, ControlSize, Theme } from "@components/theme.slint";
-import { SidebarPanel, RowLayout, TreeSectionHeader } from "theme_editor.slint";
+import {
+    SidebarPanel,
+    RowLayout,
+    InspectorLabelPane,
+    InspectorValuePane,
+    TreeSectionHeader,
+    PropertyValueData,
+} from "theme_editor.slint";
 import {
     IconButton,
     IconButtonVariant,
@@ -62,44 +69,46 @@ component ToggleSwitch inherits Rectangle {
     HorizontalLayout {
         spacing: 8px;
 
-        Text {
-            text: label;
-            color: dark-mode ? #888888 : #666666;
-            font-size: 12px;
-            vertical-alignment: center;
-            // Shared RowLayout grid: every Props row's label sits in a fixed-width
-            // column so labels and controls line up across rows and with the splitter.
-            width: RowLayout.label-width;
+        InspectorLabelPane {
+            text: root.label;
+            text-color: dark-mode ? #888888 : #666666;
+            text-font-size: 12px;
         }
 
-        // Stretch spacer absorbs the value-column width so the toggle stays right-
-        // aligned now that the label sits in the fixed RowLayout grid column.
-        Rectangle {
-            horizontal-stretch: 1;
-        }
+        InspectorValuePane {
+            HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
 
-        Rectangle {
-            width: 36px;
-            height: 20px;
-            border-radius: 10px;
-            background: checked ? #1a9a9a : (dark-mode ? #3a3a3a : #d0d0d0);
+                // Stretch spacer absorbs the value-column width so the toggle stays right-aligned.
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
 
-            animate background { duration: 150ms; }
+                Rectangle {
+                    width: 36px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: checked ? #1a9a9a : (dark-mode ? #3a3a3a : #d0d0d0);
 
-            Rectangle {
-                x: checked ? parent.width - self.width - 2px : 2px;
-                y: 2px;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                background: white;
+                    animate background { duration: 150ms; }
 
-                animate x { duration: 150ms; }
-            }
+                    Rectangle {
+                        x: checked ? parent.width - self.width - 2px : 2px;
+                        y: 2px;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: white;
 
-            TouchArea {
-                clicked => {
-                    checked = !checked;
+                        animate x { duration: 150ms; }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            checked = !checked;
+                        }
+                    }
                 }
             }
         }
@@ -113,19 +122,19 @@ component TabButton inherits Rectangle {
     in property <bool> dark-mode;
     callback clicked();
 
-    height: 32px;
-    border-radius: 6px;
+    height: 24px;
+    border-radius: 5px;
     background: selected ? (dark-mode ? #3a3a3a : #e8e8e8) : transparent;
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: 10px;
+        padding-right: 10px;
         alignment: center;
 
         Text {
             text: label;
             color: selected ? (dark-mode ? #ffffff : #1a1a1a) : (dark-mode ? #888888 : #666666);
-            font-size: 13px;
+            font-size: 11px;
             font-weight: selected ? 600 : 400;
             vertical-alignment: center;
         }
@@ -139,7 +148,7 @@ component TabButton inherits Rectangle {
 }
 
 // (TreeSectionHeader is the shared component from theme_editor.slint — the
-// duplicate here was why the Props chevron didn't pick up the 24px size change.)
+// duplicate here was why the Test chevron didn't pick up the 24px size change.)
 
 // Number input with +/- buttons
 component NumberInput inherits Rectangle {
@@ -186,113 +195,111 @@ component NumberInput inherits Rectangle {
     HorizontalLayout {
         spacing: 8px;
 
-        Text {
-            text: label;
-            color: dark-mode ? #888888 : #666666;
-            font-size: 12px;
-            vertical-alignment: center;
-            // Shared RowLayout grid: every Props row's label sits in a fixed-width
-            // column so labels and controls line up across rows and with the splitter.
-            width: RowLayout.label-width;
+        InspectorLabelPane {
+            text: root.label;
+            text-color: dark-mode ? #888888 : #666666;
+            text-font-size: 12px;
         }
 
-        Rectangle {
-            width: root.editor-width;
-            height: 22px;
-            background: dark-mode ? #1a1a1a : #f0f0f0;
-            border-radius: 4px;
+        InspectorValuePane {
+            Rectangle {
+                width: root.editor-width;
+                height: 22px;
+                background: dark-mode ? #1a1a1a : #f0f0f0;
+                border-radius: 4px;
 
-            HorizontalLayout {
-                Rectangle {
-                    width: 22px;
-                    background: minus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
+                HorizontalLayout {
+                    Rectangle {
+                        width: 22px;
+                        background: minus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
 
-                    Text {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                        text: "−";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 14px;
-                    }
+                        Text {
+                            x: (parent.width - self.preferred-width) / 2;
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "−";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 14px;
+                        }
 
-                    minus-touch := TouchArea {
-                        clicked => {
-                            if (value - step >= min-value) {
-                                value = value - step;
+                        minus-touch := TouchArea {
+                            clicked => {
+                                if (value - step >= min-value) {
+                                    value = value - step;
+                                }
                             }
                         }
                     }
-                }
 
-                Rectangle {
-                    horizontal-stretch: 1;
-                    clip: true;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        clip: true;
 
-                    number-input-field := TextInput {
-                        x: 4px;
-                        y: 0px;
-                        width: parent.width - root.suffix-slot-width - 8px;
-                        height: parent.height;
-                        text <=> root.edit-text;
-                        color: dark-mode ? #ffffff : #1a1a1a;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                        horizontal-alignment: right;
-                        input-type: number;
+                        number-input-field := TextInput {
+                            x: 4px;
+                            y: 0px;
+                            width: parent.width - root.suffix-slot-width - 8px;
+                            height: parent.height;
+                            text <=> root.edit-text;
+                            color: dark-mode ? #ffffff : #1a1a1a;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            input-type: number;
 
-                        edited => {
-                            if (self.text == "" || self.text == "-" || self.text == "." || self.text == "-.") {
-                                return;
+                            edited => {
+                                if (self.text == "" || self.text == "-" || self.text == "." || self.text == "-.") {
+                                    return;
+                                }
+                                if (self.text.is-float()) {
+                                    value = clamp(self.text.to-float(), min-value, max-value);
+                                }
                             }
-                            if (self.text.is-float()) {
-                                value = clamp(self.text.to-float(), min-value, max-value);
-                            }
-                        }
 
-                        accepted => {
-                            root.commit-edit();
-                            root.sync-edit-text();
-                        }
-
-                        changed has-focus => {
-                            root.editing = self.has-focus;
-                            if (!self.has-focus) {
+                            accepted => {
                                 root.commit-edit();
                                 root.sync-edit-text();
                             }
+
+                            changed has-focus => {
+                                root.editing = self.has-focus;
+                                if (!self.has-focus) {
+                                    root.commit-edit();
+                                    root.sync-edit-text();
+                                }
+                            }
+                        }
+
+                        suffix-text := Text {
+                            visible: root.suffix != "";
+                            x: parent.width - root.suffix-slot-width;
+                            y: 0px;
+                            width: root.suffix-slot-width;
+                            height: parent.height;
+                            text: root.suffix;
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
                         }
                     }
 
-                    suffix-text := Text {
-                        visible: root.suffix != "";
-                        x: parent.width - root.suffix-slot-width;
-                        y: 0px;
-                        width: root.suffix-slot-width;
-                        height: parent.height;
-                        text: root.suffix;
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
-                    }
-                }
+                    Rectangle {
+                        width: 22px;
+                        background: plus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
 
-                Rectangle {
-                    width: 22px;
-                    background: plus-touch.pressed ? (dark-mode ? #2a2a2a : #e0e0e0) : transparent;
+                        Text {
+                            x: (parent.width - self.preferred-width) / 2;
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "+";
+                            color: dark-mode ? #888888 : #666666;
+                            font-size: 14px;
+                        }
 
-                    Text {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                        text: "+";
-                        color: dark-mode ? #888888 : #666666;
-                        font-size: 14px;
-                    }
-
-                    plus-touch := TouchArea {
-                        clicked => {
-                            if (value + step <= max-value) {
-                                value = value + step;
+                        plus-touch := TouchArea {
+                            clicked => {
+                                if (value + step <= max-value) {
+                                    value = value + step;
+                                }
                             }
                         }
                     }
@@ -313,25 +320,23 @@ component TextInputRow inherits Rectangle {
     HorizontalLayout {
         spacing: 8px;
 
-        Text {
-            text: label;
-            color: dark-mode ? #888888 : #666666;
-            font-size: 12px;
-            vertical-alignment: center;
-            // Shared RowLayout grid: every Props row's label sits in a fixed-width
-            // column so labels and controls line up across rows and with the splitter.
-            width: RowLayout.label-width;
+        InspectorLabelPane {
+            text: root.label;
+            text-color: dark-mode ? #888888 : #666666;
+            text-font-size: 12px;
         }
 
-        Rectangle {
-            width: 120px;
-            height: 22px;
-            background: transparent;
+        InspectorValuePane {
+            Rectangle {
+                width: 120px;
+                height: 22px;
+                background: transparent;
 
-            EditorTextField {
-                width: parent.width;
-                text <=> value;
-                dark-mode: root.dark-mode;
+                EditorTextField {
+                    width: parent.width;
+                    text <=> value;
+                    dark-mode: root.dark-mode;
+                }
             }
         }
     }
@@ -351,38 +356,36 @@ component EnumSelector inherits Rectangle {
     HorizontalLayout {
         spacing: 8px;
 
-        Text {
-            text: label;
-            color: dark-mode ? #888888 : #666666;
-            font-size: 12px;
-            vertical-alignment: center;
-            // Shared RowLayout grid: every Props row's label sits in a fixed-width
-            // column so labels and controls line up across rows and with the splitter.
-            width: RowLayout.label-width;
+        InspectorLabelPane {
+            text: root.label;
+            text-color: dark-mode ? #888888 : #666666;
+            text-font-size: 12px;
         }
 
-        Rectangle {
-            width: root.selector-width;
-            preferred-width: root.selector-width;
-            height: dropdown.preferred-height;
-            preferred-height: dropdown.preferred-height;
+        InspectorValuePane {
+            Rectangle {
+                width: root.selector-width;
+                preferred-width: root.selector-width;
+                height: dropdown.preferred-height;
+                preferred-height: dropdown.preferred-height;
 
-            dropdown := Dropdown {
-                width: parent.width;
-                label: "";
-                size: ControlSize.sm;
-                options: root.options;
-                selected-index <=> root.selected-index;
-                placeholder: root.options.length > 0 ? root.options[0] : "";
-                max-visible-items: 8;
-                font-size: 11px;
-                control-height: 22px;
-                option-height: 24px;
-                padding-horizontal: 8px;
-                icon-size: 12px;
-                border-radius: 4px;
-                changed(index, _label) => {
-                    root.changed(index);
+                dropdown := Dropdown {
+                    width: parent.width;
+                    label: "";
+                    size: ControlSize.sm;
+                    options: root.options;
+                    selected-index <=> root.selected-index;
+                    placeholder: root.options.length > 0 ? root.options[0] : "";
+                    max-visible-items: 8;
+                    font-size: 11px;
+                    control-height: 22px;
+                    option-height: 24px;
+                    padding-horizontal: 8px;
+                    icon-size: 12px;
+                    border-radius: 4px;
+                    changed(index, _label) => {
+                        root.changed(index);
+                    }
                 }
             }
         }
@@ -409,62 +412,62 @@ component IconSelectorRow inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
 
-            Text {
-                text: label;
-                color: dark-mode ? #888888 : #666666;
-                font-size: 12px;
-                vertical-alignment: center;
-                width: RowLayout.label-width;
+            InspectorLabelPane {
+                text: root.label;
+                text-color: dark-mode ? #888888 : #666666;
+                text-font-size: 12px;
             }
 
-            Rectangle {
-                width: 140px;
-                height: 22px;
-                background: dark-mode ? #1a1a1a : #f0f0f0;
-                border-radius: 4px;
+            InspectorValuePane {
+                Rectangle {
+                    width: 140px;
+                    height: 22px;
+                    background: dark-mode ? #1a1a1a : #f0f0f0;
+                    border-radius: 4px;
 
-                HorizontalLayout {
-                    padding-left: 6px;
-                    padding-right: 6px;
-                    spacing: 6px;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        spacing: 6px;
 
-                    Rectangle {
-                        width: 14px;
-                        height: parent.height;
-                        vertical-stretch: 0;
-
-                        Image {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                        Rectangle {
                             width: 14px;
-                            height: 14px;
-                            source: root.icon-image(root.value);
-                            colorize: dark-mode ? #cccccc : #444444;
+                            height: parent.height;
+                            vertical-stretch: 0;
+
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                source: root.icon-image(root.value);
+                                colorize: dark-mode ? #cccccc : #444444;
+                            }
+                        }
+
+                        Text {
+                            text: root.value == "" || root.value == "none" ? "none" : root.value;
+                            color: dark-mode ? #ffffff : #1a1a1a;
+                            font-size: 10px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: picker-open ? "▲" : "▼";
+                            color: dark-mode ? #666666 : #999999;
+                            font-size: 8px;
+                            vertical-alignment: center;
                         }
                     }
 
-                    Text {
-                        text: root.value == "" || root.value == "none" ? "none" : root.value;
-                        color: dark-mode ? #ffffff : #1a1a1a;
-                        font-size: 10px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                    }
-
-                    Text {
-                        text: picker-open ? "▲" : "▼";
-                        color: dark-mode ? #666666 : #999999;
-                        font-size: 8px;
-                        vertical-alignment: center;
-                    }
-                }
-
-                TouchArea {
-                    clicked => {
-                        picker-open = !picker-open;
-                        if (picker-open) {
-                            root.filter-icons(root.search-query);
+                    TouchArea {
+                        clicked => {
+                            picker-open = !picker-open;
+                            if (picker-open) {
+                                root.filter-icons(root.search-query);
+                            }
                         }
                     }
                 }
@@ -607,20 +610,23 @@ export component Preview inherits Rectangle {
     in property <[string]> icon-results: [];
     pure callback icon-image(string) -> image;
     callback filter-icons(string);
+    in property <int> preview-version: 0;
+    pure callback preview-variant-prop(string, string, string, string, int) -> PropertyValueData;
+    pure callback preview-size-prop(string, string, string, int) -> PropertyValueData;
     in-out property <int> component-page-mode: 1;
-    in property <[string]> component-page-mode-options: ["Theme", "Props"];
+    in property <[string]> component-page-mode-options: ["Theme", "Test"];
     callback component-page-mode-changed(int);
     in property <bool> show-tabs: true;
 
     // Tab state
-    in-out property <int> active-tab: 0;  // 0=Story, 1=Props
+    in-out property <int> active-tab: 0;  // 0=Story, 1=Test
     in-out property <length> props-panel-width: 320px;
 
-    // Viewport state (internal to Props tab)
+    // Viewport state (internal to Test tab)
     property <length> viewport-width: 375px;
     property <bool> is-responsive: false;
 
-    // Props state - Component props
+    // Test state - Component props
     in-out property <string> button-text: "Click me";
     in-out property <int> button-variant: 0;
     in-out property <int> button-size: 1;
@@ -664,6 +670,7 @@ export component Preview inherits Rectangle {
     in-out property <string> input-placeholder: "you@example.com";
     in-out property <string> input-label: "Email address";
     in-out property <int> input-variant: 0;
+    in-out property <int> input-size: 1;
     in-out property <int> input-type-index: 0;
     in-out property <int> input-text-alignment-index: 0;
     in-out property <bool> input-disabled: false;
@@ -688,6 +695,7 @@ export component Preview inherits Rectangle {
     in-out property <string> textarea-label: "Project notes";
     in-out property <string> textarea-description: "Use this field for longer descriptions, feedback, and summaries.";
     in-out property <int> textarea-variant: 0;
+    in-out property <int> textarea-size: 1;
     in-out property <bool> textarea-disabled: false;
     in-out property <bool> textarea-read-only: false;
     in-out property <bool> textarea-clearable: false;
@@ -699,7 +707,6 @@ export component Preview inherits Rectangle {
     in-out property <string> textarea-error: "";
     in-out property <string> story-textarea-flat-value: "";
     in-out property <string> story-textarea-bordered-value: "Release summary:\nShipped new tabs component.\nNeed follow-up QA on dark mode.";
-    in-out property <string> story-textarea-faded-value: "This autosizes when content grows.\nAdd a few more lines to see it expand inside the card.";
     in-out property <string> story-textarea-focused-value: "Focused text areas should clearly show the active border.";
     in-out property <string> story-textarea-error-value: "This note is missing required details.";
     in-out property <string> story-textarea-disabled-value: "Editing is disabled for this field.";
@@ -709,6 +716,7 @@ export component Preview inherits Rectangle {
     in-out property <string> search-placeholder: "Search components";
     in-out property <string> search-label: "Search";
     in-out property <int> search-variant: 1;
+    in-out property <int> search-size: 1;
     in-out property <bool> search-disabled: false;
     in-out property <bool> search-read-only: false;
     in-out property <bool> search-clearable: true;
@@ -737,6 +745,7 @@ export component Preview inherits Rectangle {
     in-out property <string> dropdown-label: "Team";
     in-out property <string> dropdown-placeholder: "Choose a team";
     in-out property <int> dropdown-selected-index: 1;
+    in-out property <int> dropdown-size: 1;
     in-out property <bool> dropdown-disabled: false;
     in-out property <int> story-dropdown-selected-index: -1;
 
@@ -745,12 +754,14 @@ export component Preview inherits Rectangle {
     in-out property <string> checkbox-description: "Receive launch and billing notifications.";
     in-out property <bool> checkbox-checked: false;
     in-out property <bool> checkbox-indeterminate: false;
+    in-out property <int> checkbox-size: 1;
     in-out property <bool> checkbox-disabled: false;
 
     // Radio preview state
     in-out property <string> radio-label: "Pro plan";
     in-out property <string> radio-description: "Best for teams shipping every week.";
     in-out property <bool> radio-checked: true;
+    in-out property <int> radio-size: 1;
     in-out property <bool> radio-disabled: false;
 
     // RadioGroup preview state
@@ -762,6 +773,7 @@ export component Preview inherits Rectangle {
     ];
     property <[bool]> radio-group-disabled-items: [false, false, true];
     in-out property <int> radio-group-selected-index: 1;
+    in-out property <int> radio-group-size: 1;
     in-out property <bool> radio-group-disabled: false;
     in-out property <int> story-radio-group-selected-index: 1;
 
@@ -769,6 +781,7 @@ export component Preview inherits Rectangle {
     in-out property <string> switch-label: "Enable sync";
     in-out property <string> switch-description: "Keep the workspace up to date across devices.";
     in-out property <bool> switch-checked: true;
+    in-out property <int> switch-size: 1;
     in-out property <bool> switch-disabled: false;
 
     // Slider preview state
@@ -782,6 +795,7 @@ export component Preview inherits Rectangle {
 
     // Segmented control preview state
     in-out property <int> segmented-selected-index: 0;
+    in-out property <int> segmented-size: 1;
     in-out property <bool> segmented-disabled: false;
     in-out property <int> segmented-variant: 0;
     in-out property <int> segmented-color: 1;
@@ -794,14 +808,17 @@ export component Preview inherits Rectangle {
     in-out property <string> slide-label: "Confirm";
     in-out property <string> slide-hint: "Slide to publish";
     in-out property <string> slide-confirmed-label: "Published";
+    in-out property <int> slide-size: 1;
     in-out property <bool> slide-confirmed: false;
     in-out property <bool> slide-disabled: false;
     in-out property <bool> story-slide-confirmed: false;
 
     // Link preview state
     in-out property <string> link-label: "Open documentation";
+    in-out property <int> link-size: 1;
     in-out property <bool> link-disabled: false;
-    in-out property <bool> link-external: true;
+    in-out property <string> link-icon: "arrow-up";
+    property <image> selected-link-icon: root.icon-image(link-icon);
     in-out property <bool> link-visited: false;
     in-out property <bool> link-underlined: true;
 
@@ -813,10 +830,12 @@ export component Preview inherits Rectangle {
     in-out property <string> card-footer: "Updated 8 minutes ago";
     in-out property <bool> card-selected: false;
     in-out property <bool> card-interactive: true;
+    in-out property <int> card-size: 1;
     in-out property <string> card-icon: "clipboard";
     property <image> selected-card-icon: root.icon-image(card-icon);
 
     // Menu preview state
+    in-out property <int> menu-size: 1;
     in-out property <int> menu-selected-index: 1;
     in-out property <bool> menu-full-width: false;
 
@@ -826,6 +845,7 @@ export component Preview inherits Rectangle {
     in-out property <string> menu-item-trailing-text: "Cmd+K";
     in-out property <bool> menu-item-selected: false;
     in-out property <bool> menu-item-destructive: false;
+    in-out property <int> menu-item-size: 1;
     in-out property <bool> menu-item-disabled: false;
     in-out property <string> menu-item-start-icon: "share";
     in-out property <string> menu-item-end-icon: "chevron-right";
@@ -833,6 +853,7 @@ export component Preview inherits Rectangle {
     property <image> selected-menu-item-end-icon: root.icon-image(menu-item-end-icon);
 
     // Accordion preview state
+    in-out property <int> accordion-size: 1;
     in-out property <bool> accordion-allow-multiple: false;
     in-out property <string> accordion-item-0-title: "Release notes";
     in-out property <string> accordion-item-0-subtitle: "Updated today";
@@ -883,8 +904,20 @@ export component Preview inherits Rectangle {
         root.accordion-story-multi-open-2,
     ];
 
+    changed accordion-allow-multiple => {
+        if (!root.accordion-allow-multiple) {
+            if (root.accordion-open-0) {
+                root.accordion-open-1 = false;
+                root.accordion-open-2 = false;
+            } else if (root.accordion-open-1) {
+                root.accordion-open-2 = false;
+            }
+        }
+    }
+
     // Dialog preview state
     in-out property <bool> dialog-open: true;
+    in-out property <int> dialog-size: 1;
     in-out property <string> dialog-title: "Delete release";
     in-out property <string> dialog-message: "This action removes the release notes draft for everyone on the team.";
     in-out property <int> dialog-variant: 0;
@@ -896,6 +929,7 @@ export component Preview inherits Rectangle {
 
     // Sheet preview state
     in-out property <bool> sheet-open: true;
+    in-out property <int> sheet-size: 1;
     in-out property <string> sheet-title: "Share workspace";
     in-out property <string> sheet-body: "Invite teammates, copy a link, or update permissions without leaving the current page.";
     in-out property <bool> sheet-show-handle: true;
@@ -905,15 +939,17 @@ export component Preview inherits Rectangle {
 
     // Toast preview state
     in-out property <bool> toast-open: true;
+    in-out property <int> toast-size: 1;
     in-out property <string> toast-message: "Workspace published successfully.";
     in-out property <string> toast-action: "Undo";
-    in-out property <int> toast-variant: 1;
+    in-out property <int> toast-variant: 0;
     in-out property <int> toast-position: 1;
     in-out property <string> toast-icon: "check";
     property <image> selected-toast-icon: root.icon-image(toast-icon);
 
     // Progress preview state
     in-out property <string> progress-label: "Storage";
+    in-out property <int> progress-size: 1;
     in-out property <string> progress-value-label: "";
     in-out property <float> progress-value: 64.0;
     in-out property <float> progress-min-value: 0.0;
@@ -951,7 +987,7 @@ export component Preview inherits Rectangle {
     property <TextHorizontalAlignment> active-input-text-alignment:
         input-text-alignment-index == 1 ? TextHorizontalAlignment.center : input-text-alignment-index == 2 ? TextHorizontalAlignment.right : TextHorizontalAlignment.left;
     property <TextAreaVariant> active-textarea-variant:
-        textarea-variant == 1 ? TextAreaVariant.bordered : textarea-variant == 2 ? TextAreaVariant.faded : TextAreaVariant.flat;
+        textarea-variant == 1 ? TextAreaVariant.bordered : TextAreaVariant.flat;
     property <InputVariant> active-search-variant:
         search-variant == 0 ? InputVariant.default : search-variant == 2 ? InputVariant.outlined : InputVariant.filled;
     property <ButtonVariant> active-button-variant:
@@ -986,6 +1022,178 @@ export component Preview inherits Rectangle {
         segmented-orientation == 1 ? TabsOrientation.vertical : TabsOrientation.horizontal;
     property <DividerLabelAlignment> active-divider-label-alignment:
         divider-label-alignment == 0 ? DividerLabelAlignment.start : divider-label-alignment == 2 ? DividerLabelAlignment.end : DividerLabelAlignment.middle;
+    pure function active-control-size(index: int) -> ControlSize {
+        if index == 0 {
+            return ControlSize.sm;
+        }
+        if index == 2 {
+            return ControlSize.lg;
+        }
+        return ControlSize.md;
+    }
+
+    pure function props-size-key(index: int) -> string {
+        if index == 0 {
+            return "sm";
+        }
+        if index == 2 {
+            return "lg";
+        }
+        return "md";
+    }
+
+    pure function props-button-variant-key(index: int) -> string {
+        if index == 1 {
+            return "secondary";
+        }
+        if index == 2 {
+            return "tertiary";
+        }
+        if index == 3 {
+            return "danger";
+        }
+        if index == 4 {
+            return "ghost";
+        }
+        return "primary";
+    }
+
+    pure function props-input-variant-key(index: int) -> string {
+        if index == 1 {
+            return "filled";
+        }
+        if index == 2 {
+            return "outlined";
+        }
+        return "default";
+    }
+
+    pure function props-tabs-variant-key(index: int) -> string {
+        if index == 1 {
+            return "bordered";
+        }
+        if index == 2 {
+            return "light";
+        }
+        if index == 3 {
+            return "underlined";
+        }
+        return "solid";
+    }
+
+    pure function props-dialog-variant-key(index: int) -> string {
+        if index == 1 {
+            return "danger";
+        }
+        return "default";
+    }
+
+    pure function props-toast-variant-key(index: int) -> string {
+        if index == 1 {
+            return "success";
+        }
+        if index == 2 {
+            return "warning";
+        }
+        if index == 3 {
+            return "error";
+        }
+        return "default";
+    }
+
+    pure function props-basic-state-key(disabled: bool, focused: bool) -> string {
+        if disabled {
+            return "disabled";
+        }
+        if focused {
+            return "focused";
+        }
+        return "normal";
+    }
+
+    pure function props-link-state-key(disabled: bool, visited: bool) -> string {
+        if disabled {
+            return "disabled";
+        }
+        if visited {
+            return "visited";
+        }
+        return "normal";
+    }
+
+    pure function props-color(component_key: string, variant_key: string, state_key: string, prop_name: string, fallback: color, ) -> color {
+        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).is-overridden ? root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).color-value : fallback;
+    }
+
+    pure function props-length(component_key: string, size_key: string, prop_name: string, fallback: length, ) -> length {
+        return root.preview-size-prop(component_key, size_key, prop_name, root.preview-version).is-overridden ? root.preview-size-prop(component_key, size_key, prop_name, root.preview-version).float-value * 1px : fallback;
+    }
+
+    pure function props-variant-length(component_key: string, variant_key: string, state_key: string, prop_name: string, fallback: length, ) -> length {
+        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).is-overridden ? root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).float-value * 1px : fallback;
+    }
+
+    pure function props-float(component_key: string, variant_key: string, state_key: string, prop_name: string, fallback: float, ) -> float {
+        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).is-overridden ? root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).float-value : fallback;
+    }
+
+    pure function props-int(component_key: string, variant_key: string, state_key: string, prop_name: string, fallback: int, ) -> int {
+        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).is-overridden ? root.preview-variant-prop(component_key, variant_key, state_key, prop_name, root.preview-version).int-value : fallback;
+    }
+
+    pure function props-size-string(component_key: string, size_key: string, prop_name: string, fallback: string, ) -> string {
+        return root.preview-size-prop(component_key, size_key, prop_name, root.preview-version).is-overridden ? root.preview-size-prop(component_key, size_key, prop_name, root.preview-version).string-value : fallback;
+    }
+
+    changed button-variant => {
+        root.button-focused = false;
+    }
+
+    changed button-size => {
+        root.button-focused = false;
+    }
+
+    changed icon-button-variant => {
+        root.icon-button-focused = false;
+    }
+
+    changed input-clearable => {
+        if (root.input-clearable && root.input-value == "") {
+            root.input-value = "hello@keyos.app";
+        }
+    }
+
+    changed icon-button-size => {
+        root.icon-button-focused = false;
+    }
+
+    changed input-variant => {
+        root.input-focused = false;
+    }
+
+    changed input-size => {
+        root.input-focused = false;
+    }
+
+    changed search-variant => {
+        root.search-focused = false;
+    }
+
+    changed search-size => {
+        root.search-focused = false;
+    }
+
+    changed slider-size => {
+        root.slider-focused = false;
+    }
+
+    changed textarea-variant => {
+        root.textarea-focused = false;
+    }
+
+    changed textarea-size => {
+        root.textarea-focused = false;
+    }
 
     // Reset callback
     callback reset-to-defaults();
@@ -1025,6 +1233,7 @@ export component Preview inherits Rectangle {
         input-placeholder = "you@example.com";
         input-label = "Email address";
         input-variant = 0;
+        input-size = 1;
         input-type-index = 0;
         input-text-alignment-index = 0;
         input-disabled = false;
@@ -1045,6 +1254,7 @@ export component Preview inherits Rectangle {
         textarea-label = "Project notes";
         textarea-description = "Use this field for longer descriptions, feedback, and summaries.";
         textarea-variant = 0;
+        textarea-size = 1;
         textarea-disabled = false;
         textarea-read-only = false;
         textarea-clearable = false;
@@ -1056,7 +1266,6 @@ export component Preview inherits Rectangle {
         textarea-error = "";
         story-textarea-flat-value = "";
         story-textarea-bordered-value = "Release summary:\nShipped new tabs component.\nNeed follow-up QA on dark mode.";
-        story-textarea-faded-value = "This autosizes when content grows.\nAdd a few more lines to see it expand inside the card.";
         story-textarea-focused-value = "Focused text areas should clearly show the active border.";
         story-textarea-error-value = "This note is missing required details.";
         story-textarea-disabled-value = "Editing is disabled for this field.";
@@ -1065,6 +1274,7 @@ export component Preview inherits Rectangle {
         search-placeholder = "Search components";
         search-label = "Search";
         search-variant = 1;
+        search-size = 1;
         search-disabled = false;
         search-read-only = false;
         search-clearable = true;
@@ -1077,6 +1287,7 @@ export component Preview inherits Rectangle {
         dropdown-label = "Team";
         dropdown-placeholder = "Choose a team";
         dropdown-selected-index = 1;
+        dropdown-size = 1;
         dropdown-disabled = false;
         story-dropdown-selected-index = -1;
 
@@ -1084,20 +1295,24 @@ export component Preview inherits Rectangle {
         checkbox-description = "Receive launch and billing notifications.";
         checkbox-checked = false;
         checkbox-indeterminate = false;
+        checkbox-size = 1;
         checkbox-disabled = false;
 
         radio-label = "Pro plan";
         radio-description = "Best for teams shipping every week.";
         radio-checked = true;
+        radio-size = 1;
         radio-disabled = false;
 
         radio-group-selected-index = 1;
+        radio-group-size = 1;
         radio-group-disabled = false;
         story-radio-group-selected-index = 1;
 
         switch-label = "Enable sync";
         switch-description = "Keep the workspace up to date across devices.";
         switch-checked = true;
+        switch-size = 1;
         switch-disabled = false;
 
         slider-minimum = 0;
@@ -1109,6 +1324,7 @@ export component Preview inherits Rectangle {
         slider-focused = false;
 
         segmented-selected-index = 0;
+        segmented-size = 1;
         segmented-disabled = false;
         segmented-variant = 0;
         segmented-color = 1;
@@ -1120,13 +1336,15 @@ export component Preview inherits Rectangle {
         slide-label = "Confirm";
         slide-hint = "Slide to publish";
         slide-confirmed-label = "Published";
+        slide-size = 1;
         slide-confirmed = false;
         slide-disabled = false;
         story-slide-confirmed = false;
 
         link-label = "Open documentation";
+        link-size = 1;
         link-disabled = false;
-        link-external = true;
+        link-icon = "arrow-up";
         link-visited = false;
         link-underlined = true;
 
@@ -1137,8 +1355,10 @@ export component Preview inherits Rectangle {
         card-footer = "Updated 8 minutes ago";
         card-selected = false;
         card-interactive = true;
+        card-size = 1;
         card-icon = "clipboard";
 
+        menu-size = 1;
         menu-selected-index = 1;
         menu-full-width = false;
 
@@ -1147,10 +1367,12 @@ export component Preview inherits Rectangle {
         menu-item-trailing-text = "Cmd+K";
         menu-item-selected = false;
         menu-item-destructive = false;
+        menu-item-size = 1;
         menu-item-disabled = false;
         menu-item-start-icon = "share";
         menu-item-end-icon = "chevron-right";
 
+        accordion-size = 1;
         accordion-allow-multiple = false;
         accordion-item-0-title = "Release notes";
         accordion-item-0-subtitle = "Updated today";
@@ -1172,6 +1394,7 @@ export component Preview inherits Rectangle {
         accordion-story-multi-open-2 = false;
 
         dialog-open = true;
+        dialog-size = 1;
         dialog-title = "Delete release";
         dialog-message = "This action removes the release notes draft for everyone on the team.";
         dialog-variant = 0;
@@ -1181,6 +1404,7 @@ export component Preview inherits Rectangle {
         dialog-icon = "circle-alert";
 
         sheet-open = true;
+        sheet-size = 1;
         sheet-title = "Share workspace";
         sheet-body = "Invite teammates, copy a link, or update permissions without leaving the current page.";
         sheet-show-handle = true;
@@ -1188,13 +1412,15 @@ export component Preview inherits Rectangle {
         sheet-detent-index = 1;
 
         toast-open = true;
+        toast-size = 1;
         toast-message = "Workspace published successfully.";
         toast-action = "Undo";
-        toast-variant = 1;
+        toast-variant = 0;
         toast-position = 1;
         toast-icon = "check";
 
         progress-label = "Storage";
+        progress-size = 1;
         progress-value-label = "";
         progress-value = 64.0;
         progress-min-value = 0.0;
@@ -1272,7 +1498,7 @@ export component Preview inherits Rectangle {
         height: parent.height;
         // Embedded in the theme editor (show-tabs == false) the panels go flush to
         // the edges like ComponentThemeWorkspace; only the standalone theme editor gets
-        // the 16px frame. (This was the stray gray padding above the Props sidebar.)
+        // the 16px frame. (This was the stray gray padding above the Test sidebar.)
         padding: root.show-tabs ? 16px : 0px;
         spacing: root.show-tabs ? 12px : 0px;
 
@@ -1280,7 +1506,7 @@ export component Preview inherits Rectangle {
         // (show-tabs). In the embedded theme editor the component name lives in
         // the central preview panel and the props sidebar, so this full-width
         // band must not render — otherwise it spans over the right sidebar and
-        // pushes the Theme/Props picker down.
+        // pushes the Theme/Test picker down.
         if root.show-tabs: HorizontalLayout {
             spacing: 16px;
 
@@ -1297,7 +1523,7 @@ export component Preview inherits Rectangle {
             }
 
             if root.show-tabs: Rectangle {
-                height: 36px;
+                height: 28px;
                 background: dark-mode ? #242424 : #ffffff;
                 border-radius: 8px;
 
@@ -1315,7 +1541,7 @@ export component Preview inherits Rectangle {
                     }
 
                     TabButton {
-                        label: "Props";
+                        label: "Test";
                         selected: active-tab == 1;
                         dark-mode: root.dark-mode;
                         clicked => {
@@ -2272,14 +2498,6 @@ export component Preview inherits Rectangle {
                                     variant: TextAreaVariant.bordered;
                                     value <=> root.story-textarea-bordered-value;
                                 }
-
-                                TextArea {
-                                    width: 420px;
-                                    label: "Faded";
-                                    description: "Faded works well for denser forms.";
-                                    variant: TextAreaVariant.faded;
-                                    value <=> root.story-textarea-faded-value;
-                                }
                             }
 
                             Text {
@@ -2730,14 +2948,74 @@ export component Preview inherits Rectangle {
                                     width: 420px;
                                     height: 320px;
 
-                                    Dialog {
+                                    invite-dialog := Dialog {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Invite teammate";
-                                        message: "Add a collaborator to this workspace and assign editor access.";
-                                        icon: root.icon-image("share");
-                                        primary-action: "Send invite";
-                                        secondary-action: "Cancel";
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+
+                                            Rectangle {
+                                                width: invite-dialog.icon-size * 2;
+                                                height: invite-dialog.icon-size * 2;
+                                                border-radius: self.width / 2;
+                                                background: invite-dialog.icon-circle-background;
+
+                                                Image {
+                                                    x: (parent.width - self.width) / 2;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: invite-dialog.icon-size;
+                                                    height: invite-dialog.icon-size;
+                                                    source: root.icon-image("share");
+                                                    colorize: invite-dialog.accent-color;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-right: invite-dialog.close-button-size + 8px;
+                                                spacing: 6px;
+
+                                                Text {
+                                                    text: "Invite teammate";
+                                                    color: invite-dialog.title-color;
+                                                    font-family: invite-dialog.font-family;
+                                                    font-size: invite-dialog.title-font-size;
+                                                    font-weight: invite-dialog.title-font-weight;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                Text {
+                                                    text: "Add a collaborator to this workspace and assign editor access.";
+                                                    color: invite-dialog.message-color;
+                                                    font-family: invite-dialog.font-family;
+                                                    font-size: invite-dialog.font-size;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 1px;
+                                            background: invite-dialog.separator-color;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: end;
+
+                                            Button {
+                                                text: "Cancel";
+                                                variant: ButtonVariant.secondary;
+                                                touch-expansion: 0px;
+                                            }
+
+                                            Button {
+                                                text: "Send invite";
+                                                variant: ButtonVariant.primary;
+                                                touch-expansion: 0px;
+                                            }
+                                        }
                                     }
                                 }
 
@@ -2745,15 +3023,75 @@ export component Preview inherits Rectangle {
                                     width: 420px;
                                     height: 320px;
 
-                                    Dialog {
+                                    delete-dialog := Dialog {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Delete project";
-                                        message: "This removes the project and all unpublished changes.";
-                                        icon: root.icon-image("trash-2");
                                         variant: DialogVariant.danger;
-                                        primary-action: "Delete";
-                                        secondary-action: "Cancel";
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+
+                                            Rectangle {
+                                                width: delete-dialog.icon-size * 2;
+                                                height: delete-dialog.icon-size * 2;
+                                                border-radius: self.width / 2;
+                                                background: delete-dialog.icon-circle-background;
+
+                                                Image {
+                                                    x: (parent.width - self.width) / 2;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: delete-dialog.icon-size;
+                                                    height: delete-dialog.icon-size;
+                                                    source: root.icon-image("trash-2");
+                                                    colorize: delete-dialog.accent-color;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-right: delete-dialog.close-button-size + 8px;
+                                                spacing: 6px;
+
+                                                Text {
+                                                    text: "Delete project";
+                                                    color: delete-dialog.title-color;
+                                                    font-family: delete-dialog.font-family;
+                                                    font-size: delete-dialog.title-font-size;
+                                                    font-weight: delete-dialog.title-font-weight;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                Text {
+                                                    text: "This removes the project and all unpublished changes.";
+                                                    color: delete-dialog.message-color;
+                                                    font-family: delete-dialog.font-family;
+                                                    font-size: delete-dialog.font-size;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 1px;
+                                            background: delete-dialog.separator-color;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: end;
+
+                                            Button {
+                                                text: "Cancel";
+                                                variant: ButtonVariant.secondary;
+                                                touch-expansion: 0px;
+                                            }
+
+                                            Button {
+                                                text: "Delete";
+                                                variant: ButtonVariant.danger;
+                                                touch-expansion: 0px;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2777,12 +3115,27 @@ export component Preview inherits Rectangle {
                                     width: 360px;
                                     height: 340px;
 
-                                    Sheet {
+                                    share-sheet := Sheet {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Share workspace";
-                                        body: "Click the handle to cycle through compact, comfortable, and expanded stops.";
                                         selected-detent: 0;
+
+                                        Text {
+                                            text: "Share workspace";
+                                            color: share-sheet.title-color;
+                                            font-family: share-sheet.font-family;
+                                            font-size: share-sheet.title-font-size;
+                                            font-weight: share-sheet.title-font-weight;
+                                            wrap: word-wrap;
+                                        }
+
+                                        Text {
+                                            text: "Click the handle to cycle through compact, comfortable, and expanded stops.";
+                                            color: share-sheet.body-color;
+                                            font-family: share-sheet.font-family;
+                                            font-size: share-sheet.font-size;
+                                            wrap: word-wrap;
+                                        }
                                     }
                                 }
 
@@ -2790,12 +3143,27 @@ export component Preview inherits Rectangle {
                                     width: 360px;
                                     height: 340px;
 
-                                    Sheet {
+                                    release-sheet := Sheet {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Release checklist";
-                                        body: "The expanded stop leaves room for details, controls, and a scrollable task list.";
                                         selected-detent: 2;
+
+                                        Text {
+                                            text: "Release checklist";
+                                            color: release-sheet.title-color;
+                                            font-family: release-sheet.font-family;
+                                            font-size: release-sheet.title-font-size;
+                                            font-weight: release-sheet.title-font-weight;
+                                            wrap: word-wrap;
+                                        }
+
+                                        Text {
+                                            text: "The expanded stop leaves room for details, controls, and a scrollable task list.";
+                                            color: release-sheet.body-color;
+                                            font-family: release-sheet.font-family;
+                                            font-size: release-sheet.font-size;
+                                            wrap: word-wrap;
+                                        }
                                     }
                                 }
                             }
@@ -2980,7 +3348,7 @@ export component Preview inherits Rectangle {
                 }
             }
 
-            // Props tab content
+            // Test tab content
             if active-tab == 1: props-tab-container := Rectangle {
                 // Track if splitter is being dragged
                 property <bool> splitter-dragging: false;
@@ -3066,14 +3434,20 @@ export component Preview inherits Rectangle {
                                     clip: true;  // Clip content to viewport boundary
 
                                     if root.selected-category == 0 && root.selected-component == 0: Rectangle {
-                                        x: root.button-full-width ? 16px : (parent.width - self.width) / 2;
+                                        x: root.button-full-width ? 24px : (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
-                                        width: root.button-full-width ? (parent.width - 32px) : min(preview-btn.preferred-width, parent.width - 32px);
+                                        width: root.button-full-width ? (parent.width - 48px) : min(preview-btn.preferred-width, parent.width - 48px);
                                         height: preview-btn.preferred-height;
                                         clip: true;
 
                                         preview-btn := Button {
-                                            width: min(self.preferred-width, parent.width);
+                                            property <string> props-variant-key:
+                                                root.props-button-variant-key(root.button-variant);
+                                            property <string> props-state-key:
+                                                root.props-basic-state-key(root.button-disabled, root.button-focused);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.button-size);
+                                            width: root.button-full-width ? parent.width : min(self.preferred-width, parent.width);
                                             text: root.button-text;
                                             variant: root.active-button-variant;
                                             size: root.active-button-size;
@@ -3082,6 +3456,20 @@ export component Preview inherits Rectangle {
                                             disabled: root.button-disabled;
                                             force-focused: root.button-focused;
                                             full-width: root.button-full-width;
+                                            background: root.props-color("button", props-variant-key, props-state-key, "background", Theme.palette-primary);
+                                            foreground: root.props-color("button", props-variant-key, props-state-key, "foreground", Theme.palette-background);
+                                            border-color: root.props-color("button", props-variant-key, props-state-key, "borderColor", transparent);
+                                            border-width: root.props-variant-length("button", props-variant-key, props-state-key, "borderWidth", 0px);
+                                            font-weight: root.props-int("button", props-variant-key, props-state-key, "fontWeight", 500);
+                                            button-opacity: root.props-float("button", props-variant-key, props-state-key, "opacity", 1.0);
+                                            touch-expansion: root.props-variant-length("button", props-variant-key, props-state-key, "touchExpansion", Theme.spacing-xs);
+                                            font-family: root.props-size-string("button", props-size-key, "fontFamily", Theme.font-primary);
+                                            font-size: root.props-length("button", props-size-key, "fontSize", Theme.font-size-md);
+                                            padding-horizontal: root.props-length("button", props-size-key, "paddingH", Theme.control-padding-inline-md);
+                                            padding-vertical: root.props-length("button", props-size-key, "paddingV", 10px);
+                                            icon-size: root.props-length("button", props-size-key, "iconSize", Theme.icon-size-md);
+                                            border-radius: root.props-length("button", props-size-key, "borderRadius", Theme.control-radius-md);
+                                            min-button-height: root.props-length("button", props-size-key, "minHeight", Theme.control-size-md);
                                         }
                                     }
 
@@ -3140,11 +3528,18 @@ export component Preview inherits Rectangle {
                                         height: preview-input.preferred-height;
 
                                         preview-input := Input {
+                                            property <string> props-variant-key:
+                                                root.props-input-variant-key(root.input-variant);
+                                            property <string> props-state-key:
+                                                root.props-basic-state-key(root.input-disabled, root.input-focused);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.input-size);
                                             width: parent.width;
                                             value <=> root.input-value;
                                             placeholder: root.input-placeholder;
                                             label: root.input-label;
                                             variant: root.input-variant == 1 ? InputVariant.filled : root.input-variant == 2 ? InputVariant.outlined : InputVariant.default;
+                                            size: root.active-control-size(root.input-size);
                                             input-type: root.active-input-type;
                                             text-alignment: root.active-input-text-alignment;
                                             prefix-icon: root.selected-input-prefix-icon;
@@ -3154,6 +3549,18 @@ export component Preview inherits Rectangle {
                                             disabled: root.input-disabled;
                                             read-only: root.input-read-only;
                                             force-focused: root.input-focused;
+                                            background: root.props-color("input", props-variant-key, props-state-key, "background", Theme.palette-surface);
+                                            foreground: root.props-color("input", props-variant-key, props-state-key, "foreground", Theme.palette-foreground);
+                                            placeholder-color: root.props-color("input", props-variant-key, props-state-key, "placeholder-color", Theme.palette-muted);
+                                            border-color: root.props-color("input", props-variant-key, props-state-key, "border-color", Theme.palette-border);
+                                            border-color-error: root.props-color("input", props-variant-key, props-state-key, "border-color-error", Theme.palette-danger);
+                                            border-width: root.props-length("input", props-size-key, "border-width", 1px);
+                                            border-radius: root.props-length("input", props-size-key, "border-radius", Theme.control-radius-md);
+                                            padding-horizontal: root.props-length("input", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            padding-vertical: root.props-length("input", props-size-key, "padding-vertical", 10px);
+                                            field-height: root.props-length("input", props-size-key, "field-height", Theme.control-size-md);
+                                            font-size: root.props-length("input", props-size-key, "font-size", Theme.font-size-md);
+                                            font-family: root.props-size-string("input", props-size-key, "font-family", Theme.font-primary);
                                         }
                                     }
 
@@ -3164,16 +3571,35 @@ export component Preview inherits Rectangle {
                                         height: preview-search.preferred-height;
 
                                         preview-search := Search {
+                                            property <string> props-variant-key:
+                                                root.props-input-variant-key(root.search-variant);
+                                            property <string> props-state-key:
+                                                root.props-basic-state-key(root.search-disabled, root.search-focused);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.search-size);
                                             width: parent.width;
                                             value <=> root.search-value;
                                             label: root.search-label;
                                             placeholder: root.search-placeholder;
                                             variant: root.active-search-variant;
+                                            size: root.active-control-size(root.search-size);
                                             clearable: root.search-clearable;
                                             disabled: root.search-disabled;
                                             read-only: root.search-read-only;
                                             force-focused: root.search-focused;
                                             error: root.search-error;
+                                            background: root.props-color("search", props-variant-key, props-state-key, "background", Theme.palette-surface);
+                                            foreground: root.props-color("search", props-variant-key, props-state-key, "foreground", Theme.palette-foreground);
+                                            placeholder-color: root.props-color("search", props-variant-key, props-state-key, "placeholder-color", Theme.palette-muted);
+                                            border-color: root.props-color("search", props-variant-key, props-state-key, "border-color", Theme.palette-border);
+                                            border-color-error: root.props-color("search", props-variant-key, props-state-key, "border-color-error", Theme.palette-danger);
+                                            border-width: root.props-length("search", props-size-key, "border-width", 1px);
+                                            border-radius: root.props-length("search", props-size-key, "border-radius", Theme.control-radius-md);
+                                            padding-horizontal: root.props-length("search", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            padding-vertical: root.props-length("search", props-size-key, "padding-vertical", 10px);
+                                            field-height: root.props-length("search", props-size-key, "field-height", Theme.control-size-md);
+                                            font-size: root.props-length("search", props-size-key, "font-size", Theme.font-size-md);
+                                            font-family: root.props-size-string("search", props-size-key, "font-family", Theme.font-primary);
                                         }
                                     }
 
@@ -3184,12 +3610,31 @@ export component Preview inherits Rectangle {
                                         height: preview-dropdown.preferred-height;
 
                                         preview-dropdown := Dropdown {
+                                            property <string> props-variant-key: "default";
+                                            property <string> props-state-key:
+                                                root.dropdown-disabled ? "disabled" : "normal";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.dropdown-size);
                                             width: parent.width;
                                             label: root.dropdown-label;
                                             placeholder: root.dropdown-placeholder;
                                             options: root.dropdown-options;
                                             selected-index <=> root.dropdown-selected-index;
+                                            size: root.active-control-size(root.dropdown-size);
                                             disabled: root.dropdown-disabled;
+                                            background: root.props-color("dropdown", props-variant-key, props-state-key, "background", Theme.palette-surface);
+                                            foreground: root.props-color("dropdown", props-variant-key, props-state-key, "foreground", Theme.palette-foreground);
+                                            placeholder-color: root.props-color("dropdown", props-variant-key, props-state-key, "placeholder-color", Theme.palette-muted);
+                                            border-color: root.props-color("dropdown", props-variant-key, props-state-key, "border-color", Theme.palette-border);
+                                            border-color-error: root.props-color("dropdown", props-variant-key, props-state-key, "border-color-error", Theme.palette-danger);
+                                            border-width: root.props-length("dropdown", props-size-key, "border-width", 1px);
+                                            border-radius: root.props-length("dropdown", props-size-key, "border-radius", Theme.control-radius-md);
+                                            padding-horizontal: root.props-length("dropdown", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            control-height: root.props-length("dropdown", props-size-key, "control-height", Theme.control-size-md);
+                                            option-height: root.props-length("dropdown", props-size-key, "option-height", 64px);
+                                            icon-size: root.props-length("dropdown", props-size-key, "icon-size", 22px);
+                                            font-size: root.props-length("dropdown", props-size-key, "font-size", Theme.font-size-md);
+                                            font-family: root.props-size-string("dropdown", props-size-key, "font-family", Theme.font-primary);
                                         }
                                     }
 
@@ -3200,12 +3645,32 @@ export component Preview inherits Rectangle {
                                         height: preview-checkbox.preferred-height;
 
                                         preview-checkbox := Checkbox {
+                                            property <string> props-state-key:
+                                                root.checkbox-disabled ? "disabled" : "normal";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.checkbox-size);
                                             width: parent.width;
                                             label: root.checkbox-label;
                                             description: root.checkbox-description;
                                             checked <=> root.checkbox-checked;
                                             indeterminate <=> root.checkbox-indeterminate;
+                                            size: root.active-control-size(root.checkbox-size);
                                             disabled: root.checkbox-disabled;
+                                            checked-background: root.props-color("checkbox", "default", props-state-key, "checked-background", Theme.palette-foreground);
+                                            checked-border-color: root.props-color("checkbox", "default", props-state-key, "checked-border-color", Theme.palette-foreground);
+                                            checked-border-width: root.props-variant-length("checkbox", "default", props-state-key, "checked-border-width", 0px);
+                                            box-background: root.props-color("checkbox", "default", props-state-key, "box-background", Theme.palette-surface);
+                                            box-border-color: root.props-color("checkbox", "default", props-state-key, "box-border-color", Theme.palette-border);
+                                            box-border-width: root.props-variant-length("checkbox", "default", props-state-key, "box-border-width", 1px);
+                                            mark-color: root.props-color("checkbox", "default", props-state-key, "mark-color", Theme.palette-background);
+                                            label-color: root.props-color("checkbox", "default", props-state-key, "label-color", Theme.palette-foreground);
+                                            description-color: root.props-color("checkbox", "default", props-state-key, "description-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("checkbox", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("checkbox", props-size-key, "font-size", Theme.font-size-md);
+                                            control-size: root.props-length("checkbox", props-size-key, "control-size", Theme.choice-control-size-md);
+                                            row-height: root.props-length("checkbox", props-size-key, "row-height", Theme.control-size-md);
+                                            description-font-size: root.props-length("checkbox", props-size-key, "description-font-size", Theme.font-size-helper);
+                                            box-border-radius: root.props-length("checkbox", props-size-key, "box-border-radius", Theme.radius-sm);
                                         }
                                     }
 
@@ -3216,11 +3681,28 @@ export component Preview inherits Rectangle {
                                         height: preview-radio.preferred-height;
 
                                         preview-radio := Radio {
+                                            property <string> props-state-key:
+                                                root.radio-disabled ? "disabled" : "normal";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.radio-size);
                                             width: parent.width;
                                             label: root.radio-label;
                                             description: root.radio-description;
                                             checked <=> root.radio-checked;
+                                            size: root.active-control-size(root.radio-size);
                                             disabled: root.radio-disabled;
+                                            accent-color: root.props-color("radio", "default", props-state-key, "accent-color", Theme.palette-primary);
+                                            box-background: root.props-color("radio", "default", props-state-key, "box-background", Theme.palette-surface);
+                                            box-border-color: root.props-color("radio", "default", props-state-key, "box-border-color", Theme.palette-border);
+                                            box-border-width: root.props-variant-length("radio", "default", props-state-key, "box-border-width", 1px);
+                                            dot-color: root.props-color("radio", "default", props-state-key, "dot-color", Theme.palette-primary);
+                                            label-color: root.props-color("radio", "default", props-state-key, "label-color", Theme.palette-foreground);
+                                            description-color: root.props-color("radio", "default", props-state-key, "description-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("radio", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("radio", props-size-key, "font-size", Theme.font-size-md);
+                                            control-size: root.props-length("radio", props-size-key, "control-size", Theme.choice-control-size-md);
+                                            row-height: root.props-length("radio", props-size-key, "row-height", Theme.control-size-md);
+                                            description-font-size: root.props-length("radio", props-size-key, "description-font-size", Theme.font-size-helper);
                                         }
                                     }
 
@@ -3231,11 +3713,26 @@ export component Preview inherits Rectangle {
                                         height: preview-switch.preferred-height;
 
                                         preview-switch := Switch {
+                                            property <string> props-state-key:
+                                                root.switch-disabled ? "disabled" : root.switch-checked ? "checked" : "unchecked";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.switch-size);
                                             width: parent.width;
                                             label: root.switch-label;
                                             description: root.switch-description;
                                             checked <=> root.switch-checked;
+                                            size: root.active-control-size(root.switch-size);
                                             disabled: root.switch-disabled;
+                                            track-color: root.props-color("switch", "default", props-state-key, "track-color", Theme.palette-secondary);
+                                            knob-color: root.props-color("switch", "default", props-state-key, "knob-color", Theme.palette-background);
+                                            label-color: root.props-color("switch", "default", props-state-key, "label-color", Theme.palette-foreground);
+                                            description-color: root.props-color("switch", "default", props-state-key, "description-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("switch", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("switch", props-size-key, "font-size", Theme.font-size-md);
+                                            track-height: root.props-length("switch", props-size-key, "track-height", Theme.switch-size-md);
+                                            knob-size: root.props-length("switch", props-size-key, "knob-size", Theme.switch-size-md);
+                                            row-height: root.props-length("switch", props-size-key, "row-height", Theme.control-size-md);
+                                            description-font-size: root.props-length("switch", props-size-key, "description-font-size", Theme.font-size-helper);
                                         }
                                     }
 
@@ -3246,18 +3743,48 @@ export component Preview inherits Rectangle {
                                         height: preview-segmented.preferred-height;
 
                                         preview-segmented := Tabs {
+                                            property <string> props-variant-key:
+                                                root.props-tabs-variant-key(root.segmented-variant);
+                                            property <string> props-state-key:
+                                                root.segmented-disabled ? "disabled" : "normal";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.segmented-size);
                                             width: parent.width;
                                             options: root.segmented-options;
                                             panels: root.segmented-panels;
                                             icons: root.segmented-icons;
                                             disabled-items: root.segmented-disabled-items;
                                             selected-index <=> root.segmented-selected-index;
+                                            size: root.active-control-size(root.segmented-size);
                                             variant: root.active-tabs-variant;
                                             color: root.active-tabs-color;
                                             orientation: root.active-tabs-orientation;
                                             full-width: root.segmented-full-width;
                                             show-panel: root.segmented-show-panel;
                                             disabled: root.segmented-disabled;
+                                            item-background: root.props-color("tabs", props-variant-key, props-state-key, "item-background", Theme.palette-background);
+                                            item-border-color: root.props-color("tabs", props-variant-key, props-state-key, "item-border-color", Theme.palette-border);
+                                            item-border-width: root.props-variant-length("tabs", props-variant-key, props-state-key, "item-border-width", 0px);
+                                            item-foreground: root.props-color("tabs", props-variant-key, props-state-key, "item-foreground", Theme.palette-foreground);
+                                            indicator-color: root.props-color("tabs", props-variant-key, props-state-key, "indicator-color", Theme.palette-foreground);
+                                            list-background-color: root.props-color("tabs", props-variant-key, props-state-key, "list-background-color", Theme.palette-secondary);
+                                            list-border-width: root.props-variant-length("tabs", props-variant-key, props-state-key, "list-border-width", 1px);
+                                            list-stroke-color: root.props-color("tabs", props-variant-key, props-state-key, "list-stroke-color", Theme.palette-border);
+                                            list-edge-color: root.props-color("tabs", props-variant-key, props-state-key, "list-edge-color", Theme.palette-border);
+                                            panel-background: root.props-color("tabs", props-variant-key, props-state-key, "panel-background", Theme.palette-background);
+                                            panel-foreground: root.props-color("tabs", props-variant-key, props-state-key, "panel-foreground", Theme.palette-foreground);
+                                            panel-border-color: root.props-color("tabs", props-variant-key, props-state-key, "panel-border-color", Theme.palette-border);
+                                            panel-border-width: root.props-variant-length("tabs", props-variant-key, props-state-key, "panel-border-width", 1px);
+                                            font-family: root.props-size-string("tabs", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("tabs", props-size-key, "font-size", Theme.font-size-md);
+                                            control-height: root.props-length("tabs", props-size-key, "control-height", Theme.control-size-md);
+                                            tab-padding-horizontal: root.props-length("tabs", props-size-key, "tab-padding-horizontal", Theme.control-padding-inline-md);
+                                            icon-size: root.props-length("tabs", props-size-key, "icon-size", Theme.icon-size-md);
+                                            tab-gap: root.props-length("tabs", props-size-key, "tab-gap", 2px);
+                                            list-padding: root.props-length("tabs", props-size-key, "list-padding", 4px);
+                                            panel-padding: root.props-length("tabs", props-size-key, "panel-padding", 20px);
+                                            panel-min-height: root.props-length("tabs", props-size-key, "panel-min-height", 104px);
+                                            border-radius: root.props-length("tabs", props-size-key, "border-radius", Theme.radius-default);
                                         }
                                     }
 
@@ -3268,12 +3795,29 @@ export component Preview inherits Rectangle {
                                         height: preview-slide.preferred-height;
 
                                         preview-slide := SlideToConfirm {
+                                            property <string> props-state-key:
+                                                root.slide-disabled ? "disabled" : root.slide-confirmed ? "confirmed" : "normal";
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.slide-size);
                                             width: parent.width;
                                             label: root.slide-label;
                                             hint: root.slide-hint;
                                             confirmed-label: root.slide-confirmed-label;
+                                            size: root.active-control-size(root.slide-size);
                                             confirmed <=> root.slide-confirmed;
                                             disabled: root.slide-disabled;
+                                            track-color: root.props-color("slide_to_confirm", "default", props-state-key, "track-color", Theme.palette-secondary);
+                                            track-border-color: root.props-color("slide_to_confirm", "default", props-state-key, "track-border-color", Theme.palette-border);
+                                            label-color: root.props-color("slide_to_confirm", "default", props-state-key, "label-color", Theme.palette-muted);
+                                            thumb-color: root.props-color("slide_to_confirm", "default", props-state-key, "thumb-color", Theme.palette-primary);
+                                            thumb-label-color: root.props-color("slide_to_confirm", "default", props-state-key, "thumb-label-color", Theme.palette-background);
+                                            font-family: root.props-size-string("slide_to_confirm", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("slide_to_confirm", props-size-key, "font-size", Theme.font-size-md);
+                                            control-height: root.props-length("slide_to_confirm", props-size-key, "control-height", Theme.control-size-md);
+                                            thumb-width: root.props-length("slide_to_confirm", props-size-key, "thumb-width", 96px);
+                                            thumb-padding-horizontal: root.props-length("slide_to_confirm", props-size-key, "thumb-padding-horizontal", Theme.spacing-md);
+                                            icon-size: root.props-length("slide_to_confirm", props-size-key, "icon-size", Theme.icon-size-md);
+                                            border-radius: root.props-length("slide_to_confirm", props-size-key, "border-radius", Theme.radius-full);
                                         }
                                     }
 
@@ -3284,11 +3828,22 @@ export component Preview inherits Rectangle {
                                         height: preview-link.preferred-height;
 
                                         preview-link := Link {
+                                            property <string> props-state-key:
+                                                root.props-link-state-key(root.link-disabled, root.link-visited);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.link-size);
                                             label: root.link-label;
                                             disabled: root.link-disabled;
-                                            external: root.link-external;
+                                            icon: root.selected-link-icon;
+                                            size: root.active-control-size(root.link-size);
                                             visited: root.link-visited;
                                             underlined: root.link-underlined;
+                                            text-color: root.props-color("link", "default", props-state-key, "text-color", Theme.palette-primary);
+                                            underline-color: root.props-color("link", "default", props-state-key, "underline-color", Theme.palette-primary);
+                                            font-family: root.props-size-string("link", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("link", props-size-key, "font-size", Theme.font-size-md);
+                                            row-height: root.props-length("link", props-size-key, "row-height", Theme.control-size-md);
+                                            icon-size: root.props-length("link", props-size-key, "icon-size", Theme.icon-size-sm);
                                         }
                                     }
 
@@ -3299,6 +3854,10 @@ export component Preview inherits Rectangle {
                                         height: preview-slider.preferred-height;
 
                                         preview-slider := Slider {
+                                            property <string> props-state-key:
+                                                root.props-basic-state-key(root.slider-disabled, root.slider-focused);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.slider-size);
                                             width: parent.width;
                                             minimum: root.slider-minimum;
                                             maximum: root.slider-maximum;
@@ -3307,10 +3866,18 @@ export component Preview inherits Rectangle {
                                             size: root.active-slider-size;
                                             disabled: root.slider-disabled;
                                             force-focused: root.slider-focused;
-                                            track-color: Theme.palette-primary;
-                                            fill-color: Theme.palette-primary;
-                                            thumb-color: Theme.palette-background;
-                                            thumb-border-color: Theme.palette-primary;
+                                            track-color: root.props-color("slider", "default", props-state-key, "track-color", Theme.palette-primary);
+                                            fill-color: root.props-color("slider", "default", props-state-key, "fill-color", Theme.palette-primary);
+                                            thumb-color: root.props-color("slider", "default", props-state-key, "thumb-color", Theme.palette-background);
+                                            thumb-border-color: root.props-color("slider", "default", props-state-key, "thumb-border-color", Theme.palette-primary);
+                                            track-height: root.props-length("slider", props-size-key, "track-height", 16px);
+                                            track-radius: root.props-length("slider", props-size-key, "track-radius", Theme.radius-full);
+                                            thumb-size: root.props-length("slider", props-size-key, "thumb-size", Theme.control-size-md);
+                                            thumb-radius: root.props-length("slider", props-size-key, "thumb-radius", Theme.radius-full);
+                                            thumb-border-width: root.props-length("slider", props-size-key, "thumb-border-width", 1px);
+                                            row-height: root.props-length("slider", props-size-key, "row-height", Theme.control-size-md);
+                                            track-touch-expansion: root.props-length("slider", props-size-key, "track-touch-expansion", 0px);
+                                            thumb-touch-expansion: root.props-length("slider", props-size-key, "thumb-touch-expansion", 0px);
                                         }
                                     }
 
@@ -3321,6 +3888,12 @@ export component Preview inherits Rectangle {
                                         height: preview-textarea.preferred-height;
 
                                         preview-textarea := TextArea {
+                                            property <string> props-variant-key:
+                                                root.textarea-variant == 1 ? "bordered" : "flat";
+                                            property <string> props-state-key:
+                                                root.props-basic-state-key(root.textarea-disabled, root.textarea-focused);
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.textarea-size);
                                             width: parent.width;
                                             value <=> root.textarea-value;
                                             placeholder: root.textarea-placeholder;
@@ -3328,6 +3901,7 @@ export component Preview inherits Rectangle {
                                             description: root.textarea-description;
                                             error: root.textarea-error;
                                             variant: root.active-textarea-variant;
+                                            size: root.active-control-size(root.textarea-size);
                                             clearable: root.textarea-clearable;
                                             disabled: root.textarea-disabled;
                                             read-only: root.textarea-read-only;
@@ -3336,6 +3910,20 @@ export component Preview inherits Rectangle {
                                             min-rows: Math.round(root.textarea-min-rows);
                                             max-rows: Math.round(root.textarea-max-rows);
                                             force-focused: root.textarea-focused;
+                                            background: root.props-color("textarea", props-variant-key, props-state-key, "background", Theme.palette-secondary);
+                                            foreground: root.props-color("textarea", props-variant-key, props-state-key, "foreground", Theme.palette-foreground);
+                                            placeholder-color: root.props-color("textarea", props-variant-key, props-state-key, "placeholder-color", Theme.palette-muted);
+                                            border-color: root.props-color("textarea", props-variant-key, props-state-key, "border-color", Theme.palette-border);
+                                            border-color-error: root.props-color("textarea", props-variant-key, props-state-key, "border-color-error", Theme.palette-danger);
+                                            description-color: root.props-color("textarea", props-variant-key, props-state-key, "description-color", Theme.palette-muted);
+                                            error-color: root.props-color("textarea", props-variant-key, props-state-key, "error-color", Theme.palette-danger);
+                                            border-width: root.props-length("textarea", props-size-key, "border-width", 1px);
+                                            border-radius: root.props-length("textarea", props-size-key, "border-radius", Theme.control-radius-md);
+                                            padding-horizontal: root.props-length("textarea", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            padding-vertical: root.props-length("textarea", props-size-key, "padding-vertical", Theme.spacing-md);
+                                            field-min-height: root.props-length("textarea", props-size-key, "field-min-height", 128px);
+                                            font-size: root.props-length("textarea", props-size-key, "font-size", Theme.font-size-md);
+                                            font-family: root.props-size-string("textarea", props-size-key, "font-family", Theme.font-primary);
                                         }
                                     }
 
@@ -3346,12 +3934,20 @@ export component Preview inherits Rectangle {
                                         height: preview-radio-group.preferred-height;
 
                                         preview-radio-group := RadioGroup {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.radio-group-size);
                                             width: parent.width;
                                             options: root.radio-group-options;
                                             descriptions: root.radio-group-descriptions;
                                             disabled-items: root.radio-group-disabled-items;
                                             selected-index <=> root.radio-group-selected-index;
+                                            size: root.active-control-size(root.radio-group-size);
                                             disabled: root.radio-group-disabled;
+                                            font-family: root.props-size-string("radio_group", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("radio_group", props-size-key, "font-size", Theme.font-size-md);
+                                            control-size: root.props-length("radio_group", props-size-key, "control-size", Theme.choice-control-size-md);
+                                            row-height: root.props-length("radio_group", props-size-key, "row-height", Theme.control-size-md);
+                                            item-gap: root.props-length("radio_group", props-size-key, "item-gap", Theme.spacing-md);
                                         }
                                     }
 
@@ -3362,6 +3958,8 @@ export component Preview inherits Rectangle {
                                         height: preview-card.preferred-height;
 
                                         preview-card := Card {
+                                            property <string> props-size-key: "default";
+                                            property <string> props-variant-key: "default";
                                             width: parent.width;
                                             eyebrow: root.card-eyebrow;
                                             title: root.card-title;
@@ -3370,7 +3968,28 @@ export component Preview inherits Rectangle {
                                             footer: root.card-footer;
                                             selected: root.card-selected;
                                             interactive: root.card-interactive;
+                                            size: root.active-control-size(root.card-size);
                                             icon: root.selected-card-icon;
+                                            accent-color: root.props-color("card", props-variant-key, "normal", "accent-color", Theme.palette-primary);
+                                            background: root.props-color("card", props-variant-key, "normal", "background", Theme.palette-surface);
+                                            border-color: root.props-color("card", props-variant-key, "normal", "border-color", Theme.palette-border);
+                                            border-width: root.props-length("card", props-size-key, "border-width", 1px);
+                                            eyebrow-font-size: root.props-length("card", props-size-key, "eyebrow-font-size", Theme.font-size-label);
+                                            eyebrow-font-weight: root.props-int("card", props-variant-key, "normal", "eyebrow-font-weight", 700);
+                                            title-color: root.props-color("card", props-variant-key, "normal", "title-color", Theme.palette-foreground);
+                                            title-font-size: root.props-length("card", props-size-key, "title-font-size", Theme.font-size-title);
+                                            title-font-weight: root.props-int("card", props-variant-key, "normal", "title-font-weight", 600);
+                                            subtitle-color: root.props-color("card", props-variant-key, "normal", "subtitle-color", Theme.palette-muted);
+                                            subtitle-font-size: root.props-length("card", props-size-key, "subtitle-font-size", Theme.font-size-subtitle);
+                                            body-color: root.props-color("card", props-variant-key, "normal", "body-color", Theme.palette-foreground);
+                                            footer-divider-color: root.props-color("card", props-variant-key, "normal", "footer-divider-color", Theme.palette-border);
+                                            footer-color: root.props-color("card", props-variant-key, "normal", "footer-color", Theme.palette-muted);
+                                            footer-font-size: root.props-length("card", props-size-key, "footer-font-size", Theme.font-size-helper);
+                                            font-family: root.props-size-string("card", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("card", props-size-key, "font-size", Theme.font-size-md);
+                                            card-padding: root.props-length("card", props-size-key, "card-padding", 20px);
+                                            icon-size: root.props-length("card", props-size-key, "icon-size", Theme.icon-size-md);
+                                            border-radius: root.props-length("card", props-size-key, "border-radius", Theme.radius-default);
                                         }
                                     }
 
@@ -3381,13 +4000,36 @@ export component Preview inherits Rectangle {
                                         height: preview-menu.preferred-height;
 
                                         preview-menu := Menu {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.menu-size);
                                             x: root.menu-full-width ? 0px : (parent.width - self.preferred-width) / 2;
                                             width: root.menu-full-width ? parent.width : self.preferred-width;
                                             full-width: root.menu-full-width;
+                                            size: root.active-control-size(root.menu-size);
+                                            menu-background: root.props-color("menu", "default", "normal", "menu-background", Theme.palette-surface);
+                                            menu-border-color: root.props-color("menu", "default", "normal", "menu-border-color", Theme.palette-border);
+                                            menu-border-width: root.props-variant-length("menu", "default", "normal", "menu-border-width", 1px);
+                                            menu-height: root.props-length("menu", props-size-key, "menu-height", 172px);
+                                            menu-border-radius: root.props-length("menu", props-size-key, "menu-border-radius", Theme.control-radius-md);
+                                            menu-padding: root.props-length("menu", props-size-key, "menu-padding", 0px);
 
                                             MenuItem {
                                                 label: "Select";
                                                 end-icon: root.icon-image("check");
+                                                size: root.active-control-size(root.menu-size);
+                                                label-color: root.props-color("menu_item", "default", "normal", "label-color", Theme.palette-foreground);
+                                                accent-color: root.props-color("menu_item", "default", "normal", "accent-color", Theme.palette-foreground);
+                                                secondary-color: root.props-color("menu_item", "default", "normal", "secondary-color", Theme.palette-muted);
+                                                label-font-weight: root.props-int("menu_item", "default", "normal", "label-font-weight", 500);
+                                                subtitle-font-weight: root.props-int("menu_item", "default", "normal", "subtitle-font-weight", 500);
+                                                trailing-font-weight: root.props-int("menu_item", "default", "normal", "trailing-font-weight", 500);
+                                                font-family: root.props-size-string("menu_item", preview-menu.props-size-key, "font-family", Theme.font-primary);
+                                                font-size: root.props-length("menu_item", preview-menu.props-size-key, "font-size", Theme.font-size-md);
+                                                item-height: root.props-length("menu_item", preview-menu.props-size-key, "item-height", 64px);
+                                                padding-horizontal: root.props-length("menu_item", preview-menu.props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                                icon-size: root.props-length("menu_item", preview-menu.props-size-key, "icon-size", Theme.icon-size-md);
+                                                subtitle-font-size: root.props-length("menu_item", preview-menu.props-size-key, "subtitle-font-size", Theme.font-size-subtitle);
+                                                trailing-font-size: root.props-length("menu_item", preview-menu.props-size-key, "trailing-font-size", Theme.font-size-md);
                                                 clicked => {
                                                     root.menu-selected-index = 0;
                                                 }
@@ -3396,6 +4038,20 @@ export component Preview inherits Rectangle {
                                             MenuItem {
                                                 label: "Add Folder";
                                                 end-icon: root.icon-image("plus");
+                                                size: root.active-control-size(root.menu-size);
+                                                label-color: root.props-color("menu_item", "default", "normal", "label-color", Theme.palette-foreground);
+                                                accent-color: root.props-color("menu_item", "default", "normal", "accent-color", Theme.palette-foreground);
+                                                secondary-color: root.props-color("menu_item", "default", "normal", "secondary-color", Theme.palette-muted);
+                                                label-font-weight: root.props-int("menu_item", "default", "normal", "label-font-weight", 500);
+                                                subtitle-font-weight: root.props-int("menu_item", "default", "normal", "subtitle-font-weight", 500);
+                                                trailing-font-weight: root.props-int("menu_item", "default", "normal", "trailing-font-weight", 500);
+                                                font-family: root.props-size-string("menu_item", preview-menu.props-size-key, "font-family", Theme.font-primary);
+                                                font-size: root.props-length("menu_item", preview-menu.props-size-key, "font-size", Theme.font-size-md);
+                                                item-height: root.props-length("menu_item", preview-menu.props-size-key, "item-height", 64px);
+                                                padding-horizontal: root.props-length("menu_item", preview-menu.props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                                icon-size: root.props-length("menu_item", preview-menu.props-size-key, "icon-size", Theme.icon-size-md);
+                                                subtitle-font-size: root.props-length("menu_item", preview-menu.props-size-key, "subtitle-font-size", Theme.font-size-subtitle);
+                                                trailing-font-size: root.props-length("menu_item", preview-menu.props-size-key, "trailing-font-size", Theme.font-size-md);
                                                 clicked => {
                                                     root.menu-selected-index = 1;
                                                 }
@@ -3404,6 +4060,20 @@ export component Preview inherits Rectangle {
                                             MenuItem {
                                                 label: "Search & Sort";
                                                 end-icon: root.icon-image("search");
+                                                size: root.active-control-size(root.menu-size);
+                                                label-color: root.props-color("menu_item", "default", "normal", "label-color", Theme.palette-foreground);
+                                                accent-color: root.props-color("menu_item", "default", "normal", "accent-color", Theme.palette-foreground);
+                                                secondary-color: root.props-color("menu_item", "default", "normal", "secondary-color", Theme.palette-muted);
+                                                label-font-weight: root.props-int("menu_item", "default", "normal", "label-font-weight", 500);
+                                                subtitle-font-weight: root.props-int("menu_item", "default", "normal", "subtitle-font-weight", 500);
+                                                trailing-font-weight: root.props-int("menu_item", "default", "normal", "trailing-font-weight", 500);
+                                                font-family: root.props-size-string("menu_item", preview-menu.props-size-key, "font-family", Theme.font-primary);
+                                                font-size: root.props-length("menu_item", preview-menu.props-size-key, "font-size", Theme.font-size-md);
+                                                item-height: root.props-length("menu_item", preview-menu.props-size-key, "item-height", 64px);
+                                                padding-horizontal: root.props-length("menu_item", preview-menu.props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                                icon-size: root.props-length("menu_item", preview-menu.props-size-key, "icon-size", Theme.icon-size-md);
+                                                subtitle-font-size: root.props-length("menu_item", preview-menu.props-size-key, "subtitle-font-size", Theme.font-size-subtitle);
+                                                trailing-font-size: root.props-length("menu_item", preview-menu.props-size-key, "trailing-font-size", Theme.font-size-md);
                                                 clicked => {
                                                     root.menu-selected-index = 2;
                                                 }
@@ -3472,6 +4142,10 @@ export component Preview inherits Rectangle {
                                         height: preview-menu-item.preferred-height;
 
                                         preview-menu-item := MenuItem {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.menu-item-size);
+                                            property <string> props-state-key:
+                                                root.menu-item-disabled ? "disabled" : "normal";
                                             width: parent.width;
                                             divider: false;
                                             label: root.menu-item-label;
@@ -3481,7 +4155,21 @@ export component Preview inherits Rectangle {
                                             trailing-text: root.menu-item-trailing-text;
                                             selected: root.menu-item-selected;
                                             destructive: root.menu-item-destructive;
+                                            size: root.active-control-size(root.menu-item-size);
                                             disabled: root.menu-item-disabled;
+                                            label-color: root.props-color("menu_item", "default", props-state-key, "label-color", Theme.palette-foreground);
+                                            accent-color: root.props-color("menu_item", "default", props-state-key, "accent-color", Theme.palette-foreground);
+                                            secondary-color: root.props-color("menu_item", "default", props-state-key, "secondary-color", Theme.palette-muted);
+                                            label-font-weight: root.props-int("menu_item", "default", props-state-key, "label-font-weight", 500);
+                                            subtitle-font-weight: root.props-int("menu_item", "default", props-state-key, "subtitle-font-weight", 500);
+                                            trailing-font-weight: root.props-int("menu_item", "default", props-state-key, "trailing-font-weight", 500);
+                                            font-family: root.props-size-string("menu_item", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("menu_item", props-size-key, "font-size", Theme.font-size-md);
+                                            item-height: root.props-length("menu_item", props-size-key, "item-height", 64px);
+                                            padding-horizontal: root.props-length("menu_item", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            icon-size: root.props-length("menu_item", props-size-key, "icon-size", Theme.icon-size-md);
+                                            subtitle-font-size: root.props-length("menu_item", props-size-key, "subtitle-font-size", Theme.font-size-subtitle);
+                                            trailing-font-size: root.props-length("menu_item", props-size-key, "trailing-font-size", Theme.font-size-md);
                                         }
                                     }
 
@@ -3492,10 +4180,18 @@ export component Preview inherits Rectangle {
                                         height: preview-accordion.preferred-height;
 
                                         preview-accordion := Accordion {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.accordion-size);
                                             width: parent.width;
                                             items: root.accordion-items;
                                             expanded-states: root.accordion-expanded-states;
                                             allow-multiple: root.accordion-allow-multiple;
+                                            size: root.active-control-size(root.accordion-size);
+                                            font-family: root.props-size-string("accordion", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("accordion", props-size-key, "font-size", Theme.font-size-md);
+                                            header-height: root.props-length("accordion", props-size-key, "header-height", Theme.control-size-md);
+                                            padding-horizontal: root.props-length("accordion", props-size-key, "padding-horizontal", Theme.control-padding-inline-md);
+                                            icon-size: root.props-length("accordion", props-size-key, "icon-size", Theme.icon-size-md);
                                             toggle-requested(index) => {
                                                 root.toggle-accordion-item(index);
                                             }
@@ -3509,12 +4205,15 @@ export component Preview inherits Rectangle {
                                         height: preview-media-image.preferred-height;
 
                                         preview-media-image := MediaImage {
+                                            property <string> props-size-key: "default";
                                             width: parent.width;
                                             source: root.sample-media-image;
                                             alt: root.image-alt;
                                             caption: root.image-caption;
                                             rounded: root.image-rounded;
                                             show-border: root.image-show-border;
+                                            frame-width: root.props-length("image", props-size-key, "frame-width", 320px);
+                                            frame-height: root.props-length("image", props-size-key, "frame-height", 192px);
                                         }
                                     }
 
@@ -3525,6 +4224,7 @@ export component Preview inherits Rectangle {
                                         height: root.divider-orientation == 0 ? 48px : min(220px, parent.height - 32px);
 
                                         preview-divider := Divider {
+                                            property <string> props-size-key: "default";
                                             x: root.divider-orientation == 0 && !root.divider-full-width ? (parent.width - self.preferred-width) / 2 : 0px;
                                             width: root.divider-orientation == 1 ? parent.width : (root.divider-full-width ? parent.width : self.preferred-width);
                                             height: parent.height;
@@ -3532,31 +4232,124 @@ export component Preview inherits Rectangle {
                                             label: root.divider-label;
                                             label-alignment: root.active-divider-label-alignment;
                                             full-width: root.divider-full-width;
-                                            label-gap: root.divider-label-gap * 1px;
-                                            label-start-margin: root.divider-label-start-margin * 1px;
-                                            label-end-margin: root.divider-label-end-margin * 1px;
+                                            divider-color: root.props-color("divider", "default", "normal", "divider-color", Theme.palette-border);
+                                            label-color: root.props-color("divider", "default", "normal", "label-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("divider", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("divider", props-size-key, "font-size", 13px);
+                                            label-gap: root.props-length("divider", props-size-key, "label-gap", root.divider-label-gap * 1px);
+                                            label-start-margin: root.props-length("divider", props-size-key, "label-start-margin", root.divider-label-start-margin * 1px);
+                                            label-end-margin: root.props-length("divider", props-size-key, "label-end-margin", root.divider-label-end-margin * 1px);
+                                            thickness: root.props-length("divider", props-size-key, "thickness", 1px);
                                         }
                                     }
 
                                     if root.selected-category == 2 && root.selected-component == 0: Rectangle {
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
-                                        width: min(420px, parent.width - 32px);
+                                        width: min(720px, parent.width - 32px);
                                         height: min(320px, parent.height - 32px);
 
                                         preview-dialog := Dialog {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.dialog-size);
+                                            property <string> props-variant-key:
+                                                root.props-dialog-variant-key(root.dialog-variant);
                                             width: parent.width;
                                             height: parent.height;
                                             open <=> root.dialog-open;
-                                            title: root.dialog-title;
-                                            message: root.dialog-message;
-                                            icon: root.selected-dialog-icon;
+                                            size: root.active-control-size(root.dialog-size);
+                                            fill-container: root.dialog-size == 3;
                                             variant: root.active-dialog-variant;
-                                            primary-action: root.dialog-primary-action;
-                                            secondary-action: root.dialog-secondary-action;
                                             dismissable: root.dialog-dismissable;
+                                            accent-color: root.props-color("dialog", props-variant-key, "normal", "accent-color", Theme.palette-primary);
+                                            backdrop-color: root.props-color("dialog", props-variant-key, "normal", "backdrop-color", Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.72 : 0.24));
+                                            panel-background: root.props-color("dialog", props-variant-key, "normal", "panel-background", Theme.palette-surface);
+                                            panel-border-color: root.props-color("dialog", props-variant-key, "normal", "panel-border-color", Theme.palette-border);
+                                            panel-border-width: root.props-variant-length("dialog", props-variant-key, "normal", "panel-border-width", 1px);
+                                            icon-circle-background: root.props-color("dialog", props-variant-key, "normal", "icon-circle-background", Theme.palette-secondary);
+                                            title-color: root.props-color("dialog", props-variant-key, "normal", "title-color", Theme.palette-foreground);
+                                            title-font-weight: root.props-int("dialog", props-variant-key, "normal", "title-font-weight", 700);
+                                            message-color: root.props-color("dialog", props-variant-key, "normal", "message-color", Theme.palette-muted);
+                                            separator-color: root.props-color("dialog", props-variant-key, "normal", "separator-color", Theme.palette-border);
+                                            close-icon-color: root.props-color("dialog", props-variant-key, "normal", "close-icon-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("dialog", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("dialog", props-size-key, "font-size", Theme.font-size-md);
+                                            panel-width: root.props-length("dialog", props-size-key, "panel-width", 420px);
+                                            panel-padding: root.props-length("dialog", props-size-key, "panel-padding", Theme.icon-size-md);
+                                            icon-size: root.props-length("dialog", props-size-key, "icon-size", Theme.control-radius-md);
+                                            border-radius: root.props-length("dialog", props-size-key, "border-radius", Theme.radius-default);
+                                            title-font-size: root.props-length("dialog", props-size-key, "title-font-size", Theme.font-size-title);
+                                            close-button-size: root.props-length("dialog", props-size-key, "close-button-size", 28px);
+                                            close-icon-size: root.props-length("dialog", props-size-key, "close-icon-size", 16px);
                                             dismissed => {
                                                 root.dialog-open = false;
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 12px;
+
+                                                if root.selected-dialog-icon.width > 0: Rectangle {
+                                                    width: preview-dialog.icon-size * 2;
+                                                    height: preview-dialog.icon-size * 2;
+                                                    border-radius: self.width / 2;
+                                                    background: preview-dialog.icon-circle-background;
+
+                                                    Image {
+                                                        x: (parent.width - self.width) / 2;
+                                                        y: (parent.height - self.height) / 2;
+                                                        width: preview-dialog.icon-size;
+                                                        height: preview-dialog.icon-size;
+                                                        source: root.selected-dialog-icon;
+                                                        colorize: preview-dialog.accent-color;
+                                                    }
+                                                }
+
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+                                                    padding-right: preview-dialog.dismissable ? preview-dialog.close-button-size + 8px : 0px;
+                                                    spacing: 6px;
+
+                                                    if root.dialog-title != "": Text {
+                                                        text: root.dialog-title;
+                                                        color: preview-dialog.title-color;
+                                                        font-family: preview-dialog.font-family;
+                                                        font-size: preview-dialog.title-font-size;
+                                                        font-weight: preview-dialog.title-font-weight;
+                                                        wrap: word-wrap;
+                                                    }
+
+                                                    if root.dialog-message != "": Text {
+                                                        text: root.dialog-message;
+                                                        color: preview-dialog.message-color;
+                                                        font-family: preview-dialog.font-family;
+                                                        font-size: preview-dialog.font-size;
+                                                        wrap: word-wrap;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                height: 1px;
+                                                background: preview-dialog.separator-color;
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                alignment: end;
+
+                                                if root.dialog-secondary-action != "": Button {
+                                                    text: root.dialog-secondary-action;
+                                                    variant: ButtonVariant.secondary;
+                                                    size: preview-dialog.size;
+                                                    touch-expansion: 0px;
+                                                }
+
+                                                if root.dialog-primary-action != "": Button {
+                                                    text: root.dialog-primary-action;
+                                                    variant: preview-dialog.variant == DialogVariant.danger ? ButtonVariant.danger : ButtonVariant.primary;
+                                                    size: preview-dialog.size;
+                                                    touch-expansion: 0px;
+                                                }
                                             }
                                         }
                                     }
@@ -3568,17 +4361,114 @@ export component Preview inherits Rectangle {
                                         height: min(360px, parent.height - 32px);
 
                                         preview-sheet := Sheet {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.sheet-size);
+                                            property <string> props-variant-key: "default";
                                             width: parent.width;
                                             height: parent.height;
                                             open <=> root.sheet-open;
-                                            title: root.sheet-title;
-                                            body: root.sheet-body;
+                                            size: root.active-control-size(root.sheet-size);
                                             show-handle: root.sheet-show-handle;
                                             dismissable: root.sheet-dismissable;
                                             detents: root.sheet-detents;
                                             selected-detent <=> root.sheet-detent-index;
+                                            backdrop-color: root.props-color("sheet", props-variant-key, "normal", "backdrop-color", Theme.palette-foreground.with-alpha(Theme.is-dark ? 0.64 : 0.18));
+                                            panel-background: root.props-color("sheet", props-variant-key, "normal", "panel-background", Theme.palette-surface);
+                                            panel-border-color: root.props-color("sheet", props-variant-key, "normal", "panel-border-color", Theme.palette-border);
+                                            panel-border-width: root.props-variant-length("sheet", props-variant-key, "normal", "panel-border-width", 1px);
+                                            handle-color: root.props-color("sheet", props-variant-key, "normal", "handle-color", Theme.palette-border);
+                                            title-color: root.props-color("sheet", props-variant-key, "normal", "title-color", Theme.palette-foreground);
+                                            title-font-weight: root.props-int("sheet", props-variant-key, "normal", "title-font-weight", 700);
+                                            body-color: root.props-color("sheet", props-variant-key, "normal", "body-color", Theme.palette-muted);
+                                            divider-color: root.props-color("sheet", props-variant-key, "normal", "divider-color", Theme.palette-border);
+                                            detent-card-background: root.props-color("sheet", props-variant-key, "normal", "detent-card-background", Theme.palette-secondary);
+                                            detent-label-color: root.props-color("sheet", props-variant-key, "normal", "detent-label-color", Theme.palette-muted);
+                                            detent-label-font-weight: root.props-int("sheet", props-variant-key, "normal", "detent-label-font-weight", 600);
+                                            detent-value-color: root.props-color("sheet", props-variant-key, "normal", "detent-value-color", Theme.palette-foreground);
+                                            detent-value-font-weight: root.props-int("sheet", props-variant-key, "normal", "detent-value-font-weight", 600);
+                                            detent-helper-color: root.props-color("sheet", props-variant-key, "normal", "detent-helper-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("sheet", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("sheet", props-size-key, "font-size", Theme.font-size-md);
+                                            panel-padding: root.props-length("sheet", props-size-key, "panel-padding", 20px);
+                                            content-padding: root.props-length("sheet", props-size-key, "content-padding", 20px);
+                                            border-radius: root.props-length("sheet", props-size-key, "border-radius", Theme.radius-default);
+                                            handle-width: root.props-length("sheet", props-size-key, "handle-width", 56px);
+                                            handle-height: root.props-length("sheet", props-size-key, "handle-height", 6px);
+                                            handle-radius: root.props-length("sheet", props-size-key, "handle-radius", 3px);
+                                            title-font-size: root.props-length("sheet", props-size-key, "title-font-size", Theme.font-size-title);
+                                            divider-height: root.props-length("sheet", props-size-key, "divider-height", 1px);
+                                            detent-card-radius: root.props-length("sheet", props-size-key, "detent-card-radius", 24px);
+                                            detent-label-font-size: root.props-length("sheet", props-size-key, "detent-label-font-size", Theme.font-size-label);
+                                            detent-value-font-size: root.props-length("sheet", props-size-key, "detent-value-font-size", Theme.font-size-md);
                                             dismissed => {
                                                 root.sheet-open = false;
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 8px;
+
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+                                                    spacing: 6px;
+
+                                                    if root.sheet-title != "": Text {
+                                                        text: root.sheet-title;
+                                                        color: preview-sheet.title-color;
+                                                        font-family: preview-sheet.font-family;
+                                                        font-size: preview-sheet.title-font-size;
+                                                        font-weight: preview-sheet.title-font-weight;
+                                                        wrap: word-wrap;
+                                                    }
+
+                                                    if root.sheet-body != "": Text {
+                                                        text: root.sheet-body;
+                                                        color: preview-sheet.body-color;
+                                                        font-family: preview-sheet.font-family;
+                                                        font-size: preview-sheet.font-size;
+                                                        wrap: word-wrap;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                height: preview-sheet.divider-height;
+                                                background: preview-sheet.divider-color;
+                                            }
+
+                                            Rectangle {
+                                                background: preview-sheet.detent-card-background;
+                                                border-radius: preview-sheet.detent-card-radius;
+                                                horizontal-stretch: 1;
+                                                vertical-stretch: 1;
+
+                                                VerticalLayout {
+                                                    padding: 20px;
+                                                    spacing: 10px;
+
+                                                    Text {
+                                                        text: "Current detent";
+                                                        color: preview-sheet.detent-label-color;
+                                                        font-family: preview-sheet.font-family;
+                                                        font-size: preview-sheet.detent-label-font-size;
+                                                        font-weight: preview-sheet.detent-label-font-weight;
+                                                    }
+
+                                                    Text {
+                                                        text: preview-sheet.selected-detent == 0 ? "Compact" : preview-sheet.selected-detent == 1 ? "Comfortable" : "Expanded";
+                                                        color: preview-sheet.detent-value-color;
+                                                        font-family: preview-sheet.font-family;
+                                                        font-size: preview-sheet.detent-value-font-size;
+                                                        font-weight: preview-sheet.detent-value-font-weight;
+                                                    }
+
+                                                    Text {
+                                                        text: "Pull the handle down to dismiss the sheet.";
+                                                        color: preview-sheet.detent-helper-color;
+                                                        font-family: preview-sheet.font-family;
+                                                        font-size: preview-sheet.font-size;
+                                                        wrap: word-wrap;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -3590,14 +4480,39 @@ export component Preview inherits Rectangle {
                                         height: 180px;
 
                                         preview-toast := Toast {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.toast-size);
+                                            property <string> props-variant-key:
+                                                root.props-toast-variant-key(root.toast-variant);
                                             width: parent.width;
                                             height: parent.height;
                                             open <=> root.toast-open;
                                             message: root.toast-message;
                                             icon: root.selected-toast-icon;
+                                            size: root.active-control-size(root.toast-size);
                                             variant: root.active-toast-variant;
                                             position: root.active-toast-position;
                                             action: root.toast-action;
+                                            toast-background: root.props-color("toast", props-variant-key, "normal", "toast-background", Theme.palette-surface);
+                                            message-color: root.props-color("toast", props-variant-key, "normal", "message-color", Theme.palette-foreground);
+                                            icon-color: root.props-color("toast", props-variant-key, "normal", "icon-color", Theme.palette-primary);
+                                            action-color: root.props-color("toast", props-variant-key, "normal", "action-color", Theme.palette-primary);
+                                            close-icon-color: root.props-color("toast", props-variant-key, "normal", "close-icon-color", Theme.palette-muted);
+                                            card-border-color: root.props-color("toast", props-variant-key, "normal", "card-border-color", Theme.palette-border);
+                                            card-border-width: root.props-variant-length("toast", props-variant-key, "normal", "card-border-width", 1px);
+                                            action-font-weight: root.props-int("toast", props-variant-key, "normal", "action-font-weight", 700);
+                                            font-family: root.props-size-string("toast", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("toast", props-size-key, "font-size", Theme.font-size-md);
+                                            card-width: root.props-length("toast", props-size-key, "card-width", 360px);
+                                            toast-padding: root.props-length("toast", props-size-key, "toast-padding", 14px);
+                                            icon-size: root.props-length("toast", props-size-key, "icon-size", 18px);
+                                            border-radius: root.props-length("toast", props-size-key, "border-radius", Theme.radius-md);
+                                            action-font-size: root.props-length("toast", props-size-key, "action-font-size", Theme.font-size-label);
+                                            close-button-size: root.props-length("toast", props-size-key, "close-button-size", 24px);
+                                            action-height: root.props-length("toast", props-size-key, "action-height", 26px);
+                                            action-horizontal-padding: root.props-length("toast", props-size-key, "action-horizontal-padding", 10px);
+                                            action-radius: root.props-length("toast", props-size-key, "action-radius", 13px);
+                                            close-icon-size: root.props-length("toast", props-size-key, "close-icon-size", 14px);
                                             dismissed => {
                                                 root.toast-open = false;
                                             }
@@ -3611,6 +4526,10 @@ export component Preview inherits Rectangle {
                                         height: preview-progress.preferred-height;
 
                                         preview-progress := ProgressBar {
+                                            property <string> props-size-key:
+                                                root.props-size-key(root.progress-size);
+                                            property <string> props-state-key:
+                                                root.progress-disabled ? "disabled" : "normal";
                                             width: parent.width;
                                             label: root.progress-label;
                                             value-label: root.progress-value-label;
@@ -3621,8 +4540,18 @@ export component Preview inherits Rectangle {
                                             show-value-label: root.progress-show-value-label;
                                             disabled: root.progress-disabled;
                                             disable-animation: root.progress-disable-animation;
+                                            size: root.active-control-size(root.progress-size);
                                             tone: root.active-progress-tone;
                                             value-format: root.active-progress-value-format;
+                                            track-color: root.props-color("progress_bar", "default", props-state-key, "track-color", Theme.palette-secondary);
+                                            fill-color-override: root.props-color("progress_bar", "default", props-state-key, "fill-color-override", Theme.palette-primary);
+                                            label-color: root.props-color("progress_bar", "default", props-state-key, "label-color", Theme.palette-foreground);
+                                            value-color: root.props-color("progress_bar", "default", props-state-key, "value-color", Theme.palette-muted);
+                                            font-family: root.props-size-string("progress_bar", props-size-key, "font-family", Theme.font-primary);
+                                            font-size: root.props-length("progress_bar", props-size-key, "font-size", Theme.font-size-md);
+                                            label-gap: root.props-length("progress_bar", props-size-key, "label-gap", 8px);
+                                            bar-height: root.props-length("progress_bar", props-size-key, "bar-height", 8px);
+                                            border-radius: root.props-length("progress_bar", props-size-key, "border-radius", Theme.radius-full);
                                         }
                                     }
 
@@ -3927,7 +4856,7 @@ export component Preview inherits Rectangle {
                         }
                     }
 
-                    // Right: Props tree — the shared SidebarPanel frame (header band +
+                    // Right: Test tree — the shared SidebarPanel frame (header band +
                     // divider + flush white + top-aligned, no-h-centering body), the same
                     // component used by the Theme and Tokens sidebars.
                     SidebarPanel {
@@ -3942,8 +4871,8 @@ export component Preview inherits Rectangle {
                         mode-changed(index) => {
                             root.component-page-mode-changed(index);
                         }
-                        title: root.show-tabs ? "" : get-component-name(selected-category, selected-component) + " Props";
-                        // Props rows now use the shared RowLayout grid, so the column
+                        title: "";
+                        // Test rows now use the shared RowLayout grid, so the column
                         // splitter aligns with them. Rows live under the "Component Props"
                         // section (padding-left: 20 inside body padding 16 → base 36).
                         splitter-base-x: 36px;
@@ -4225,6 +5154,13 @@ export component Preview inherits Rectangle {
                                     }
 
                                     EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.input-size;
+                                    }
+
+                                    EnumSelector {
                                         label: "type";
                                         dark-mode: root.dark-mode;
                                         options: ["text", "password", "number", "decimal"];
@@ -4327,6 +5263,13 @@ export component Preview inherits Rectangle {
                                         selected-index <=> root.search-variant;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.search-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "clearable";
                                         dark-mode: root.dark-mode;
@@ -4378,6 +5321,13 @@ export component Preview inherits Rectangle {
                                         selected-index <=> root.dropdown-selected-index;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.dropdown-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "disabled";
                                         dark-mode: root.dark-mode;
@@ -4402,6 +5352,13 @@ export component Preview inherits Rectangle {
                                         label: "description";
                                         dark-mode: root.dark-mode;
                                         value <=> root.checkbox-description;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.checkbox-size;
                                     }
 
                                     ToggleSwitch {
@@ -4442,6 +5399,13 @@ export component Preview inherits Rectangle {
                                         value <=> root.radio-description;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.radio-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "checked";
                                         dark-mode: root.dark-mode;
@@ -4474,6 +5438,13 @@ export component Preview inherits Rectangle {
                                         value <=> root.switch-description;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.switch-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "checked";
                                         dark-mode: root.dark-mode;
@@ -4499,6 +5470,13 @@ export component Preview inherits Rectangle {
                                         dark-mode: root.dark-mode;
                                         options: root.segmented-options;
                                         selected-index <=> root.segmented-selected-index;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.segmented-size;
                                     }
 
                                     EnumSelector {
@@ -4566,6 +5544,13 @@ export component Preview inherits Rectangle {
                                         value <=> root.slide-confirmed-label;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.slide-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "confirmed";
                                         dark-mode: root.dark-mode;
@@ -4592,10 +5577,24 @@ export component Preview inherits Rectangle {
                                         value <=> root.link-label;
                                     }
 
-                                    ToggleSwitch {
-                                        label: "external";
+                                    EnumSelector {
+                                        label: "size";
                                         dark-mode: root.dark-mode;
-                                        checked <=> root.link-external;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.link-size;
+                                    }
+
+                                    IconSelectorRow {
+                                        label: "icon (optional)";
+                                        dark-mode: root.dark-mode;
+                                        value <=> root.link-icon;
+                                        icon-results: root.icon-results;
+                                        icon-image(name) => {
+                                            return root.icon-image(name);
+                                        }
+                                        filter-icons(query) => {
+                                            root.filter-icons(query);
+                                        }
                                     }
 
                                     ToggleSwitch {
@@ -4724,8 +5723,15 @@ export component Preview inherits Rectangle {
                                     EnumSelector {
                                         label: "variant";
                                         dark-mode: root.dark-mode;
-                                        options: ["flat", "bordered", "faded"];
+                                        options: ["flat", "bordered"];
                                         selected-index <=> root.textarea-variant;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.textarea-size;
                                     }
 
                                     NumberInput {
@@ -4799,6 +5805,13 @@ export component Preview inherits Rectangle {
                                         selected-index <=> root.radio-group-selected-index;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.radio-group-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "disabled";
                                         dark-mode: root.dark-mode;
@@ -4856,6 +5869,13 @@ export component Preview inherits Rectangle {
                                         }
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.card-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "selected";
                                         dark-mode: root.dark-mode;
@@ -4881,6 +5901,13 @@ export component Preview inherits Rectangle {
                                         dark-mode: root.dark-mode;
                                         options: ["dashboard", "share", "settings", "delete"];
                                         selected-index <=> root.menu-selected-index;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.menu-size;
                                     }
 
                                     ToggleSwitch {
@@ -4913,6 +5940,13 @@ export component Preview inherits Rectangle {
                                         label: "trailing";
                                         dark-mode: root.dark-mode;
                                         value <=> root.menu-item-trailing-text;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.menu-item-size;
                                     }
 
                                     IconSelectorRow {
@@ -4971,6 +6005,13 @@ export component Preview inherits Rectangle {
                                         label: "allow-multiple";
                                         dark-mode: root.dark-mode;
                                         checked <=> root.accordion-allow-multiple;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.accordion-size;
                                     }
 
                                     Text {
@@ -5229,6 +6270,13 @@ export component Preview inherits Rectangle {
                                         selected-index <=> root.dialog-variant;
                                     }
 
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg", "fill container"];
+                                        selected-index <=> root.dialog-size;
+                                    }
+
                                     ToggleSwitch {
                                         label: "open";
                                         dark-mode: root.dark-mode;
@@ -5266,6 +6314,13 @@ export component Preview inherits Rectangle {
                                         dark-mode: root.dark-mode;
                                         options: ["compact", "comfort", "expand"];
                                         selected-index <=> root.sheet-detent-index;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.sheet-size;
                                     }
 
                                     ToggleSwitch {
@@ -5331,6 +6386,13 @@ export component Preview inherits Rectangle {
                                         dark-mode: root.dark-mode;
                                         options: ["top", "bottom"];
                                         selected-index <=> root.toast-position;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.toast-size;
                                     }
 
                                     ToggleSwitch {
@@ -5401,6 +6463,13 @@ export component Preview inherits Rectangle {
                                         dark-mode: root.dark-mode;
                                         options: ["percent", "value"];
                                         selected-index <=> root.progress-value-format;
+                                    }
+
+                                    EnumSelector {
+                                        label: "size";
+                                        dark-mode: root.dark-mode;
+                                        options: ["sm", "md", "lg"];
+                                        selected-index <=> root.progress-size;
                                     }
 
                                     ToggleSwitch {

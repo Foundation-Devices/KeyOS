@@ -1,10 +1,30 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from progress_bar.json by foundation theme tooling — do not edit by hand.
+// GENERATED from progress_bar.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum ProgressBarThemeVariant {
+    default,
+    primary,
+    secondary,
+    success,
+    warning,
+    danger,
+}
+
+export enum ProgressBarState {
+    normal,
+}
+
+export struct ProgressBarVariantProps {
+    track-color: color,
+    fill-color-override: color,
+    label-color: color,
+    value-color: color,
+}
 
 export struct ProgressBarSizeProps {
     font-family: string,
@@ -15,35 +35,79 @@ export struct ProgressBarSizeProps {
 }
 
 export global ProgressBarTheme {
-    in-out property <ProgressBarSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: 12px,
-        label-gap: 6px,
-        bar-height: 8px,
-        border-radius: 999px,
-    };
-    in-out property <ProgressBarSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: 13px,
-        label-gap: 8px,
-        bar-height: 10px,
-        border-radius: 999px,
-    };
-    in-out property <ProgressBarSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: 14px,
-        label-gap: 10px,
-        bar-height: 12px,
-        border-radius: 999px,
-    };
-
+    public pure function style(v: ProgressBarThemeVariant, st: ProgressBarState) -> ProgressBarVariantProps {
+        if v == ProgressBarThemeVariant.default {
+            return {
+                track-color: Theme.color-secondary,
+                fill-color-override: Theme.color-foreground,
+                label-color: Theme.color-foreground,
+                value-color: Theme.color-muted,
+            };
+        }
+        if v == ProgressBarThemeVariant.primary {
+            return {
+                track-color: Theme.color-secondary,
+                fill-color-override: Theme.color-primary,
+                label-color: Theme.color-foreground,
+                value-color: Theme.color-muted,
+            };
+        }
+        if v == ProgressBarThemeVariant.secondary {
+            return {
+                track-color: Theme.color-secondary,
+                fill-color-override: Theme.color-secondary-dark,
+                label-color: Theme.color-foreground,
+                value-color: Theme.color-muted,
+            };
+        }
+        if v == ProgressBarThemeVariant.success {
+            return {
+                track-color: Theme.color-secondary,
+                fill-color-override: Theme.color-success,
+                label-color: Theme.color-foreground,
+                value-color: Theme.color-muted,
+            };
+        }
+        if v == ProgressBarThemeVariant.warning {
+            return {
+                track-color: Theme.color-secondary,
+                fill-color-override: Theme.color-warning,
+                label-color: Theme.color-foreground,
+                value-color: Theme.color-muted,
+            };
+        }
+        return {
+            track-color: Theme.color-secondary,
+            fill-color-override: Theme.color-danger,
+            label-color: Theme.color-foreground,
+            value-color: Theme.color-muted,
+        };
+    }
     public pure function size(s: ControlSize) -> ProgressBarSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: 12px,
+                label-gap: 6px,
+                bar-height: 8px,
+                border-radius: 999px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: 13px,
+                label-gap: Theme.spacing-sm,
+                bar-height: 10px,
+                border-radius: 999px,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: 14px,
+            label-gap: 10px,
+            bar-height: 12px,
+            border-radius: 999px,
+        };
     }
 }

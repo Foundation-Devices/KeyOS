@@ -1,5 +1,5 @@
 {
   "id": "app_theme",
   "name": "{{friendly_app_name}}",
-  "parent": "{{selected_theme_id}}"
+  "parent": "base_theme"
 }

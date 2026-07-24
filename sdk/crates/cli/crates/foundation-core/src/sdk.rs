@@ -82,12 +82,12 @@ impl SdkRoot {
         }
     }
 
-    /// Directory of plugin component schemas (`button.json`, …), used by the
+    /// Directory of component schemas (`button.schema.json`, ...), used by the
     /// theme-compile step to generate per-app component themes. Lives under the
     /// KeyOS tree in both layouts (Repo: source tree; Bundle: the staged
     /// `lib/keyos` copy — see the matching `[[copy]]` in sdk-build.toml).
     pub fn plugin_schema_path(&self) -> PathBuf {
-        self.keyos_root().join("ui2").join("theme-editor").join("defaults").join("plugins")
+        self.keyos_root().join("ui2").join("theme-editor").join("defaults").join("components")
     }
 
     pub fn template_root(&self) -> Option<PathBuf> {

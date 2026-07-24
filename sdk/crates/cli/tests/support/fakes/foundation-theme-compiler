@@ -10,7 +10,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -n "$rust_dir" ]; then
   mkdir -p "$rust_dir"
-  printf 'pub mod default_theme;\n' > "$rust_dir/mod.rs"
-  printf 'pub fn theme() {}\n' > "$rust_dir/default_theme.rs"
+  printf 'pub mod base_theme;\n' > "$rust_dir/mod.rs"
+  printf 'pub fn theme() {}\n' > "$rust_dir/base_theme.rs"
 fi
 exit 0

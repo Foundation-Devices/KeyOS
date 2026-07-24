@@ -99,10 +99,13 @@ component Button {
 
     // Text line height = font-size * Theme.line-height-ratio (default 1.2).
     property <length> text-line-height: actual-font-size * Theme.line-height-ratio;
+    property <length> content-slot-height:
+        max(text-line-height, actual-min-height - actual-padding-v * 2);
 
     // Height is fixed based on font + padding, NOT icon size
     preferred-width: container.preferred-width;
     preferred-height: max(actual-min-height, text-line-height + actual-padding-v * 2);
+    horizontal-stretch: root.full-width ? 1 : 0;
 
     // Visual container Rectangle
     container := Rectangle {
@@ -129,12 +132,14 @@ component Button {
             // Start icon - height capped to text line height
             if root.start-icon.width > 0 && !root.loading: Rectangle {
                 width: min(actual-icon-size, text-line-height);
-                height: min(actual-icon-size, text-line-height);
-                vertical-stretch: 0;
+                height: root.content-slot-height;
+                vertical-stretch: 1;
 
                 Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     width: parent.width;
-                    height: parent.height;
+                    height: min(actual-icon-size, text-line-height);
                     source: root.start-icon;
                     colorize: actual-foreground;
                 }
@@ -143,12 +148,14 @@ component Button {
             // Loading spinner placeholder
             if root.loading: Rectangle {
                 width: min(actual-icon-size, text-line-height);
-                height: min(actual-icon-size, text-line-height);
-                vertical-stretch: 0;
+                height: root.content-slot-height;
+                vertical-stretch: 1;
 
                 Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     width: parent.width;
-                    height: parent.height;
+                    height: min(actual-icon-size, text-line-height);
                     source: @image-url("../../resources/icons/loader.svg");
                     colorize: actual-foreground;
                 }
@@ -169,12 +176,14 @@ component Button {
             // End icon - height capped to text line height
             if root.end-icon.width > 0 && !root.loading: Rectangle {
                 width: min(actual-icon-size, text-line-height);
-                height: min(actual-icon-size, text-line-height);
-                vertical-stretch: 0;
+                height: root.content-slot-height;
+                vertical-stretch: 1;
 
                 Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     width: parent.width;
-                    height: parent.height;
+                    height: min(actual-icon-size, text-line-height);
                     source: root.end-icon;
                     colorize: actual-foreground;
                 }

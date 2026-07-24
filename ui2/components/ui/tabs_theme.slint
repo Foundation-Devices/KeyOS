@@ -1,10 +1,40 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from tabs.json by foundation theme tooling — do not edit by hand.
+// GENERATED from tabs.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum TabsThemeVariant {
+    solid,
+    bordered,
+    light,
+    underlined,
+}
+
+export enum TabsState {
+    normal,
+    focused,
+    pressed,
+    disabled,
+}
+
+export struct TabsVariantProps {
+    item-background: color,
+    item-border-color: color,
+    item-border-width: length,
+    item-foreground: color,
+    indicator-color: color,
+    list-background-color: color,
+    list-border-width: length,
+    list-stroke-color: color,
+    list-edge-color: color,
+    panel-background: color,
+    panel-foreground: color,
+    panel-border-color: color,
+    panel-border-width: length,
+}
 
 export struct TabsSizeProps {
     font-family: string,
@@ -20,50 +50,318 @@ export struct TabsSizeProps {
 }
 
 export global TabsTheme {
-    in-out property <TabsSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        control-height: Theme.control-size-sm,
-        tab-padding-horizontal: Theme.control-padding-inline-sm,
-        icon-size: 18px,
-        tab-gap: 2px,
-        list-padding: 4px,
-        panel-padding: 16px,
-        panel-min-height: 88px,
-        border-radius: Theme.radius-default,
-    };
-    in-out property <TabsSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        control-height: Theme.control-size-md,
-        tab-padding-horizontal: Theme.control-padding-inline-md,
-        icon-size: 20px,
-        tab-gap: 2px,
-        list-padding: 4px,
-        panel-padding: 20px,
-        panel-min-height: 104px,
-        border-radius: Theme.radius-default,
-    };
-    in-out property <TabsSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        control-height: Theme.control-size-lg,
-        tab-padding-horizontal: Theme.control-padding-inline-lg,
-        icon-size: 24px,
-        tab-gap: 2px,
-        list-padding: 4px,
-        panel-padding: 24px,
-        panel-min-height: 120px,
-        border-radius: Theme.radius-default,
-    };
-
+    public pure function style(v: TabsThemeVariant, st: TabsState) -> TabsVariantProps {
+        if v == TabsThemeVariant.solid {
+            if st == TabsState.focused {
+                return {
+                    item-background: Theme.color-background,
+                    item-border-color: Theme.color-primary,
+                    item-border-width: 2px,
+                    item-foreground: Theme.color-foreground,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-secondary,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.pressed {
+                return {
+                    item-background: Theme.color-secondary-dark,
+                    item-border-color: Theme.color-transparent,
+                    item-border-width: 0px,
+                    item-foreground: Theme.color-primary-dark,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-secondary,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.disabled {
+                return {
+                    item-background: Theme.color-background,
+                    item-border-color: Theme.color-transparent,
+                    item-border-width: 0px,
+                    item-foreground: Theme.color-muted,
+                    indicator-color: Theme.color-muted,
+                    list-background-color: Theme.color-secondary,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            return {
+                item-background: Theme.color-background,
+                item-border-color: Theme.color-transparent,
+                item-border-width: 0px,
+                item-foreground: Theme.color-foreground,
+                indicator-color: Theme.color-foreground,
+                list-background-color: Theme.color-secondary,
+                list-border-width: 1px,
+                list-stroke-color: Theme.color-border,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        if v == TabsThemeVariant.bordered {
+            if st == TabsState.focused {
+                return {
+                    item-background: Theme.color-background,
+                    item-border-color: Theme.color-primary,
+                    item-border-width: 2px,
+                    item-foreground: Theme.color-foreground,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.pressed {
+                return {
+                    item-background: Theme.color-secondary,
+                    item-border-color: Theme.color-border,
+                    item-border-width: 1px,
+                    item-foreground: Theme.color-primary-dark,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.disabled {
+                return {
+                    item-background: Theme.color-background,
+                    item-border-color: Theme.color-border,
+                    item-border-width: 1px,
+                    item-foreground: Theme.color-muted,
+                    indicator-color: Theme.color-muted,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 1px,
+                    list-stroke-color: Theme.color-border,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            return {
+                item-background: Theme.color-background,
+                item-border-color: Theme.color-border,
+                item-border-width: 1px,
+                item-foreground: Theme.color-foreground,
+                indicator-color: Theme.color-foreground,
+                list-background-color: Theme.color-transparent,
+                list-border-width: 1px,
+                list-stroke-color: Theme.color-border,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        if v == TabsThemeVariant.light {
+            if st == TabsState.focused {
+                return {
+                    item-background: Theme.color-secondary,
+                    item-border-color: Theme.color-primary,
+                    item-border-width: 2px,
+                    item-foreground: Theme.color-foreground,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 0px,
+                    list-stroke-color: Theme.color-transparent,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.pressed {
+                return {
+                    item-background: Theme.color-secondary-dark,
+                    item-border-color: Theme.color-transparent,
+                    item-border-width: 0px,
+                    item-foreground: Theme.color-primary-dark,
+                    indicator-color: Theme.color-foreground,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 0px,
+                    list-stroke-color: Theme.color-transparent,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            if st == TabsState.disabled {
+                return {
+                    item-background: Theme.color-secondary,
+                    item-border-color: Theme.color-transparent,
+                    item-border-width: 0px,
+                    item-foreground: Theme.color-muted,
+                    indicator-color: Theme.color-muted,
+                    list-background-color: Theme.color-transparent,
+                    list-border-width: 0px,
+                    list-stroke-color: Theme.color-transparent,
+                    list-edge-color: Theme.color-border,
+                    panel-background: Theme.color-background,
+                    panel-foreground: Theme.color-foreground,
+                    panel-border-color: Theme.color-border,
+                    panel-border-width: 1px,
+                };
+            }
+            return {
+                item-background: Theme.color-secondary,
+                item-border-color: Theme.color-transparent,
+                item-border-width: 0px,
+                item-foreground: Theme.color-foreground,
+                indicator-color: Theme.color-foreground,
+                list-background-color: Theme.color-transparent,
+                list-border-width: 0px,
+                list-stroke-color: Theme.color-transparent,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        if st == TabsState.focused {
+            return {
+                item-background: Theme.color-transparent,
+                item-border-color: Theme.color-primary,
+                item-border-width: 0px,
+                item-foreground: Theme.color-foreground,
+                indicator-color: Theme.color-foreground,
+                list-background-color: Theme.color-transparent,
+                list-border-width: 0px,
+                list-stroke-color: Theme.color-transparent,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        if st == TabsState.pressed {
+            return {
+                item-background: Theme.color-secondary,
+                item-border-color: Theme.color-transparent,
+                item-border-width: 0px,
+                item-foreground: Theme.color-primary-dark,
+                indicator-color: Theme.color-foreground,
+                list-background-color: Theme.color-transparent,
+                list-border-width: 0px,
+                list-stroke-color: Theme.color-transparent,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        if st == TabsState.disabled {
+            return {
+                item-background: Theme.color-transparent,
+                item-border-color: Theme.color-transparent,
+                item-border-width: 0px,
+                item-foreground: Theme.color-muted,
+                indicator-color: Theme.color-muted,
+                list-background-color: Theme.color-transparent,
+                list-border-width: 0px,
+                list-stroke-color: Theme.color-transparent,
+                list-edge-color: Theme.color-border,
+                panel-background: Theme.color-background,
+                panel-foreground: Theme.color-foreground,
+                panel-border-color: Theme.color-border,
+                panel-border-width: 1px,
+            };
+        }
+        return {
+            item-background: Theme.color-transparent,
+            item-border-color: Theme.color-transparent,
+            item-border-width: 0px,
+            item-foreground: Theme.color-foreground,
+            indicator-color: Theme.color-foreground,
+            list-background-color: Theme.color-transparent,
+            list-border-width: 0px,
+            list-stroke-color: Theme.color-transparent,
+            list-edge-color: Theme.color-border,
+            panel-background: Theme.color-background,
+            panel-foreground: Theme.color-foreground,
+            panel-border-color: Theme.color-border,
+            panel-border-width: 1px,
+        };
+    }
     public pure function size(s: ControlSize) -> TabsSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                control-height: Theme.control-size-sm,
+                tab-padding-horizontal: Theme.control-padding-inline-sm,
+                icon-size: 18px,
+                tab-gap: 2px,
+                list-padding: 4px,
+                panel-padding: 16px,
+                panel-min-height: 88px,
+                border-radius: Theme.radius-default,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                control-height: Theme.control-size-md,
+                tab-padding-horizontal: Theme.control-padding-inline-md,
+                icon-size: 20px,
+                tab-gap: 2px,
+                list-padding: 4px,
+                panel-padding: 20px,
+                panel-min-height: 104px,
+                border-radius: Theme.radius-default,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            control-height: Theme.control-size-lg,
+            tab-padding-horizontal: Theme.control-padding-inline-lg,
+            icon-size: 24px,
+            tab-gap: 2px,
+            list-padding: 4px,
+            panel-padding: 24px,
+            panel-min-height: 120px,
+            border-radius: Theme.radius-default,
+        };
     }
 }

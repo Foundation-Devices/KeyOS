@@ -90,6 +90,17 @@ fn parse_hex_color(hex: &str) -> Option<slint::Color> {
         hex.to_string()
     };
 
+    if hex.len() == 8 {
+        if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
+            u8::from_str_radix(&hex[0..2], 16),
+            u8::from_str_radix(&hex[2..4], 16),
+            u8::from_str_radix(&hex[4..6], 16),
+            u8::from_str_radix(&hex[6..8], 16),
+        ) {
+            return Some(slint::Color::from_argb_u8(a, r, g, b));
+        }
+    }
+
     if hex.len() >= 6 {
         if let (Ok(r), Ok(g), Ok(b)) = (
             u8::from_str_radix(&hex[0..2], 16),
@@ -220,9 +231,27 @@ impl TokenStore {
                 "tertiary": "Montserrat"
             },
             "fontSize": {
+                "xs": 12,
+                "caption": 13,
                 "sm": 20,
                 "md": 22,
-                "lg": 24
+                "lg": 24,
+                "helper": 14
+            },
+            "borderWidth": {
+                "none": 0,
+                "sm": 1,
+                "focus": 2
+            },
+            "choiceControlSize": {
+                "sm": 24,
+                "md": 28,
+                "lg": 32
+            },
+            "switchSize": {
+                "sm": 20,
+                "md": 24,
+                "lg": 28
             },
             "radius": {
                 "sm": 8,
@@ -305,6 +334,13 @@ mod tests {
         // Shorthand
         let color3 = parse_hex_color("#f00").unwrap();
         assert_eq!(color3.red(), 255);
+
+        // CSS/Slint 8-char form: #RRGGBBAA
+        let color4 = parse_hex_color("#231f201a").unwrap();
+        assert_eq!(color4.red(), 0x23);
+        assert_eq!(color4.green(), 0x1f);
+        assert_eq!(color4.blue(), 0x20);
+        assert_eq!(color4.alpha(), 0x1a);
     }
 }
 

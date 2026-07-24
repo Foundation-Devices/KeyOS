@@ -259,7 +259,7 @@ fn run_cargo_build(
     // Resolve foundation_themes::include_theme! against the generated theme dir.
     cmd.env("FOUNDATION_THEMES_RUST_DIR", themes_rust_dir);
     cmd.env(UI_LIBRARY_PATH_ENV, project_sdk_ui_root(project_root));
-    // `@theme` namespace → per-app generated component themes (button_theme.slint).
+    // `@theme` namespace → per-app generated component themes.
     cmd.env("FOUNDATION_THEMES_SLINT_DIR", crate::commands::themes::project_theme_slint_dir(project_root));
 
     let output = cmd.output().context("cargo not found")?;

@@ -17,6 +17,9 @@ pub fn check_color_equal(value: slint::Color, default: slint::Color) -> bool {
         && value.alpha() == default.alpha()
 }
 
+/// Return the alpha channel as a 0-100 percentage for the Slint color picker.
+pub fn color_alpha_percent(color: slint::Color) -> f32 { (color.alpha() as f32 / 255.0) * 100.0 }
+
 /// Parse a hex color string (with or without `#`) into a Slint `Color`.
 /// Accepts 3-character shorthand and full 6/8-character forms. On failure
 /// returns the editor's "missing color" sentinel `#1a9a9a` so the UI shows
@@ -30,6 +33,17 @@ pub fn parse_hex_color(hex: &str) -> slint::Color {
     } else {
         hex.to_string()
     };
+
+    if hex.len() == 8 {
+        if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
+            u8::from_str_radix(&hex[0..2], 16),
+            u8::from_str_radix(&hex[2..4], 16),
+            u8::from_str_radix(&hex[4..6], 16),
+            u8::from_str_radix(&hex[6..8], 16),
+        ) {
+            return slint::Color::from_argb_u8(a, r, g, b);
+        }
+    }
 
     if hex.len() >= 6 {
         if let (Ok(r), Ok(g), Ok(b)) = (
@@ -46,5 +60,9 @@ pub fn parse_hex_color(hex: &str) -> slint::Color {
 
 /// Format a Slint `Color` as a lowercase hex string (no `#` prefix).
 pub fn format_hex_color(color: slint::Color) -> slint::SharedString {
-    format!("{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue()).into()
+    if color.alpha() == 255 {
+        format!("{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue()).into()
+    } else {
+        format!("{:02x}{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue(), color.alpha()).into()
+    }
 }

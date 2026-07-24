@@ -1,45 +1,92 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from checkbox.json by foundation theme tooling — do not edit by hand.
+// GENERATED from checkbox.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum CheckboxState {
+    normal,
+    disabled,
+}
+
+export struct CheckboxVariantProps {
+    checked-background: color,
+    checked-border-color: color,
+    checked-border-width: length,
+    box-background: color,
+    box-border-color: color,
+    box-border-width: length,
+    mark-color: color,
+    label-color: color,
+    description-color: color,
+}
 
 export struct CheckboxSizeProps {
     font-family: string,
     font-size: length,
     control-size: length,
+    description-font-size: length,
     row-height: length,
+    box-border-radius: length,
 }
 
 export global CheckboxTheme {
-    in-out property <CheckboxSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        control-size: 24px,
-        row-height: Theme.control-size-sm,
-    };
-    in-out property <CheckboxSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        control-size: 28px,
-        row-height: Theme.control-size-md,
-    };
-    in-out property <CheckboxSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        control-size: 32px,
-        row-height: Theme.control-size-lg,
-    };
-
+    public pure function style(st: CheckboxState) -> CheckboxVariantProps {
+        if st == CheckboxState.disabled {
+            return {
+                checked-background: Theme.color-muted,
+                checked-border-color: Theme.color-muted,
+                checked-border-width: Theme.border-width-none,
+                box-background: Theme.color-surface,
+                box-border-color: Theme.color-border,
+                box-border-width: Theme.border-width-sm,
+                mark-color: Theme.color-background,
+                label-color: Theme.color-muted,
+                description-color: Theme.color-muted,
+            };
+        }
+        return {
+            checked-background: Theme.color-foreground,
+            checked-border-color: Theme.color-foreground,
+            checked-border-width: Theme.border-width-none,
+            box-background: Theme.color-surface,
+            box-border-color: Theme.color-border,
+            box-border-width: Theme.border-width-sm,
+            mark-color: Theme.color-background,
+            label-color: Theme.color-foreground,
+            description-color: Theme.color-muted,
+        };
+    }
     public pure function size(s: ControlSize) -> CheckboxSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                control-size: Theme.choice-control-size-sm,
+                description-font-size: Theme.font-size-helper,
+                row-height: Theme.control-size-sm,
+                box-border-radius: Theme.radius-sm,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                control-size: Theme.choice-control-size-md,
+                description-font-size: Theme.font-size-helper,
+                row-height: Theme.control-size-md,
+                box-border-radius: Theme.radius-sm,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            control-size: Theme.choice-control-size-lg,
+            description-font-size: Theme.font-size-helper,
+            row-height: Theme.control-size-lg,
+            box-border-radius: Theme.radius-sm,
+        };
     }
 }

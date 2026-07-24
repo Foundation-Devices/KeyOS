@@ -988,6 +988,16 @@ mkdir -p "$INSTALL_ROOT"
 INSTALL_ROOT="$(CDPATH= cd -- "$INSTALL_ROOT" && pwd -P)"
 DESTINATION="$INSTALL_ROOT/foundation-sdk-$VERSION-$TARGET"
 CURRENT_LINK="$INSTALL_ROOT/current"
+CACHED_BASE_THEME="$HOME/.foundation/themes/json/base_theme.json"
+CURRENT_BASE_THEME="$CURRENT_LINK/lib/keyos/sdk/crates/foundation-themes/themes/base_theme.json"
+REFRESH_CACHED_BASE_THEME=0
+if [ -f "$CACHED_BASE_THEME" ] && [ ! -L "$CACHED_BASE_THEME" ] && \
+   [ -f "$CURRENT_BASE_THEME" ] && cmp -s "$CACHED_BASE_THEME" "$CURRENT_BASE_THEME"; then
+  # The cache is still the exact Base Theme shipped by the installed SDK, so
+  # it is safe to advance it with the SDK. A designer-edited cache is left
+  # untouched and remains subject to the compiler's completeness check.
+  REFRESH_CACHED_BASE_THEME=1
+fi
 rm -rf "$DESTINATION"
 mkdir -p "$DESTINATION"
 tar -xzf "$TMPDIR/$COMMON_ARCHIVE" -C "$DESTINATION"
@@ -995,6 +1005,14 @@ tar -xzf "$TMPDIR/$TARGET_ARCHIVE" -C "$DESTINATION"
 refresh_installed_mtimes "$DESTINATION"
 rm -f "$CURRENT_LINK"
 ln -s "$DESTINATION" "$CURRENT_LINK"
+
+if [ "$REFRESH_CACHED_BASE_THEME" -eq 1 ]; then
+  NEW_BASE_THEME="$DESTINATION/lib/keyos/sdk/crates/foundation-themes/themes/base_theme.json"
+  if [ -f "$NEW_BASE_THEME" ]; then
+    cp "$NEW_BASE_THEME" "$CACHED_BASE_THEME"
+    print_ok "Updated unmodified Base Theme cache"
+  fi
+fi
 
 install_launchers "$INSTALL_ROOT" "$DESTINATION" "$CURRENT_LINK"
 ensure_secure_launcher_dir "$INSTALL_ROOT" "$INSTALL_ROOT/bin"
@@ -1224,6 +1242,9 @@ mod tests {
         assert!(script.contains("ensure_secure_launcher_dir \"$INSTALL_ROOT\" \"$INSTALL_ROOT/bin\""));
         assert!(script.contains("refresh_installed_mtimes \"$DESTINATION\""));
         assert!(script.contains("Cargo invalidates app-side path dependency caches"));
+        assert!(script.contains("cmp -s \"$CACHED_BASE_THEME\" \"$CURRENT_BASE_THEME\""));
+        assert!(script.contains("REFRESH_CACHED_BASE_THEME=1"));
+        assert!(script.contains("print_ok \"Updated unmodified Base Theme cache\""));
         assert!(script.contains("if update_rc_enabled; then"));
         assert!(script.contains("print_warn \"Could not update shell rc file: $RC_FILE\""));
         assert!(script.contains("export PATH="));

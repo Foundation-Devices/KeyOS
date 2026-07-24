@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "Input",
   "variants": [
     "default",
@@ -113,31 +114,6 @@
           "normal": "color.border",
           "focused": "color.primary",
           "disabled": "color.border"
-        }
-      }
-    },
-    {
-      "name": "border-color-focus",
-      "displayName": "Border Color Focus",
-      "type": "color",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
-      "defaults": {
-        "default": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
-        },
-        "filled": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
-        },
-        "outlined": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
         }
       }
     },

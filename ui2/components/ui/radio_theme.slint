@@ -1,45 +1,82 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from radio.json by foundation theme tooling — do not edit by hand.
+// GENERATED from radio.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum RadioState {
+    normal,
+    disabled,
+}
+
+export struct RadioVariantProps {
+    accent-color: color,
+    box-background: color,
+    box-border-color: color,
+    box-border-width: length,
+    dot-color: color,
+    label-color: color,
+    description-color: color,
+}
 
 export struct RadioSizeProps {
     font-family: string,
     font-size: length,
     control-size: length,
+    description-font-size: length,
     row-height: length,
 }
 
 export global RadioTheme {
-    in-out property <RadioSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        control-size: 24px,
-        row-height: Theme.control-size-sm,
-    };
-    in-out property <RadioSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        control-size: 28px,
-        row-height: Theme.control-size-md,
-    };
-    in-out property <RadioSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        control-size: 32px,
-        row-height: Theme.control-size-lg,
-    };
-
+    public pure function style(st: RadioState) -> RadioVariantProps {
+        if st == RadioState.disabled {
+            return {
+                accent-color: Theme.color-muted,
+                box-background: Theme.color-surface,
+                box-border-color: Theme.color-border,
+                box-border-width: Theme.border-width-sm,
+                dot-color: Theme.color-muted,
+                label-color: Theme.color-muted,
+                description-color: Theme.color-muted,
+            };
+        }
+        return {
+            accent-color: Theme.color-primary,
+            box-background: Theme.color-surface,
+            box-border-color: Theme.color-border,
+            box-border-width: Theme.border-width-sm,
+            dot-color: Theme.color-primary,
+            label-color: Theme.color-foreground,
+            description-color: Theme.color-muted,
+        };
+    }
     public pure function size(s: ControlSize) -> RadioSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                control-size: Theme.choice-control-size-sm,
+                description-font-size: Theme.font-size-helper,
+                row-height: Theme.control-size-sm,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                control-size: Theme.choice-control-size-md,
+                description-font-size: Theme.font-size-helper,
+                row-height: Theme.control-size-md,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            control-size: Theme.choice-control-size-lg,
+            description-font-size: Theme.font-size-helper,
+            row-height: Theme.control-size-lg,
+        };
     }
 }

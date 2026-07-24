@@ -7,7 +7,7 @@ mod theme;
 mod tokens;
 mod typed;
 
-pub use default_tokens::create_default_tokens;
+pub use default_tokens::create_schema_fallback_tokens;
 pub use theme::*;
 pub use tokens::*;
 pub use typed::{ComponentKey, ThemedComponent};
@@ -47,11 +47,12 @@ impl ComponentState {
     }
 }
 
-/// Create the default theme with all component styles
-pub fn create_default_theme() -> Theme {
+/// Create a schema fallback theme for resolver tests and last-resort values.
+/// Compiled application themes must inherit from or fully define Base Theme.
+pub fn create_schema_fallback_theme() -> Theme {
     use std::collections::HashMap;
 
-    let tokens = create_default_tokens();
+    let tokens = create_schema_fallback_tokens();
     let mut theme = Theme { tokens, components: HashMap::new() };
 
     // Add button component styles

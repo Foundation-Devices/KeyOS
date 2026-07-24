@@ -2,25 +2,33 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { LinkTheme } from "link_theme.slint";
+import {
+    LinkTheme,
+    LinkState,
+    LinkVariantProps,
+    LinkSizeProps,
+} from "@theme/link_theme.slint";
 
 export component Link {
     in property <string> label: "Learn more";
     in property <bool> disabled: false;
+    // `external` remains as a convenience/backwards-compatible way to request
+    // the stock external-link icon. Supplying `icon` selects any other icon;
+    // leaving both unset renders no icon.
     in property <bool> external: false;
+    in property <image> icon;
     in property <ControlSize> size: ControlSize.md;
     in property <bool> visited: false;
     in property <bool> force-focused: false;
     in property <bool> force-pressed: false;
     in property <bool> underlined: true;
-    in property <color> text-color: fallback-text-color;
-    in property <color> underline-color:
-        root.disabled ? transparent : root.pressed ? root.resolved-text-color.with-alpha(0.95) : root.focused ? root.resolved-text-color.with-alpha(0.82) : root.resolved-text-color.with-alpha(0.35);
-    in property <color> visited-color: default-visited-color();
-    in property <string> font-family: LinkTheme.size(root.size).font-family;
-    in property <length> font-size: LinkTheme.size(root.size).font-size;
-    in property <length> row-height: LinkTheme.size(root.size).row-height;
-    in property <length> icon-size: LinkTheme.size(root.size).icon-size;
+    in property <color> text-color: theme-style.text-color;
+    in property <color> underline-color: theme-style.underline-color;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> row-height: theme-size.row-height;
+    in property <length> icon-size: theme-size.icon-size;
+    property <LinkSizeProps> theme-size: LinkTheme.size(root.size);
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
@@ -41,21 +49,15 @@ export component Link {
     property <length> actual-icon-size: root.icon-size;
     property <bool> pressed: link-touch.pressed || root.force-pressed;
     property <bool> focused: (focus-scope.has-focus || root.force-focused) && !root.disabled;
-    pure function default-link-color() -> color {
-        return Theme.palette-primary;
-    }
-    pure function pressed-color() -> color {
-        return Theme.palette-primary-pressed;
-    }
-    pure function default-visited-color() -> color {
-        return Theme.palette-muted;
-    }
-
-    property <color> fallback-text-color:
-        root.disabled ? Theme.palette-muted.with-alpha(0.75) : root.visited ? root.visited-color : root.pressed ? pressed-color() : default-link-color();
+    property <LinkState> current-state:
+        root.disabled ? LinkState.disabled : root.pressed ? LinkState.pressed : root.focused ? LinkState.focused : root.visited ? LinkState.visited : LinkState.normal;
+    property <LinkVariantProps> theme-style: LinkTheme.style(root.current-state);
     property <color> resolved-text-color: root.text-color;
     property <color> resolved-underline-color: root.underline-color;
-    property <length> icon-slot-width: root.external ? actual-icon-size + 6px : 0px;
+    property <image> resolved-icon:
+        root.icon.width > 0 ? root.icon : root.external ? @image-url("../../resources/icons/arrow-up.svg") : @image-url("");
+    property <bool> show-icon: root.resolved-icon.width > 0;
+    property <length> icon-slot-width: root.show-icon ? actual-icon-size + 6px : 0px;
     property <length> text-top: (root.height - link-text.preferred-height) / 2;
     property <length> underline-y:
         min(
@@ -92,7 +94,7 @@ export component Link {
             vertical-alignment: center;
         }
 
-        if root.external: Rectangle {
+        if root.show-icon: Rectangle {
             width: root.actual-icon-size;
             height: root.height;
 
@@ -101,7 +103,7 @@ export component Link {
                 y: (parent.height - self.height) / 2;
                 width: root.actual-icon-size;
                 height: root.actual-icon-size;
-                source: @image-url("../../resources/icons/arrow-up.svg");
+                source: root.resolved-icon;
                 colorize: root.resolved-text-color;
             }
         }

@@ -1,10 +1,27 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from spinner.json by foundation theme tooling — do not edit by hand.
+// GENERATED from spinner.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum SpinnerThemeVariant {
+    primary,
+    neutral,
+    success,
+    warning,
+    danger,
+}
+
+export enum SpinnerState {
+    normal,
+}
+
+export struct SpinnerVariantProps {
+    track-color: color,
+    accent-color-override: color,
+}
 
 export struct SpinnerSizeProps {
     spinner-size: length,
@@ -13,29 +30,55 @@ export struct SpinnerSizeProps {
 }
 
 export global SpinnerTheme {
-    in-out property <SpinnerSizeProps> size-sm: {
-        spinner-size: 18px,
-        stroke-width: 2px,
-        animation-speed: 60px,
-    };
-    in-out property <SpinnerSizeProps> size-md: {
-        spinner-size: 26px,
-        stroke-width: 3px,
-        animation-speed: 60px,
-    };
-    in-out property <SpinnerSizeProps> size-lg: {
-        spinner-size: 36px,
-        stroke-width: 4px,
-        animation-speed: 60px,
-    };
-
+    public pure function style(v: SpinnerThemeVariant, st: SpinnerState) -> SpinnerVariantProps {
+        if v == SpinnerThemeVariant.primary {
+            return {
+                track-color: Theme.color-secondary,
+                accent-color-override: Theme.color-primary,
+            };
+        }
+        if v == SpinnerThemeVariant.neutral {
+            return {
+                track-color: Theme.color-secondary,
+                accent-color-override: Theme.color-foreground,
+            };
+        }
+        if v == SpinnerThemeVariant.success {
+            return {
+                track-color: Theme.color-secondary,
+                accent-color-override: Theme.color-success,
+            };
+        }
+        if v == SpinnerThemeVariant.warning {
+            return {
+                track-color: Theme.color-secondary,
+                accent-color-override: Theme.color-warning,
+            };
+        }
+        return {
+            track-color: Theme.color-secondary,
+            accent-color-override: Theme.color-danger,
+        };
+    }
     public pure function size(s: ControlSize) -> SpinnerSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                spinner-size: 18px,
+                stroke-width: 2px,
+                animation-speed: 60px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                spinner-size: 26px,
+                stroke-width: 3px,
+                animation-speed: 60px,
+            };
         }
-        return self.size-md;
+        return {
+            spinner-size: 36px,
+            stroke-width: 4px,
+            animation-speed: 60px,
+        };
     }
 }

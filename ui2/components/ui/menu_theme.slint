@@ -1,10 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from menu.json by foundation theme tooling — do not edit by hand.
+// GENERATED from menu.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum MenuState {
+    normal,
+}
+
+export struct MenuVariantProps {
+    menu-background: color,
+    menu-border-color: color,
+    menu-border-width: length,
+}
 
 export struct MenuSizeProps {
     menu-height: length,
@@ -13,29 +23,32 @@ export struct MenuSizeProps {
 }
 
 export global MenuTheme {
-    in-out property <MenuSizeProps> size-sm: {
-        menu-height: 148px,
-        menu-border-radius: Theme.control-radius-sm,
-        menu-padding: 0px,
-    };
-    in-out property <MenuSizeProps> size-md: {
-        menu-height: 172px,
-        menu-border-radius: Theme.control-radius-md,
-        menu-padding: 0px,
-    };
-    in-out property <MenuSizeProps> size-lg: {
-        menu-height: 196px,
-        menu-border-radius: Theme.control-radius-lg,
-        menu-padding: 0px,
-    };
-
+    public pure function style(st: MenuState) -> MenuVariantProps {
+        return {
+            menu-background: Theme.color-surface,
+            menu-border-color: Theme.color-border,
+            menu-border-width: 1px,
+        };
+    }
     public pure function size(s: ControlSize) -> MenuSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                menu-height: 148px,
+                menu-border-radius: Theme.control-radius-sm,
+                menu-padding: 0px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                menu-height: 172px,
+                menu-border-radius: Theme.control-radius-md,
+                menu-padding: 0px,
+            };
         }
-        return self.size-md;
+        return {
+            menu-height: 196px,
+            menu-border-radius: Theme.control-radius-lg,
+            menu-padding: 0px,
+        };
     }
 }

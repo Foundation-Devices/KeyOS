@@ -24,7 +24,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("foundation-theme-compiler: {err}");
+            eprintln!("foundation-theme-compiler: {err:#}");
             ExitCode::FAILURE
         }
     }
@@ -33,7 +33,7 @@ fn main() -> ExitCode {
 fn run() -> anyhow::Result<Vec<String>> {
     let mut json_dir: Option<PathBuf> = None;
     let mut rust_dir: Option<PathBuf> = None;
-    // Optional: also emit per-app component theme `.slint` files.
+    // Optional: also emit per-app component theme `.slint` files from component schemas.
     let mut plugin_dir: Option<PathBuf> = None;
     let mut slint_dir: Option<PathBuf> = None;
     let mut app_theme_json: Option<PathBuf> = None;
@@ -86,16 +86,18 @@ fn run() -> anyhow::Result<Vec<String>> {
     let json_dir = json_dir.ok_or_else(|| anyhow::anyhow!("--json-dir is required"))?;
     let rust_dir = rust_dir.ok_or_else(|| anyhow::anyhow!("--rust-dir is required"))?;
 
-    let ids = foundation_themes::build::compile_theme_dir(&json_dir, &rust_dir)?;
+    let ids = if let Some(plugin_dir) = plugin_dir.as_ref() {
+        foundation_themes::build::compile_theme_dir_with_schemas(&json_dir, &rust_dir, plugin_dir)?
+    } else {
+        foundation_themes::build::compile_theme_dir(&json_dir, &rust_dir)?
+    };
 
-    // Per-app component theme `.slint` emission (button-first). Only runs when the
-    // caller passes the slint trio; otherwise this is a pure Rust theme compile.
+    // Per-app component theme `.slint` emission. Only runs when the caller
+    // passes the slint trio; otherwise this is a pure Rust theme compile. An
+    // empty component list means every schema-backed component.
     if let (Some(plugin_dir), Some(slint_dir), Some(app_theme_json)) =
         (plugin_dir.as_ref(), slint_dir.as_ref(), app_theme_json.as_ref())
     {
-        if components.is_empty() {
-            components.push("button".to_string());
-        }
         let keys: Vec<&str> = components.iter().map(String::as_str).collect();
         foundation_themes::build::compile_app_component_themes(app_theme_json, plugin_dir, slint_dir, &keys)?;
     }

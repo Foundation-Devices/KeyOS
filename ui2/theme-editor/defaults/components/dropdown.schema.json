@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "Dropdown",
   "extends": "Input",
   "sizeProps": [
@@ -6,9 +7,9 @@
       "name": "control-height",
       "displayName": "Control Height",
       "type": "float",
-      "min": 0.0,
-      "max": 160.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 160,
+      "step": 1,
       "defaults": {
         "sm": "controlSize.sm",
         "md": "controlSize.md",
@@ -19,26 +20,26 @@
       "name": "option-height",
       "displayName": "Option Height",
       "type": "float",
-      "min": 0.0,
-      "max": 160.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 160,
+      "step": 1,
       "defaults": {
-        "sm": 56.0,
-        "md": 64.0,
-        "lg": 72.0
+        "sm": 56,
+        "md": 64,
+        "lg": 72
       }
     },
     {
       "name": "icon-size",
       "displayName": "Icon Size",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "sm": 20.0,
-        "md": 22.0,
-        "lg": 24.0
+        "sm": "iconSize.sm",
+        "md": 22,
+        "lg": "iconSize.md"
       }
     }
   ]

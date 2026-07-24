@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { MenuTheme } from "menu_theme.slint";
+import { MenuTheme, MenuSizeProps } from "@theme/menu_theme.slint";
 
 export component MenuRow inherits Rectangle {
     in property <bool> interactive: false;
@@ -63,8 +63,9 @@ export component Menu inherits Rectangle {
     in property <color> menu-background: Theme.palette-surface;
     in property <color> menu-border-color: Theme.palette-border;
     in property <length> menu-border-width: 1px;
-    in property <length> menu-border-radius: MenuTheme.size(root.size).menu-border-radius;
-    in property <length> menu-padding: MenuTheme.size(root.size).menu-padding;
+    in property <length> menu-border-radius: theme-size.menu-border-radius;
+    in property <length> menu-padding: theme-size.menu-padding;
+    property <MenuSizeProps> theme-size: MenuTheme.size(root.size);
 
     property <color> actual-background: root.menu-background;
     property <color> actual-border-color: root.menu-border-color;
@@ -89,11 +90,20 @@ export component Menu inherits Rectangle {
     border-radius: root.actual-border-radius;
     clip: true;
 
-    content := VerticalLayout {
-        width: parent.width;
-        padding: root.actual-padding;
-        spacing: 0px;
+    content-clip := Rectangle {
+        x: root.actual-border-width;
+        y: root.actual-border-width;
+        width: max(0px, parent.width - root.actual-border-width * 2);
+        height: max(0px, parent.height - root.actual-border-width * 2);
+        border-radius: max(0px, root.actual-border-radius - root.actual-border-width);
+        clip: true;
 
-        @children
+        content := VerticalLayout {
+            width: parent.width;
+            padding: root.actual-padding;
+            spacing: 0px;
+
+            @children
+        }
     }
 }

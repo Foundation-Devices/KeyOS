@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "component": "Sheet",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "panel-padding",
+      "displayName": "Panel Padding",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "controlRadius.md",
+        "sm": "controlRadius.sm",
+        "lg": "controlRadius.lg"
+      }
+    },
+    {
+      "name": "content-padding",
+      "displayName": "Content Padding",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 20,
+        "sm": 16,
+        "lg": 24
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "radius.default",
+        "sm": 20,
+        "lg": 28
+      }
+    },
+    {
+      "name": "handle-width",
+      "displayName": "Handle Width",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "handle-height",
+      "displayName": "Handle Height",
+      "type": "float",
+      "min": 0,
+      "max": 24,
+      "step": 1,
+      "defaults": {
+        "default": 6
+      }
+    },
+    {
+      "name": "handle-radius",
+      "displayName": "Handle Radius",
+      "type": "float",
+      "min": 0,
+      "max": 12,
+      "step": 1,
+      "defaults": {
+        "default": 3
+      }
+    },
+    {
+      "name": "title-font-size",
+      "displayName": "Title Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 24
+      }
+    },
+    {
+      "name": "divider-height",
+      "displayName": "Divider Height",
+      "type": "float",
+      "min": 0,
+      "max": 16,
+      "step": 0.5,
+      "defaults": {
+        "default": 1
+      }
+    },
+    {
+      "name": "detent-card-radius",
+      "displayName": "Detent Card Radius",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 24
+      }
+    },
+    {
+      "name": "detent-label-font-size",
+      "displayName": "Detent Label Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 14
+      }
+    },
+    {
+      "name": "detent-value-font-size",
+      "displayName": "Detent Value Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 24,
+        "sm": 22,
+        "lg": 26
+      }
+    }
+  ]
+}

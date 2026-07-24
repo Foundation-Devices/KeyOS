@@ -63,8 +63,8 @@ export component AppWindow inherits Window {
     in-out property <string> theme-font-family: "Arial";
 
     in-out property <bool> showing-themes-page: false;
-    in-out property <int> component-page-mode: 0; // 0=Theme, 1=Props
-    // Shared right-sidebar width so Theme and Props keep the same width when toggled.
+    in-out property <int> component-page-mode: 0; // 0=Theme, 1=Test
+    // Shared right-sidebar width so Theme and Test keep the same width when toggled.
     in-out property <length> right-panel-width: 360px;
     in-out property <int> theme-preview-state-index: 0;
     in-out property <int> theme-preview-version: 0;
@@ -80,6 +80,7 @@ export component AppWindow inherits Window {
     // Hex color conversion callbacks - connected from Rust
     callback parse-hex-color(string) -> color;
     callback format-hex-color(color) -> string;
+    callback color-alpha-percent(color) -> float;
 
     // Value comparison callbacks - connected from Rust for reliable equality checks
     callback check-float-equal(float, float) -> bool;
@@ -106,16 +107,20 @@ export component AppWindow inherits Window {
     callback reset-theme();  // Called when user resets the current theme to its parent/base
     callback theme-values-edited();  // Called when theme editor values are edited
     callback theme-tokens-edited();  // Called when token values that affect runtime are edited
+    callback undo-theme-edit();
+    callback redo-theme-edit();
     in-out property <int> selected-theme: 0;
+    in-out property <bool> can-undo-theme-edit: false;
+    in-out property <bool> can-redo-theme-edit: false;
     in-out property <[ThemeInfo]> theme-list: [
-        { name: "Default Theme", is-builtin: true },
+        { name: "Base Theme", is-builtin: true },
         { name: "My Custom Theme", is-builtin: false },
         { name: "Verdant Theme", is-builtin: false },
         { name: "Sunset Serif", is-builtin: false },
         { name: "Signal Mono", is-builtin: false },
     ];
     in-out property <[string]> theme-name-list: [
-        "Default Theme",
+        "Base Theme",
         "My Custom Theme",
         "Verdant Theme",
         "Sunset Serif",
@@ -130,7 +135,7 @@ export component AppWindow inherits Window {
     property <string> current-theme-parent-name:
         parent-theme-name-list.length > selected-parent-theme ? parent-theme-name-list[selected-parent-theme] : "None";
     in-out property <string> theme-name-draft: current-theme-name;
-    in property <[string]> component-page-mode-options: ["Theme", "Props"];
+    in property <[string]> component-page-mode-options: ["Theme", "Test"];
 
     // ===== DYNAMIC PLUGIN DATA (populated by Rust from JSON plugins) =====
     in-out property <[ThemeComponentInfo]> theme-component-list: [];
@@ -147,12 +152,12 @@ export component AppWindow inherits Window {
     in-out property <[SizeInfo]> size-list: [];
     in-out property <[string]> size-name-list: [];
     // (matrix-size-list and matrix-size-index-offset are unused now that the
-    // Default row is shown in the matrix again — kept around in case we want
+    // Common row is shown in the matrix again — kept around in case we want
     // to filter it out per-component later.)
     in-out property <[SizeInfo]> matrix-size-list: [];
     in-out property <int> matrix-size-index-offset: 0;
     // True when the currently selected component's plugin has an `extends:` —
-    // enables the reset (↺) button on its Default-base rows so the user can
+    // enables the reset (↺) button on its Common rows so the user can
     // clear a local override and re-inherit live from the parent.
     in-out property <bool> theme-component-has-parent: false;
     in-out property <[PropertyDef]> variant-prop-defs: [];
@@ -165,6 +170,7 @@ export component AppWindow inherits Window {
     callback component-theme-selected(string);
     callback variant-prop-changed(int /* state_index */, int /* prop_index */, PropertyValueData /* new_value */);
     callback size-prop-changed(int /* size_index */, int /* prop_index */, PropertyValueData /* new_value */);
+    callback clear-variant-override(int /* state_index */, int /* prop_index */);
     callback clear-size-override(int /* size_index */, int /* prop_index */);
     pure callback preview-variant-prop(string, string, string, string, int) -> PropertyValueData;
     pure callback preview-size-prop(string, string, string, int) -> PropertyValueData;
@@ -201,9 +207,18 @@ export component AppWindow inherits Window {
     in-out property <float> token-control-size-sm: 48.0;
     in-out property <float> token-control-size-md: 56.0;
     in-out property <float> token-control-size-lg: 64.0;
+    in-out property <float> token-choice-control-size-sm: 24.0;
+    in-out property <float> token-choice-control-size-md: 28.0;
+    in-out property <float> token-choice-control-size-lg: 32.0;
+    in-out property <float> token-switch-size-sm: 20.0;
+    in-out property <float> token-switch-size-md: 24.0;
+    in-out property <float> token-switch-size-lg: 28.0;
     in-out property <float> token-icon-size-sm: 20.0;
     in-out property <float> token-icon-size-md: 24.0;
     in-out property <float> token-icon-size-lg: 28.0;
+    in-out property <float> token-border-width-none: 0.0;
+    in-out property <float> token-border-width-sm: 1.0;
+    in-out property <float> token-border-width-focus: 2.0;
     in-out property <float> token-control-radius-sm: 20.0;
     in-out property <float> token-control-radius-md: 24.0;
     in-out property <float> token-control-radius-lg: 28.0;
@@ -211,9 +226,12 @@ export component AppWindow inherits Window {
     in-out property <float> token-control-padding-inline-md: 16.0;
     in-out property <float> token-control-padding-inline-lg: 20.0;
     // Font size tokens
+    in-out property <float> token-font-size-xs: 12.0;
+    in-out property <float> token-font-size-caption: 13.0;
     in-out property <float> token-font-size-sm: 20.0;
     in-out property <float> token-font-size-md: 22.0;
     in-out property <float> token-font-size-lg: 24.0;
+    in-out property <float> token-font-size-helper: 14.0;
     // Font family tokens
     in-out property <string> token-font-primary: "Montserrat";
     in-out property <string> token-font-secondary: "Montserrat";
@@ -346,543 +364,657 @@ export component AppWindow inherits Window {
         }
     }
 
-    Rectangle {
+    forward-focus: shortcut-scope;
+
+    shortcut-scope := FocusScope {
         width: parent.width;
         height: parent.height;
-        background: transparent;
+
+        init => {
+            self.focus();
+        }
+
+        capture-key-pressed(event) => {
+            if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && (event.text == "z" || event.text == "Z" || event.text == "\u{1a}")) {
+                root.redo-theme-edit();
+                return accept;
+            }
+            if (((event.modifiers.control || event.modifiers.meta) && !event.modifiers.shift && (event.text == "z" || event.text == "Z")) || event.text == "\u{1a}") {
+                root.undo-theme-edit();
+                return accept;
+            }
+            if (((event.modifiers.control || event.modifiers.meta) && (event.text == "y" || event.text == "Y")) || event.text == "\u{19}") {
+                root.redo-theme-edit();
+                return accept;
+            }
+            return reject;
+        }
 
         Rectangle {
-            x: 0px;
-            y: 0px;
             width: parent.width;
+            height: parent.height;
+            background: transparent;
+
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
             // Selectors are 32px tall and vertically centered, giving equal
             // (24px) padding above and below them within the header.
             height: 80px;
-            background: dark-mode ? #2a2a2a : #ffffff;
+                background: dark-mode ? #2a2a2a : #ffffff;
 
-            header-content := Rectangle {
-                x: 16px;
-                y: (parent.height - self.height) / 2;
-                width: parent.width - 32px;
-                height: 34px;
-                background: transparent;
+                header-content := Rectangle {
+                    x: 16px;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - 32px;
+                    height: 34px;
+                    background: transparent;
 
-                HorizontalLayout {
-                    spacing: 12px;
-                    alignment: center;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: center;
 
-                    // Theme-management controls live in the toolbar on every page —
+                        // Theme-management controls live in the toolbar on every page —
                     // Tokens and component editing share the same header.
                     HorizontalLayout {
-                        spacing: 8px;
+                            spacing: 8px;
 
-                        // Theme name follows the file name (set on Load / Save).
+                            // Theme name follows the file name (set on Load / Save).
                         Text {
-                            text: root.theme-name-draft == "" ? "Untitled" : root.theme-name-draft;
-                            color: dark-mode ? #ffffff : #1a1a1a;
-                            font-size: 14px;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                        }
-
-                        Text {
-                            text: "Base:";
-                            color: dark-mode ? #888888 : #666666;
-                            font-size: 12px;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                        }
-
-                        Rectangle {
-                            width: 200px;
-                            height: base-dropdown.preferred-height;
-
-                            base-dropdown := Dropdown {
-                                width: parent.width;
-                                label: "";
-                                size: ControlSize.sm;
-                                options: root.parent-theme-name-list;
-                                selected-index <=> root.selected-parent-theme;
-                                placeholder: "Default Theme";
-                                max-visible-items: 8;
-                                control-height: 34px;
+                                text: root.theme-name-draft == "" ? "Untitled" : root.theme-name-draft;
+                                color: dark-mode ? #ffffff : #1a1a1a;
                                 font-size: 14px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
 
-                                changed(_index, label) => {
-                                    root.theme-parent-changed(label);
+                            Text {
+                                text: "Base:";
+                                color: dark-mode ? #888888 : #666666;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+
+                            Rectangle {
+                                width: 200px;
+                                height: base-dropdown.preferred-height;
+
+                                base-dropdown := Dropdown {
+                                    width: parent.width;
+                                    label: "";
+                                    size: ControlSize.sm;
+                                    options: root.parent-theme-name-list;
+                                    selected-index <=> root.selected-parent-theme;
+                                    placeholder: "Base Theme";
+                                    max-visible-items: 8;
+                                    control-height: 34px;
+                                    font-size: 14px;
+
+                                    changed(_index, label) => {
+                                        root.theme-parent-changed(label);
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 34px;
+                                height: 34px;
+
+                                IconButton {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: @image-url("../../resources/icons/upload.svg");
+                                    label: "Choose base theme file";
+                                    size: IconButtonSize.sm;
+                                    shape: IconButtonShape.square;
+                                    control-size: 34px;
+                                    icon-size: 18px;
+                                    clicked => {
+                                        root.pick-base-theme();
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "New";
+                                variant: ButtonVariant.secondary;
+                                size: ControlSize.sm;
+                                font-size: 13px;
+                                min-button-height: 34px;
+                                clicked => {
+                                    root.new-theme();
+                                }
+                            }
+
+                            Button {
+                                text: "Load";
+                                variant: ButtonVariant.secondary;
+                                size: ControlSize.sm;
+                                font-size: 13px;
+                                min-button-height: 34px;
+                                clicked => {
+                                    root.import-json();
+                                }
+                            }
+
+                            Button {
+                                text: "Save";
+                                variant: ButtonVariant.primary;
+                                size: ControlSize.sm;
+                                font-size: 13px;
+                                min-button-height: 34px;
+                                clicked => {
+                                    root.export-json();
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 4px;
+
+                            Rectangle {
+                                width: 34px;
+                                height: 34px;
+
+                                IconButton {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: @image-url("../../resources/icons/undo-2.svg");
+                                    label: "Undo";
+                                    size: IconButtonSize.sm;
+                                    shape: IconButtonShape.square;
+                                    control-size: 34px;
+                                    icon-size: 18px;
+                                    disabled: !root.can-undo-theme-edit;
+                                    clicked => {
+                                        root.undo-theme-edit();
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 34px;
+                                height: 34px;
+
+                                IconButton {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: @image-url("../../resources/icons/redo-2.svg");
+                                    label: "Redo";
+                                    size: IconButtonSize.sm;
+                                    shape: IconButtonShape.square;
+                                    control-size: 34px;
+                                    icon-size: 18px;
+                                    disabled: !root.can-redo-theme-edit;
+                                    clicked => {
+                                        root.redo-theme-edit();
+                                    }
                                 }
                             }
                         }
 
                         Rectangle {
-                            width: 34px;
-                            height: 34px;
+                            horizontal-stretch: 1;
+                        }
+
+                        Rectangle {
+                            width: 52px;
+                            height: parent.height;
+                            background: transparent;
 
                             IconButton {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
-                                icon: @image-url("../../resources/icons/upload.svg");
-                                label: "Choose base theme file";
+                                icon: dark-mode ? @image-url("../../resources/icons/sun.svg") : @image-url("../../resources/icons/moon.svg");
+                                label: dark-mode ? "Switch to light mode" : "Switch to dark mode";
                                 size: IconButtonSize.sm;
-                                shape: IconButtonShape.square;
+                                shape: IconButtonShape.circle;
                                 control-size: 34px;
                                 icon-size: 18px;
                                 clicked => {
-                                    root.pick-base-theme();
+                                    root.toggle-theme();
                                 }
-                            }
-                        }
-
-                        Button {
-                            text: "New";
-                            variant: ButtonVariant.secondary;
-                            size: ControlSize.sm;
-                            font-size: 13px;
-                            min-button-height: 34px;
-                            clicked => {
-                                root.new-theme();
-                            }
-                        }
-
-                        Button {
-                            text: "Load";
-                            variant: ButtonVariant.secondary;
-                            size: ControlSize.sm;
-                            font-size: 13px;
-                            min-button-height: 34px;
-                            clicked => {
-                                root.import-json();
-                            }
-                        }
-
-                        Button {
-                            text: "Save";
-                            variant: ButtonVariant.primary;
-                            size: ControlSize.sm;
-                            font-size: 13px;
-                            min-button-height: 34px;
-                            clicked => {
-                                root.export-json();
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                    }
-
-                    Rectangle {
-                        width: 52px;
-                        height: parent.height;
-                        background: transparent;
-
-                        IconButton {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            icon: dark-mode ? @image-url("../../resources/icons/sun.svg") : @image-url("../../resources/icons/moon.svg");
-                            label: dark-mode ? "Switch to light mode" : "Switch to dark mode";
-                            size: IconButtonSize.sm;
-                            shape: IconButtonShape.circle;
-                            control-size: 34px;
-                            icon-size: 18px;
-                            clicked => {
-                                root.toggle-theme();
                             }
                         }
                     }
                 }
-            }
 
-            // 1px separator at the bottom of the header, dividing it from the
+                // 1px separator at the bottom of the header, dividing it from the
             // content below.
             Rectangle {
-                x: 0px;
-                y: parent.height - self.height;
-                width: parent.width;
-                height: 1px;
-                background: dark-mode ? #404040 : #999999;
+                    x: 0px;
+                    y: parent.height - self.height;
+                    width: parent.width;
+                    height: 1px;
+                    background: dark-mode ? #404040 : #999999;
+                }
             }
-        }
 
-        body := Rectangle {
-            x: 0px;
-            y: 80px;
-            width: parent.width;
-            height: parent.height - 80px;
-            background: transparent;
+            body := Rectangle {
+                x: 0px;
+                y: 80px;
+                width: parent.width;
+                height: parent.height - 80px;
+                background: transparent;
             // Resizable left-nav width: drag the splitter between the nav and the
             // content to resize it.
             property <length> nav-width: 220px;
-            property <bool> nav-dragging: false;
+                property <bool> nav-dragging: false;
 
-            Sidebar {
-                x: 0px;
-                y: 0px;
-                width: body.nav-width;
-                height: parent.height;
-                dark-mode: root.dark-mode;
-                showing-themes-page: root.showing-themes-page;
-                selected-category: root.selected-category;
-                selected-component: root.selected-component;
-                select-themes-page => {
-                    root.showing-themes-page = true;
-                }
-                select-component(cat, comp) => {
-                    root.showing-themes-page = false;
-                    root.select-component(cat, comp);
-                }
-            }
-
-            // Left-nav splitter (drag to resize the navigation panel).
-            Rectangle {
-                x: body.nav-width;
-                y: 0px;
-                width: 6px;
-                height: parent.height;
-                background: body.nav-dragging || nav-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
-
-                Rectangle {
-                    x: 2px;
-                    y: (parent.height - 40px) / 2;
-                    width: 2px;
-                    height: 40px;
-                    border-radius: 1px;
-                    background: body.nav-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
-                }
-
-                nav-splitter-touch := TouchArea {
-                    mouse-cursor: col-resize;
-                    pointer-event(event) => {
-                        if (event.kind == PointerEventKind.down) {
-                            body.nav-dragging = true;
-                        }
-                        if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
-                            body.nav-dragging = false;
-                        }
+                Sidebar {
+                    x: 0px;
+                    y: 0px;
+                    width: body.nav-width;
+                    height: parent.height;
+                    dark-mode: root.dark-mode;
+                    showing-themes-page: root.showing-themes-page;
+                    selected-category: root.selected-category;
+                    selected-component: root.selected-component;
+                    select-themes-page => {
+                        root.showing-themes-page = true;
                     }
-                    moved => {
-                        if (self.pressed) {
-                            body.nav-width = clamp(
+                    select-component(cat, comp) => {
+                        root.showing-themes-page = false;
+                        root.select-component(cat, comp);
+                    }
+                }
+
+                // Left-nav splitter (drag to resize the navigation panel).
+            Rectangle {
+                    x: body.nav-width;
+                    y: 0px;
+                    width: 6px;
+                    height: parent.height;
+                    background: body.nav-dragging || nav-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
+
+                    Rectangle {
+                        x: 2px;
+                        y: (parent.height - 40px) / 2;
+                        width: 2px;
+                        height: 40px;
+                        border-radius: 1px;
+                        background: body.nav-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
+                    }
+
+                    nav-splitter-touch := TouchArea {
+                        mouse-cursor: col-resize;
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                body.nav-dragging = true;
+                            }
+                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                body.nav-dragging = false;
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                body.nav-width = clamp(
                                 body.nav-width + (self.mouse-x - self.pressed-x),
                                 160px,
                                 400px);
+                            }
                         }
                     }
                 }
-            }
 
-            content-area := Rectangle {
-                x: body.nav-width + 6px;
-                y: 0px;
-                width: parent.width - body.nav-width - 6px;
-                height: parent.height;
-                background: transparent;
-
-                if root.showing-themes-page: themes-row := HorizontalLayout {
-                    width: parent.width;
+                content-area := Rectangle {
+                    x: body.nav-width + 6px;
+                    y: 0px;
+                    width: parent.width - body.nav-width - 6px;
                     height: parent.height;
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    spacing: 0px;
+                    background: transparent;
+
+                    if root.showing-themes-page: themes-row := HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        spacing: 0px;
                     // Resizable token-panel width: drag the splitter to its left.
                     property <length> tokens-panel-width: 360px;
-                    property <bool> tokens-dragging: false;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        background: dark-mode ? #1a1a1a : #f5f5f5;
-
-                        Flickable {
-                            viewport-height: themes-page-content.preferred-height;
-
-                            themes-page-content := VerticalLayout {
-                                width: parent.width;
-                                padding: 24px;
-                                spacing: 16px;
-                                alignment: start;
-
-                                Text {
-                                    text: "Tokens";
-                                    color: dark-mode ? #ffffff : #1a1a1a;
-                                    font-size: 20px;
-                                    font-weight: 600;
-                                }
-
-                                Text {
-                                    text: "Tokens are the theme's shared design values — colors, spacing, control sizes, radii and fonts. Components don't hard-code these values; they reference tokens, so editing a token in the panel on the right updates every component that uses it, across both light and dark mode.";
-                                    color: dark-mode ? #b0b0b0 : #555555;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
-                                }
-
-                                Text {
-                                    text: "Component defaults";
-                                    color: dark-mode ? #ffffff : #1a1a1a;
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                }
-
-                                Text {
-                                    text: "Each component defines a Default base for its size properties, plus optional Sm / Md / Lg overrides. A size with no override falls back to the Default — so you can set a value once on Default and every size inherits it unless it overrides explicitly.";
-                                    color: dark-mode ? #b0b0b0 : #555555;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
-                                }
-
-                                Text {
-                                    text: "Component inheritance";
-                                    color: dark-mode ? #ffffff : #1a1a1a;
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                }
-
-                                Text {
-                                    text: "Some components build on a parent component — for example Search inherits from Input. Inherited entries stay greyed-out and follow the parent's value until you override them, so a change to the parent cascades down to its children.";
-                                    color: dark-mode ? #b0b0b0 : #555555;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
-                                }
-
-                                Text {
-                                    text: "Base theme";
-                                    color: dark-mode ? #ffffff : #1a1a1a;
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                }
-
-                                Text {
-                                    text: "The Base Theme selector in the toolbar is what the current theme inherits from and is compared against when you Save — a saved theme records only the values that differ from its base. Default Theme is the only built-in base.";
-                                    color: dark-mode ? #b0b0b0 : #555555;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
-                                }
-                            }
-                        }
-                    }
-
-                    // Splitter between the theme list and the token panel.
-                    Rectangle {
-                        width: 6px;
-                        background: themes-row.tokens-dragging || tokens-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
+                        property <bool> tokens-dragging: false;
 
                         Rectangle {
-                            x: 2px;
-                            y: (parent.height - 40px) / 2;
-                            width: 2px;
-                            height: 40px;
-                            border-radius: 1px;
-                            background: themes-row.tokens-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
-                        }
+                            horizontal-stretch: 1;
+                            background: dark-mode ? #1a1a1a : #f5f5f5;
 
-                        tokens-splitter-touch := TouchArea {
-                            mouse-cursor: col-resize;
-                            pointer-event(event) => {
-                                if (event.kind == PointerEventKind.down) {
-                                    themes-row.tokens-dragging = true;
-                                }
-                                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
-                                    themes-row.tokens-dragging = false;
+                            Flickable {
+                                viewport-height: themes-page-content.preferred-height;
+
+                                themes-page-content := VerticalLayout {
+                                    width: parent.width;
+                                    padding: 24px;
+                                    spacing: 16px;
+                                    alignment: start;
+
+                                    Text {
+                                        text: "Tokens";
+                                        color: dark-mode ? #ffffff : #1a1a1a;
+                                        font-size: 20px;
+                                        font-weight: 600;
+                                    }
+
+                                    Text {
+                                        text: "Tokens are shared design values used by the base theme and app themes. Theme values inherit from app theme to base theme to none. Component values can also inherit through component parents such as Search and Dropdown from Input. Common size props feed sm, md, and lg unless a size overrides them; later variants inherit from the first variant; Focused, Pressed, and Disabled inherit from Normal unless a state overrides them. Saved JSON contains overridden values, while inherited values keep following their source.";
+                                        color: dark-mode ? #b0b0b0 : #555555;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Text {
+                                        text: "Component defaults";
+                                        color: dark-mode ? #ffffff : #1a1a1a;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                    }
+
+                                    Text {
+                                        text: "Each component defines a Common base for its size properties, plus optional Sm / Md / Lg overrides. A size with no override falls back to Common — so you can set a value once on Common and every size inherits it unless it overrides explicitly.";
+                                        color: dark-mode ? #b0b0b0 : #555555;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Text {
+                                        text: "Component inheritance";
+                                        color: dark-mode ? #ffffff : #1a1a1a;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                    }
+
+                                    Text {
+                                        text: "Some components build on a parent component — for example Search inherits from Input. Inherited entries stay greyed-out and follow the parent's value until you override them, so a change to the parent cascades down to its children.";
+                                        color: dark-mode ? #b0b0b0 : #555555;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Text {
+                                        text: "Base theme";
+                                        color: dark-mode ? #ffffff : #1a1a1a;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                    }
+
+                                    Text {
+                                        text: "The Base Theme selector in the toolbar is what the current theme inherits from and is compared against when you Save — a saved theme records only the values that differ from its base. Base Theme is the built-in base.";
+                                        color: dark-mode ? #b0b0b0 : #555555;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
                                 }
                             }
-                            moved => {
-                                if (self.pressed) {
-                                    themes-row.tokens-panel-width = clamp(
+                        }
+
+                        // Splitter between the theme list and the token panel.
+                    Rectangle {
+                            width: 6px;
+                            background: themes-row.tokens-dragging || tokens-splitter-touch.has-hover ? (dark-mode ? #3a3a3a : #d0d0d0) : (dark-mode ? #2a2a2a : #e0e0e0);
+
+                            Rectangle {
+                                x: 2px;
+                                y: (parent.height - 40px) / 2;
+                                width: 2px;
+                                height: 40px;
+                                border-radius: 1px;
+                                background: themes-row.tokens-dragging ? #1a9a9a : (dark-mode ? #444444 : #bbbbbb);
+                            }
+
+                            tokens-splitter-touch := TouchArea {
+                                mouse-cursor: col-resize;
+                                pointer-event(event) => {
+                                    if (event.kind == PointerEventKind.down) {
+                                        themes-row.tokens-dragging = true;
+                                    }
+                                    if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                        themes-row.tokens-dragging = false;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        themes-row.tokens-panel-width = clamp(
                                         themes-row.tokens-panel-width - (self.mouse-x - self.pressed-x),
                                         250px,
                                         themes-row.width - 250px);
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Rectangle {
-                        width: themes-row.tokens-panel-width;
-                        background: dark-mode ? #242424 : #ffffff;
+                        Rectangle {
+                            width: themes-row.tokens-panel-width;
+                            background: dark-mode ? #242424 : #ffffff;
 
-                        ThemeTokenPanel {
-                            width: parent.width;
-                            height: parent.height;
-                            dark-mode: root.dark-mode;
-                            parse-hex-color(hex) => {
-                                return root.parse-hex-color(hex);
+                            ThemeTokenPanel {
+                                width: parent.width;
+                                height: parent.height;
+                                dark-mode: root.dark-mode;
+                                parse-hex-color(hex) => {
+                                    return root.parse-hex-color(hex);
+                                }
+                                format-hex-color(c) => {
+                                    return root.format-hex-color(c);
+                                }
+                                token-value-changed(name, c, is_dark) => {
+                                    root.token-value-changed(name, c, is_dark);
+                                }
+                                theme-tokens-edited => {
+                                    root.theme-tokens-edited();
+                                }
+                                light-token-primary <=> root.light-token-primary;
+                                light-token-primary-pressed <=> root.light-token-primary-pressed;
+                                light-token-secondary <=> root.light-token-secondary;
+                                light-token-danger <=> root.light-token-danger;
+                                light-token-surface <=> root.light-token-surface;
+                                light-token-background <=> root.light-token-background;
+                                light-token-text <=> root.light-token-text;
+                                light-token-text-muted <=> root.light-token-text-muted;
+                                dark-token-primary <=> root.dark-token-primary;
+                                dark-token-primary-pressed <=> root.dark-token-primary-pressed;
+                                dark-token-secondary <=> root.dark-token-secondary;
+                                dark-token-danger <=> root.dark-token-danger;
+                                dark-token-surface <=> root.dark-token-surface;
+                                dark-token-background <=> root.dark-token-background;
+                                dark-token-text <=> root.dark-token-text;
+                                dark-token-text-muted <=> root.dark-token-text-muted;
+                                token-spacing-xs <=> root.token-spacing-xs;
+                                token-spacing-sm <=> root.token-spacing-sm;
+                                token-spacing-md <=> root.token-spacing-md;
+                                token-spacing-lg <=> root.token-spacing-lg;
+                                token-spacing-xl <=> root.token-spacing-xl;
+                                token-control-size-sm <=> root.token-control-size-sm;
+                                token-control-size-md <=> root.token-control-size-md;
+                                token-control-size-lg <=> root.token-control-size-lg;
+                                token-choice-control-size-sm <=> root.token-choice-control-size-sm;
+                                token-choice-control-size-md <=> root.token-choice-control-size-md;
+                                token-choice-control-size-lg <=> root.token-choice-control-size-lg;
+                                token-switch-size-sm <=> root.token-switch-size-sm;
+                                token-switch-size-md <=> root.token-switch-size-md;
+                                token-switch-size-lg <=> root.token-switch-size-lg;
+                                token-icon-size-sm <=> root.token-icon-size-sm;
+                                token-icon-size-md <=> root.token-icon-size-md;
+                                token-icon-size-lg <=> root.token-icon-size-lg;
+                                token-border-width-none <=> root.token-border-width-none;
+                                token-border-width-sm <=> root.token-border-width-sm;
+                                token-border-width-focus <=> root.token-border-width-focus;
+                                token-control-radius-sm <=> root.token-control-radius-sm;
+                                token-control-radius-md <=> root.token-control-radius-md;
+                                token-control-radius-lg <=> root.token-control-radius-lg;
+                                token-control-padding-inline-sm <=> root.token-control-padding-inline-sm;
+                                token-control-padding-inline-md <=> root.token-control-padding-inline-md;
+                                token-control-padding-inline-lg <=> root.token-control-padding-inline-lg;
+                                token-font-size-xs <=> root.token-font-size-xs;
+                                token-font-size-caption <=> root.token-font-size-caption;
+                                token-font-size-sm <=> root.token-font-size-sm;
+                                token-font-size-md <=> root.token-font-size-md;
+                                token-font-size-lg <=> root.token-font-size-lg;
+                                token-font-size-helper <=> root.token-font-size-helper;
+                                token-font-primary <=> root.token-font-primary;
+                                token-font-secondary <=> root.token-font-secondary;
+                                token-font-tertiary <=> root.token-font-tertiary;
+                                token-font-primary-index <=> root.token-font-primary-index;
+                                token-font-secondary-index <=> root.token-font-secondary-index;
+                                token-font-tertiary-index <=> root.token-font-tertiary-index;
+                                token-radius-sm <=> root.token-radius-sm;
+                                token-radius-md <=> root.token-radius-md;
+                                token-radius-lg <=> root.token-radius-lg;
+                                token-radius-full <=> root.token-radius-full;
+                                token-radius-default-index <=> root.token-radius-default-index;
                             }
-                            format-hex-color(c) => {
-                                return root.format-hex-color(c);
-                            }
-                            token-value-changed(name, c, is_dark) => {
-                                root.token-value-changed(name, c, is_dark);
-                            }
-                            theme-tokens-edited => {
-                                root.theme-tokens-edited();
-                            }
-                            light-token-primary <=> root.light-token-primary;
-                            light-token-primary-pressed <=> root.light-token-primary-pressed;
-                            light-token-secondary <=> root.light-token-secondary;
-                            light-token-danger <=> root.light-token-danger;
-                            light-token-surface <=> root.light-token-surface;
-                            light-token-background <=> root.light-token-background;
-                            light-token-text <=> root.light-token-text;
-                            light-token-text-muted <=> root.light-token-text-muted;
-                            dark-token-primary <=> root.dark-token-primary;
-                            dark-token-primary-pressed <=> root.dark-token-primary-pressed;
-                            dark-token-secondary <=> root.dark-token-secondary;
-                            dark-token-danger <=> root.dark-token-danger;
-                            dark-token-surface <=> root.dark-token-surface;
-                            dark-token-background <=> root.dark-token-background;
-                            dark-token-text <=> root.dark-token-text;
-                            dark-token-text-muted <=> root.dark-token-text-muted;
-                            token-spacing-xs <=> root.token-spacing-xs;
-                            token-spacing-sm <=> root.token-spacing-sm;
-                            token-spacing-md <=> root.token-spacing-md;
-                            token-spacing-lg <=> root.token-spacing-lg;
-                            token-spacing-xl <=> root.token-spacing-xl;
-                            token-control-size-sm <=> root.token-control-size-sm;
-                            token-control-size-md <=> root.token-control-size-md;
-                            token-control-size-lg <=> root.token-control-size-lg;
-                            token-icon-size-sm <=> root.token-icon-size-sm;
-                            token-icon-size-md <=> root.token-icon-size-md;
-                            token-icon-size-lg <=> root.token-icon-size-lg;
-                            token-control-radius-sm <=> root.token-control-radius-sm;
-                            token-control-radius-md <=> root.token-control-radius-md;
-                            token-control-radius-lg <=> root.token-control-radius-lg;
-                            token-control-padding-inline-sm <=> root.token-control-padding-inline-sm;
-                            token-control-padding-inline-md <=> root.token-control-padding-inline-md;
-                            token-control-padding-inline-lg <=> root.token-control-padding-inline-lg;
-                            token-font-size-sm <=> root.token-font-size-sm;
-                            token-font-size-md <=> root.token-font-size-md;
-                            token-font-size-lg <=> root.token-font-size-lg;
-                            token-font-primary <=> root.token-font-primary;
-                            token-font-secondary <=> root.token-font-secondary;
-                            token-font-tertiary <=> root.token-font-tertiary;
-                            token-font-primary-index <=> root.token-font-primary-index;
-                            token-font-secondary-index <=> root.token-font-secondary-index;
-                            token-font-tertiary-index <=> root.token-font-tertiary-index;
-                            token-radius-sm <=> root.token-radius-sm;
-                            token-radius-md <=> root.token-radius-md;
-                            token-radius-lg <=> root.token-radius-lg;
-                            token-radius-full <=> root.token-radius-full;
-                            token-radius-default-index <=> root.token-radius-default-index;
                         }
                     }
-                }
 
-                if !root.showing-themes-page && root.component-page-mode == 0: ComponentThemeWorkspace {
-                    width: parent.width;
-                    height: parent.height;
-                    dark-mode: root.dark-mode;
-                    settings-panel-width <=> root.right-panel-width;
-                    component-page-mode <=> root.component-page-mode;
-                    component-page-mode-options: root.component-page-mode-options;
-                    preview-state-index <=> root.theme-preview-state-index;
-                    preview-version <=> root.theme-preview-version;
-                    btn-selected-variant <=> root.btn-selected-variant;
-                    btn-selected-size <=> root.btn-selected-size;
-                    selected-component-key <=> root.theme-selected-component-key;
-                    selected-component-name <=> root.theme-selected-component-name;
-                    component-selected-variant <=> root.theme-selected-variant-index;
-                    component-selected-size <=> root.theme-selected-size-index;
-                    variant-list <=> root.variant-list;
-                    variant-name-list <=> root.variant-name-list;
-                    state-list <=> root.state-list;
-                    state-name-list <=> root.state-name-list;
-                    size-list <=> root.size-list;
-                    matrix-size-list <=> root.matrix-size-list;
-                    matrix-size-index-offset <=> root.matrix-size-index-offset;
-                    component-has-parent <=> root.theme-component-has-parent;
-                    size-name-list <=> root.size-name-list;
-                    variant-prop-defs <=> root.variant-prop-defs;
-                    size-prop-defs <=> root.size-prop-defs;
-                    current-variant-values <=> root.current-variant-values;
-                    current-size-values <=> root.current-size-values;
-                    variant-values-version <=> root.variant-values-version;
-                    size-values-version <=> root.size-values-version;
-                    token-font-primary: root.token-font-primary;
-                    token-font-secondary: root.token-font-secondary;
-                    token-font-tertiary: root.token-font-tertiary;
-                    number-token-values: [
-                        root.token-font-size-sm,
-                        root.token-font-size-md,
-                        root.token-font-size-lg,
-                        root.token-spacing-xs,
-                        root.token-spacing-sm,
-                        root.token-spacing-md,
-                        root.token-spacing-lg,
-                        root.token-spacing-xl,
-                        root.token-radius-sm,
-                        root.token-radius-default,
-                        root.token-radius-lg,
-                        root.token-radius-full,
-                        root.token-control-size-sm,
-                        root.token-control-size-md,
-                        root.token-control-size-lg,
-                        root.token-icon-size-sm,
-                        root.token-icon-size-md,
-                        root.token-icon-size-lg,
-                        root.token-control-radius-sm,
-                        root.token-control-radius-md,
-                        root.token-control-radius-lg,
-                        root.token-control-padding-inline-sm,
-                        root.token-control-padding-inline-md,
-                        root.token-control-padding-inline-lg
-                    ];
-                    parse-hex-color(hex) => {
-                        return root.parse-hex-color(hex);
+                    if !root.showing-themes-page: ComponentThemeWorkspace {
+                        width: parent.width;
+                        height: parent.height;
+                        visible: root.component-page-mode == 0;
+                        dark-mode: root.dark-mode;
+                        settings-panel-width <=> root.right-panel-width;
+                        component-page-mode <=> root.component-page-mode;
+                        component-page-mode-options: root.component-page-mode-options;
+                        preview-state-index <=> root.theme-preview-state-index;
+                        preview-version <=> root.theme-preview-version;
+                        btn-selected-variant <=> root.btn-selected-variant;
+                        btn-selected-size <=> root.btn-selected-size;
+                        selected-component-key <=> root.theme-selected-component-key;
+                        selected-component-name <=> root.theme-selected-component-name;
+                        component-selected-variant <=> root.theme-selected-variant-index;
+                        component-selected-size <=> root.theme-selected-size-index;
+                        variant-list <=> root.variant-list;
+                        variant-name-list <=> root.variant-name-list;
+                        state-list <=> root.state-list;
+                        state-name-list <=> root.state-name-list;
+                        size-list <=> root.size-list;
+                        matrix-size-list <=> root.matrix-size-list;
+                        matrix-size-index-offset <=> root.matrix-size-index-offset;
+                        component-has-parent <=> root.theme-component-has-parent;
+                        size-name-list <=> root.size-name-list;
+                        variant-prop-defs <=> root.variant-prop-defs;
+                        size-prop-defs <=> root.size-prop-defs;
+                        current-variant-values <=> root.current-variant-values;
+                        current-size-values <=> root.current-size-values;
+                        variant-values-version <=> root.variant-values-version;
+                        size-values-version <=> root.size-values-version;
+                        token-font-primary: root.token-font-primary;
+                        token-font-secondary: root.token-font-secondary;
+                        token-font-tertiary: root.token-font-tertiary;
+                        number-token-values: [
+                            root.token-font-size-xs,
+                            root.token-font-size-caption,
+                            root.token-font-size-sm,
+                            root.token-font-size-md,
+                            root.token-font-size-lg,
+                            root.token-font-size-helper,
+                            400.0,
+                            500.0,
+                            600.0,
+                            700.0,
+                            root.token-border-width-none,
+                            root.token-border-width-sm,
+                            root.token-border-width-focus,
+                            root.token-spacing-xs,
+                            root.token-spacing-sm,
+                            root.token-spacing-md,
+                            root.token-spacing-lg,
+                            root.token-spacing-xl,
+                            root.token-radius-sm,
+                            root.token-radius-default,
+                            root.token-radius-lg,
+                            root.token-radius-full,
+                            root.token-control-size-sm,
+                            root.token-control-size-md,
+                            root.token-control-size-lg,
+                            root.token-choice-control-size-sm,
+                            root.token-choice-control-size-md,
+                            root.token-choice-control-size-lg,
+                            root.token-switch-size-sm,
+                            root.token-switch-size-md,
+                            root.token-switch-size-lg,
+                            root.token-icon-size-sm,
+                            root.token-icon-size-md,
+                            root.token-icon-size-lg,
+                            root.token-control-radius-sm,
+                            root.token-control-radius-md,
+                            root.token-control-radius-lg,
+                            root.token-control-padding-inline-sm,
+                            root.token-control-padding-inline-md,
+                            root.token-control-padding-inline-lg
+                        ];
+                        parse-hex-color(hex) => {
+                            return root.parse-hex-color(hex);
+                        }
+                        format-hex-color(c) => {
+                            return root.format-hex-color(c);
+                        }
+                        alpha-percent-color(c) => {
+                            return root.color-alpha-percent(c);
+                        }
+                        check-float-equal(v, d) => {
+                            return root.check-float-equal(v, d);
+                        }
+                        check-color-equal(v, d) => {
+                            return root.check-color-equal(v, d);
+                        }
+                        btn-variant-changed(index) => {
+                            root.btn-variant-changed(index);
+                        }
+                        btn-size-changed(index) => {
+                            root.btn-size-changed(index);
+                        }
+                        variant-prop-changed(state_index, prop_index, value) => {
+                            root.variant-prop-changed(state_index, prop_index, value);
+                        }
+                        clear-variant-override(state_index, prop_index) => {
+                            root.clear-variant-override(state_index, prop_index);
+                        }
+                        size-prop-changed(size_index, prop_index, value) => {
+                            root.size-prop-changed(size_index, prop_index, value);
+                        }
+                        clear-size-override(size_index, prop_index) => {
+                            root.clear-size-override(size_index, prop_index);
+                        }
+                        component-page-mode-changed(index) => {
+                            root.component-page-mode = index;
+                        }
+                        preview-variant-prop(component_key, variant_key, state_key, prop_name, version) => {
+                            return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, version);
+                        }
+                        preview-size-prop(component_key, size_key, prop_name, version) => {
+                            return root.preview-size-prop(component_key, size_key, prop_name, version);
+                        }
                     }
-                    format-hex-color(c) => {
-                        return root.format-hex-color(c);
-                    }
-                    check-float-equal(v, d) => {
-                        return root.check-float-equal(v, d);
-                    }
-                    check-color-equal(v, d) => {
-                        return root.check-color-equal(v, d);
-                    }
-                    btn-variant-changed(index) => {
-                        root.btn-variant-changed(index);
-                    }
-                    btn-size-changed(index) => {
-                        root.btn-size-changed(index);
-                    }
-                    variant-prop-changed(state_index, prop_index, value) => {
-                        root.variant-prop-changed(state_index, prop_index, value);
-                    }
-                    size-prop-changed(size_index, prop_index, value) => {
-                        root.size-prop-changed(size_index, prop_index, value);
-                    }
-                    clear-size-override(size_index, prop_index) => {
-                        root.clear-size-override(size_index, prop_index);
-                    }
-                    component-page-mode-changed(index) => {
-                        root.component-page-mode = index;
-                    }
-                    preview-variant-prop(component_key, variant_key, state_key, prop_name, version) => {
-                        return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, version);
-                    }
-                    preview-size-prop(component_key, size_key, prop_name, version) => {
-                        return root.preview-size-prop(component_key, size_key, prop_name, version);
-                    }
-                }
 
-                if !root.showing-themes-page && root.component-page-mode == 1: Preview {
-                    width: parent.width;
-                    height: parent.height;
-                    dark-mode: root.dark-mode;
-                    props-panel-width <=> root.right-panel-width;
-                    selected-category: root.selected-category;
-                    selected-component: root.selected-component;
-                    component-page-mode <=> root.component-page-mode;
-                    component-page-mode-options: root.component-page-mode-options;
-                    show-tabs: false;
-                    active-tab: 1;
-                    icon-results <=> root.icon-results;
-                    icon-image(name) => {
-                        return root.icon-image(name);
-                    }
-                    filter-icons(query) => {
-                        root.filter-icons(query);
-                    }
-                    component-page-mode-changed(index) => {
-                        root.component-page-mode = index;
+                    if !root.showing-themes-page: Preview {
+                        width: parent.width;
+                        height: parent.height;
+                        visible: root.component-page-mode == 1;
+                        dark-mode: root.dark-mode;
+                        props-panel-width <=> root.right-panel-width;
+                        selected-category: root.selected-category;
+                        selected-component: root.selected-component;
+                        component-page-mode <=> root.component-page-mode;
+                        component-page-mode-options: root.component-page-mode-options;
+                        show-tabs: false;
+                        active-tab: 1;
+                        preview-version <=> root.theme-preview-version;
+                        icon-results <=> root.icon-results;
+                        icon-image(name) => {
+                            return root.icon-image(name);
+                        }
+                        filter-icons(query) => {
+                            root.filter-icons(query);
+                        }
+                        component-page-mode-changed(index) => {
+                            root.component-page-mode = index;
+                        }
+                        preview-variant-prop(component_key, variant_key, state_key, prop_name, version) => {
+                            return root.preview-variant-prop(component_key, variant_key, state_key, prop_name, version);
+                        }
+                        preview-size-prop(component_key, size_key, prop_name, version) => {
+                            return root.preview-size-prop(component_key, size_key, prop_name, version);
+                        }
                     }
                 }
             }

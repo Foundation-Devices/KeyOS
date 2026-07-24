@@ -206,15 +206,15 @@ preview file locale="en" i18n_dir="":
     "{{justfile_directory()}}/scripts/slint-preview.sh" "${args[@]}"
 
 # Regenerate the per-component theme Slint files (ui2/components/ui/<c>_theme.slint)
-# from the plugin schemas (defaults/plugins/*.json). Idempotent; run by build/sim.
+# from the component schemas (defaults/components/*.schema.json). Idempotent; run by build/sim.
 gen-themes:
     cargo run --quiet --manifest-path ui2/theme-editor/Cargo.toml --bin slintthemegen -- --out-dir ui2/components/ui
 
 theme-editor:
     slint-runner cargo run --manifest-path ui2/theme-editor/Cargo.toml --bin theme-editor
 
-# Verify the committed per-component theme files match the plugin schemas (CI guard;
-# fails if a plugin was edited without re-running gen-themes).
+# Verify the committed per-component theme files match the component schemas (CI guard;
+# fails if a schema was edited without re-running gen-themes).
 check-themes:
     cargo run --quiet --manifest-path ui2/theme-editor/Cargo.toml --bin slintthemegen -- --check
 

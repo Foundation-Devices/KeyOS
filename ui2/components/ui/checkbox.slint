@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { CheckboxTheme } from "checkbox_theme.slint";
+import {
+    CheckboxTheme,
+    CheckboxVariantProps,
+    CheckboxSizeProps,
+    CheckboxState,
+} from "@theme/checkbox_theme.slint";
 
 export component Checkbox {
     in property <string> label: "";
@@ -14,18 +19,21 @@ export component Checkbox {
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
-    in property <string> font-family: CheckboxTheme.size(root.size).font-family;
-    in property <length> font-size: CheckboxTheme.size(root.size).font-size;
-    in property <length> control-size: CheckboxTheme.size(root.size).control-size;
-    in property <length> row-height: CheckboxTheme.size(root.size).row-height;
-    in property <length> description-font-size: Theme.font-size-helper;
-    in property <color> accent-color: root.disabled ? Theme.palette-muted : Theme.palette-primary;
-    in property <color> box-background: root.active ? root.accent-color : Theme.palette-surface;
-    in property <color> box-border-color: root.active ? root.accent-color : Theme.palette-border;
-    in property <length> box-border-width: root.active ? 0px : 1px;
-    in property <color> mark-color: Theme.palette-background;
-    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
-    in property <color> description-color: Theme.palette-muted;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-size: theme-size.control-size;
+    in property <length> row-height: theme-size.row-height;
+    in property <length> description-font-size: theme-size.description-font-size;
+    in property <color> checked-background: theme-style.checked-background;
+    in property <color> checked-border-color: theme-style.checked-border-color;
+    in property <length> checked-border-width: theme-style.checked-border-width;
+    in property <color> box-background: theme-style.box-background;
+    in property <color> box-border-color: theme-style.box-border-color;
+    in property <length> box-border-width: theme-style.box-border-width;
+    in property <length> box-border-radius: theme-size.box-border-radius;
+    in property <color> mark-color: theme-style.mark-color;
+    in property <color> label-color: theme-style.label-color;
+    in property <color> description-color: theme-style.description-color;
 
     callback changed(bool);
 
@@ -34,6 +42,15 @@ export component Checkbox {
     property <length> actual-box-size: root.control-size;
     property <length> actual-row-height: root.row-height;
     property <bool> active: root.checked || root.indeterminate;
+    property <color> actual-box-background:
+        root.active ? root.checked-background : root.box-background;
+    property <color> actual-box-border-color:
+        root.active ? root.checked-border-color : root.box-border-color;
+    property <length> actual-box-border-width:
+        root.active ? root.checked-border-width : root.box-border-width;
+    property <CheckboxState> current-state: root.disabled ? CheckboxState.disabled : CheckboxState.normal;
+    property <CheckboxVariantProps> theme-style: CheckboxTheme.style(root.current-state);
+    property <CheckboxSizeProps> theme-size: CheckboxTheme.size(root.size);
 
     preferred-width: content-row.preferred-width;
     preferred-height: max(actual-row-height, text-column.preferred-height);
@@ -53,10 +70,10 @@ export component Checkbox {
             Rectangle {
                 width: root.actual-box-size;
                 height: root.actual-box-size;
-                border-radius: max(4px, root.actual-box-size / 4);
-                background: root.box-background;
-                border-color: root.box-border-color;
-                border-width: root.box-border-width;
+                border-radius: root.box-border-radius;
+                background: root.actual-box-background;
+                border-color: root.actual-box-border-color;
+                border-width: root.actual-box-border-width;
 
                 if root.indeterminate: Rectangle {
                     x: max(3px, parent.width * 0.22);

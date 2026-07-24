@@ -16,12 +16,10 @@
 //! app picks a base theme and calls apply_theme!(ui, <id>::theme(), scheme)
 //! ```
 //!
-//! - [`build`] holds the JSON→Rust codegen (used by the CLI and, historically,
-//!   app build scripts).
+//! - [`build`] holds the JSON→Rust codegen (used by the CLI and, historically, app build scripts).
 //! - [`runtime`] holds the data-extraction helpers used by [`apply_theme!`].
-//! - The SDK ships base themes as JSON under this crate's `themes/` directory;
-//!   they're seeded into `~/.foundation/themes/json/` for the editor and as
-//!   inheritance roots for user themes.
+//! - The SDK ships base themes as JSON under this crate's `themes/` directory; they're seeded into
+//!   `~/.foundation/themes/json/` for the editor and as inheritance roots for user themes.
 
 use std::path::PathBuf;
 
@@ -42,9 +40,7 @@ pub fn themes_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("FOUNDATION_THEMES_DIR") {
         return PathBuf::from(dir);
     }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let base = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     base.join(".foundation").join("themes")
 }
 
@@ -63,19 +59,14 @@ pub fn themes_rust_dir() -> PathBuf { themes_dir().join("rust") }
 /// setting that env var (run `foundation themes build` first).
 ///
 /// ```ignore
-/// foundation_themes::include_theme!(default_theme);
-/// let t = default_theme::theme();
+/// foundation_themes::include_theme!(base_theme);
+/// let t = base_theme::theme();
 /// ```
 #[macro_export]
 macro_rules! include_theme {
     ($name:ident) => {
         pub mod $name {
-            include!(concat!(
-                env!("FOUNDATION_THEMES_RUST_DIR"),
-                "/",
-                stringify!($name),
-                ".rs"
-            ));
+            include!(concat!(env!("FOUNDATION_THEMES_RUST_DIR"), "/", stringify!($name), ".rs"));
         }
     };
 }
@@ -90,11 +81,11 @@ macro_rules! include_theme {
 /// `color-*` + token values automatically.
 ///
 /// ```ignore
-/// foundation_themes::include_theme!(default_theme);
+/// foundation_themes::include_theme!(base_theme);
 ///
 /// pub fn customize_theme(ui: &crate::AppWindow) {
 ///     let scheme = foundation_themes::ColorScheme::Light;
-///     foundation_themes::apply_theme!(ui, default_theme::theme(), scheme);
+///     foundation_themes::apply_theme!(ui, base_theme::theme(), scheme);
 ///     // App-specific overrides (usually empty):
 ///     // ui.global::<crate::Theme>().set_font_size_title(28.0);
 /// }
@@ -150,7 +141,16 @@ macro_rules! apply_theme {
         __g.set_color_warning(__color("color", "warning", 217, 119, 6));
         __g.set_color_info(__color("color", "info", 37, 99, 235));
         __g.set_color_white(__color("color", "white", 255, 255, 255));
-        __g.set_color_transparent(__color("color", "transparent", 0, 0, 0));
+        __g.set_color_transparent(
+            $crate::runtime::token_color(
+                &__theme,
+                __scheme,
+                "color",
+                "transparent",
+                $crate::ThemeColor::rgba(0, 0, 0, 0),
+            )
+            .to_slint(),
+        );
 
         // ----- button styling -----
         // Button variant/state styles + sizes are no longer pushed from here.
@@ -166,7 +166,6 @@ macro_rules! apply_theme {
         __g.set_font_size_body(__len("font-size-body", 18.0));
         __g.set_font_size_subtitle(__len("font-size-subtitle", 16.0));
         __g.set_font_size_label(__len("font-size-label", 14.0));
-        __g.set_font_size_helper(__len("font-size-helper", 14.0));
 
         // ----- shared design tokens (font.*, fontSize.*, fontWeight.*, controlSize.*,
         // iconSize.*, radius.*, controlRadius.*, controlPaddingInline.*, spacing.*) -----
@@ -181,15 +180,28 @@ macro_rules! apply_theme {
         __g.set_font_primary(__font("primary", "Montserrat").into());
         __g.set_font_secondary(__font("secondary", "Montserrat").into());
         __g.set_font_tertiary(__font("tertiary", "Montserrat").into());
+        __g.set_font_size_xs(__tok("fontSize", "xs", 12.0));
+        __g.set_font_size_caption(__tok("fontSize", "caption", 13.0));
+        __g.set_font_size_helper(__tok("fontSize", "helper", __len("font-size-helper", 14.0)));
         __g.set_font_size_sm(__tok("fontSize", "sm", 20.0));
         __g.set_font_size_md(__tok("fontSize", "md", 22.0));
         __g.set_font_size_lg(__tok("fontSize", "lg", 24.0));
         __g.set_font_weight_normal(__tok("fontWeight", "normal", 400.0) as i32);
         __g.set_font_weight_medium(__tok("fontWeight", "medium", 500.0) as i32);
+        __g.set_font_weight_semibold(__tok("fontWeight", "semibold", 600.0) as i32);
         __g.set_font_weight_bold(__tok("fontWeight", "bold", 700.0) as i32);
+        __g.set_border_width_none(__tok("borderWidth", "none", 0.0));
+        __g.set_border_width_sm(__tok("borderWidth", "sm", 1.0));
+        __g.set_border_width_focus(__tok("borderWidth", "focus", 2.0));
         __g.set_control_size_sm(__tok("controlSize", "sm", 48.0));
         __g.set_control_size_md(__tok("controlSize", "md", 56.0));
         __g.set_control_size_lg(__tok("controlSize", "lg", 64.0));
+        __g.set_choice_control_size_sm(__tok("choiceControlSize", "sm", 24.0));
+        __g.set_choice_control_size_md(__tok("choiceControlSize", "md", 28.0));
+        __g.set_choice_control_size_lg(__tok("choiceControlSize", "lg", 32.0));
+        __g.set_switch_size_sm(__tok("switchSize", "sm", 20.0));
+        __g.set_switch_size_md(__tok("switchSize", "md", 24.0));
+        __g.set_switch_size_lg(__tok("switchSize", "lg", 28.0));
         __g.set_icon_size_sm(__tok("iconSize", "sm", 20.0));
         __g.set_icon_size_md(__tok("iconSize", "md", 24.0));
         __g.set_icon_size_lg(__tok("iconSize", "lg", 28.0));

@@ -18,7 +18,7 @@ pub fn workspace_dir() -> PathBuf {
 }
 
 /// Slint library namespace for per-app generated component themes
-/// (`@theme/button_theme.slint`), set by `foundation build`/`sim`.
+/// (for example, `@theme/button_theme.slint`), set by `foundation build`/`sim`.
 const KEYOS_THEME_LIBRARY_NAME: &str = "theme";
 
 pub fn library_paths() -> std::collections::HashMap<String, PathBuf> {

@@ -3,8 +3,8 @@
 
 use super::tokens::{Color, ThemeTokens, TokenSet, TokenValue};
 
-/// Create the default theme tokens with light and dark schemes
-pub fn create_default_tokens() -> ThemeTokens {
+/// Create schema fallback tokens with light and dark schemes.
+pub fn create_schema_fallback_tokens() -> ThemeTokens {
     ThemeTokens { light: create_light_tokens(), dark: create_dark_tokens() }
 }
 
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_default_tokens() {
-        let tokens = create_default_tokens();
+        let tokens = create_schema_fallback_tokens();
 
         // Test light mode colors
         let primary = tokens.light.get_color("color", "primary").unwrap();

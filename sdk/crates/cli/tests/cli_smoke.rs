@@ -271,6 +271,34 @@ fn theme_command_creates_app_theme_and_launches_bundled_editor() {
     let theme_json = fs::read_to_string(&theme_path).unwrap();
     assert!(theme_json.contains("\"id\": \"app_theme\""));
     assert!(theme_json.contains("\"name\": \"Smoke App\""));
+    assert!(theme_json.contains("\"parent\": \"base_theme\""));
+
+    let expected_theme_path = fs::canonicalize(&theme_path).unwrap_or(theme_path);
+    let editor_log = env.read_log("theme-editor.log");
+    assert!(
+        editor_log.contains(expected_theme_path.display().to_string().as_str()),
+        "theme editor log missing {}: {editor_log}",
+        expected_theme_path.display()
+    );
+}
+
+#[test]
+fn theme_command_opens_an_explicit_file_without_rewriting_it() {
+    let env = TestEnv::new();
+    let theme_path = env
+        .bundle_root()
+        .join("lib")
+        .join("keyos")
+        .join("sdk")
+        .join("crates")
+        .join("foundation-themes")
+        .join("themes")
+        .join("base_theme.json");
+    let before = fs::read_to_string(&theme_path).unwrap();
+
+    let theme = env.command().arg("theme").arg(&theme_path).output().unwrap();
+    assert!(theme.status.success(), "theme failed: {}", stderr(&theme));
+    assert_eq!(fs::read_to_string(&theme_path).unwrap(), before);
 
     let expected_theme_path = fs::canonicalize(&theme_path).unwrap_or(theme_path);
     let editor_log = env.read_log("theme-editor.log");
@@ -373,12 +401,21 @@ impl TestEnv {
 
         fs::create_dir_all(home.join(".foundation").join("plugins")).unwrap();
         fs::create_dir_all(bundle.join("lib").join("keyos")).unwrap();
+        let themes_dir = bundle
+            .join("lib")
+            .join("keyos")
+            .join("sdk")
+            .join("crates")
+            .join("foundation-themes")
+            .join("themes");
+        fs::create_dir_all(&themes_dir).unwrap();
         fs::create_dir_all(bundle.join("ui").join("ui")).unwrap();
         fs::create_dir_all(bundle.join("resources").join("icons")).unwrap();
         fs::create_dir_all(bundle.join("target").join("apps")).unwrap();
         link(fake_bin, &bundle.join("bin"));
         fs::write(bundle.join("flake.nix"), "{}").unwrap();
         fs::write(bundle.join("lib").join("keyos").join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::write(themes_dir.join("base_theme.json"), r#"{"id":"base_theme","name":"Base Theme"}"#).unwrap();
         fs::write(bundle.join("ui").join("ui").join("placeholder.slint"), "// ui\n").unwrap();
         fs::write(bundle.join("ui").join("ui").join("theme.slint"), "// theme\n").unwrap();
         fs::write(bundle.join("resources").join("icons").join("loader.svg"), "<svg></svg>\n").unwrap();

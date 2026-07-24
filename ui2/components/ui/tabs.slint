@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { TabsTheme } from "tabs_theme.slint";
+import {
+    TabsTheme,
+    TabsThemeVariant,
+    TabsState,
+    TabsVariantProps,
+    TabsSizeProps,
+} from "@theme/tabs_theme.slint";
 
 export enum TabsVariant {
     solid,
@@ -38,11 +44,12 @@ component TabItem inherits Rectangle {
     in property <TabsColor> tab-color: TabsColor.default;
     in property <bool> force-focused: false;
     in property <bool> force-pressed: false;
-    in property <string> font-family: TabsTheme.size(root.size).font-family;
-    in property <length> font-size: TabsTheme.size(root.size).font-size;
-    in property <length> control-height: TabsTheme.size(root.size).control-height;
-    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
-    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-height: theme-size.control-height;
+    in property <length> tab-padding-horizontal: theme-size.tab-padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    property <TabsSizeProps> theme-size: TabsTheme.size(root.size);
     in property <length> corner-radius: default-corner-radius();
 
     out property <bool> has-focus: focus-scope.has-focus;
@@ -53,7 +60,8 @@ component TabItem inherits Rectangle {
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
-    in property <color> item-background: root.selected ? root.selected-background() : root.pressed-item ? root.pressed-background() : transparent;
+    in property <color> item-background: root.selected ? root.selected-background() : transparent;
+    in property <color> pressed-item-background: root.pressed-background();
     in property <length> item-border-width: root.selected && root.variant == TabsVariant.bordered ? 1px : root.focused-item && root.variant != TabsVariant.underlined ? 2px : 0px;
     in property <color> item-border-color: root.focused-item && root.variant != TabsVariant.underlined ? root.accent-color().with-alpha(Theme.is-dark ? 0.9 : 0.7) : root.selected && root.variant == TabsVariant.bordered ? Theme.palette-border.with-alpha(Theme.is-dark ? 0.9 : 1.0) : transparent;
     in property <color> item-foreground: root.disabled ? Theme.palette-muted.with-alpha(0.68) : root.selected ? root.selected-foreground() : root.base-foreground();
@@ -165,7 +173,7 @@ component TabItem inherits Rectangle {
     horizontal-stretch: root.full-width ? 1 : 0;
     border-radius: root.inner-radius;
     clip: true;
-    background: root.item-background;
+    background: root.pressed-item ? root.pressed-item-background : root.item-background;
     border-width: root.item-border-width;
     border-color: root.item-border-color;
 
@@ -289,11 +297,12 @@ component TabsList inherits Rectangle {
     in property <bool> full-width: false;
     in property <bool> force-focused: false;
     in property <bool> force-pressed: false;
-    in property <string> font-family: TabsTheme.size(root.size).font-family;
-    in property <length> font-size: TabsTheme.size(root.size).font-size;
-    in property <length> control-height: TabsTheme.size(root.size).control-height;
-    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
-    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-height: theme-size.control-height;
+    in property <length> tab-padding-horizontal: theme-size.tab-padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    property <TabsSizeProps> theme-size: TabsTheme.size(root.size);
     in property <length> tab-gap: default-tab-gap();
     in property <length> list-padding: default-list-padding();
     in property <length> corner-radius: default-border-radius();
@@ -304,6 +313,12 @@ component TabsList inherits Rectangle {
     in property <length> list-border-width: root.variant == TabsVariant.bordered || root.variant == TabsVariant.solid ? 1px : 0px;
     in property <color> list-stroke-color: list-border-color();
     in property <color> list-edge-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.88 : 1.0);
+    in property <color> item-background: Theme.palette-background;
+    in property <color> pressed-item-background: Theme.palette-secondary-pressed;
+    in property <color> item-border-color: Theme.palette-border;
+    in property <length> item-border-width: 0px;
+    in property <color> item-foreground: Theme.palette-foreground;
+    in property <color> indicator-color: Theme.palette-foreground;
 
     callback select-requested(int, string);
 
@@ -415,6 +430,12 @@ component TabsList inherits Rectangle {
             tab-padding-horizontal: root.tab-padding-horizontal;
             icon-size: root.icon-size;
             corner-radius: root.corner-radius;
+            item-background: root.active-index == index ? root.item-background : transparent;
+            pressed-item-background: root.pressed-item-background;
+            item-border-color: root.active-index == index ? root.item-border-color : transparent;
+            item-border-width: root.active-index == index ? root.item-border-width : 0px;
+            item-foreground: root.active-index == index ? root.item-foreground : Theme.palette-muted;
+            indicator-color: root.indicator-color;
             activated => {
                 if (root.active-index != index) {
                     root.selected-index = index;
@@ -447,6 +468,12 @@ component TabsList inherits Rectangle {
             tab-padding-horizontal: root.tab-padding-horizontal;
             icon-size: root.icon-size;
             corner-radius: root.corner-radius;
+            item-background: root.active-index == index ? root.item-background : transparent;
+            pressed-item-background: root.pressed-item-background;
+            item-border-color: root.active-index == index ? root.item-border-color : transparent;
+            item-border-width: root.active-index == index ? root.item-border-width : 0px;
+            item-foreground: root.active-index == index ? root.item-foreground : Theme.palette-muted;
+            indicator-color: root.indicator-color;
             activated => {
                 if (root.active-index != index) {
                     root.selected-index = index;
@@ -525,16 +552,31 @@ export component Tabs {
     in-out property <int> selected-index: 0;
     in property <bool> disabled: false;
 
-    in property <string> font-family: TabsTheme.size(root.size).font-family;
-    in property <length> font-size: TabsTheme.size(root.size).font-size;
-    in property <length> control-height: TabsTheme.size(root.size).control-height;
-    in property <length> tab-padding-horizontal: TabsTheme.size(root.size).tab-padding-horizontal;
-    in property <length> icon-size: TabsTheme.size(root.size).icon-size;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-height: theme-size.control-height;
+    in property <length> tab-padding-horizontal: theme-size.tab-padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    property <TabsSizeProps> theme-size: TabsTheme.size(root.size);
     in property <length> tab-gap: root.variant == TabsVariant.underlined ? (root.actual-vertical ? 6px : 12px) : 2px;
     in property <length> list-padding: root.variant == TabsVariant.underlined ? 0px : 4px;
     in property <length> panel-padding: 20px;
     in property <length> panel-min-height: root.size == ControlSize.sm ? 112px : root.size == ControlSize.lg ? 160px : 128px;
     in property <length> border-radius: root.size == ControlSize.sm ? 20px : root.size == ControlSize.lg ? 28px : 24px;
+    in property <color> item-background: root.theme-style.item-background;
+    in property <color> pressed-item-background: root.pressed-theme-style.item-background;
+    in property <color> item-border-color: root.theme-style.item-border-color;
+    in property <length> item-border-width: root.theme-style.item-border-width;
+    in property <color> item-foreground: root.theme-style.item-foreground;
+    in property <color> indicator-color: root.theme-style.indicator-color;
+    in property <color> list-background-color: root.theme-style.list-background-color;
+    in property <length> list-border-width: root.theme-style.list-border-width;
+    in property <color> list-stroke-color: root.theme-style.list-stroke-color;
+    in property <color> list-edge-color: root.theme-style.list-edge-color;
+    in property <color> panel-background: root.theme-style.panel-background;
+    in property <color> panel-foreground: root.theme-style.panel-foreground;
+    in property <color> panel-border-color: root.theme-style.panel-border-color;
+    in property <length> panel-border-width: root.theme-style.panel-border-width;
 
     in property <bool> force-focused: false;
     in property <bool> force-pressed: false;
@@ -551,6 +593,14 @@ export component Tabs {
     property <length> panel-gap: root.show-panel ? 12px : 0px;
     property <int> active-index:
         root.options.length > 0 ? max(0, min(root.selected-index, root.options.length - 1)) : 0;
+    property <TabsThemeVariant> theme-variant:
+        root.variant == TabsVariant.bordered ? TabsThemeVariant.bordered : root.variant == TabsVariant.light ? TabsThemeVariant.light : root.variant == TabsVariant.underlined ? TabsThemeVariant.underlined : TabsThemeVariant.solid;
+    property <TabsState> theme-state:
+        root.disabled ? TabsState.disabled : root.force-pressed ? TabsState.pressed : root.force-focused ? TabsState.focused : TabsState.normal;
+    property <TabsVariantProps> theme-style:
+        TabsTheme.style(root.theme-variant, root.theme-state);
+    property <TabsVariantProps> pressed-theme-style:
+        TabsTheme.style(root.theme-variant, TabsState.pressed);
 
     preferred-width: root.actual-vertical ? 520px : 360px;
     preferred-height: root.actual-vertical ? max(root.list-extent, root.show-panel ? root.actual-panel-min-height : root.list-extent) : root.list-extent + root.panel-gap + (root.show-panel ? root.actual-panel-min-height : 0px);
@@ -581,6 +631,16 @@ export component Tabs {
             tab-gap: root.tab-gap;
             list-padding: root.list-padding;
             corner-radius: root.border-radius;
+            item-background: root.item-background;
+            pressed-item-background: root.pressed-item-background;
+            item-border-color: root.item-border-color;
+            item-border-width: root.item-border-width;
+            item-foreground: root.item-foreground;
+            indicator-color: root.indicator-color;
+            list-background-color: root.list-background-color;
+            list-border-width: root.list-border-width;
+            list-stroke-color: root.list-stroke-color;
+            list-edge-color: root.list-edge-color;
             select-requested(index, label) => {
                 root.changed(index, label);
             }
@@ -596,6 +656,10 @@ export component Tabs {
             panel-padding: root.panel-padding;
             panel-min-height: root.panel-min-height;
             corner-radius: root.border-radius;
+            panel-background: root.panel-background;
+            panel-foreground: root.panel-foreground;
+            panel-border-color: root.panel-border-color;
+            panel-border-width: root.panel-border-width;
         }
     }
 
@@ -625,6 +689,16 @@ export component Tabs {
             tab-gap: root.tab-gap;
             list-padding: root.list-padding;
             corner-radius: root.border-radius;
+            item-background: root.item-background;
+            pressed-item-background: root.pressed-item-background;
+            item-border-color: root.item-border-color;
+            item-border-width: root.item-border-width;
+            item-foreground: root.item-foreground;
+            indicator-color: root.indicator-color;
+            list-background-color: root.list-background-color;
+            list-border-width: root.list-border-width;
+            list-stroke-color: root.list-stroke-color;
+            list-edge-color: root.list-edge-color;
             select-requested(index, label) => {
                 root.changed(index, label);
             }
@@ -639,6 +713,10 @@ export component Tabs {
             panel-padding: root.panel-padding;
             panel-min-height: root.panel-min-height;
             corner-radius: root.border-radius;
+            panel-background: root.panel-background;
+            panel-foreground: root.panel-foreground;
+            panel-border-color: root.panel-border-color;
+            panel-border-width: root.panel-border-width;
         }
     }
 }

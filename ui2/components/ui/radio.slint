@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { RadioTheme } from "radio_theme.slint";
+import {
+    RadioTheme,
+    RadioVariantProps,
+    RadioSizeProps,
+    RadioState,
+} from "@theme/radio_theme.slint";
 
 export component Radio {
     in property <string> label: "";
@@ -11,21 +16,21 @@ export component Radio {
     in-out property <bool> checked: false;
     in property <bool> disabled: false;
     in property <bool> manage-checked-state: true;
-    in property <string> font-family: RadioTheme.size(root.size).font-family;
-    in property <length> font-size: RadioTheme.size(root.size).font-size;
-    in property <length> control-size: RadioTheme.size(root.size).control-size;
-    in property <length> row-height: RadioTheme.size(root.size).row-height;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-size: theme-size.control-size;
+    in property <length> row-height: theme-size.row-height;
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
-    in property <length> description-font-size: Theme.font-size-helper;
-    in property <color> accent-color: root.disabled ? Theme.palette-muted : Theme.palette-primary;
-    in property <color> box-background: Theme.palette-surface;
-    in property <color> box-border-color: root.checked ? root.accent-color : Theme.palette-border;
-    in property <length> box-border-width: root.checked ? 2px : 1px;
-    in property <color> dot-color: root.accent-color;
-    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
-    in property <color> description-color: Theme.palette-muted;
+    in property <length> description-font-size: theme-size.description-font-size;
+    in property <color> accent-color: theme-style.accent-color;
+    in property <color> box-background: theme-style.box-background;
+    in property <color> box-border-color: root.checked ? root.accent-color : theme-style.box-border-color;
+    in property <length> box-border-width: root.checked ? 2px : theme-style.box-border-width;
+    in property <color> dot-color: theme-style.dot-color;
+    in property <color> label-color: theme-style.label-color;
+    in property <color> description-color: theme-style.description-color;
 
     callback changed(bool);
 
@@ -33,6 +38,9 @@ export component Radio {
     property <length> actual-font-size: root.font-size;
     property <length> actual-control-size: root.control-size;
     property <length> actual-row-height: root.row-height;
+    property <RadioState> current-state: root.disabled ? RadioState.disabled : RadioState.normal;
+    property <RadioVariantProps> theme-style: RadioTheme.style(root.current-state);
+    property <RadioSizeProps> theme-size: RadioTheme.size(root.size);
 
     preferred-width: content-row.preferred-width;
     preferred-height: max(actual-row-height, text-column.preferred-height);

@@ -37,7 +37,7 @@ export global UISize {
 }
 
 // Button style/size structs are generated into button_theme.slint
-// (ButtonVariantProps / ButtonSizeProps) from defaults/plugins/button.json.
+// (ButtonVariantProps / ButtonSizeProps) from defaults/components/button.schema.json.
 
 export global Images {
     pure callback image(string) -> image;
@@ -126,7 +126,7 @@ export global Theme {
     // These mirror the global token set (font.*, fontSize.*, controlSize.*,
     // iconSize.*, radius.*, spacing.*, ...) from the active theme. Rust pushes
     // the resolved (active-scheme) values at startup; the defaults below match
-    // the built-in default theme so the global is sensible before the first
+    // Base Theme so the global is sensible before the first
     // apply. Per-component values (e.g. checkbox's own control-size literal)
     // come from per-component size structs, NOT from these shared tokens.
 
@@ -135,21 +135,39 @@ export global Theme {
     in-out property <string> font-secondary: "Montserrat";
     in-out property <string> font-tertiary: "Montserrat";
 
-    // Font scale (fontSize.sm/md/lg) — distinct from the role-based
+    // Font scale (fontSize.*) — distinct from the role-based
     // font-size-{title,body,subtitle,label,helper} above.
+    in-out property <length> font-size-xs: 12px;
+    in-out property <length> font-size-caption: 13px;
     in-out property <length> font-size-sm: 20px;
     in-out property <length> font-size-md: 22px;
     in-out property <length> font-size-lg: 24px;
 
-    // Font weights (fontWeight.normal/medium/bold)
+    // Font weights (fontWeight.normal/medium/semibold/bold)
     in-out property <int> font-weight-normal: 400;
     in-out property <int> font-weight-medium: 500;
+    in-out property <int> font-weight-semibold: 600;
     in-out property <int> font-weight-bold: 700;
+
+    // Border widths (borderWidth.none/sm/focus)
+    in-out property <length> border-width-none: 0px;
+    in-out property <length> border-width-sm: 1px;
+    in-out property <length> border-width-focus: 2px;
 
     // Control sizing — row / touch-target heights (controlSize.sm/md/lg)
     in-out property <length> control-size-sm: 48px;
     in-out property <length> control-size-md: 56px;
     in-out property <length> control-size-lg: 64px;
+
+    // Choice controls — checkbox/radio glyph box sizes (choiceControlSize.sm/md/lg)
+    in-out property <length> choice-control-size-sm: 24px;
+    in-out property <length> choice-control-size-md: 28px;
+    in-out property <length> choice-control-size-lg: 32px;
+
+    // Switch geometry — switch track height and knob diameter (switchSize.sm/md/lg)
+    in-out property <length> switch-size-sm: 20px;
+    in-out property <length> switch-size-md: 24px;
+    in-out property <length> switch-size-lg: 28px;
 
     // Icon sizing (iconSize.sm/md/lg)
     in-out property <length> icon-size-sm: 20px;

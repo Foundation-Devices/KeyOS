@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "Button",
   "variants": [
     "primary",
@@ -178,34 +179,34 @@
       "max": 900,
       "defaults": {
         "primary": {
-          "normal": 500,
-          "focused": 500,
-          "pressed": 500,
-          "disabled": 500
+          "normal": "fontWeight.medium",
+          "focused": "fontWeight.medium",
+          "pressed": "fontWeight.medium",
+          "disabled": "fontWeight.medium"
         },
         "secondary": {
-          "normal": 500,
-          "focused": 500,
-          "pressed": 500,
-          "disabled": 500
+          "normal": "fontWeight.medium",
+          "focused": "fontWeight.medium",
+          "pressed": "fontWeight.medium",
+          "disabled": "fontWeight.medium"
         },
         "tertiary": {
-          "normal": 500,
-          "focused": 500,
-          "pressed": 500,
-          "disabled": 500
+          "normal": "fontWeight.medium",
+          "focused": "fontWeight.medium",
+          "pressed": "fontWeight.medium",
+          "disabled": "fontWeight.medium"
         },
         "ghost": {
-          "normal": 500,
-          "focused": 500,
-          "pressed": 500,
-          "disabled": 500
+          "normal": "fontWeight.medium",
+          "focused": "fontWeight.medium",
+          "pressed": "fontWeight.medium",
+          "disabled": "fontWeight.medium"
         },
         "danger": {
-          "normal": 500,
-          "focused": 500,
-          "pressed": 500,
-          "disabled": 500
+          "normal": "fontWeight.medium",
+          "focused": "fontWeight.medium",
+          "pressed": "fontWeight.medium",
+          "disabled": "fontWeight.medium"
         }
       }
     },
@@ -258,34 +259,34 @@
       "step": 1,
       "defaults": {
         "primary": {
-          "normal": 4,
-          "focused": 4,
-          "pressed": 4,
-          "disabled": 4
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "secondary": {
-          "normal": 4,
-          "focused": 4,
-          "pressed": 4,
-          "disabled": 4
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "tertiary": {
-          "normal": 4,
-          "focused": 4,
-          "pressed": 4,
-          "disabled": 4
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "ghost": {
-          "normal": 4,
-          "focused": 4,
-          "pressed": 4,
-          "disabled": 4
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "danger": {
-          "normal": 4,
-          "focused": 4,
-          "pressed": 4,
-          "disabled": 4
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         }
       }
     }
@@ -346,9 +347,9 @@
       "max": 48,
       "step": 2,
       "defaults": {
-        "default": 24,
-        "sm": 20,
-        "lg": 28
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
       }
     },
     {

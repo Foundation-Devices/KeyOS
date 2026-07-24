@@ -1,10 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from menu_item.json by foundation theme tooling — do not edit by hand.
+// GENERATED from menu_item.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum MenuItemState {
+    normal,
+    pressed,
+    disabled,
+}
+
+export struct MenuItemVariantProps {
+    label-color: color,
+    accent-color: color,
+    secondary-color: color,
+    label-font-weight: int,
+    subtitle-font-weight: int,
+    trailing-font-weight: int,
+}
 
 export struct MenuItemSizeProps {
     font-family: string,
@@ -12,38 +27,52 @@ export struct MenuItemSizeProps {
     item-height: length,
     padding-horizontal: length,
     icon-size: length,
+    subtitle-font-size: length,
+    trailing-font-size: length,
 }
 
 export global MenuItemTheme {
-    in-out property <MenuItemSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        item-height: 56px,
-        padding-horizontal: Theme.control-padding-inline-sm,
-        icon-size: Theme.icon-size-sm,
-    };
-    in-out property <MenuItemSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        item-height: 64px,
-        padding-horizontal: Theme.control-padding-inline-md,
-        icon-size: Theme.icon-size-md,
-    };
-    in-out property <MenuItemSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        item-height: 72px,
-        padding-horizontal: Theme.control-padding-inline-lg,
-        icon-size: Theme.icon-size-lg,
-    };
-
+    public pure function style(st: MenuItemState) -> MenuItemVariantProps {
+        return {
+            label-color: Theme.color-foreground,
+            accent-color: Theme.color-primary,
+            secondary-color: Theme.color-muted,
+            label-font-weight: Theme.font-weight-medium,
+            subtitle-font-weight: Theme.font-weight-medium,
+            trailing-font-weight: Theme.font-weight-medium,
+        };
+    }
     public pure function size(s: ControlSize) -> MenuItemSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                item-height: 56px,
+                padding-horizontal: Theme.control-padding-inline-sm,
+                icon-size: Theme.icon-size-sm,
+                subtitle-font-size: 14px,
+                trailing-font-size: 14px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                item-height: 64px,
+                padding-horizontal: Theme.control-padding-inline-md,
+                icon-size: Theme.icon-size-md,
+                subtitle-font-size: 14px,
+                trailing-font-size: 14px,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            item-height: 72px,
+            padding-horizontal: Theme.control-padding-inline-lg,
+            icon-size: Theme.icon-size-lg,
+            subtitle-font-size: 14px,
+            trailing-font-size: 14px,
+        };
     }
 }

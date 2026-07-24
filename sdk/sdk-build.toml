@@ -121,11 +121,11 @@ dest = "lib/keyos/api/bt"
 source = "../ui2/components"
 dest = "lib/keyos/ui2/components"
 
-# Plugin component schemas (button.json, …) for the per-app theme-compile step:
+# Component schemas (button.schema.json, ...) for the per-app theme-compile step:
 # `foundation build` generates `<key>_theme.slint` from these + the app theme.
 [[copy]]
-source = "../ui2/theme-editor/defaults/plugins"
-dest = "lib/keyos/ui2/theme-editor/defaults/plugins"
+source = "../ui2/theme-editor/defaults/components"
+dest = "lib/keyos/ui2/theme-editor/defaults/components"
 
 [[copy]]
 source = "crates/foundation-themes"

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ButtonState, ControlSize } from "theme.slint";
-import { IconButtonTheme } from "icon_button_theme.slint";
+import {
+    IconButtonTheme,
+    IconButtonSizeProps,
+} from "@theme/icon_button_theme.slint";
 
 export enum IconButtonVariant {
     default,
@@ -114,8 +117,9 @@ export component IconButton {
     property <length> themed-border-width:
         current-state == ButtonState.focused ? 2px : root.variant == IconButtonVariant.outlined ? 1px : 0px;
     property <float> themed-opacity: root.disabled ? 0.5 : 1.0;
-    property <length> themed-control-size: IconButtonTheme.size(root.ctrl-size()).control-size;
-    property <length> themed-icon-size: IconButtonTheme.size(root.ctrl-size()).icon-size;
+    property <IconButtonSizeProps> theme-size: IconButtonTheme.size(root.ctrl-size());
+    property <length> themed-control-size: theme-size.control-size;
+    property <length> themed-icon-size: theme-size.icon-size;
     property <length> themed-touch-expansion: 4px;
 
     property <color> actual-background: root.background;

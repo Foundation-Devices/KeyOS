@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from button.json by foundation theme tooling — do not edit by hand.
+// GENERATED from button.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize, ButtonVariant, ButtonState } from "theme.slint";
@@ -27,282 +27,246 @@ export struct ButtonSizeProps {
 }
 
 export global ButtonTheme {
-    in-out property <ButtonVariantProps> primary-normal: {
-        background: Theme.color-primary,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> primary-focused: {
-        background: Theme.color-primary,
-        foreground: Theme.color-white,
-        border-color: Theme.color-primary-light,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> primary-pressed: {
-        background: Theme.color-primary-dark,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> primary-disabled: {
-        background: Theme.color-primary,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 0.5,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> secondary-normal: {
-        background: Theme.color-secondary,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> secondary-focused: {
-        background: Theme.color-secondary,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> secondary-pressed: {
-        background: Theme.color-secondary-dark,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> secondary-disabled: {
-        background: Theme.color-secondary,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 0.5,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> tertiary-normal: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-primary,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> tertiary-focused: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-primary,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> tertiary-pressed: {
-        background: Theme.color-primary-light,
-        foreground: Theme.color-primary,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> tertiary-disabled: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-primary,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 0.5,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> ghost-normal: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> ghost-focused: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-primary,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> ghost-pressed: {
-        background: Theme.color-foreground-light,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> ghost-disabled: {
-        background: Theme.color-transparent,
-        foreground: Theme.color-foreground,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 0.5,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> danger-normal: {
-        background: Theme.color-danger,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> danger-focused: {
-        background: Theme.color-danger,
-        foreground: Theme.color-white,
-        border-color: Theme.color-danger-light,
-        border-width: 2px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> danger-pressed: {
-        background: Theme.color-danger-dark,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 1,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonVariantProps> danger-disabled: {
-        background: Theme.color-danger,
-        foreground: Theme.color-white,
-        border-color: Theme.color-transparent,
-        border-width: 0px,
-        font-weight: 500,
-        opacity: 0.5,
-        touch-expansion: 4px,
-    };
-    in-out property <ButtonSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        padding-h: Theme.spacing-md,
-        padding-v: Theme.spacing-xs,
-        icon-size: 20px,
-        min-height: 52px,
-        border-radius: Theme.radius-default,
-    };
-    in-out property <ButtonSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        padding-h: Theme.spacing-lg,
-        padding-v: Theme.spacing-sm,
-        icon-size: 24px,
-        min-height: 60px,
-        border-radius: Theme.radius-default,
-    };
-    in-out property <ButtonSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        padding-h: Theme.spacing-xl,
-        padding-v: Theme.spacing-md,
-        icon-size: 28px,
-        min-height: 68px,
-        border-radius: Theme.radius-default,
-    };
-
     public pure function style(v: ButtonVariant, st: ButtonState) -> ButtonVariantProps {
         if v == ButtonVariant.primary {
             if st == ButtonState.focused {
-                return self.primary-focused;
+                return {
+                    background: Theme.color-primary,
+                    foreground: Theme.color-white,
+                    border-color: Theme.color-primary-light,
+                    border-width: 2px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.pressed {
-                return self.primary-pressed;
+                return {
+                    background: Theme.color-primary-dark,
+                    foreground: Theme.color-white,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.disabled {
-                return self.primary-disabled;
+                return {
+                    background: Theme.color-primary,
+                    foreground: Theme.color-white,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 0.5,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
-            return self.primary-normal;
+            return {
+                background: Theme.color-primary,
+                foreground: Theme.color-white,
+                border-color: Theme.color-transparent,
+                border-width: 0px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if v == ButtonVariant.secondary {
             if st == ButtonState.focused {
-                return self.secondary-focused;
+                return {
+                    background: Theme.color-secondary,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-primary,
+                    border-width: 2px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.pressed {
-                return self.secondary-pressed;
+                return {
+                    background: Theme.color-secondary-dark,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.disabled {
-                return self.secondary-disabled;
+                return {
+                    background: Theme.color-secondary,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 0.5,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
-            return self.secondary-normal;
+            return {
+                background: Theme.color-secondary,
+                foreground: Theme.color-foreground,
+                border-color: Theme.color-transparent,
+                border-width: 0px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if v == ButtonVariant.tertiary {
-            if st == ButtonState.focused {
-                return self.tertiary-focused;
-            }
             if st == ButtonState.pressed {
-                return self.tertiary-pressed;
+                return {
+                    background: Theme.color-primary-light,
+                    foreground: Theme.color-primary,
+                    border-color: Theme.color-primary,
+                    border-width: 2px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.disabled {
-                return self.tertiary-disabled;
+                return {
+                    background: Theme.color-transparent,
+                    foreground: Theme.color-primary,
+                    border-color: Theme.color-primary,
+                    border-width: 2px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 0.5,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
-            return self.tertiary-normal;
+            return {
+                background: Theme.color-transparent,
+                foreground: Theme.color-primary,
+                border-color: Theme.color-primary,
+                border-width: 2px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if v == ButtonVariant.ghost {
             if st == ButtonState.focused {
-                return self.ghost-focused;
+                return {
+                    background: Theme.color-transparent,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-primary,
+                    border-width: 2px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.pressed {
-                return self.ghost-pressed;
+                return {
+                    background: Theme.color-foreground-light,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
             if st == ButtonState.disabled {
-                return self.ghost-disabled;
+                return {
+                    background: Theme.color-transparent,
+                    foreground: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    border-width: 0px,
+                    font-weight: Theme.font-weight-medium,
+                    opacity: 0.5,
+                    touch-expansion: Theme.spacing-xs,
+                };
             }
-            return self.ghost-normal;
+            return {
+                background: Theme.color-transparent,
+                foreground: Theme.color-foreground,
+                border-color: Theme.color-transparent,
+                border-width: 0px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if st == ButtonState.focused {
-            return self.danger-focused;
+            return {
+                background: Theme.color-danger,
+                foreground: Theme.color-white,
+                border-color: Theme.color-danger-light,
+                border-width: 2px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if st == ButtonState.pressed {
-            return self.danger-pressed;
+            return {
+                background: Theme.color-danger-dark,
+                foreground: Theme.color-white,
+                border-color: Theme.color-transparent,
+                border-width: 0px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
         if st == ButtonState.disabled {
-            return self.danger-disabled;
+            return {
+                background: Theme.color-danger,
+                foreground: Theme.color-white,
+                border-color: Theme.color-transparent,
+                border-width: 0px,
+                font-weight: Theme.font-weight-medium,
+                opacity: 0.5,
+                touch-expansion: Theme.spacing-xs,
+            };
         }
-        return self.danger-normal;
+        return {
+            background: Theme.color-danger,
+            foreground: Theme.color-white,
+            border-color: Theme.color-transparent,
+            border-width: 0px,
+            font-weight: Theme.font-weight-medium,
+            opacity: 1,
+            touch-expansion: Theme.spacing-xs,
+        };
     }
-
     public pure function size(s: ControlSize) -> ButtonSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                padding-h: Theme.spacing-md,
+                padding-v: Theme.spacing-xs,
+                icon-size: Theme.icon-size-sm,
+                min-height: 52px,
+                border-radius: Theme.radius-default,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                padding-h: Theme.spacing-lg,
+                padding-v: Theme.spacing-sm,
+                icon-size: Theme.icon-size-md,
+                min-height: 60px,
+                border-radius: Theme.radius-default,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            padding-h: Theme.spacing-xl,
+            padding-v: Theme.spacing-md,
+            icon-size: Theme.icon-size-lg,
+            min-height: 68px,
+            border-radius: Theme.radius-default,
+        };
     }
 }

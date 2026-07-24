@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! slintthemegen — writes the shared default `<key>_theme.slint` files into
-//! `ui2/components/ui` from the plugin JSON schema (`defaults/plugins/*.json`).
+//! `ui2/components/ui` from the component schemas (`defaults/components/*.schema.json`).
 //!
 //! The emitter itself lives in `components::theme_gen` (shared with the
 //! `foundation build` per-app generator). This binary just loads every plugin
@@ -64,7 +64,7 @@ fn main() {
     let out_dir = out_dir.unwrap_or_else(|| PathBuf::from("ui2/components/ui"));
 
     // --check: verify the committed *_theme.slint match what the generator would
-    // emit from the current plugin schemas. CI guard against stale theme files.
+    // emit from the current component schemas. CI guard against stale theme files.
     if check {
         let mut stale = Vec::new();
         for (spec, plugin) in &plugins {
@@ -76,7 +76,7 @@ fn main() {
             }
         }
         if stale.is_empty() {
-            eprintln!("component theme files are up to date with the plugin schemas");
+            eprintln!("component theme files are up to date with the component schemas");
         } else {
             eprintln!("STALE component theme files (run `just gen-themes`): {}", stale.join(", "));
             std::process::exit(1);

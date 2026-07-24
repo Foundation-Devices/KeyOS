@@ -1,10 +1,27 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from card.json by foundation theme tooling — do not edit by hand.
+// GENERATED from card.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum CardState {
+    normal,
+}
+
+export struct CardVariantProps {
+    accent-color: color,
+    background: color,
+    border-color: color,
+    eyebrow-font-weight: int,
+    title-color: color,
+    title-font-weight: int,
+    subtitle-color: color,
+    body-color: color,
+    footer-divider-color: color,
+    footer-color: color,
+}
 
 export struct CardSizeProps {
     font-family: string,
@@ -12,14 +29,40 @@ export struct CardSizeProps {
     card-padding: length,
     icon-size: length,
     border-radius: length,
+    border-width: length,
+    eyebrow-font-size: length,
+    title-font-size: length,
+    subtitle-font-size: length,
+    footer-font-size: length,
 }
 
 export global CardTheme {
-    in-out property <CardSizeProps> size-default: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        card-padding: 20px,
-        icon-size: 24px,
-        border-radius: 24px,
-    };
+    public pure function style(st: CardState) -> CardVariantProps {
+        return {
+            accent-color: Theme.color-primary,
+            background: Theme.color-surface,
+            border-color: Theme.color-border,
+            eyebrow-font-weight: Theme.font-weight-bold,
+            title-color: Theme.color-foreground,
+            title-font-weight: Theme.font-weight-bold,
+            subtitle-color: Theme.color-muted,
+            body-color: Theme.color-foreground,
+            footer-divider-color: Theme.color-border,
+            footer-color: Theme.color-muted,
+        };
+    }
+    public pure function size() -> CardSizeProps {
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-md,
+            card-padding: 20px,
+            icon-size: Theme.icon-size-md,
+            border-radius: Theme.radius-default,
+            border-width: 1px,
+            eyebrow-font-size: 14px,
+            title-font-size: 14px,
+            subtitle-font-size: 14px,
+            footer-font-size: 14px,
+        };
+    }
 }

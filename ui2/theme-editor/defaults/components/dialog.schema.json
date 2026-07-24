@@ -1,5 +1,6 @@
 {
-  "component": "Toast",
+  "schemaVersion": 1,
+  "component": "Dialog",
   "variants": [
     "default"
   ],
@@ -17,9 +18,9 @@
       "name": "font-family",
       "displayName": "Font Family",
       "type": "string",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": "font.primary"
       }
@@ -28,9 +29,9 @@
       "name": "font-size",
       "displayName": "Font Size",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
         "default": "fontSize.md",
         "sm": "fontSize.sm",
@@ -38,55 +39,55 @@
       }
     },
     {
-      "name": "card-width",
-      "displayName": "Card Width",
+      "name": "panel-width",
+      "displayName": "Panel Width",
       "type": "float",
-      "min": 0.0,
-      "max": 512.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 960,
+      "step": 1,
       "defaults": {
-        "default": 360.0,
-        "sm": 300.0,
-        "lg": 420.0
+        "default": 420,
+        "sm": 360,
+        "lg": 480
       }
     },
     {
-      "name": "toast-padding",
-      "displayName": "Toast Padding",
+      "name": "panel-padding",
+      "displayName": "Panel Padding",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 14.0,
-        "sm": 12.0,
-        "lg": 16.0
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
       }
     },
     {
       "name": "icon-size",
       "displayName": "Icon Size",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 18.0,
-        "sm": 16.0,
-        "lg": 20.0
+        "default": "controlRadius.md",
+        "sm": "controlRadius.sm",
+        "lg": "controlRadius.lg"
       }
     },
     {
       "name": "border-radius",
       "displayName": "Border Radius",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 16.0,
-        "sm": 14.0,
-        "lg": 18.0
+        "default": "radius.default",
+        "sm": 20,
+        "lg": 28
       }
     }
   ]

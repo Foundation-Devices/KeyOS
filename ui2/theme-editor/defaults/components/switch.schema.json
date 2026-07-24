@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "component": "Switch",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "unchecked",
+    "checked",
+    "indeterminate",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "track-color",
+      "displayName": "Track Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "unchecked": "color.secondary",
+          "checked": "color.primary",
+          "indeterminate": "color.primary",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "knob-color",
+      "displayName": "Knob Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "unchecked": "color.background",
+          "checked": "color.background",
+          "indeterminate": "color.background",
+          "disabled": "color.background"
+        }
+      }
+    },
+    {
+      "name": "label-color",
+      "displayName": "Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "unchecked": "color.foreground",
+          "checked": "color.foreground",
+          "indeterminate": "color.foreground",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "description-color",
+      "displayName": "Description Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "unchecked": "color.muted",
+          "checked": "color.muted",
+          "indeterminate": "color.muted",
+          "disabled": "color.muted"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "track-height",
+      "displayName": "Track Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "switchSize.md",
+        "sm": "switchSize.sm",
+        "lg": "switchSize.lg"
+      }
+    },
+    {
+      "name": "knob-size",
+      "displayName": "Knob Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "switchSize.md",
+        "sm": "switchSize.sm",
+        "lg": "switchSize.lg"
+      }
+    },
+    {
+      "name": "description-font-size",
+      "displayName": "Description Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.helper"
+      }
+    },
+    {
+      "name": "row-height",
+      "displayName": "Row Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    }
+  ]
+}

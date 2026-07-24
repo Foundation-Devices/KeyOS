@@ -1,10 +1,30 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from dropdown.json by foundation theme tooling — do not edit by hand.
+// GENERATED from dropdown.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum DropdownThemeVariant {
+    default,
+    filled,
+    outlined,
+}
+
+export enum DropdownState {
+    normal,
+    focused,
+    disabled,
+}
+
+export struct DropdownVariantProps {
+    background: color,
+    foreground: color,
+    placeholder-color: color,
+    border-color: color,
+    border-color-error: color,
+}
 
 export struct DropdownSizeProps {
     border-width: length,
@@ -20,50 +40,64 @@ export struct DropdownSizeProps {
 }
 
 export global DropdownTheme {
-    in-out property <DropdownSizeProps> size-sm: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-sm,
-        padding-horizontal: Theme.control-padding-inline-sm,
-        padding-vertical: Theme.spacing-sm,
-        field-height: Theme.control-size-sm,
-        font-size: Theme.font-size-sm,
-        font-family: Theme.font-primary,
-        control-height: Theme.control-size-sm,
-        option-height: 56px,
-        icon-size: 20px,
-    };
-    in-out property <DropdownSizeProps> size-md: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-md,
-        padding-horizontal: Theme.control-padding-inline-md,
-        padding-vertical: 10px,
-        field-height: Theme.control-size-md,
-        font-size: Theme.font-size-md,
-        font-family: Theme.font-primary,
-        control-height: Theme.control-size-md,
-        option-height: 64px,
-        icon-size: 22px,
-    };
-    in-out property <DropdownSizeProps> size-lg: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-lg,
-        padding-horizontal: Theme.control-padding-inline-lg,
-        padding-vertical: Theme.spacing-md,
-        field-height: Theme.control-size-lg,
-        font-size: Theme.font-size-lg,
-        font-family: Theme.font-primary,
-        control-height: Theme.control-size-lg,
-        option-height: 72px,
-        icon-size: 24px,
-    };
-
+    public pure function style(v: DropdownThemeVariant, st: DropdownState) -> DropdownVariantProps {
+        if st == DropdownState.focused {
+            return {
+                background: Theme.color-surface,
+                foreground: Theme.color-primary,
+                placeholder-color: Theme.color-foreground-light,
+                border-color: Theme.color-primary,
+                border-color-error: Theme.color-danger,
+            };
+        }
+        return {
+            background: Theme.color-surface,
+            foreground: Theme.color-primary,
+            placeholder-color: Theme.color-foreground-light,
+            border-color: Theme.color-border,
+            border-color-error: Theme.color-danger,
+        };
+    }
     public pure function size(s: ControlSize) -> DropdownSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-sm,
+                padding-horizontal: Theme.control-padding-inline-sm,
+                padding-vertical: Theme.spacing-sm,
+                field-height: Theme.control-size-sm,
+                font-size: Theme.font-size-sm,
+                font-family: Theme.font-primary,
+                control-height: Theme.control-size-sm,
+                option-height: 56px,
+                icon-size: Theme.icon-size-sm,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-md,
+                padding-horizontal: Theme.control-padding-inline-md,
+                padding-vertical: 10px,
+                field-height: Theme.control-size-md,
+                font-size: Theme.font-size-md,
+                font-family: Theme.font-primary,
+                control-height: Theme.control-size-md,
+                option-height: 64px,
+                icon-size: 22px,
+            };
         }
-        return self.size-md;
+        return {
+            border-width: 1px,
+            border-radius: Theme.control-radius-lg,
+            padding-horizontal: Theme.control-padding-inline-lg,
+            padding-vertical: Theme.spacing-md,
+            field-height: Theme.control-size-lg,
+            font-size: Theme.font-size-lg,
+            font-family: Theme.font-primary,
+            control-height: Theme.control-size-lg,
+            option-height: 72px,
+            icon-size: Theme.icon-size-md,
+        };
     }
 }

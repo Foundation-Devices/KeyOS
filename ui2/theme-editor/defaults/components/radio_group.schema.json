@@ -1,5 +1,6 @@
 {
-  "component": "Radio",
+  "schemaVersion": 1,
+  "component": "RadioGroup",
   "variants": [
     "default"
   ],
@@ -18,9 +19,9 @@
       "name": "font-family",
       "displayName": "Font Family",
       "type": "string",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": "font.primary"
       }
@@ -29,9 +30,9 @@
       "name": "font-size",
       "displayName": "Font Size",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
         "default": "fontSize.md",
         "sm": "fontSize.sm",
@@ -42,26 +43,39 @@
       "name": "control-size",
       "displayName": "Control Size",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 28.0,
-        "sm": 24.0,
-        "lg": 32.0
+        "default": "choiceControlSize.md",
+        "sm": "choiceControlSize.sm",
+        "lg": "choiceControlSize.lg"
       }
     },
     {
       "name": "row-height",
       "displayName": "Row Height",
       "type": "float",
-      "min": 0.0,
-      "max": 160.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 160,
+      "step": 1,
       "defaults": {
         "default": "controlSize.md",
         "sm": "controlSize.sm",
         "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "item-gap",
+      "displayName": "Item Gap",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "spacing.md",
+        "sm": 10,
+        "lg": 14
       }
     }
   ]

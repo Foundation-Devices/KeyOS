@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "IconButton",
   "variants": [
     "default",
@@ -21,9 +22,9 @@
       "name": "background",
       "displayName": "Background",
       "type": "color",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": {
           "normal": "color.surface",
@@ -49,9 +50,9 @@
       "name": "icon-color",
       "displayName": "Icon Color",
       "type": "color",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": {
           "normal": "color.foreground",
@@ -77,9 +78,9 @@
       "name": "border-color",
       "displayName": "Border Color",
       "type": "color",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": {
           "normal": "color.transparent",
@@ -105,26 +106,26 @@
       "name": "button-opacity",
       "displayName": "Button Opacity",
       "type": "float",
-      "min": 0.0,
-      "max": 1.0,
+      "min": 0,
+      "max": 1,
       "step": 0.05,
       "defaults": {
         "default": {
-          "normal": 1.0,
-          "focused": 1.0,
-          "pressed": 1.0,
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
           "disabled": 0.5
         },
         "ghost": {
-          "normal": 1.0,
-          "focused": 1.0,
-          "pressed": 1.0,
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
           "disabled": 0.5
         },
         "outlined": {
-          "normal": 1.0,
-          "focused": 1.0,
-          "pressed": 1.0,
+          "normal": 1,
+          "focused": 1,
+          "pressed": 1,
           "disabled": 0.5
         }
       }
@@ -133,27 +134,27 @@
       "name": "touch-expansion",
       "displayName": "Touch Expansion",
       "type": "float",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": {
-          "normal": 4.0,
-          "focused": 4.0,
-          "pressed": 4.0,
-          "disabled": 4.0
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "ghost": {
-          "normal": 4.0,
-          "focused": 4.0,
-          "pressed": 4.0,
-          "disabled": 4.0
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         },
         "outlined": {
-          "normal": 4.0,
-          "focused": 4.0,
-          "pressed": 4.0,
-          "disabled": 4.0
+          "normal": "spacing.xs",
+          "focused": "spacing.xs",
+          "pressed": "spacing.xs",
+          "disabled": "spacing.xs"
         }
       }
     }
@@ -163,20 +164,20 @@
       "name": "border-width",
       "displayName": "Border Width",
       "type": "float",
-      "min": 0.0,
-      "max": 256.0,
+      "min": 0,
+      "max": 256,
       "step": 0.5,
       "defaults": {
-        "default": 1.0
+        "default": 1
       }
     },
     {
       "name": "border-radius",
       "displayName": "Border Radius",
       "type": "float",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": "radius.default"
       }
@@ -185,9 +186,9 @@
       "name": "control-size",
       "displayName": "Control Size",
       "type": "float",
-      "min": 0.0,
-      "max": 160.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 160,
+      "step": 1,
       "defaults": {
         "default": "controlSize.md",
         "sm": "controlSize.sm",
@@ -198,9 +199,9 @@
       "name": "icon-size",
       "displayName": "Icon Size",
       "type": "float",
-      "min": 0.0,
-      "max": 256.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 256,
+      "step": 1,
       "defaults": {
         "default": "iconSize.md",
         "sm": "iconSize.sm",

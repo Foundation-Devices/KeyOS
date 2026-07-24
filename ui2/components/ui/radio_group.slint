@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { RadioGroupTheme } from "radio_group_theme.slint";
+import {
+    RadioGroupTheme,
+    RadioGroupSizeProps,
+} from "@theme/radio_group_theme.slint";
 import { Radio } from "radio.slint";
 
 export component RadioGroup inherits Rectangle {
@@ -12,11 +15,12 @@ export component RadioGroup inherits Rectangle {
     in-out property <int> selected-index: 0;
     in property <ControlSize> size: ControlSize.md;
     in property <bool> disabled: false;
-    in property <string> font-family: RadioGroupTheme.size(root.size).font-family;
-    in property <length> font-size: RadioGroupTheme.size(root.size).font-size;
-    in property <length> control-size: RadioGroupTheme.size(root.size).control-size;
-    in property <length> row-height: RadioGroupTheme.size(root.size).row-height;
-    in property <length> item-gap: RadioGroupTheme.size(root.size).item-gap;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-size: theme-size.control-size;
+    in property <length> row-height: theme-size.row-height;
+    in property <length> item-gap: theme-size.item-gap;
+    property <RadioGroupSizeProps> theme-size: RadioGroupTheme.size(root.size);
 
     callback changed(int, string);
 

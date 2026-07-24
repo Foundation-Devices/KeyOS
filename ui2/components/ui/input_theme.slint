@@ -1,10 +1,30 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from input.json by foundation theme tooling — do not edit by hand.
+// GENERATED from input.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum InputThemeVariant {
+    default,
+    filled,
+    outlined,
+}
+
+export enum InputState {
+    normal,
+    focused,
+    disabled,
+}
+
+export struct InputVariantProps {
+    background: color,
+    foreground: color,
+    placeholder-color: color,
+    border-color: color,
+    border-color-error: color,
+}
 
 export struct InputSizeProps {
     border-width: length,
@@ -17,41 +37,55 @@ export struct InputSizeProps {
 }
 
 export global InputTheme {
-    in-out property <InputSizeProps> size-sm: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-sm,
-        padding-horizontal: Theme.control-padding-inline-sm,
-        padding-vertical: Theme.spacing-sm,
-        field-height: Theme.control-size-sm,
-        font-size: Theme.font-size-sm,
-        font-family: Theme.font-primary,
-    };
-    in-out property <InputSizeProps> size-md: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-md,
-        padding-horizontal: Theme.control-padding-inline-md,
-        padding-vertical: 10px,
-        field-height: Theme.control-size-md,
-        font-size: Theme.font-size-md,
-        font-family: Theme.font-primary,
-    };
-    in-out property <InputSizeProps> size-lg: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-lg,
-        padding-horizontal: Theme.control-padding-inline-lg,
-        padding-vertical: Theme.spacing-md,
-        field-height: Theme.control-size-lg,
-        font-size: Theme.font-size-lg,
-        font-family: Theme.font-primary,
-    };
-
+    public pure function style(v: InputThemeVariant, st: InputState) -> InputVariantProps {
+        if st == InputState.focused {
+            return {
+                background: Theme.color-surface,
+                foreground: Theme.color-primary,
+                placeholder-color: Theme.color-foreground-light,
+                border-color: Theme.color-primary,
+                border-color-error: Theme.color-danger,
+            };
+        }
+        return {
+            background: Theme.color-surface,
+            foreground: Theme.color-primary,
+            placeholder-color: Theme.color-foreground-light,
+            border-color: Theme.color-border,
+            border-color-error: Theme.color-danger,
+        };
+    }
     public pure function size(s: ControlSize) -> InputSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-sm,
+                padding-horizontal: Theme.control-padding-inline-sm,
+                padding-vertical: Theme.spacing-sm,
+                field-height: Theme.control-size-sm,
+                font-size: Theme.font-size-sm,
+                font-family: Theme.font-primary,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-md,
+                padding-horizontal: Theme.control-padding-inline-md,
+                padding-vertical: 10px,
+                field-height: Theme.control-size-md,
+                font-size: Theme.font-size-md,
+                font-family: Theme.font-primary,
+            };
         }
-        return self.size-md;
+        return {
+            border-width: 1px,
+            border-radius: Theme.control-radius-lg,
+            padding-horizontal: Theme.control-padding-inline-lg,
+            padding-vertical: Theme.spacing-md,
+            field-height: Theme.control-size-lg,
+            font-size: Theme.font-size-lg,
+            font-family: Theme.font-primary,
+        };
     }
 }

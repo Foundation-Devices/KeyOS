@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "Icon",
   "variants": [
     "default"
@@ -28,13 +29,13 @@
       "name": "icon-size",
       "displayName": "Icon Size",
       "type": "float",
-      "min": 0.0,
-      "max": 96.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 96,
+      "step": 1,
       "defaults": {
-        "default": 20.0,
-        "sm": 16.0,
-        "lg": 24.0
+        "default": "iconSize.sm",
+        "sm": 16,
+        "lg": "iconSize.md"
       }
     }
   ]

@@ -24,6 +24,8 @@ use clap::{Args, Subcommand};
 use foundation_core::{AppConfig, SdkRoot};
 
 const APP_THEME_ID: &str = "app_theme";
+const BASE_THEME_ID: &str = "base_theme";
+const LEGACY_DEFAULT_THEME_ID: &str = "default_theme";
 
 #[derive(Args)]
 pub struct ThemesArgs {
@@ -55,8 +57,8 @@ pub struct ThemesNewArgs {
     /// Name of the new theme
     pub name: String,
 
-    /// Base theme to inherit from (default: default_theme)
-    #[arg(long, value_name = "BASE", default_value = "default_theme")]
+    /// Base theme to inherit from (default: base_theme)
+    #[arg(long, value_name = "BASE", default_value = "base_theme")]
     pub from: String,
 }
 
@@ -80,17 +82,6 @@ fn rust_dir() -> Result<PathBuf> { Ok(themes_dir()?.join("rust")) }
 /// Directory of the SDK's bundled base theme JSON.
 pub(crate) fn sdk_themes_dir(sdk: &SdkRoot) -> PathBuf {
     sdk.keyos_root().join("sdk").join("crates").join("foundation-themes").join("themes")
-}
-
-/// Theme JSON source directories in precedence order: the user cache (where
-/// `themes new` writes) then the SDK built-ins. The user dir may not exist yet.
-pub fn theme_source_dirs(sdk: &SdkRoot) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Ok(dir) = json_dir() {
-        dirs.push(dir);
-    }
-    dirs.push(sdk_themes_dir(sdk));
-    dirs
 }
 
 /// Copy any base theme JSON the user doesn't already have into `~/.foundation/themes/json`.
@@ -127,7 +118,7 @@ fn seed_base_themes(sdk: &SdkRoot, json_dir: &Path) -> Result<()> {
 
 /// Optional per-app component-theme `.slint` generation, passed alongside the
 /// Rust theme compile. When present, the compiler also emits
-/// `<key>_theme.slint` into `slint_dir` from the plugin schemas in `plugin_dir`
+/// `<key>_theme.slint` into `slint_dir` from the component schemas in `plugin_dir`
 /// plus the app theme's `components.<key>` overrides.
 pub(crate) struct SlintThemeGen<'a> {
     pub plugin_dir: &'a Path,
@@ -149,9 +140,11 @@ pub(crate) fn run_compiler(
     let rust = rust_dir.display().to_string();
 
     let mut args: Vec<String> = vec!["--json-dir".into(), json, "--rust-dir".into(), rust];
+    let plugin_dir =
+        slint.as_ref().map(|gen| gen.plugin_dir.to_path_buf()).unwrap_or_else(|| sdk.plugin_schema_path());
+    args.push("--plugin-dir".into());
+    args.push(plugin_dir.display().to_string());
     if let Some(gen) = slint {
-        args.push("--plugin-dir".into());
-        args.push(gen.plugin_dir.display().to_string());
         args.push("--slint-dir".into());
         args.push(gen.slint_dir.display().to_string());
         args.push("--app-theme-json".into());
@@ -198,24 +191,6 @@ pub fn project_theme_slint_dir(project_root: &Path) -> PathBuf {
     project_root.join("target").join("foundation").join("themes").join("slint")
 }
 
-/// Ensure the generated theme Rust exists and is up to date, returning the
-/// rust directory so `build`/`sim` can point `FOUNDATION_THEMES_RUST_DIR` at it.
-///
-/// Regenerates when the `rust/` index is missing or any source JSON is newer
-/// than it, so app builds always pick up edited themes without a manual
-/// `foundation themes build`.
-fn ensure_built_in(sdk: &SdkRoot, themes_dir: &Path) -> Result<PathBuf> {
-    let json_dir = themes_dir.join("json");
-    let rust_dir = themes_dir.join("rust");
-    seed_base_themes(sdk, &json_dir)?;
-
-    if needs_regen(&json_dir, &rust_dir) {
-        fs::create_dir_all(&rust_dir)?;
-        run_compiler(sdk, &json_dir, &rust_dir, None)?;
-    }
-    Ok(rust_dir)
-}
-
 /// Generate the app-local `app_theme` module when app-config.toml names a
 /// theme. The generated directory also contains the regular user/built-in
 /// theme modules, so older source that still includes a base theme id keeps
@@ -230,9 +205,11 @@ pub fn ensure_project_theme_in(
     project_root: &Path,
     themes_dir: &Path,
 ) -> Result<PathBuf> {
-    let Some(theme) = config.theme.as_deref().map(str::trim).filter(|theme| !theme.is_empty()) else {
-        return ensure_built_in(sdk, themes_dir);
-    };
+    // Every SDK component imports its schema-backed theme through `@theme`.
+    // Apps without an explicit theme still need a generated directory, using
+    // the bundled base theme as their app theme.
+    let theme =
+        config.theme.as_deref().map(str::trim).filter(|theme| !theme.is_empty()).unwrap_or(BASE_THEME_ID);
 
     let global_json_dir = themes_dir.join("json");
     seed_base_themes(sdk, &global_json_dir)?;
@@ -243,26 +220,28 @@ pub fn ensure_project_theme_in(
     fs::create_dir_all(&project_json_dir)?;
     fs::create_dir_all(&project_rust_dir)?;
 
-    // Compile exactly two themes for the app: the default theme (the only
+    // Compile exactly two themes for the app: the base theme (the only
     // built-in, which the app inherits) and the app's own app_theme. We do NOT
     // mirror the rest of the shared theme cache — that drags stale or unrelated
     // themes into the build — and we prune anything left from an earlier build,
     // so only these two are ever compiled.
     let app_theme_json = project_json_dir.join(format!("{APP_THEME_ID}.json"));
     copy_if_changed(
-        &global_json_dir.join("default_theme.json"),
-        &project_json_dir.join("default_theme.json"),
+        &global_json_dir.join(format!("{BASE_THEME_ID}.json")),
+        &project_json_dir.join(format!("{BASE_THEME_ID}.json")),
     )?;
     write_app_theme_json(theme, sdk, project_root, &app_theme_json)?;
     prune_foreign_theme_jsons(&project_json_dir)?;
 
-    // Also emit per-app component theme `.slint` files (button-first): the app's
-    // `components.button` overrides become literals; everything else cascades
-    // from tokens. Regenerate when the Rust is stale (theme edited) or the slint
-    // hasn't been generated yet.
+    // Also emit every schema-backed per-app component theme `.slint` file. The
+    // app's component overrides become literals; everything else cascades from
+    // tokens. Regenerate when theme JSON or any component schema is newer than
+    // its generated output, or when an expected output is missing.
     let slint_dir = project_theme_slint_dir(project_root);
     let plugin_dir = sdk.plugin_schema_path();
-    if needs_regen(&project_json_dir, &project_rust_dir) || !slint_dir.join("button_theme.slint").exists() {
+    if needs_regen(&project_json_dir, &project_rust_dir)
+        || component_themes_need_regen(&project_json_dir, &plugin_dir, &slint_dir)
+    {
         run_compiler(
             sdk,
             &project_json_dir,
@@ -271,7 +250,9 @@ pub fn ensure_project_theme_in(
                 plugin_dir: &plugin_dir,
                 slint_dir: &slint_dir,
                 app_theme_json: &app_theme_json,
-                components: &["button"],
+                // Empty means every `*.schema.json`, discovered in stable order
+                // by the compiler.
+                components: &[],
             }),
         )?;
     }
@@ -279,7 +260,7 @@ pub fn ensure_project_theme_in(
     Ok(project_rust_dir)
 }
 
-/// Remove any theme JSON in `dir` that isn't `default_theme` or the app theme,
+/// Remove any theme JSON in `dir` that isn't `base_theme` or the app theme,
 /// so an app build only ever compiles those two. Stale or unrelated themes left
 /// in the project's theme dir (e.g. from an older build that mirrored the whole
 /// shared cache) are dropped.
@@ -290,7 +271,7 @@ fn prune_foreign_theme_jsons(dir: &Path) -> Result<()> {
             continue;
         }
         let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
-        if stem != "default_theme" && stem != APP_THEME_ID {
+        if stem != BASE_THEME_ID && stem != APP_THEME_ID {
             fs::remove_file(&path).ok();
         }
     }
@@ -305,6 +286,7 @@ fn write_app_theme_json(theme: &str, sdk: &SdkRoot, project_root: &Path, destina
         let mut value: serde_json::Value = serde_json::from_str(&contents)
             .with_context(|| format!("failed to parse configured app theme {}", theme_path.display()))?;
         set_theme_json_id(&mut value, APP_THEME_ID)?;
+        ensure_app_theme_parent(&mut value, BASE_THEME_ID)?;
         serde_json::to_string_pretty(&value)?
     } else {
         if !base_exists(&json_dir()?, sdk, theme) {
@@ -315,7 +297,7 @@ fn write_app_theme_json(theme: &str, sdk: &SdkRoot, project_root: &Path, destina
         }
         format!(
             "{{\n  \"id\": \"{APP_THEME_ID}\",\n  \"name\": \"App Theme\",\n  \"parent\": \"{}\"\n}}\n",
-            normalize_id(theme)
+            normalize_theme_alias(&normalize_id(theme))
         )
     };
 
@@ -352,6 +334,7 @@ pub(crate) fn write_editable_app_theme(
     project_root: &Path,
     destination: &Path,
     display_name: &str,
+    forced_parent: Option<&str>,
 ) -> Result<()> {
     let mut value = if is_theme_path(theme) {
         let path = resolve_project_path(project_root, theme);
@@ -359,16 +342,23 @@ pub(crate) fn write_editable_app_theme(
             serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path)?)
                 .with_context(|| format!("failed to parse theme {}", path.display()))?
         } else {
-            empty_app_theme_json(display_name, "default_theme")
+            empty_app_theme_json(display_name, BASE_THEME_ID)
         }
-    } else if let Some(path) = find_theme_json(sdk, theme)? {
-        serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path)?)
-            .with_context(|| format!("failed to parse theme {}", path.display()))?
+    } else if find_theme_json(sdk, theme)?.is_some() {
+        // Named themes are parents, not templates to flatten into the app.
+        // Keeping the app JSON as a small child preserves inheritance and
+        // makes the editor's Base Theme selector reflect the chosen theme.
+        empty_app_theme_json(display_name, &normalize_theme_alias(&normalize_id(theme)))
     } else {
         empty_app_theme_json(display_name, &normalize_id(theme))
     };
 
     set_theme_json_id(&mut value, APP_THEME_ID)?;
+    if let Some(parent) = forced_parent {
+        value["parent"] = serde_json::Value::String(normalize_theme_alias(parent));
+    } else {
+        ensure_app_theme_parent(&mut value, BASE_THEME_ID)?;
+    }
     if let Some(object) = value.as_object_mut() {
         object.insert("name".to_string(), serde_json::Value::String(display_name.to_string()));
     }
@@ -377,16 +367,28 @@ pub(crate) fn write_editable_app_theme(
     write_if_changed(destination, format!("{json}\n").as_bytes())
 }
 
+/// Migrate an existing app-owned theme to the current inheritance contract
+/// without changing its id, name, or overrides.
+pub(crate) fn ensure_editable_app_theme_parent(path: &Path) -> Result<()> {
+    let contents =
+        fs::read_to_string(path).with_context(|| format!("failed to read theme {}", path.display()))?;
+    let mut value = serde_json::from_str::<serde_json::Value>(&contents)
+        .with_context(|| format!("failed to parse theme {}", path.display()))?;
+    ensure_app_theme_parent(&mut value, BASE_THEME_ID)?;
+    let json = serde_json::to_string_pretty(&value)?;
+    write_if_changed(path, format!("{json}\n").as_bytes())
+}
+
 fn empty_app_theme_json(display_name: &str, parent: &str) -> serde_json::Value {
     serde_json::json!({
         "id": APP_THEME_ID,
         "name": display_name,
-        "parent": parent,
+        "parent": normalize_theme_alias(parent),
     })
 }
 
 fn find_theme_json(sdk: &SdkRoot, theme: &str) -> Result<Option<PathBuf>> {
-    let normalized = normalize_id(theme);
+    let normalized = normalize_theme_alias(&normalize_id(theme));
     for dir in [json_dir()?, sdk_themes_dir(sdk)] {
         for stem in [theme, normalized.as_str()] {
             let path = dir.join(format!("{stem}.json"));
@@ -433,6 +435,53 @@ fn needs_regen(json_dir: &Path, rust_dir: &Path) -> bool {
             }
         }
     }
+    false
+}
+
+/// True when any schema-backed component theme output is missing or older
+/// than either its schema or one of the project theme JSON inputs.
+fn component_themes_need_regen(json_dir: &Path, plugin_dir: &Path, slint_dir: &Path) -> bool {
+    let Ok(schema_entries) = fs::read_dir(plugin_dir) else {
+        return true;
+    };
+    let theme_sources = fs::read_dir(json_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+        .collect::<Vec<_>>();
+
+    for entry in schema_entries.flatten() {
+        let schema_path = entry.path();
+        let Some(file_name) = schema_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(key) = file_name.strip_suffix(".schema.json") else {
+            continue;
+        };
+        let output_path = slint_dir.join(format!("{key}_theme.slint"));
+        let Ok(output_mtime) = fs::metadata(&output_path).and_then(|metadata| metadata.modified()) else {
+            return true;
+        };
+        if fs::metadata(&schema_path)
+            .and_then(|metadata| metadata.modified())
+            .map(|mtime| mtime > output_mtime)
+            .unwrap_or(true)
+        {
+            return true;
+        }
+        if theme_sources.iter().any(|source| {
+            fs::metadata(source)
+                .and_then(|metadata| metadata.modified())
+                .map(|mtime| mtime > output_mtime)
+                .unwrap_or(true)
+        }) {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -486,7 +535,7 @@ pub fn execute_new(name: &str, base: &str) -> Result<()> {
         "{{\n  \"id\": \"{id}\",\n  \"name\": \"{display}\",\n  \"parent\": \"{base}\",\n  \"tokens\": {{}}\n}}\n",
         id = normalize_id(name),
         display = name,
-        base = base,
+        base = normalize_theme_alias(&normalize_id(base)),
     );
 
     if !base_exists(&json_dir, &sdk, base) {
@@ -508,10 +557,47 @@ pub fn execute_new(name: &str, base: &str) -> Result<()> {
 }
 
 fn base_exists(json_dir: &Path, sdk: &SdkRoot, base: &str) -> bool {
-    let normalized = normalize_id(base);
+    let normalized = normalize_theme_alias(&normalize_id(base));
     [json_dir.to_path_buf(), sdk_themes_dir(sdk)].iter().any(|dir| {
         dir.join(format!("{base}.json")).exists() || dir.join(format!("{normalized}.json")).exists()
     })
+}
+
+fn normalize_legacy_theme_parent(value: &mut serde_json::Value) {
+    if let Some(parent) = value
+        .as_object_mut()
+        .and_then(|object| object.get_mut("parent"))
+        .and_then(|parent| parent.as_str())
+        .map(normalize_theme_alias)
+    {
+        value["parent"] = serde_json::Value::String(parent);
+    }
+}
+
+fn ensure_app_theme_parent(value: &mut serde_json::Value, fallback_parent: &str) -> Result<()> {
+    let Some(object) = value.as_object_mut() else {
+        anyhow::bail!("theme JSON must be an object");
+    };
+    let needs_parent = object
+        .get("parent")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .map(str::is_empty)
+        .unwrap_or(true);
+    if needs_parent {
+        object
+            .insert("parent".to_string(), serde_json::Value::String(normalize_theme_alias(fallback_parent)));
+    }
+    normalize_legacy_theme_parent(value);
+    Ok(())
+}
+
+fn normalize_theme_alias(id: &str) -> String {
+    if id == LEGACY_DEFAULT_THEME_ID {
+        BASE_THEME_ID.to_string()
+    } else {
+        id.to_string()
+    }
 }
 
 fn theme_ids(json_dir: &Path) -> Result<Vec<String>> {
@@ -523,10 +609,12 @@ fn theme_ids(json_dir: &Path) -> Result<Vec<String>> {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                ids.push(stem.to_string());
+                ids.push(normalize_theme_alias(&normalize_id(stem)));
             }
         }
     }
+    ids.sort();
+    ids.dedup();
     Ok(ids)
 }
 
@@ -554,5 +642,66 @@ fn normalize_id(value: &str) -> String {
         "theme".to_string()
     } else {
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ensure_app_theme_parent, normalize_legacy_theme_parent, normalize_theme_alias, BASE_THEME_ID,
+    };
+
+    #[test]
+    fn legacy_default_theme_parent_is_written_as_base_theme() {
+        let mut value = serde_json::json!({
+            "id": "app_theme",
+            "name": "App Theme",
+            "parent": "default_theme",
+        });
+
+        normalize_legacy_theme_parent(&mut value);
+
+        assert_eq!(value["parent"].as_str(), Some(BASE_THEME_ID));
+    }
+
+    #[test]
+    fn legacy_default_theme_id_is_a_base_theme_alias() {
+        assert_eq!(normalize_theme_alias("default_theme"), BASE_THEME_ID);
+        assert_eq!(normalize_theme_alias("base_theme"), BASE_THEME_ID);
+    }
+
+    #[test]
+    fn parentless_app_theme_inherits_from_base_theme() {
+        for parent in [serde_json::Value::Null, serde_json::Value::String(String::new())] {
+            let mut value = serde_json::json!({
+                "id": "app_theme",
+                "name": "App Theme",
+                "parent": parent,
+            });
+
+            ensure_app_theme_parent(&mut value, BASE_THEME_ID).unwrap();
+
+            assert_eq!(value["parent"].as_str(), Some(BASE_THEME_ID));
+        }
+
+        let mut value = serde_json::json!({
+            "id": "app_theme",
+            "name": "App Theme",
+        });
+        ensure_app_theme_parent(&mut value, BASE_THEME_ID).unwrap();
+        assert_eq!(value["parent"].as_str(), Some(BASE_THEME_ID));
+    }
+
+    #[test]
+    fn explicit_app_theme_parent_is_preserved() {
+        let mut value = serde_json::json!({
+            "id": "app_theme",
+            "name": "App Theme",
+            "parent": "designer_theme",
+        });
+
+        ensure_app_theme_parent(&mut value, BASE_THEME_ID).unwrap();
+
+        assert_eq!(value["parent"].as_str(), Some("designer_theme"));
     }
 }

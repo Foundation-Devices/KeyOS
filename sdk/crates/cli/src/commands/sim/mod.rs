@@ -99,7 +99,7 @@ fn build_for_simulator(
     cmd.arg("--message-format").arg("json-render-diagnostics");
     cmd.env("FOUNDATION_THEMES_RUST_DIR", themes_rust_dir);
     cmd.env(UI_LIBRARY_PATH_ENV, project_sdk_ui_root(project_root));
-    // `@theme` namespace → per-app generated component themes (button_theme.slint).
+    // `@theme` namespace → per-app generated component themes.
     cmd.env("FOUNDATION_THEMES_SLINT_DIR", crate::commands::themes::project_theme_slint_dir(project_root));
     configure_host_build_environment(&mut cmd);
 

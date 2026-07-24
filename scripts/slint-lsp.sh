@@ -37,11 +37,14 @@ if [[ -n "${SLINT_LSP_BIN:-}" ]]; then
 fi
 
 if [[ -x "${LOCAL_BIN}" ]]; then
-    exec "${LOCAL_BIN}" "$@"
+    version="$("${LOCAL_BIN}" --version 2>/dev/null | awk 'NR == 1 { print $2 }')" || version=""
+    if version_is_compatible "${version}"; then
+        exec "${LOCAL_BIN}" "$@"
+    fi
 fi
 
 if command -v slint-lsp >/dev/null 2>&1; then
-    version="$(slint-lsp --version 2>/dev/null | awk 'NR == 1 { print $2 }')"
+    version="$(slint-lsp --version 2>/dev/null | awk 'NR == 1 { print $2 }')" || version=""
     if version_is_compatible "${version}"; then
         exec slint-lsp "$@"
     fi

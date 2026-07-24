@@ -587,6 +587,9 @@ mod tests {
         fs::write(root.join("flake.nix"), "{}").unwrap();
         fs::write(root.join("sdk-build.toml"), "").unwrap();
         link_fake_bin(&root.join("bin"));
+        let themes_dir = root.join("crates").join("foundation-themes").join("themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        fs::write(themes_dir.join("base_theme.json"), r#"{"id":"base_theme","name":"Base Theme"}"#).unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("components").join("ui")).unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("resources").join("icons")).unwrap();
         fs::write(repo_root.join("ui2").join("components").join("ui").join("theme.slint"), "theme\n")

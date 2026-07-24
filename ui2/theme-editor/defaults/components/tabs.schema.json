@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "component": "Tabs",
+  "variants": [
+    "solid",
+    "bordered",
+    "light",
+    "underlined"
+  ],
+  "states": [
+    "normal",
+    "focused",
+    "pressed",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "item-background",
+      "displayName": "Item Background",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.background",
+          "pressed": "color.secondary.dark"
+        },
+        "bordered": {
+          "normal": "color.background",
+          "pressed": "color.secondary"
+        },
+        "light": {
+          "normal": "color.secondary",
+          "pressed": "color.secondary.dark"
+        },
+        "underlined": {
+          "normal": "color.transparent",
+          "pressed": "color.secondary"
+        }
+      }
+    },
+    {
+      "name": "item-border-color",
+      "displayName": "Item Border Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.transparent",
+          "focused": "color.primary"
+        },
+        "light": {
+          "normal": "color.transparent",
+          "focused": "color.primary"
+        },
+        "underlined": {
+          "normal": "color.transparent",
+          "focused": "color.primary"
+        },
+        "bordered": {
+          "normal": "color.border",
+          "focused": "color.primary"
+        }
+      }
+    },
+    {
+      "name": "item-border-width",
+      "displayName": "Item Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 16.0,
+      "step": 0.5,
+      "defaults": {
+        "solid": {
+          "normal": 0.0,
+          "focused": 2.0
+        },
+        "light": {
+          "normal": 0.0,
+          "focused": 2.0
+        },
+        "underlined": {
+          "normal": 0.0,
+          "focused": 0.0
+        },
+        "bordered": {
+          "normal": 1.0,
+          "focused": 2.0
+        }
+      }
+    },
+    {
+      "name": "item-foreground",
+      "displayName": "Item Foreground",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.foreground",
+          "pressed": "color.primary.dark",
+          "disabled": "color.muted"
+        },
+        "bordered": {
+          "normal": "color.foreground",
+          "pressed": "color.primary.dark",
+          "disabled": "color.muted"
+        },
+        "light": {
+          "normal": "color.foreground",
+          "pressed": "color.primary.dark",
+          "disabled": "color.muted"
+        },
+        "underlined": {
+          "normal": "color.foreground",
+          "pressed": "color.primary.dark",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "indicator-color",
+      "displayName": "Indicator Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.foreground",
+          "disabled": "color.muted"
+        },
+        "bordered": {
+          "normal": "color.foreground",
+          "disabled": "color.muted"
+        },
+        "light": {
+          "normal": "color.foreground",
+          "disabled": "color.muted"
+        },
+        "underlined": {
+          "normal": "color.foreground",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "list-background-color",
+      "displayName": "List Background Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.secondary"
+        },
+        "bordered": {
+          "normal": "color.transparent"
+        },
+        "light": {
+          "normal": "color.transparent"
+        },
+        "underlined": {
+          "normal": "color.transparent"
+        }
+      }
+    },
+    {
+      "name": "list-border-width",
+      "displayName": "List Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 16.0,
+      "step": 0.5,
+      "defaults": {
+        "solid": {
+          "normal": 1.0
+        },
+        "bordered": {
+          "normal": 1.0
+        },
+        "light": {
+          "normal": 0.0
+        },
+        "underlined": {
+          "normal": 0.0
+        }
+      }
+    },
+    {
+      "name": "list-stroke-color",
+      "displayName": "List Stroke Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.border"
+        },
+        "bordered": {
+          "normal": "color.border"
+        },
+        "light": {
+          "normal": "color.transparent"
+        },
+        "underlined": {
+          "normal": "color.transparent"
+        }
+      }
+    },
+    {
+      "name": "list-edge-color",
+      "displayName": "List Edge Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.border"
+        },
+        "bordered": {
+          "normal": "color.border"
+        },
+        "light": {
+          "normal": "color.border"
+        },
+        "underlined": {
+          "normal": "color.border"
+        }
+      }
+    },
+    {
+      "name": "panel-background",
+      "displayName": "Panel Background",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.background"
+        },
+        "bordered": {
+          "normal": "color.background"
+        },
+        "light": {
+          "normal": "color.background"
+        },
+        "underlined": {
+          "normal": "color.background"
+        }
+      }
+    },
+    {
+      "name": "panel-foreground",
+      "displayName": "Panel Foreground",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.foreground"
+        },
+        "bordered": {
+          "normal": "color.foreground"
+        },
+        "light": {
+          "normal": "color.foreground"
+        },
+        "underlined": {
+          "normal": "color.foreground"
+        }
+      }
+    },
+    {
+      "name": "panel-border-color",
+      "displayName": "Panel Border Color",
+      "type": "color",
+      "defaults": {
+        "solid": {
+          "normal": "color.border"
+        },
+        "bordered": {
+          "normal": "color.border"
+        },
+        "light": {
+          "normal": "color.border"
+        },
+        "underlined": {
+          "normal": "color.border"
+        }
+      }
+    },
+    {
+      "name": "panel-border-width",
+      "displayName": "Panel Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 16.0,
+      "step": 0.5,
+      "defaults": {
+        "solid": {
+          "normal": 1.0
+        },
+        "bordered": {
+          "normal": 1.0
+        },
+        "light": {
+          "normal": 1.0
+        },
+        "underlined": {
+          "normal": 1.0
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "control-height",
+      "displayName": "Control Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    },
+    {
+      "name": "tab-padding-horizontal",
+      "displayName": "Tab Padding H",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlPaddingInline.md",
+        "sm": "controlPaddingInline.sm",
+        "lg": "controlPaddingInline.lg"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 48.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0,
+        "sm": 18.0,
+        "lg": 24.0
+      }
+    },
+    {
+      "name": "tab-gap",
+      "displayName": "Tab Gap",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 2.0
+      }
+    },
+    {
+      "name": "list-padding",
+      "displayName": "List Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 32.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 4.0
+      }
+    },
+    {
+      "name": "panel-padding",
+      "displayName": "Panel Padding",
+      "type": "float",
+      "min": 0.0,
+      "max": 48.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 20.0,
+        "sm": 16.0,
+        "lg": 24.0
+      }
+    },
+    {
+      "name": "panel-min-height",
+      "displayName": "Panel Min Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 240.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 104.0,
+        "sm": 88.0,
+        "lg": 120.0
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "radius.default"
+      }
+    }
+  ]
+}

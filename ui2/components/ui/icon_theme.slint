@@ -1,33 +1,42 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from icon.json by foundation theme tooling — do not edit by hand.
+// GENERATED from icon.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum IconState {
+    normal,
+}
+
+export struct IconVariantProps {
+    icon-color: color,
+}
 
 export struct IconSizeProps {
     icon-size: length,
 }
 
 export global IconTheme {
-    in-out property <IconSizeProps> size-sm: {
-        icon-size: 16px,
-    };
-    in-out property <IconSizeProps> size-md: {
-        icon-size: 20px,
-    };
-    in-out property <IconSizeProps> size-lg: {
-        icon-size: 24px,
-    };
-
+    public pure function style(st: IconState) -> IconVariantProps {
+        return {
+            icon-color: Theme.color-foreground,
+        };
+    }
     public pure function size(s: ControlSize) -> IconSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                icon-size: 16px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                icon-size: Theme.icon-size-sm,
+            };
         }
-        return self.size-md;
+        return {
+            icon-size: Theme.icon-size-md,
+        };
     }
 }

@@ -12,6 +12,11 @@ use crate::plugin::{
     self, ensure_default_files, load_all_plugins, ComponentThemeData, PluginDefinition, TokenStore,
 };
 
+const BASE_THEME_NAME: &str = "Base Theme";
+const LEGACY_DEFAULT_THEME_NAME: &str = "Default Theme";
+const BASE_THEME_ID: &str = "base_theme";
+const LEGACY_DEFAULT_THEME_ID: &str = "default_theme";
+
 #[derive(Clone)]
 pub struct ThemeMeta {
     pub name: String,
@@ -26,7 +31,7 @@ pub struct ThemeRecord {
     pub component_themes: HashMap<String, ComponentThemeData>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct TokenTheme {
     pub light_primary: slint::Color,
     pub light_primary_pressed: slint::Color,
@@ -52,18 +57,34 @@ pub struct TokenTheme {
     pub control_size_sm: f32,
     pub control_size_md: f32,
     pub control_size_lg: f32,
+    pub choice_control_size_sm: f32,
+    pub choice_control_size_md: f32,
+    pub choice_control_size_lg: f32,
+    pub switch_size_sm: f32,
+    pub switch_size_md: f32,
+    pub switch_size_lg: f32,
     pub icon_size_sm: f32,
     pub icon_size_md: f32,
     pub icon_size_lg: f32,
+    pub border_width_none: f32,
+    pub border_width_sm: f32,
+    pub border_width_focus: f32,
     pub control_radius_sm: f32,
     pub control_radius_md: f32,
     pub control_radius_lg: f32,
     pub control_padding_inline_sm: f32,
     pub control_padding_inline_md: f32,
     pub control_padding_inline_lg: f32,
+    pub font_size_xs: f32,
+    pub font_size_caption: f32,
     pub font_size_sm: f32,
     pub font_size_md: f32,
     pub font_size_lg: f32,
+    pub font_size_helper: f32,
+    pub font_weight_normal: i32,
+    pub font_weight_medium: i32,
+    pub font_weight_semibold: i32,
+    pub font_weight_bold: i32,
     pub radius_sm: f32,
     pub radius_md: f32,
     pub radius_lg: f32,
@@ -88,7 +109,7 @@ struct ThemeManifestEntry {
 }
 
 impl TokenTheme {
-    pub fn default_theme() -> Self {
+    pub fn base_theme() -> Self {
         Self {
             light_primary: slint::Color::from_rgb_u8(0, 157, 185),
             light_primary_pressed: slint::Color::from_rgb_u8(0, 111, 131),
@@ -114,18 +135,34 @@ impl TokenTheme {
             control_size_sm: 48.0,
             control_size_md: 56.0,
             control_size_lg: 64.0,
+            choice_control_size_sm: 24.0,
+            choice_control_size_md: 28.0,
+            choice_control_size_lg: 32.0,
+            switch_size_sm: 20.0,
+            switch_size_md: 24.0,
+            switch_size_lg: 28.0,
             icon_size_sm: 20.0,
             icon_size_md: 24.0,
             icon_size_lg: 28.0,
+            border_width_none: 0.0,
+            border_width_sm: 1.0,
+            border_width_focus: 2.0,
             control_radius_sm: 20.0,
             control_radius_md: 24.0,
             control_radius_lg: 28.0,
             control_padding_inline_sm: 14.0,
             control_padding_inline_md: 16.0,
             control_padding_inline_lg: 20.0,
+            font_size_xs: 12.0,
+            font_size_caption: 13.0,
             font_size_sm: 20.0,
             font_size_md: 22.0,
             font_size_lg: 24.0,
+            font_size_helper: 14.0,
+            font_weight_normal: 400,
+            font_weight_medium: 500,
+            font_weight_semibold: 600,
+            font_weight_bold: 700,
             radius_sm: 8.0,
             radius_md: 16.0,
             radius_lg: 24.0,
@@ -157,10 +194,9 @@ pub fn write_theme_crate_outputs_with_plugins(
     let mut mod_rs = String::from("use crate::ThemeDescriptor;\n\n");
 
     for (idx, record) in records.iter().enumerate() {
-        let module_name = theme_function_name(&record.meta.name);
-        let rust =
-            generate_theme_rust_export(&records, idx, "crate::generated::default_theme::default_theme")
-                .ok_or_else(|| format!("failed to generate export for {}", record.meta.name))?;
+        let module_name = theme_record_function_name(record);
+        let rust = generate_theme_rust_export(&records, idx, "crate::generated::base_theme::base_theme")
+            .ok_or_else(|| format!("failed to generate export for {}", record.meta.name))?;
         fs::write(generated_dir.join(format!("{module_name}.rs")), rust)?;
         mod_rs.push_str(&format!("pub mod {module_name};\n"));
         manifest.themes.push(ThemeManifestEntry {
@@ -189,11 +225,34 @@ pub fn write_theme_crate_outputs_with_plugins(
 pub fn built_in_theme_records(
     loaded_plugins: &[(plugin::BuiltinComponentSpec, PluginDefinition)],
 ) -> Vec<ThemeRecord> {
-    vec![build_theme_record("Default Theme", true, None, TokenTheme::default_theme(), loaded_plugins)]
+    vec![build_theme_record(BASE_THEME_NAME, true, None, TokenTheme::base_theme(), loaded_plugins)]
+}
+
+fn is_base_theme_name(name: &str) -> bool {
+    name == BASE_THEME_NAME
+        || name == LEGACY_DEFAULT_THEME_NAME
+        || theme_function_name(name) == BASE_THEME_ID
+        || theme_function_name(name) == LEGACY_DEFAULT_THEME_ID
+}
+
+fn is_builtin_base_theme(theme: &ThemeRecord) -> bool {
+    theme.meta.is_builtin && is_base_theme_name(&theme.meta.name)
+}
+
+fn theme_record_function_name(theme: &ThemeRecord) -> String {
+    if is_builtin_base_theme(theme) {
+        BASE_THEME_ID.to_string()
+    } else {
+        theme_function_name(&theme.meta.name)
+    }
 }
 
 fn format_hex_color(color: slint::Color) -> String {
-    format!("{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue())
+    if color.alpha() == 255 {
+        format!("{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue())
+    } else {
+        format!("{:02x}{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue(), color.alpha())
+    }
 }
 
 fn slint_color_to_token(color: slint::Color) -> components::theme::Color {
@@ -298,6 +357,30 @@ fn token_store_from_theme(theme: &TokenTheme) -> TokenStore {
         ]),
     );
     categories.insert(
+        "choiceControlSize".to_string(),
+        HashMap::from([
+            ("sm".to_string(), TokenValue::Number(theme.choice_control_size_sm as f64)),
+            ("md".to_string(), TokenValue::Number(theme.choice_control_size_md as f64)),
+            ("lg".to_string(), TokenValue::Number(theme.choice_control_size_lg as f64)),
+        ]),
+    );
+    categories.insert(
+        "switchSize".to_string(),
+        HashMap::from([
+            ("sm".to_string(), TokenValue::Number(theme.switch_size_sm as f64)),
+            ("md".to_string(), TokenValue::Number(theme.switch_size_md as f64)),
+            ("lg".to_string(), TokenValue::Number(theme.switch_size_lg as f64)),
+        ]),
+    );
+    categories.insert(
+        "borderWidth".to_string(),
+        HashMap::from([
+            ("none".to_string(), TokenValue::Number(theme.border_width_none as f64)),
+            ("sm".to_string(), TokenValue::Number(theme.border_width_sm as f64)),
+            ("focus".to_string(), TokenValue::Number(theme.border_width_focus as f64)),
+        ]),
+    );
+    categories.insert(
         "controlRadius".to_string(),
         HashMap::from([
             ("sm".to_string(), TokenValue::Number(theme.control_radius_sm as f64)),
@@ -316,9 +399,12 @@ fn token_store_from_theme(theme: &TokenTheme) -> TokenStore {
     categories.insert(
         "fontSize".to_string(),
         HashMap::from([
+            ("xs".to_string(), TokenValue::Number(theme.font_size_xs as f64)),
+            ("caption".to_string(), TokenValue::Number(theme.font_size_caption as f64)),
             ("sm".to_string(), TokenValue::Number(theme.font_size_sm as f64)),
             ("md".to_string(), TokenValue::Number(theme.font_size_md as f64)),
             ("lg".to_string(), TokenValue::Number(theme.font_size_lg as f64)),
+            ("helper".to_string(), TokenValue::Number(theme.font_size_helper as f64)),
         ]),
     );
     categories.insert(
@@ -383,7 +469,7 @@ fn explicit_parent_theme_index(themes: &[ThemeRecord], theme_idx: usize) -> Opti
 }
 
 fn editor_tokens_to_export_tokens(tokens: &TokenTheme) -> export_theme::ThemeTokens {
-    let mut export_tokens = export_theme::create_default_tokens();
+    let mut export_tokens = export_theme::create_schema_fallback_tokens();
 
     let set_shared = |set: &mut export_theme::TokenSet| {
         set.set("spacing", "xs", export_theme::TokenValue::Float(tokens.spacing_xs));
@@ -415,9 +501,21 @@ fn editor_tokens_to_export_tokens(tokens: &TokenTheme) -> export_theme::ThemeTok
             "lg",
             export_theme::TokenValue::Float(tokens.control_padding_inline_lg),
         );
+        set.set("fontSize", "xs", export_theme::TokenValue::Float(tokens.font_size_xs));
+        set.set("fontSize", "caption", export_theme::TokenValue::Float(tokens.font_size_caption));
         set.set("fontSize", "sm", export_theme::TokenValue::Float(tokens.font_size_sm));
         set.set("fontSize", "md", export_theme::TokenValue::Float(tokens.font_size_md));
         set.set("fontSize", "lg", export_theme::TokenValue::Float(tokens.font_size_lg));
+        set.set("fontSize", "helper", export_theme::TokenValue::Float(tokens.font_size_helper));
+        set.set("borderWidth", "none", export_theme::TokenValue::Float(tokens.border_width_none));
+        set.set("borderWidth", "sm", export_theme::TokenValue::Float(tokens.border_width_sm));
+        set.set("borderWidth", "focus", export_theme::TokenValue::Float(tokens.border_width_focus));
+        set.set("choiceControlSize", "sm", export_theme::TokenValue::Float(tokens.choice_control_size_sm));
+        set.set("choiceControlSize", "md", export_theme::TokenValue::Float(tokens.choice_control_size_md));
+        set.set("choiceControlSize", "lg", export_theme::TokenValue::Float(tokens.choice_control_size_lg));
+        set.set("switchSize", "sm", export_theme::TokenValue::Float(tokens.switch_size_sm));
+        set.set("switchSize", "md", export_theme::TokenValue::Float(tokens.switch_size_md));
+        set.set("switchSize", "lg", export_theme::TokenValue::Float(tokens.switch_size_lg));
         set.set("radius", "sm", export_theme::TokenValue::Float(tokens.radius_sm));
         set.set("radius", "md", export_theme::TokenValue::Float(tokens.radius_md));
         set.set(
@@ -430,6 +528,10 @@ fn editor_tokens_to_export_tokens(tokens: &TokenTheme) -> export_theme::ThemeTok
         set.set("font", "primary", export_theme::TokenValue::String(tokens.font_primary.clone()));
         set.set("font", "secondary", export_theme::TokenValue::String(tokens.font_secondary.clone()));
         set.set("font", "tertiary", export_theme::TokenValue::String(tokens.font_tertiary.clone()));
+        set.set("fontWeight", "normal", export_theme::TokenValue::Int(tokens.font_weight_normal));
+        set.set("fontWeight", "medium", export_theme::TokenValue::Int(tokens.font_weight_medium));
+        set.set("fontWeight", "semibold", export_theme::TokenValue::Int(tokens.font_weight_semibold));
+        set.set("fontWeight", "bold", export_theme::TokenValue::Int(tokens.font_weight_bold));
     };
 
     set_shared(&mut export_tokens.light);
@@ -918,10 +1020,7 @@ fn should_inline_parent_theme(themes: &[ThemeRecord], theme_idx: usize, selected
     if theme_idx == selected_theme_idx {
         return true;
     }
-    !themes
-        .get(theme_idx)
-        .map(|theme| theme.meta.is_builtin && theme.meta.name == "Default Theme")
-        .unwrap_or(false)
+    !themes.get(theme_idx).map(is_builtin_base_theme).unwrap_or(false)
 }
 
 fn export_parent_reference<'a>(
@@ -934,18 +1033,18 @@ fn export_parent_reference<'a>(
     let parent_record = themes.get(parent_idx)?;
     let parent_theme = export_themes.get(&parent_idx)?;
     let parent_expr = if should_inline_parent_theme(themes, parent_idx, selected_theme_idx) {
-        format!("{}()", theme_function_name(&parent_record.meta.name))
+        format!("{}()", theme_record_function_name(parent_record))
     } else {
-        "default_theme()".to_string()
+        "base_theme()".to_string()
     };
     Some((parent_expr, parent_theme))
 }
 
-fn export_needs_default_theme_import(themes: &[ThemeRecord], theme_idx: usize) -> bool {
+fn export_needs_base_theme_import(themes: &[ThemeRecord], theme_idx: usize) -> bool {
     let mut current = explicit_parent_theme_index(themes, theme_idx);
     while let Some(idx) = current {
         let Some(record) = themes.get(idx) else { break };
-        if record.meta.is_builtin && record.meta.name == "Default Theme" {
+        if is_builtin_base_theme(record) {
             return true;
         }
         current = explicit_parent_theme_index(themes, idx);
@@ -1039,7 +1138,7 @@ fn emit_theme_function(
 pub fn generate_theme_rust_export(
     themes: &[ThemeRecord],
     theme_idx: usize,
-    default_theme_import_path: &str,
+    base_theme_import_path: &str,
 ) -> Option<String> {
     let theme = themes.get(theme_idx)?;
     let chain = theme_export_chain(themes, theme_idx);
@@ -1056,13 +1155,13 @@ pub fn generate_theme_rust_export(
     rust_code
         .push_str(&format!("//! Theme: {}\n//! Generated by Prime UI Theme Editor\n\n", theme.meta.name));
     rust_code.push_str("use components::{color, define_theme, token_ref, Theme};\n");
-    if export_needs_default_theme_import(themes, theme_idx) && theme.meta.name != "Default Theme" {
-        rust_code.push_str(&format!("use {default_theme_import_path};\n"));
+    if export_needs_base_theme_import(themes, theme_idx) && !is_builtin_base_theme(theme) {
+        rust_code.push_str(&format!("use {base_theme_import_path};\n"));
     }
     rust_code.push('\n');
     for idx in chain.iter().copied().filter(|idx| should_inline_parent_theme(themes, *idx, theme_idx)) {
         let record = themes.get(idx)?;
-        let function_name = theme_function_name(&record.meta.name);
+        let function_name = theme_record_function_name(record);
         let parent = export_parent_reference(themes, &export_themes, idx, theme_idx);
         let export_theme = export_themes.get(&idx)?;
         emit_theme_function(

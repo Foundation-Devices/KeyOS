@@ -313,6 +313,7 @@ The stable launcher path is:
 ```
 
 If the same version and target are reinstalled, the install script replaces that existing directory in place and repoints `current`.
+If the cached Base Theme still exactly matches the previously installed SDK copy, the installer advances it to the new SDK copy too. A modified Base Theme is never overwritten; it remains editable and must satisfy the compiler's completeness check before an app can build.
 
 For local testing against freshly built artifacts, maintainers can install from `dist/` directly:
 

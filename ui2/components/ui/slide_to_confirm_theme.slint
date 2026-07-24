@@ -1,10 +1,24 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from slide_to_confirm.json by foundation theme tooling — do not edit by hand.
+// GENERATED from slide_to_confirm.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum SlideToConfirmState {
+    normal,
+    confirmed,
+    disabled,
+}
+
+export struct SlideToConfirmVariantProps {
+    track-color: color,
+    track-border-color: color,
+    label-color: color,
+    thumb-color: color,
+    thumb-label-color: color,
+}
 
 export struct SlideToConfirmSizeProps {
     font-family: string,
@@ -17,41 +31,64 @@ export struct SlideToConfirmSizeProps {
 }
 
 export global SlideToConfirmTheme {
-    in-out property <SlideToConfirmSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        control-height: 60px,
-        thumb-width: 112px,
-        thumb-padding-horizontal: 12px,
-        icon-size: 18px,
-        border-radius: Theme.control-radius-sm,
-    };
-    in-out property <SlideToConfirmSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        control-height: 72px,
-        thumb-width: 128px,
-        thumb-padding-horizontal: 16px,
-        icon-size: 22px,
-        border-radius: Theme.control-radius-md,
-    };
-    in-out property <SlideToConfirmSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        control-height: 84px,
-        thumb-width: 144px,
-        thumb-padding-horizontal: 20px,
-        icon-size: 26px,
-        border-radius: Theme.control-radius-lg,
-    };
-
+    public pure function style(st: SlideToConfirmState) -> SlideToConfirmVariantProps {
+        if st == SlideToConfirmState.confirmed {
+            return {
+                track-color: Theme.color-secondary,
+                track-border-color: Theme.color-success,
+                label-color: Theme.color-success,
+                thumb-color: Theme.color-success,
+                thumb-label-color: Theme.color-white,
+            };
+        }
+        if st == SlideToConfirmState.disabled {
+            return {
+                track-color: Theme.color-secondary,
+                track-border-color: Theme.color-border,
+                label-color: Theme.color-muted,
+                thumb-color: Theme.color-border,
+                thumb-label-color: Theme.color-white,
+            };
+        }
+        return {
+            track-color: Theme.color-secondary,
+            track-border-color: Theme.color-border,
+            label-color: Theme.color-muted,
+            thumb-color: Theme.color-primary,
+            thumb-label-color: Theme.color-white,
+        };
+    }
     public pure function size(s: ControlSize) -> SlideToConfirmSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                control-height: 60px,
+                thumb-width: 112px,
+                thumb-padding-horizontal: 12px,
+                icon-size: 18px,
+                border-radius: Theme.control-radius-sm,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                control-height: 72px,
+                thumb-width: 128px,
+                thumb-padding-horizontal: 16px,
+                icon-size: 22px,
+                border-radius: Theme.control-radius-md,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            control-height: 84px,
+            thumb-width: 144px,
+            thumb-padding-horizontal: 20px,
+            icon-size: 26px,
+            border-radius: Theme.control-radius-lg,
+        };
     }
 }

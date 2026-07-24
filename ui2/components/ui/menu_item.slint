@@ -3,7 +3,7 @@
 
 import { MenuRow } from "menu.slint";
 import { Theme, ControlSize } from "theme.slint";
-import { MenuItemTheme } from "menu_item_theme.slint";
+import { MenuItemTheme, MenuItemSizeProps } from "@theme/menu_item_theme.slint";
 
 export component MenuItem inherits MenuRow {
     in property <string> label: "";
@@ -15,11 +15,12 @@ export component MenuItem inherits MenuRow {
     in property <bool> selected: false;
     in property <bool> destructive: false;
     in property <bool> disabled: false;
-    in property <string> font-family: MenuItemTheme.size(root.size).font-family;
-    in property <length> font-size: MenuItemTheme.size(root.size).font-size;
-    in property <length> item-height: MenuItemTheme.size(root.size).item-height;
-    in property <length> padding-horizontal: MenuItemTheme.size(root.size).padding-horizontal;
-    in property <length> icon-size: MenuItemTheme.size(root.size).icon-size;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> item-height: theme-size.item-height;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> icon-size: theme-size.icon-size;
+    property <MenuItemSizeProps> theme-size: MenuItemTheme.size(root.size);
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
@@ -51,6 +52,7 @@ export component MenuItem inherits MenuRow {
     content-padding-horizontal: root.actual-padding-horizontal;
     preferred-width: 314px;
     preferred-height: max(root.actual-item-height, root.actual-icon-size + 20px);
+    horizontal-stretch: 1;
     height: self.preferred-height;
 
     // NOTE: do NOT add invisible measurement Text elements at this level — MenuItem
@@ -60,12 +62,13 @@ export component MenuItem inherits MenuRow {
     // the visible HorizontalLayout's share of the row and clips the label text at
     // the top. If you need a measurement, nest it inside HorizontalLayout instead.
 
-    HorizontalLayout {
-        width: parent.width;
-        height: parent.height;
-        spacing: root.item-spacing;
+    Rectangle {
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        background: transparent;
 
         if root.has-leading: Rectangle {
+            x: 0px;
             width: root.actual-icon-size;
             height: parent.height;
             background: transparent;
@@ -80,37 +83,14 @@ export component MenuItem inherits MenuRow {
             }
         }
 
-        VerticalLayout {
-            spacing: root.content-gap;
-            horizontal-stretch: 1;
-            alignment: center;
-
-            Text {
-                text: root.label;
-                color: root.accent-color;
-                font-family: root.actual-font-family;
-                font-size: root.actual-font-size;
-                font-weight: root.label-font-weight;
-                horizontal-alignment: left;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            if root.subtitle != "": Text {
-                text: root.subtitle;
-                color: root.secondary-color;
-                font-family: root.actual-font-family;
-                font-size: root.subtitle-font-size;
-                font-weight: root.subtitle-font-weight;
-                horizontal-alignment: left;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-        }
-
-        if root.has-trailing: HorizontalLayout {
+        trailing-content := HorizontalLayout {
+            x: parent.width - self.width;
+            y: 0px;
+            width: root.has-trailing ? self.preferred-width : 0px;
+            height: parent.height;
             spacing: root.trailing-text != "" && root.end-icon.width > 0 ? 10px : 0px;
             alignment: center;
+            horizontal-stretch: 0;
 
             if root.trailing-text != "": Text {
                 text: root.trailing-text;
@@ -135,6 +115,36 @@ export component MenuItem inherits MenuRow {
                     source: root.end-icon;
                     colorize: root.accent-color;
                 }
+            }
+        }
+
+        text-column := VerticalLayout {
+            x: root.has-leading ? root.actual-icon-size + root.item-spacing : 0px;
+            width: max(0px, (root.has-trailing ? trailing-content.x - root.item-spacing : parent.width) - self.x);
+            height: parent.height;
+            spacing: root.content-gap;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                color: root.accent-color;
+                font-family: root.actual-font-family;
+                font-size: root.actual-font-size;
+                font-weight: root.label-font-weight;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: root.secondary-color;
+                font-family: root.actual-font-family;
+                font-size: root.subtitle-font-size;
+                font-weight: root.subtitle-font-weight;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                overflow: elide;
             }
         }
     }

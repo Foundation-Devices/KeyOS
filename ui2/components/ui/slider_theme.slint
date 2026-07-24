@@ -1,57 +1,94 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from slider.json by foundation theme tooling — do not edit by hand.
+// GENERATED from slider.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum SliderState {
+    normal,
+    focused,
+    disabled,
+}
+
+export struct SliderVariantProps {
+    track-color: color,
+    fill-color: color,
+    thumb-color: color,
+    thumb-border-color: color,
+}
 
 export struct SliderSizeProps {
     track-height: length,
     track-radius: length,
     thumb-size: length,
     thumb-radius: length,
+    thumb-border-width: length,
     row-height: length,
     track-touch-expansion: length,
     thumb-touch-expansion: length,
 }
 
 export global SliderTheme {
-    in-out property <SliderSizeProps> size-sm: {
-        track-height: 12px,
-        track-radius: Theme.radius-full,
-        thumb-size: Theme.control-size-sm,
-        thumb-radius: Theme.radius-full,
-        row-height: Theme.control-size-sm,
-        track-touch-expansion: 0px,
-        thumb-touch-expansion: 0px,
-    };
-    in-out property <SliderSizeProps> size-md: {
-        track-height: 16px,
-        track-radius: Theme.radius-full,
-        thumb-size: Theme.control-size-md,
-        thumb-radius: Theme.radius-full,
-        row-height: Theme.control-size-md,
-        track-touch-expansion: 0px,
-        thumb-touch-expansion: 0px,
-    };
-    in-out property <SliderSizeProps> size-lg: {
-        track-height: 20px,
-        track-radius: Theme.radius-full,
-        thumb-size: Theme.control-size-lg,
-        thumb-radius: Theme.radius-full,
-        row-height: Theme.control-size-lg,
-        track-touch-expansion: 0px,
-        thumb-touch-expansion: 0px,
-    };
-
+    public pure function style(st: SliderState) -> SliderVariantProps {
+        if st == SliderState.focused {
+            return {
+                track-color: Theme.color-primary-light,
+                fill-color: Theme.color-primary-light,
+                thumb-color: Theme.color-background,
+                thumb-border-color: Theme.color-primary-light,
+            };
+        }
+        if st == SliderState.disabled {
+            return {
+                track-color: Theme.color-border,
+                fill-color: Theme.color-border,
+                thumb-color: Theme.color-surface,
+                thumb-border-color: Theme.color-border,
+            };
+        }
+        return {
+            track-color: Theme.color-primary,
+            fill-color: Theme.color-primary,
+            thumb-color: Theme.color-background,
+            thumb-border-color: Theme.color-primary,
+        };
+    }
     public pure function size(s: ControlSize) -> SliderSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                track-height: 12px,
+                track-radius: Theme.radius-full,
+                thumb-size: Theme.control-size-sm,
+                thumb-radius: Theme.radius-full,
+                thumb-border-width: 1px,
+                row-height: Theme.control-size-sm,
+                track-touch-expansion: 0px,
+                thumb-touch-expansion: 0px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                track-height: 16px,
+                track-radius: Theme.radius-full,
+                thumb-size: Theme.control-size-md,
+                thumb-radius: Theme.radius-full,
+                thumb-border-width: 1px,
+                row-height: Theme.control-size-md,
+                track-touch-expansion: 0px,
+                thumb-touch-expansion: 0px,
+            };
         }
-        return self.size-md;
+        return {
+            track-height: 20px,
+            track-radius: Theme.radius-full,
+            thumb-size: Theme.control-size-lg,
+            thumb-radius: Theme.radius-full,
+            thumb-border-width: 1px,
+            row-height: Theme.control-size-lg,
+            track-touch-expansion: 0px,
+            thumb-touch-expansion: 0px,
+        };
     }
 }

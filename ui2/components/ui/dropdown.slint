@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { DropdownTheme } from "dropdown_theme.slint";
+import {
+    DropdownTheme,
+    DropdownThemeVariant,
+    DropdownVariantProps,
+    DropdownSizeProps,
+    DropdownState,
+} from "@theme/dropdown_theme.slint";
 
 export component Dropdown {
     in property <string> label: "";
@@ -15,24 +21,31 @@ export component Dropdown {
     in property <bool> interactive: true;
     in property <int> max-visible-items: 5;
 
-    in property <string> font-family: DropdownTheme.size(root.size).font-family;
-    in property <length> font-size: DropdownTheme.size(root.size).font-size;
-    in property <length> control-height: DropdownTheme.size(root.size).control-height;
-    in property <length> padding-horizontal: DropdownTheme.size(root.size).padding-horizontal;
-    in property <length> option-height: DropdownTheme.size(root.size).option-height;
-    in property <length> icon-size: DropdownTheme.size(root.size).icon-size;
-    in property <length> border-radius: DropdownTheme.size(root.size).border-radius;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> control-height: theme-size.control-height;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> option-height: theme-size.option-height;
+    in property <length> icon-size: theme-size.icon-size;
+    in property <length> border-radius: theme-size.border-radius;
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
     in property <length> label-font-size: Theme.font-size-label;
     in property <int> label-font-weight: 500;
     in property <color> label-color: root.disabled ? Theme.palette-muted.with-alpha(0.8) : Theme.palette-muted;
-    in property <color> trigger-background: root.disabled ? Theme.palette-secondary : Theme.palette-surface;
-    in property <color> trigger-border-color: root.open ? Theme.palette-primary : Theme.palette-border;
-    in property <length> trigger-border-width: root.open ? 2px : 1px;
-    in property <color> value-color: root.disabled ? Theme.palette-muted : (root.selected-text == "" ? Theme.palette-muted : Theme.palette-foreground);
-    in property <color> chevron-color: Theme.palette-muted;
+    in property <color> background: root.disabled ? Theme.palette-secondary : Theme.palette-surface;
+    in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
+    in property <color> placeholder-color: Theme.palette-muted;
+    in property <color> border-color: theme-style.border-color;
+    in property <color> border-color-error: theme-style.border-color-error;
+    in property <length> border-width: theme-size.border-width;
+    in property <color> trigger-background: root.background;
+    in property <color> trigger-border-color: root.border-color;
+    in property <length> trigger-border-width:
+        root.open ? Theme.border-width-focus : root.border-width;
+    in property <color> value-color: root.selected-text == "" ? root.placeholder-color : root.foreground;
+    in property <color> chevron-color: root.placeholder-color;
     in property <color> popup-background: Theme.palette-surface;
     in property <color> popup-border-color: Theme.palette-border;
     in property <length> popup-border-width: 1px;
@@ -45,6 +58,11 @@ export component Dropdown {
     out property <string> selected-text:
         root.selected-index >= 0 && root.selected-index < root.options.length ? root.options[root.selected-index] : "";
     private property <length> control-y: root.label != "" ? root.label-line-height + 6px : 0px;
+    property <DropdownState> theme-state:
+        root.disabled ? DropdownState.disabled : root.open ? DropdownState.focused : DropdownState.normal;
+    property <DropdownVariantProps> theme-style:
+        DropdownTheme.style(DropdownThemeVariant.default, root.theme-state);
+    property <DropdownSizeProps> theme-size: DropdownTheme.size(root.size);
 
     callback changed(int, string);
 

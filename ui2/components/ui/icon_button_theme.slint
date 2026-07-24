@@ -1,10 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from icon_button.json by foundation theme tooling — do not edit by hand.
+// GENERATED from icon_button.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum IconButtonThemeVariant {
+    default,
+    ghost,
+    outlined,
+}
+
+export enum IconButtonState {
+    normal,
+    focused,
+    pressed,
+    disabled,
+}
+
+export struct IconButtonVariantProps {
+    background: color,
+    icon-color: color,
+    border-color: color,
+    button-opacity: float,
+    touch-expansion: length,
+}
 
 export struct IconButtonSizeProps {
     border-width: length,
@@ -14,32 +35,100 @@ export struct IconButtonSizeProps {
 }
 
 export global IconButtonTheme {
-    in-out property <IconButtonSizeProps> size-sm: {
-        border-width: 1px,
-        border-radius: Theme.radius-default,
-        control-size: Theme.control-size-sm,
-        icon-size: Theme.icon-size-sm,
-    };
-    in-out property <IconButtonSizeProps> size-md: {
-        border-width: 1px,
-        border-radius: Theme.radius-default,
-        control-size: Theme.control-size-md,
-        icon-size: Theme.icon-size-md,
-    };
-    in-out property <IconButtonSizeProps> size-lg: {
-        border-width: 1px,
-        border-radius: Theme.radius-default,
-        control-size: Theme.control-size-lg,
-        icon-size: Theme.icon-size-lg,
-    };
-
+    public pure function style(v: IconButtonThemeVariant, st: IconButtonState) -> IconButtonVariantProps {
+        if v == IconButtonThemeVariant.default {
+            if st == IconButtonState.focused {
+                return {
+                    background: Theme.color-surface,
+                    icon-color: Theme.color-foreground,
+                    border-color: Theme.color-secondary-dark,
+                    button-opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
+            }
+            if st == IconButtonState.pressed {
+                return {
+                    background: Theme.color-secondary-dark,
+                    icon-color: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    button-opacity: 1,
+                    touch-expansion: Theme.spacing-xs,
+                };
+            }
+            if st == IconButtonState.disabled {
+                return {
+                    background: Theme.color-surface,
+                    icon-color: Theme.color-foreground,
+                    border-color: Theme.color-transparent,
+                    button-opacity: 0.5,
+                    touch-expansion: Theme.spacing-xs,
+                };
+            }
+            return {
+                background: Theme.color-surface,
+                icon-color: Theme.color-foreground,
+                border-color: Theme.color-transparent,
+                button-opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
+        }
+        if st == IconButtonState.focused {
+            return {
+                background: Theme.color-surface,
+                icon-color: Theme.color-primary,
+                border-color: Theme.color-primary,
+                button-opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
+        }
+        if st == IconButtonState.pressed {
+            return {
+                background: Theme.color-secondary-dark,
+                icon-color: Theme.color-primary,
+                border-color: Theme.color-transparent,
+                button-opacity: 1,
+                touch-expansion: Theme.spacing-xs,
+            };
+        }
+        if st == IconButtonState.disabled {
+            return {
+                background: Theme.color-surface,
+                icon-color: Theme.color-primary,
+                border-color: Theme.color-transparent,
+                button-opacity: 0.5,
+                touch-expansion: Theme.spacing-xs,
+            };
+        }
+        return {
+            background: Theme.color-surface,
+            icon-color: Theme.color-primary,
+            border-color: Theme.color-transparent,
+            button-opacity: 1,
+            touch-expansion: Theme.spacing-xs,
+        };
+    }
     public pure function size(s: ControlSize) -> IconButtonSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                border-width: 1px,
+                border-radius: Theme.radius-default,
+                control-size: Theme.control-size-sm,
+                icon-size: Theme.icon-size-sm,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                border-width: 1px,
+                border-radius: Theme.radius-default,
+                control-size: Theme.control-size-md,
+                icon-size: Theme.icon-size-md,
+            };
         }
-        return self.size-md;
+        return {
+            border-width: 1px,
+            border-radius: Theme.radius-default,
+            control-size: Theme.control-size-lg,
+            icon-size: Theme.icon-size-lg,
+        };
     }
 }

@@ -1,10 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from textarea.json by foundation theme tooling — do not edit by hand.
+// GENERATED from textarea.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum TextAreaThemeVariant {
+    flat,
+    bordered,
+}
+
+export enum TextAreaState {
+    normal,
+    focused,
+    disabled,
+}
+
+export struct TextAreaVariantProps {
+    background: color,
+    foreground: color,
+    placeholder-color: color,
+    border-color: color,
+    border-color-error: color,
+    description-color: color,
+    error-color: color,
+}
 
 export struct TextAreaSizeProps {
     border-width: length,
@@ -17,41 +38,103 @@ export struct TextAreaSizeProps {
 }
 
 export global TextAreaTheme {
-    in-out property <TextAreaSizeProps> size-sm: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-sm,
-        padding-horizontal: Theme.control-padding-inline-sm,
-        padding-vertical: 10px,
-        field-min-height: 96px,
-        font-size: Theme.font-size-sm,
-        font-family: Theme.font-primary,
-    };
-    in-out property <TextAreaSizeProps> size-md: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-md,
-        padding-horizontal: Theme.control-padding-inline-md,
-        padding-vertical: 12px,
-        field-min-height: 128px,
-        font-size: Theme.font-size-md,
-        font-family: Theme.font-primary,
-    };
-    in-out property <TextAreaSizeProps> size-lg: {
-        border-width: 1px,
-        border-radius: Theme.control-radius-lg,
-        padding-horizontal: Theme.control-padding-inline-lg,
-        padding-vertical: 14px,
-        field-min-height: 160px,
-        font-size: Theme.font-size-lg,
-        font-family: Theme.font-primary,
-    };
-
+    public pure function style(v: TextAreaThemeVariant, st: TextAreaState) -> TextAreaVariantProps {
+        if v == TextAreaThemeVariant.flat {
+            if st == TextAreaState.focused {
+                return {
+                    background: Theme.color-secondary,
+                    foreground: Theme.color-foreground,
+                    placeholder-color: Theme.color-foreground-light,
+                    border-color: Theme.color-primary,
+                    border-color-error: Theme.color-danger,
+                    description-color: Theme.color-foreground-light,
+                    error-color: Theme.color-danger,
+                };
+            }
+            if st == TextAreaState.disabled {
+                return {
+                    background: Theme.color-secondary,
+                    foreground: Theme.color-foreground-light,
+                    placeholder-color: Theme.color-foreground-light,
+                    border-color: Theme.color-transparent,
+                    border-color-error: Theme.color-danger,
+                    description-color: Theme.color-foreground-light,
+                    error-color: Theme.color-danger,
+                };
+            }
+            return {
+                background: Theme.color-secondary,
+                foreground: Theme.color-foreground,
+                placeholder-color: Theme.color-foreground-light,
+                border-color: Theme.color-transparent,
+                border-color-error: Theme.color-danger,
+                description-color: Theme.color-foreground-light,
+                error-color: Theme.color-danger,
+            };
+        }
+        if st == TextAreaState.focused {
+            return {
+                background: Theme.color-surface,
+                foreground: Theme.color-foreground,
+                placeholder-color: Theme.color-foreground-light,
+                border-color: Theme.color-primary,
+                border-color-error: Theme.color-danger,
+                description-color: Theme.color-foreground-light,
+                error-color: Theme.color-danger,
+            };
+        }
+        if st == TextAreaState.disabled {
+            return {
+                background: Theme.color-surface,
+                foreground: Theme.color-foreground-light,
+                placeholder-color: Theme.color-foreground-light,
+                border-color: Theme.color-border,
+                border-color-error: Theme.color-danger,
+                description-color: Theme.color-foreground-light,
+                error-color: Theme.color-danger,
+            };
+        }
+        return {
+            background: Theme.color-surface,
+            foreground: Theme.color-foreground,
+            placeholder-color: Theme.color-foreground-light,
+            border-color: Theme.color-border,
+            border-color-error: Theme.color-danger,
+            description-color: Theme.color-foreground-light,
+            error-color: Theme.color-danger,
+        };
+    }
     public pure function size(s: ControlSize) -> TextAreaSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-sm,
+                padding-horizontal: Theme.control-padding-inline-sm,
+                padding-vertical: 10px,
+                field-min-height: 96px,
+                font-size: Theme.font-size-sm,
+                font-family: Theme.font-primary,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                border-width: 1px,
+                border-radius: Theme.control-radius-md,
+                padding-horizontal: Theme.control-padding-inline-md,
+                padding-vertical: Theme.spacing-md,
+                field-min-height: 128px,
+                font-size: Theme.font-size-md,
+                font-family: Theme.font-primary,
+            };
         }
-        return self.size-md;
+        return {
+            border-width: 1px,
+            border-radius: Theme.control-radius-lg,
+            padding-horizontal: Theme.control-padding-inline-lg,
+            padding-vertical: 14px,
+            field-min-height: 160px,
+            font-size: Theme.font-size-lg,
+            font-family: Theme.font-primary,
+        };
     }
 }

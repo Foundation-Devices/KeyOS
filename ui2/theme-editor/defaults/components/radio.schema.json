@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "component": "Radio",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal",
+    "disabled"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "accent-color",
+      "displayName": "Accent Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "box-background",
+      "displayName": "Box Background",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.surface",
+          "disabled": "color.surface"
+        }
+      }
+    },
+    {
+      "name": "box-border-color",
+      "displayName": "Box Border Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.border",
+          "disabled": "color.border"
+        }
+      }
+    },
+    {
+      "name": "box-border-width",
+      "displayName": "Box Border Width",
+      "type": "float",
+      "min": 0.0,
+      "max": 8.0,
+      "step": 0.5,
+      "defaults": {
+        "default": {
+          "normal": "borderWidth.sm",
+          "disabled": "borderWidth.sm"
+        }
+      }
+    },
+    {
+      "name": "dot-color",
+      "displayName": "Dot Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "label-color",
+      "displayName": "Label Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.foreground",
+          "disabled": "color.muted"
+        }
+      }
+    },
+    {
+      "name": "description-color",
+      "displayName": "Description Color",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.muted",
+          "disabled": "color.muted"
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0.0,
+      "max": 256.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "control-size",
+      "displayName": "Control Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "choiceControlSize.md",
+        "sm": "choiceControlSize.sm",
+        "lg": "choiceControlSize.lg"
+      }
+    },
+    {
+      "name": "description-font-size",
+      "displayName": "Description Font Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "fontSize.helper"
+      }
+    },
+    {
+      "name": "row-height",
+      "displayName": "Row Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "controlSize.md",
+        "sm": "controlSize.sm",
+        "lg": "controlSize.lg"
+      }
+    }
+  ]
+}

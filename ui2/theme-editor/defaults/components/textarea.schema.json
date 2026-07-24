@@ -1,9 +1,9 @@
 {
+  "schemaVersion": 1,
   "component": "TextArea",
   "variants": [
     "flat",
-    "bordered",
-    "faded"
+    "bordered"
   ],
   "states": [
     "normal",
@@ -30,11 +30,6 @@
           "normal": "color.surface",
           "focused": "color.surface",
           "disabled": "color.surface"
-        },
-        "faded": {
-          "normal": "color.secondary",
-          "focused": "color.secondary",
-          "disabled": "color.secondary"
         }
       }
     },
@@ -49,11 +44,6 @@
           "disabled": "color.foreground.light"
         },
         "bordered": {
-          "normal": "color.foreground",
-          "focused": "color.foreground",
-          "disabled": "color.foreground.light"
-        },
-        "faded": {
           "normal": "color.foreground",
           "focused": "color.foreground",
           "disabled": "color.foreground.light"
@@ -74,11 +64,6 @@
           "normal": "color.foreground.light",
           "focused": "color.foreground.light",
           "disabled": "color.foreground.light"
-        },
-        "faded": {
-          "normal": "color.foreground.light",
-          "focused": "color.foreground.light",
-          "disabled": "color.foreground.light"
         }
       }
     },
@@ -96,33 +81,6 @@
           "normal": "color.border",
           "focused": "color.primary",
           "disabled": "color.border"
-        },
-        "faded": {
-          "normal": "color.border",
-          "focused": "color.primary",
-          "disabled": "color.border"
-        }
-      }
-    },
-    {
-      "name": "border-color-focus",
-      "displayName": "Focus Border",
-      "type": "color",
-      "defaults": {
-        "flat": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
-        },
-        "bordered": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
-        },
-        "faded": {
-          "normal": "color.primary",
-          "focused": "color.primary",
-          "disabled": "color.primary"
         }
       }
     },
@@ -137,11 +95,6 @@
           "disabled": "color.danger"
         },
         "bordered": {
-          "normal": "color.danger",
-          "focused": "color.danger",
-          "disabled": "color.danger"
-        },
-        "faded": {
           "normal": "color.danger",
           "focused": "color.danger",
           "disabled": "color.danger"
@@ -162,11 +115,6 @@
           "normal": "color.foreground.light",
           "focused": "color.foreground.light",
           "disabled": "color.foreground.light"
-        },
-        "faded": {
-          "normal": "color.foreground.light",
-          "focused": "color.foreground.light",
-          "disabled": "color.foreground.light"
         }
       }
     },
@@ -184,11 +132,6 @@
           "normal": "color.danger",
           "focused": "color.danger",
           "disabled": "color.danger"
-        },
-        "faded": {
-          "normal": "color.danger",
-          "focused": "color.danger",
-          "disabled": "color.danger"
         }
       }
     }
@@ -198,20 +141,20 @@
       "name": "border-width",
       "displayName": "Border Width",
       "type": "float",
-      "min": 0.0,
-      "max": 8.0,
+      "min": 0,
+      "max": 8,
       "step": 0.5,
       "defaults": {
-        "default": 1.0
+        "default": 1
       }
     },
     {
       "name": "border-radius",
       "displayName": "Border Radius",
       "type": "float",
-      "min": 0.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 32,
+      "step": 1,
       "defaults": {
         "default": "controlRadius.md",
         "sm": "controlRadius.sm",
@@ -222,9 +165,9 @@
       "name": "padding-horizontal",
       "displayName": "Padding Horizontal",
       "type": "float",
-      "min": 0.0,
-      "max": 40.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 40,
+      "step": 1,
       "defaults": {
         "default": "controlPaddingInline.md",
         "sm": "controlPaddingInline.sm",
@@ -235,35 +178,35 @@
       "name": "padding-vertical",
       "displayName": "Padding Vertical",
       "type": "float",
-      "min": 0.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 32,
+      "step": 1,
       "defaults": {
-        "default": 12.0,
-        "sm": 10.0,
-        "lg": 14.0
+        "default": "spacing.md",
+        "sm": 10,
+        "lg": 14
       }
     },
     {
       "name": "field-min-height",
       "displayName": "Field Min Height",
       "type": "float",
-      "min": 40.0,
-      "max": 240.0,
-      "step": 1.0,
+      "min": 40,
+      "max": 240,
+      "step": 1,
       "defaults": {
-        "default": 128.0,
-        "sm": 96.0,
-        "lg": 160.0
+        "default": 128,
+        "sm": 96,
+        "lg": 160
       }
     },
     {
       "name": "font-size",
       "displayName": "Font Size",
       "type": "float",
-      "min": 10.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 10,
+      "max": 32,
+      "step": 1,
       "defaults": {
         "default": "fontSize.md",
         "sm": "fontSize.sm",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { ToastTheme } from "toast_theme.slint";
+import { ToastTheme, ToastSizeProps } from "@theme/toast_theme.slint";
 
 export enum ToastVariant {
     default,
@@ -24,22 +24,23 @@ export component Toast {
     in property <ToastVariant> variant: ToastVariant.default;
     in property <ToastPosition> position: ToastPosition.bottom;
     in property <string> action: "";
-    in property <string> font-family: ToastTheme.size(root.size).font-family;
-    in property <length> font-size: ToastTheme.size(root.size).font-size;
-    in property <length> card-width: ToastTheme.size(root.size).card-width;
-    in property <length> toast-padding: ToastTheme.size(root.size).toast-padding;
-    in property <length> icon-size: ToastTheme.size(root.size).icon-size;
-    in property <length> border-radius: ToastTheme.size(root.size).border-radius;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> card-width: theme-size.card-width;
+    in property <length> toast-padding: theme-size.toast-padding;
+    in property <length> icon-size: theme-size.icon-size;
+    in property <length> border-radius: theme-size.border-radius;
+    property <ToastSizeProps> theme-size: ToastTheme.size(root.size);
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
-    in property <length> action-font-size: Theme.font-size-label;
-    in property <length> close-button-size: 24px;
-    in property <length> action-height: 26px;
-    in property <length> action-horizontal-padding: 10px;
+    in property <length> action-font-size: theme-size.action-font-size;
+    in property <length> close-button-size: theme-size.close-button-size;
+    in property <length> action-height: theme-size.action-height;
+    in property <length> action-horizontal-padding: theme-size.action-horizontal-padding;
     in property <int> action-font-weight: 700;
-    in property <length> action-radius: 13px;
-    in property <length> close-icon-size: 14px;
+    in property <length> action-radius: theme-size.action-radius;
+    in property <length> close-icon-size: theme-size.close-icon-size;
     in property <color> message-color: Theme.palette-foreground;
     in property <color> icon-color: accent-color();
     in property <color> action-color: accent-color();

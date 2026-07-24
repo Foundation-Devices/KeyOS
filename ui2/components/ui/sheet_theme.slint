@@ -1,10 +1,32 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from sheet.json by foundation theme tooling — do not edit by hand.
+// GENERATED from sheet.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum SheetState {
+    normal,
+}
+
+export struct SheetVariantProps {
+    backdrop-color: color,
+    panel-background: color,
+    panel-border-color: color,
+    panel-border-width: length,
+    handle-color: color,
+    title-color: color,
+    title-font-weight: int,
+    body-color: color,
+    divider-color: color,
+    detent-card-background: color,
+    detent-label-color: color,
+    detent-label-font-weight: int,
+    detent-value-color: color,
+    detent-value-font-weight: int,
+    detent-helper-color: color,
+}
 
 export struct SheetSizeProps {
     font-family: string,
@@ -13,41 +35,84 @@ export struct SheetSizeProps {
     content-padding: length,
     border-radius: length,
     handle-width: length,
+    handle-height: length,
+    handle-radius: length,
+    title-font-size: length,
+    divider-height: length,
+    detent-card-radius: length,
+    detent-label-font-size: length,
+    detent-value-font-size: length,
 }
 
 export global SheetTheme {
-    in-out property <SheetSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        panel-padding: Theme.control-radius-sm,
-        content-padding: 16px,
-        border-radius: 20px,
-        handle-width: Theme.control-size-sm,
-    };
-    in-out property <SheetSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        panel-padding: Theme.control-radius-md,
-        content-padding: 20px,
-        border-radius: 24px,
-        handle-width: Theme.control-size-md,
-    };
-    in-out property <SheetSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        panel-padding: Theme.control-radius-lg,
-        content-padding: 24px,
-        border-radius: 28px,
-        handle-width: Theme.control-size-lg,
-    };
-
+    public pure function style(st: SheetState) -> SheetVariantProps {
+        return {
+            backdrop-color: Theme.color-foreground,
+            panel-background: Theme.color-surface,
+            panel-border-color: Theme.color-border,
+            panel-border-width: 1px,
+            handle-color: Theme.color-border,
+            title-color: Theme.color-foreground,
+            title-font-weight: Theme.font-weight-bold,
+            body-color: Theme.color-foreground,
+            divider-color: Theme.color-border,
+            detent-card-background: Theme.color-secondary,
+            detent-label-color: Theme.color-muted,
+            detent-label-font-weight: Theme.font-weight-medium,
+            detent-value-color: Theme.color-foreground,
+            detent-value-font-weight: Theme.font-weight-semibold,
+            detent-helper-color: Theme.color-muted,
+        };
+    }
     public pure function size(s: ControlSize) -> SheetSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                panel-padding: Theme.control-radius-sm,
+                content-padding: 16px,
+                border-radius: 20px,
+                handle-width: Theme.control-size-sm,
+                handle-height: 6px,
+                handle-radius: 3px,
+                title-font-size: 24px,
+                divider-height: 1px,
+                detent-card-radius: 24px,
+                detent-label-font-size: 14px,
+                detent-value-font-size: 22px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                panel-padding: Theme.control-radius-md,
+                content-padding: 20px,
+                border-radius: Theme.radius-default,
+                handle-width: Theme.control-size-md,
+                handle-height: 6px,
+                handle-radius: 3px,
+                title-font-size: 24px,
+                divider-height: 1px,
+                detent-card-radius: 24px,
+                detent-label-font-size: 14px,
+                detent-value-font-size: 24px,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            panel-padding: Theme.control-radius-lg,
+            content-padding: 24px,
+            border-radius: 28px,
+            handle-width: Theme.control-size-lg,
+            handle-height: 6px,
+            handle-radius: 3px,
+            title-font-size: 24px,
+            divider-height: 1px,
+            detent-card-radius: 24px,
+            detent-label-font-size: 14px,
+            detent-value-font-size: 26px,
+        };
     }
 }

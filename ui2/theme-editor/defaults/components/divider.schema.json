@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "Divider",
   "variants": [
     "default"
@@ -44,55 +45,55 @@
       "name": "font-size",
       "displayName": "Font Size",
       "type": "float",
-      "min": 8.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 8,
+      "max": 32,
+      "step": 1,
       "defaults": {
-        "default": 13.0
+        "default": 13
       }
     },
     {
       "name": "label-gap",
       "displayName": "Label Gap",
       "type": "float",
-      "min": 0.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 32,
+      "step": 1,
       "defaults": {
-        "default": 8.0
+        "default": "spacing.sm"
       }
     },
     {
       "name": "label-start-margin",
       "displayName": "Start Margin",
       "type": "float",
-      "min": 0.0,
-      "max": 96.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 96,
+      "step": 1,
       "defaults": {
-        "default": 16.0
+        "default": "spacing.lg"
       }
     },
     {
       "name": "label-end-margin",
       "displayName": "End Margin",
       "type": "float",
-      "min": 0.0,
-      "max": 96.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 96,
+      "step": 1,
       "defaults": {
-        "default": 16.0
+        "default": "spacing.lg"
       }
     },
     {
       "name": "thickness",
       "displayName": "Thickness",
       "type": "float",
-      "min": 1.0,
-      "max": 12.0,
-      "step": 1.0,
+      "min": 1,
+      "max": 12,
+      "step": 1,
       "defaults": {
-        "default": 1.0
+        "default": 1
       }
     }
   ]

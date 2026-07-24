@@ -1,5 +1,6 @@
 {
-  "component": "RadioGroup",
+  "schemaVersion": 1,
+  "component": "Accordion",
   "variants": [
     "default"
   ],
@@ -39,21 +40,8 @@
       }
     },
     {
-      "name": "control-size",
-      "displayName": "Control Size",
-      "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
-      "defaults": {
-        "default": 28.0,
-        "sm": 24.0,
-        "lg": 32.0
-      }
-    },
-    {
-      "name": "row-height",
-      "displayName": "Row Height",
+      "name": "header-height",
+      "displayName": "Header Height",
       "type": "float",
       "min": 0.0,
       "max": 160.0,
@@ -65,16 +53,29 @@
       }
     },
     {
-      "name": "item-gap",
-      "displayName": "Item Gap",
+      "name": "padding-horizontal",
+      "displayName": "Padding Horizontal",
       "type": "float",
       "min": 0.0,
       "max": 64.0,
       "step": 1.0,
       "defaults": {
-        "default": 12.0,
-        "sm": 10.0,
-        "lg": 14.0
+        "default": "controlPaddingInline.md",
+        "sm": "controlPaddingInline.sm",
+        "lg": "controlPaddingInline.lg"
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0.0,
+      "max": 64.0,
+      "step": 1.0,
+      "defaults": {
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
       }
     }
   ]

@@ -101,8 +101,7 @@ export component TimePage inherits BasePage {
                     importance: Importance.primary;
                     label: "Save";
                     clicked => {
-                        if DateTimeGlobal.year != date.year || DateTimeGlobal.month != date.month || DateTimeGlobal.day != date.day
-                            || DateTimeGlobal.hour != new-hour || DateTimeGlobal.minute != new-minute {
+                        if DateTimeGlobal.year != date.year || DateTimeGlobal.month != date.month || DateTimeGlobal.day != date.day || DateTimeGlobal.hour != new-hour || DateTimeGlobal.minute != new-minute {
                             // Apply date and time together; two separate writes let the second clobber the first.
                             DateTimeGlobal.datetime-changed(date.year, date.month, date.day, new-hour, new-minute, 0);
                             DateTimeGlobal.year = date.year;

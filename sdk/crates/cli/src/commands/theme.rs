@@ -4,18 +4,34 @@
 //! `foundation theme` - open the app theme in the visual theme editor.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use clap::Args;
 use foundation_core::{ProjectContext, SdkRoot, APP_CONFIG_FILE};
 
 const DEFAULT_APP_THEME_PATH: &str = "resources/theme.json";
 
-pub fn execute() -> Result<()> {
+#[derive(Args)]
+pub struct ThemeArgs {
+    /// Theme JSON to edit; may be any relative or absolute path
+    #[arg(value_name = "FILENAME")]
+    pub filename: Option<PathBuf>,
+}
+
+pub fn execute(args: &ThemeArgs) -> Result<()> {
     let sdk = SdkRoot::discover().context(
         "Could not locate the Foundation SDK root. Run from an SDK checkout or unpacked bundle, or set FOUNDATION_SDK_ROOT.",
     )?;
+
+    if let Some(filename) = &args.filename {
+        let current_dir = std::env::current_dir().context("failed to determine the current directory")?;
+        let theme_path = if filename.is_absolute() { filename.clone() } else { current_dir.join(filename) };
+        let editor_dir = theme_path.parent().filter(|parent| parent.is_dir()).unwrap_or(&current_dir);
+        return launch_theme_editor(&sdk, editor_dir, &theme_path);
+    }
+
     let project = ProjectContext::discover().context("app-config.toml not found")?;
     let project_root = project.root.as_path();
     let config = &project.config;
@@ -31,7 +47,10 @@ pub fn execute() -> Result<()> {
                     project_root,
                     &path,
                     &config.friendly_app_name,
+                    None,
                 )?;
+            } else {
+                crate::commands::themes::ensure_editable_app_theme_parent(&path)?;
             }
             path
         }
@@ -43,6 +62,7 @@ pub fn execute() -> Result<()> {
                 project_root,
                 &path,
                 &config.friendly_app_name,
+                None,
             )?;
             set_app_config_theme(project_root, DEFAULT_APP_THEME_PATH)?;
             path
@@ -50,11 +70,12 @@ pub fn execute() -> Result<()> {
         None => {
             let path = project_root.join(DEFAULT_APP_THEME_PATH);
             crate::commands::themes::write_editable_app_theme(
-                "default_theme",
+                "base_theme",
                 &sdk,
                 project_root,
                 &path,
                 &config.friendly_app_name,
+                None,
             )?;
             set_app_config_theme(project_root, DEFAULT_APP_THEME_PATH)?;
             path

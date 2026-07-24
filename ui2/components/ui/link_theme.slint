@@ -1,10 +1,23 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from link.json by foundation theme tooling — do not edit by hand.
+// GENERATED from link.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum LinkState {
+    normal,
+    focused,
+    pressed,
+    disabled,
+    visited,
+}
+
+export struct LinkVariantProps {
+    text-color: color,
+    underline-color: color,
+}
 
 export struct LinkSizeProps {
     font-family: string,
@@ -14,32 +27,52 @@ export struct LinkSizeProps {
 }
 
 export global LinkTheme {
-    in-out property <LinkSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        row-height: 44px,
-        icon-size: 16px,
-    };
-    in-out property <LinkSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        row-height: 52px,
-        icon-size: 18px,
-    };
-    in-out property <LinkSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        row-height: 60px,
-        icon-size: 20px,
-    };
-
+    public pure function style(st: LinkState) -> LinkVariantProps {
+        if st == LinkState.pressed {
+            return {
+                text-color: Theme.color-primary-dark,
+                underline-color: Theme.color-primary-dark,
+            };
+        }
+        if st == LinkState.disabled {
+            return {
+                text-color: Theme.color-muted,
+                underline-color: Theme.color-transparent,
+            };
+        }
+        if st == LinkState.visited {
+            return {
+                text-color: Theme.color-muted,
+                underline-color: Theme.color-muted,
+            };
+        }
+        return {
+            text-color: Theme.color-primary,
+            underline-color: Theme.color-primary,
+        };
+    }
     public pure function size(s: ControlSize) -> LinkSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                row-height: 44px,
+                icon-size: 16px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                row-height: 52px,
+                icon-size: 18px,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            row-height: 60px,
+            icon-size: Theme.icon-size-sm,
+        };
     }
 }

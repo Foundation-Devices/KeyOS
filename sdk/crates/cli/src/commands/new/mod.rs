@@ -21,8 +21,10 @@ use template::TemplateProcessor;
 
 /// Template scaffolded when `--template` is omitted.
 const DEFAULT_TEMPLATE: &str = "default-app";
-/// Theme id selected when `--theme` is omitted.
-const DEFAULT_THEME_ID: &str = "default_theme";
+/// The one built-in theme every app theme inherits from.
+const BASE_THEME_ID: &str = "base_theme";
+/// Template-owned app theme, which may contain app-specific overrides.
+const APP_THEME_PATH: &str = "resources/theme.json";
 
 #[derive(Args)]
 pub struct NewArgs {
@@ -32,10 +34,6 @@ pub struct NewArgs {
     /// Project template to use
     #[arg(short, long, value_name = "TEMPLATE")]
     pub template: Option<String>,
-
-    /// Starting theme id
-    #[arg(long, value_name = "THEME_ID")]
-    pub theme: Option<String>,
 
     /// Friendly app name shown to users
     #[arg(long, value_name = "NAME")]
@@ -82,20 +80,6 @@ use crate::sdk_mapping::{
     ensure_project_sdk_mapping, project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path,
 };
 
-#[derive(Debug, Clone, serde::Deserialize)]
-struct ThemeFileEntry {
-    id: Option<String>,
-    name: Option<String>,
-    sort_order: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-struct ThemeEntry {
-    id: String,
-    display_name: String,
-    sort_order: i64,
-}
-
 const DEFAULT_GIT_BRANCH: &str = "main";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,18 +104,17 @@ fn create_project(args: &NewArgs, sdk: &SdkRoot, parent: &Path) -> Result<()> {
     println!();
 
     let template = select_template(args, sdk)?;
-    let theme_id = select_theme(args, sdk)?;
 
     let project_name = args.name.trim().to_string();
     validate_project_name(&project_name)?;
 
-    let variables = collect_variables(args, sdk, &template, &project_name, &theme_id)?;
+    let variables = collect_variables(args, sdk, &template, &project_name)?;
 
     println!();
     println!("Creating new KeyOS application: {}", project_name);
 
     let project_path = parent.join(&project_name);
-    write_project_files(&project_path, &template, &theme_id, variables, sdk)?;
+    write_project_files(&project_path, &template, variables, sdk)?;
 
     println!("✓ Created {}/", project_name);
     println!("✓ Created project structure from template");
@@ -192,32 +175,6 @@ fn select_template(args: &NewArgs, sdk: &SdkRoot) -> Result<String> {
     }
 }
 
-/// Pick the starting theme id: the `--theme` value (validated against the
-/// installed themes), an interactive menu, or `default_theme` when there is no
-/// terminal.
-fn select_theme(args: &NewArgs, sdk: &SdkRoot) -> Result<String> {
-    let available = load_available_themes(sdk)?;
-    let default_index = available.iter().position(|theme| theme.id == DEFAULT_THEME_ID).unwrap_or(0);
-
-    match args.theme.as_deref() {
-        Some(id) => available
-            .iter()
-            .find(|theme| theme.id == id)
-            .map(|theme| theme.id.clone())
-            .with_context(|| format!("Theme '{id}' not found")),
-        None if interactive() => {
-            let items: Vec<&str> = available.iter().map(|theme| theme.display_name.as_str()).collect();
-            let index = Select::new()
-                .with_prompt("Select a starting theme:")
-                .items(&items)
-                .default(default_index)
-                .interact()?;
-            available.get(index).map(|theme| theme.id.clone()).context("selected theme index out of range")
-        }
-        None => available.get(default_index).map(|theme| theme.id.clone()).context("No themes available"),
-    }
-}
-
 /// Reject a project name that cannot double as a directory and a Cargo package
 /// name.
 fn validate_project_name(name: &str) -> Result<()> {
@@ -250,7 +207,6 @@ fn collect_variables(
     sdk: &SdkRoot,
     template: &str,
     project_name: &str,
-    theme_id: &str,
 ) -> Result<HashMap<String, String>> {
     let template_vars = template::read_template_variables(template, Some(sdk));
     let template_default = |key: &str, fallback: &str| -> String {
@@ -266,7 +222,9 @@ fn collect_variables(
     let mut variables = HashMap::new();
     variables.insert("app_name".to_string(), project_name.to_string());
     variables.insert("icon".to_string(), template_default("icon", "resources/icon.svg"));
-    variables.insert("selected_theme_id".to_string(), theme_id.to_string());
+    // Keep the old template variable for external templates, but make its
+    // value deterministic now that Base Theme is the only built-in parent.
+    variables.insert("selected_theme_id".to_string(), BASE_THEME_ID.to_string());
 
     prompt_field(
         &mut variables,
@@ -361,7 +319,6 @@ fn collect_variables(
 fn write_project_files(
     project_path: &Path,
     template: &str,
-    theme_id: &str,
     mut variables: HashMap<String, String>,
     sdk: &SdkRoot,
 ) -> Result<()> {
@@ -394,12 +351,16 @@ fn write_project_files(
         .process_directory(&template_files_path, project_path)
         .with_context(|| format!("Failed to apply template '{}'", template))?;
     ensure_project_sdk_mapping(project_path, sdk)?;
+    // Normalize the template-owned app theme in place. Reading the generated
+    // file back preserves any sparse token or component overrides provided by
+    // the template; templates without one get an empty child of Base Theme.
     crate::commands::themes::write_editable_app_theme(
-        theme_id,
+        APP_THEME_PATH,
         sdk,
         project_path,
-        &project_path.join("resources").join("theme.json"),
+        &project_path.join(APP_THEME_PATH),
         &friendly_app_name,
+        Some(BASE_THEME_ID),
     )?;
 
     Ok(())
@@ -476,101 +437,6 @@ fn valid_version(field: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn load_available_themes(sdk: &SdkRoot) -> Result<Vec<ThemeEntry>> {
-    // User themes in ~/.foundation/themes/json shadow the SDK built-ins by id, so
-    // `foundation new --theme <id>` accepts anything `foundation themes list`
-    // shows, not just the bundled themes.
-    let dirs = crate::commands::themes::theme_source_dirs(sdk);
-
-    let mut themes = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for dir in &dirs {
-        // The user theme dir may not exist yet; only the SDK dir is guaranteed.
-        let mut entries = match fs::read_dir(dir) {
-            Ok(entries) => entries.collect::<std::result::Result<Vec<_>, _>>()?,
-            Err(_) => continue,
-        };
-        entries.sort_by_key(|entry| entry.path());
-
-        for entry in entries {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-
-            let contents = fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read theme file {}", path.display()))?;
-            let parsed: ThemeFileEntry = serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to parse theme file {}", path.display()))?;
-            let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("theme");
-            let id = parsed.id.unwrap_or_else(|| normalize_identifier(stem));
-            if !seen.insert(id.clone()) {
-                continue;
-            }
-
-            themes.push(ThemeEntry {
-                id,
-                display_name: parsed.name.unwrap_or_else(|| prettify_identifier(stem)),
-                // Convention: themes with no explicit sort_order land at the end of the
-                // built-in block (sort_order <= 999 reserved) but before any future
-                // out-of-tree additions.
-                sort_order: parsed.sort_order.unwrap_or(1000),
-            });
-        }
-    }
-
-    themes.sort_by(|a, b| {
-        a.sort_order
-            .cmp(&b.sort_order)
-            .then_with(|| a.display_name.to_ascii_lowercase().cmp(&b.display_name.to_ascii_lowercase()))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-
-    if themes.is_empty() {
-        anyhow::bail!("No themes found in {}", crate::commands::themes::sdk_themes_dir(sdk).display());
-    }
-
-    Ok(themes)
-}
-
-fn normalize_identifier(value: &str) -> String {
-    let mut ident = String::new();
-    let mut last_was_underscore = true;
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if ident.is_empty() && ch.is_ascii_digit() {
-                ident.push('_');
-            }
-            ident.push(ch.to_ascii_lowercase());
-            last_was_underscore = false;
-        } else if !last_was_underscore {
-            ident.push('_');
-            last_was_underscore = true;
-        }
-    }
-    while ident.ends_with('_') {
-        ident.pop();
-    }
-    if ident.is_empty() {
-        "theme".to_string()
-    } else {
-        ident
-    }
-}
-
-fn prettify_identifier(value: &str) -> String {
-    normalize_identifier(value)
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            let Some(first) = chars.next() else { return String::new() };
-            format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn initialize_git_repo(project_path: &PathBuf) -> GitInitStatus {
     if !is_git_available() {
         return GitInitStatus::Unavailable;
@@ -600,7 +466,8 @@ mod tests {
     use foundation_core::SdkRoot;
 
     use super::{
-        create_project, initialize_git_repo, is_git_available, GitInitStatus, NewArgs, DEFAULT_GIT_BRANCH,
+        create_project, initialize_git_repo, is_git_available, GitInitStatus, NewArgs, APP_THEME_PATH,
+        DEFAULT_GIT_BRANCH,
     };
     use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
@@ -633,7 +500,12 @@ mod tests {
         assert!(theme_rs.contains("foundation_themes::include_theme!(app_theme);"));
         assert!(theme_rs.contains("foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);"));
         assert!(!theme_rs.contains("{{selected_theme_id}}"));
-        assert!(project_path.join("resources").join("theme.json").exists());
+        let app_theme_path = project_path.join("resources").join("theme.json");
+        assert!(app_theme_path.exists());
+        let app_theme: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(app_theme_path).unwrap()).unwrap();
+        assert_eq!(app_theme["parent"].as_str(), Some("base_theme"));
+        assert!(app_theme.get("tokens").is_none(), "base theme must remain inherited, not flattened");
         assert!(!project_path.join("theme").join("theme.json").exists());
         let cargo_lock = fs::read_to_string(project_path.join("Cargo.lock")).unwrap();
         assert!(cargo_lock.contains("name = \"demo-app\""));
@@ -691,7 +563,7 @@ mod tests {
         fs::create_dir_all(&template_dir).unwrap();
         fs::write(
             template_dir.join("paths.txt"),
-            "root={{sdk_root}}\nkeyos={{sdk_keyos_root}}\nui={{sdk_ui_root}}\npath={{sdk_path}}\n",
+            "root={{sdk_root}}\nkeyos={{sdk_keyos_root}}\nui={{sdk_ui_root}}\npath={{sdk_path}}\ntheme={{selected_theme_id}}\n",
         )
         .unwrap();
 
@@ -708,7 +580,7 @@ mod tests {
         assert_eq!(
             paths,
             format!(
-                "root={}\nkeyos={}\nui={}\npath={}\n",
+                "root={}\nkeyos={}\nui={}\npath={}\ntheme=base_theme\n",
                 project_sdk_root_path(),
                 project_sdk_keyos_root_path(),
                 project_sdk_ui_root_path(),
@@ -716,6 +588,66 @@ mod tests {
             )
         );
         assert!(project_path.join(project_sdk_keyos_root_path()).exists());
+    }
+
+    #[test]
+    fn create_project_locks_base_theme_and_preserves_template_overrides() {
+        let (_sdk_dir, sdk_root) = make_sdk_root("theme-template-sdk");
+        let template_dir = sdk_root
+            .join("crates")
+            .join("cli")
+            .join("templates")
+            .join("theme-overrides")
+            .join("files")
+            .join("resources");
+        fs::create_dir_all(&template_dir).unwrap();
+        fs::write(
+            template_dir.join("theme.json"),
+            r#"{
+  "id": "template_theme",
+  "name": "Template Theme",
+  "parent": "obsolete_theme",
+  "tokens": {
+    "spacing": {
+      "md": 18.0
+    }
+  },
+  "components": {
+    "button": {
+      "variantProps": {
+        "primary": {
+          "normal": {
+            "background": "color.danger"
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let sdk = SdkRoot::from_root(sdk_root).unwrap();
+        let project_root_dir = make_temp_dir("theme-template-project");
+        let project_root = project_root_dir.path();
+        let mut args = sample_args("demo-app");
+        args.template = Some("theme-overrides".to_string());
+
+        create_project(&args, &sdk, project_root).unwrap();
+
+        let app_theme: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project_root.join("demo-app").join(APP_THEME_PATH)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(app_theme["id"], "app_theme");
+        assert_eq!(app_theme["name"], "Demo App");
+        assert_eq!(app_theme["parent"], "base_theme");
+        assert_eq!(app_theme["tokens"]["spacing"]["md"], 18.0);
+        assert_eq!(
+            app_theme["components"]["button"]["variantProps"]["primary"]["normal"]["background"],
+            "color.danger"
+        );
     }
 
     // Heavy integration test: scaffolds an app and `cargo check`s it against the
@@ -791,7 +723,7 @@ mod tests {
             .unwrap();
         assert!(gen.status.success(), "theme compiler failed:\n{}", String::from_utf8_lossy(&gen.stderr));
         assert!(
-            rust_dir.join("default_theme.rs").exists(),
+            rust_dir.join("base_theme.rs").exists(),
             "theme compiler did not write to {}",
             rust_dir.display()
         );
@@ -872,7 +804,6 @@ mod tests {
         NewArgs {
             name: name.to_string(),
             template: Some("default-app".to_string()),
-            theme: Some("default_theme".to_string()),
             friendly_name: Some("Demo App".to_string()),
             launcher_name: Some("Demo".to_string()),
             description: Some("Demo app".to_string()),
@@ -903,7 +834,7 @@ mod tests {
             );
         }
 
-        // create_project reads the built-in themes; seed the default one so
+        // create_project reads the built-in themes; seed the base one so
         // theme lookup by id resolves.
         let themes_dir = root.join("crates").join("foundation-themes").join("themes");
         fs::create_dir_all(&themes_dir).unwrap();
@@ -912,8 +843,8 @@ mod tests {
                 .join("..")
                 .join("foundation-themes")
                 .join("themes")
-                .join("default_theme.json"),
-            themes_dir.join("default_theme.json"),
+                .join("base_theme.json"),
+            themes_dir.join("base_theme.json"),
         )
         .unwrap();
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme } from "theme.slint";
-import { DividerTheme } from "divider_theme.slint";
+import { DividerTheme, DividerSizeProps } from "@theme/divider_theme.slint";
 
 export enum DividerOrientation {
     horizontal,
@@ -22,12 +22,13 @@ export component Divider {
     in property <bool> full-width: false;
     in property <color> divider-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.92 : 1.0);
     in property <color> label-color: Theme.palette-muted;
-    in property <string> font-family: DividerTheme.size-default.font-family;
-    in property <length> thickness: DividerTheme.size-default.thickness;
-    in property <length> font-size: DividerTheme.size-default.font-size;
-    in property <length> label-gap: DividerTheme.size-default.label-gap;
-    in property <length> label-start-margin: DividerTheme.size-default.label-start-margin;
-    in property <length> label-end-margin: DividerTheme.size-default.label-end-margin;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> thickness: theme-size.thickness;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> label-gap: theme-size.label-gap;
+    in property <length> label-start-margin: theme-size.label-start-margin;
+    in property <length> label-end-margin: theme-size.label-end-margin;
+    property <DividerSizeProps> theme-size: DividerTheme.size();
 
     // ===== THEMEABLE PROPS =====
     in property <int> label-font-weight: 500;

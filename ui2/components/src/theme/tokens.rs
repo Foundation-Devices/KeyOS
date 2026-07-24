@@ -296,7 +296,7 @@ mod parity_tests {
     /// Catches U1-style bugs — a token added to one scheme without the other.
     #[test]
     fn default_tokens_have_dark_light_parity() {
-        let tokens = crate::theme::create_default_tokens();
+        let tokens = crate::theme::create_schema_fallback_tokens();
         let diff = tokens.parity_diff();
         assert!(
             diff.is_empty(),

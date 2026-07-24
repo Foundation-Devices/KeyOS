@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ButtonState, ControlSize } from "theme.slint";
-import { ChipTheme } from "chip_theme.slint";
+import { ChipTheme, ChipSizeProps } from "@theme/chip_theme.slint";
 
 export enum ChipVariant {
     filled,
@@ -43,7 +43,7 @@ export component Chip {
     in property <length> padding-horizontal: themed-padding-horizontal;
     in property <length> padding-vertical: themed-padding-vertical;
     in property <length> font-size: themed-font-size;
-    in property <string> font-family: ChipTheme.size(root.ctrl-size()).font-family;
+    in property <string> font-family: theme-size.font-family;
     in property <length> icon-size: themed-icon-size;
 
     // ===== THEMEABLE PROPS =====
@@ -239,10 +239,11 @@ export component Chip {
         current-state == ButtonState.focused ? focused-border-color() : base-border-color();
     property <length> themed-border-width:
         current-state == ButtonState.focused ? 2px : root.variant == ChipVariant.outlined ? 1px : 0px;
-    property <length> themed-padding-horizontal: ChipTheme.size(root.ctrl-size()).padding-horizontal;
-    property <length> themed-padding-vertical: ChipTheme.size(root.ctrl-size()).padding-vertical;
-    property <length> themed-font-size: ChipTheme.size(root.ctrl-size()).font-size;
-    property <length> themed-icon-size: ChipTheme.size(root.ctrl-size()).icon-size;
+    property <ChipSizeProps> theme-size: ChipTheme.size(root.ctrl-size());
+    property <length> themed-padding-horizontal: theme-size.padding-horizontal;
+    property <length> themed-padding-vertical: theme-size.padding-vertical;
+    property <length> themed-font-size: theme-size.font-size;
+    property <length> themed-icon-size: theme-size.icon-size;
 
     property <color> actual-background: root.background;
     property <color> actual-foreground: root.foreground;

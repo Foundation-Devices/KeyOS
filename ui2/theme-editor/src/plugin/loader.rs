@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Plugin loader - discovers and loads plugins from the filesystem.
+//! Plugin loader - discovers and loads component schemas from the filesystem.
 //!
-//! Plugins are loaded from `~/.foundation/theme-editor/plugins/` as JSON files.
-//! If the directory doesn't exist, it's created with default plugins.
+//! Component schemas are loaded from `~/.foundation/theme-editor/components/`
+//! as `*.schema.json` files. Legacy `plugins/*.json` files are migrated on
+//! first use.
 
 use std::collections::HashSet;
 use std::fs;
@@ -69,8 +70,8 @@ struct ParsedComponentFile {
 
 pub fn builtin_component_specs() -> &'static [BuiltinComponentSpec] { BUILTIN_COMPONENTS }
 
-// Pulled in by build.rs from defaults/plugins/*.json. Used by the parity test
-// below so a new plugin JSON dropped into defaults/plugins/ without a matching
+// Pulled in by build.rs from defaults/components/*.schema.json. Used by the parity test
+// below so a new component schema dropped into defaults/components/ without a matching
 // BUILTIN_COMPONENTS entry fails the build instead of being silently ignored.
 #[cfg(test)]
 include!(concat!(env!("OUT_DIR"), "/components_generated.rs"));
@@ -80,7 +81,7 @@ mod component_parity {
     use super::{BUILTIN_COMPONENTS, GENERATED_BUILTIN_COMPONENTS};
 
     /// Catches drift between the hand-written BUILTIN_COMPONENTS list and the
-    /// set of plugin JSON files actually present on disk.
+    /// set of component schema JSON files actually present on disk.
     #[test]
     fn every_plugin_json_has_a_builtin_component_entry() {
         let hand_keys: std::collections::BTreeSet<&str> =
@@ -93,9 +94,9 @@ mod component_parity {
 
         assert!(
             only_in_json.is_empty() && only_in_hand.is_empty(),
-            "BUILTIN_COMPONENTS vs defaults/plugins/*.json drift:\n  \
-             keys with a plugin JSON but no BUILTIN_COMPONENTS entry: {only_in_json:?}\n  \
-             keys in BUILTIN_COMPONENTS but no plugin JSON: {only_in_hand:?}"
+            "BUILTIN_COMPONENTS vs defaults/components/*.schema.json drift:\n  \
+             keys with a component schema but no BUILTIN_COMPONENTS entry: {only_in_json:?}\n  \
+             keys in BUILTIN_COMPONENTS but no component schema: {only_in_hand:?}"
         );
     }
 }
@@ -105,19 +106,25 @@ pub fn get_theme_editor_path() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".foundation").join("theme-editor")
 }
 
-/// Get the plugins directory path
-pub fn get_plugins_path() -> PathBuf { get_theme_editor_path().join("plugins") }
+/// Get the user component schema directory path.
+pub fn get_plugins_path() -> PathBuf { get_theme_editor_path().join("components") }
+
+fn get_legacy_plugins_path() -> PathBuf { get_theme_editor_path().join("plugins") }
 
 /// Get the tokens file path
 pub fn get_tokens_path() -> PathBuf { get_theme_editor_path().join("tokens.json") }
 
 fn repo_default_plugins_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("defaults/plugins")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("defaults/components")
 }
 
 fn repo_default_plugin_path(name: &str) -> PathBuf {
-    repo_default_plugins_path().join(format!("{name}.json"))
+    repo_default_plugins_path().join(format!("{name}.schema.json"))
 }
+
+fn user_plugin_path(name: &str) -> PathBuf { get_plugins_path().join(format!("{name}.schema.json")) }
+
+fn legacy_user_plugin_path(name: &str) -> PathBuf { get_legacy_plugins_path().join(format!("{name}.json")) }
 
 fn default_plugin_json(name: &str) -> Option<String> {
     fs::read_to_string(repo_default_plugin_path(name)).ok().or_else(|| {
@@ -154,6 +161,7 @@ fn normalize_plugin_definition(name: &str, plugin: PluginDefinition) -> PluginDe
     };
     let plugin = normalize_plugin_states_against_default(name, plugin);
     let plugin = normalize_legacy_shipped_size_defaults(name, plugin);
+    let plugin = augment_missing_themeable_props_from_source(name, plugin);
     dedupe_plugin_props(plugin)
 }
 
@@ -163,6 +171,71 @@ fn dedupe_plugin_props(mut plugin: PluginDefinition) -> PluginDefinition {
 
     let mut seen_size_props = HashSet::new();
     plugin.size_props.retain(|prop| seen_size_props.insert(prop.name.clone()));
+
+    plugin
+}
+
+fn augment_missing_themeable_props_from_source(name: &str, mut plugin: PluginDefinition) -> PluginDefinition {
+    const AUGMENTED_COMPONENTS: &[&str] = &[
+        "checkbox",
+        "radio",
+        "switch",
+        "card",
+        "menu_item",
+        "accordion",
+        "image",
+        "dialog",
+        "sheet",
+        "toast",
+    ];
+
+    if !AUGMENTED_COMPONENTS.contains(&name) {
+        return plugin;
+    }
+
+    let Some(spec) = builtin_component_specs().iter().find(|spec| spec.key == name) else {
+        return plugin;
+    };
+    let Ok(parsed) = parse_component_file(&component_source_path(spec.source_file)) else {
+        return plugin;
+    };
+
+    for prop in parsed.properties {
+        let prop_type = map_prop_type(&prop.type_name);
+        if is_size_prop(&prop.name) {
+            if plugin.size_props.iter().any(|existing| existing.name == prop.name) {
+                continue;
+            }
+            plugin.size_props.push(PropDefinition {
+                name: prop.name.clone(),
+                display_name: Some(humanize_prop_name(&prop.name)),
+                prop_type: prop_type.clone(),
+                min: infer_min(&prop.name),
+                max: infer_max(&prop.name),
+                step: infer_step(&prop.name),
+                defaults: build_size_defaults(&prop.name, &prop_type, &plugin.sizes),
+            });
+        } else {
+            if plugin.variant_props.iter().any(|existing| existing.name == prop.name) {
+                continue;
+            }
+            plugin.variant_props.push(PropDefinition {
+                name: prop.name.clone(),
+                display_name: Some(humanize_prop_name(&prop.name)),
+                prop_type: prop_type.clone(),
+                min: infer_min(&prop.name),
+                max: infer_max(&prop.name),
+                step: infer_step(&prop.name),
+                defaults: build_variant_defaults(
+                    name,
+                    &prop.name,
+                    &prop_type,
+                    &plugin.variants,
+                    &plugin.states,
+                ),
+            });
+        }
+    }
 
     plugin
 }
@@ -182,20 +255,35 @@ pub fn ensure_default_files() -> std::io::Result<()> {
         eprintln!("Created default tokens.json at {}", tokens_path.display());
     }
 
-    let legacy_segmented_path = plugins_path.join("segmented_control.json");
-    let tabs_path = plugins_path.join("tabs.json");
-    if !tabs_path.exists() && legacy_segmented_path.exists() {
-        fs::copy(&legacy_segmented_path, &tabs_path)?;
-        eprintln!("Migrated legacy segmented_control.json to {}", tabs_path.display());
+    let tabs_path = user_plugin_path("tabs");
+    let legacy_plugins_path = get_legacy_plugins_path();
+    let migration_candidates = [
+        plugins_path.join("segmented_control.schema.json"),
+        legacy_plugins_path.join("tabs.json"),
+        legacy_plugins_path.join("segmented_control.json"),
+    ];
+    if !tabs_path.exists() {
+        if let Some(source_path) = migration_candidates.iter().find(|path| path.exists()) {
+            fs::copy(source_path, &tabs_path)?;
+            eprintln!(
+                "Migrated legacy component schema {} to {}",
+                source_path.display(),
+                tabs_path.display()
+            );
+        }
     }
 
     for spec in builtin_component_specs() {
-        let plugin_path = plugins_path.join(format!("{}.json", spec.key));
+        let plugin_path = user_plugin_path(spec.key);
 
         if !plugin_path.exists() {
-            if let Some(default_plugin) = default_plugin_json(spec.key) {
+            let legacy_plugin_path = legacy_user_plugin_path(spec.key);
+            if legacy_plugin_path.exists() {
+                fs::copy(&legacy_plugin_path, &plugin_path)?;
+                eprintln!("Migrated legacy {}.json to {}", spec.key, plugin_path.display());
+            } else if let Some(default_plugin) = default_plugin_json(spec.key) {
                 fs::write(&plugin_path, default_plugin)?;
-                eprintln!("Created default {}.json at {}", spec.key, plugin_path.display());
+                eprintln!("Created default {}.schema.json at {}", spec.key, plugin_path.display());
             }
         }
 
@@ -215,7 +303,7 @@ pub fn ensure_default_files() -> std::io::Result<()> {
                     if let Some(default_plugin) = default_plugin_json(spec.key) {
                         fs::write(&plugin_path, &default_plugin)?;
                         eprintln!(
-                            "Restored mangled {}.json from defaults at {}",
+                            "Restored mangled {}.schema.json from defaults at {}",
                             spec.key,
                             plugin_path.display()
                         );
@@ -226,7 +314,7 @@ pub fn ensure_default_files() -> std::io::Result<()> {
                 if normalized != plugin {
                     if let Ok(json) = serde_json::to_string_pretty(&normalized) {
                         fs::write(&plugin_path, json)?;
-                        eprintln!("Updated {}.json at {}", spec.key, plugin_path.display());
+                        eprintln!("Updated {}.schema.json at {}", spec.key, plugin_path.display());
                     }
                 }
             }
@@ -236,17 +324,20 @@ pub fn ensure_default_files() -> std::io::Result<()> {
     Ok(())
 }
 
-/// Hard cap on plugin-JSON file size. Plugin defs are tiny (a few KB), so
+/// Hard cap on component-schema file size. Component defs are tiny (a few KB), so
 /// anything larger than this is either a misnamed file or a hostile input
 /// (zip bomb, recursive ref, etc). Reject before serde_json walks it.
 const MAX_PLUGIN_FILE_BYTES: u64 = 1 * 1024 * 1024;
 
-/// Load a specific plugin by name (e.g., "button" loads "button.json")
+/// Load a specific component schema by name (e.g., "button" loads "button.schema.json").
 pub fn load_plugin(name: &str) -> Result<PluginDefinition, String> {
-    let plugins_path = get_plugins_path();
-    let plugin_path = plugins_path.join(format!("{}.json", name));
+    let plugin_path = user_plugin_path(name);
+    let legacy_plugin_path = legacy_user_plugin_path(name);
 
-    if plugin_path.exists() {
+    for plugin_path in [&plugin_path, &legacy_plugin_path] {
+        if !plugin_path.exists() {
+            continue;
+        }
         let metadata =
             fs::metadata(&plugin_path).map_err(|e| format!("Failed to stat plugin {}: {}", name, e))?;
         if metadata.len() > MAX_PLUGIN_FILE_BYTES {
@@ -268,8 +359,9 @@ pub fn load_plugin(name: &str) -> Result<PluginDefinition, String> {
     }
 
     Err(format!(
-        "Plugin not found: {} or {}",
+        "Component schema not found: {}, {}, or {}",
         plugin_path.display(),
+        legacy_plugin_path.display(),
         repo_default_plugin_path(name).display()
     ))
 }
@@ -295,8 +387,8 @@ pub fn load_all_plugins() -> Result<Vec<(BuiltinComponentSpec, PluginDefinition)
 }
 
 /// Like [`load_all_plugins`], but reads ONLY the repo-pinned defaults under
-/// `CARGO_MANIFEST_DIR/defaults/plugins`, ignoring the user's mutable
-/// `~/.foundation/theme-editor/plugins`. The build-time theme generator
+/// `CARGO_MANIFEST_DIR/defaults/components`, ignoring the user's mutable
+/// `~/.foundation/theme-editor/components`. The build-time theme generator
 /// (`slintthemegen`) uses this so its output is reproducible from the repo
 /// rather than from editor runtime state.
 pub fn load_all_plugins_from_repo() -> Result<Vec<(BuiltinComponentSpec, PluginDefinition)>, String> {
@@ -504,7 +596,7 @@ fn normalize_legacy_textarea_plugin(name: &str, mut plugin: PluginDefinition) ->
 
     for variant in &mut plugin.variants {
         if variant == "underlined" {
-            *variant = "faded".to_string();
+            *variant = "bordered".to_string();
         }
     }
 
@@ -763,15 +855,17 @@ fn migrate_size_defaults(
     fallback_defaults: &PropDefaults,
     target_sizes: &[String],
 ) -> PropDefaults {
-    // New model: the local prop already declares an explicit "default" base with
+    // New model: the local prop already declares an explicit Common base with
     // sparse per-size overrides. Preserve the base verbatim and keep only the
     // per-size keys that are actually present — a missing size inherits the base,
     // so the legacy positional/first-value backfill below would wrongly promote
     // an inheriting size into an override (with the wrong value).
-    if local_defaults.values.contains_key("default") {
+    if local_defaults.values.contains_key("common") || local_defaults.values.contains_key("default") {
         let mut migrated = PropDefaults::default();
-        if let Some(base) = local_defaults.values.get("default") {
-            migrated.values.insert("default".to_string(), base.clone());
+        if let Some(base) =
+            local_defaults.values.get("common").or_else(|| local_defaults.values.get("default"))
+        {
+            migrated.values.insert("common".to_string(), base.clone());
         }
         for target_size in target_sizes {
             if let Some(value) = local_defaults.values.get(target_size) {
@@ -905,6 +999,9 @@ fn normalize_legacy_shipped_size_defaults(name: &str, mut plugin: PluginDefiniti
                 }
             }
         }
+        "input" | "search" | "dropdown" | "textarea" => {
+            plugin.variant_props.retain(|prop| prop.name != "border-color-focus");
+        }
         "icon" => {
             plugin.states = vec!["normal".to_string()];
             for prop in &mut plugin.variant_props {
@@ -945,8 +1042,9 @@ fn normalize_legacy_shipped_size_defaults(name: &str, mut plugin: PluginDefiniti
             plugin.variants = vec!["default".to_string()];
             plugin.states = vec!["normal".to_string()];
             plugin.sizes = vec!["default".to_string()];
-            plugin.variant_props.clear();
-            plugin.size_props.retain(|prop| prop.name == "frame-width" || prop.name == "frame-height");
+            plugin.size_props.retain(|prop| {
+                prop.name == "frame-width" || prop.name == "frame-height" || prop.name == "frame-radius"
+            });
             rewrite_float_size_prop_if_exact_match(
                 &mut plugin,
                 "frame-height",
@@ -1191,6 +1289,7 @@ fn is_size_prop(prop_name: &str) -> bool {
             | "bar-height"
             | "spinner-size"
             | "stroke-width"
+            | "thumb-border-width"
             | "border-width"
             | "padding"
     ) || prop_name.contains("size")
@@ -1206,7 +1305,6 @@ fn is_variant_prop(prop_name: &str) -> bool {
             | "foreground"
             | "placeholder-color"
             | "border-color"
-            | "border-color-focus"
             | "border-color-error"
             | "description-color"
             | "error-color"
@@ -1227,9 +1325,69 @@ fn is_variant_prop(prop_name: &str) -> bool {
             | "menu-background"
             | "menu-border-color"
             | "menu-border-width"
+            | "checked-background"
+            | "checked-border-color"
+            | "checked-border-width"
+            | "box-background"
+            | "box-border-color"
+            | "box-border-width"
+            | "mark-color"
+            | "dot-color"
+            | "knob-color"
+            | "item-background"
+            | "item-border-color"
+            | "item-border-width"
+            | "item-foreground"
+            | "indicator-color"
+            | "list-background-color"
+            | "list-border-width"
+            | "list-stroke-color"
+            | "list-edge-color"
+            | "panel-background"
+            | "panel-foreground"
+            | "panel-border-color"
+            | "panel-border-width"
+            | "accent-color"
+            | "title-color"
+            | "subtitle-color"
+            | "body-color"
+            | "footer-divider-color"
+            | "footer-color"
+            | "secondary-color"
+            | "title-disabled-color"
+            | "chevron-color"
+            | "expanded-divider-color"
+            | "frame-background"
+            | "frame-border-color"
+            | "frame-border-width"
+            | "alt-background"
+            | "alt-color"
+            | "caption-color"
+            | "backdrop-color"
+            | "icon-circle-background"
+            | "message-color"
+            | "close-icon-color"
+            | "handle-color"
+            | "close-background"
+            | "detent-card-background"
+            | "detent-label-color"
+            | "detent-value-color"
+            | "detent-helper-color"
+            | "toast-background"
+            | "action-color"
+            | "card-border-color"
             | "pressed-background"
             | "separator-color"
             | "accent-color-override"
+            | "label-font-weight"
+            | "subtitle-font-weight"
+            | "trailing-font-weight"
+            | "title-font-weight"
+            | "eyebrow-font-weight"
+            | "alt-font-weight"
+            | "action-font-weight"
+            | "detent-label-font-weight"
+            | "detent-value-font-weight"
             | "button-opacity"
             | "opacity"
             | "font-weight"
@@ -1281,12 +1439,47 @@ fn default_variant_value(
         let accent = accent_token_for_variant(component_key, variant);
         return TokenOrValue::String(match prop_name {
             "background" => background_token_for_state(component_key, accent, state),
+            "box-background" | "panel-background" | "toast-background" => "color.surface".to_string(),
+            "frame-background" | "detent-card-background" | "icon-circle-background" => {
+                "color.secondary".to_string()
+            }
+            "alt-background" | "backdrop-color" => "color.foreground".to_string(),
             "foreground" => foreground_token_for_variant(component_key, accent, variant),
             "placeholder-color" => "color.foreground.light".to_string(),
             "border-color" => border_token_for_state(component_key, accent, state),
-            "border-color-focus" => accent.focus_token().to_string(),
+            "box-border-color"
+            | "panel-border-color"
+            | "frame-border-color"
+            | "card-border-color"
+            | "separator-color"
+            | "divider-color"
+            | "footer-divider-color"
+            | "handle-color"
+            | "expanded-divider-color"
+            | "list-stroke-color"
+            | "list-edge-color" => "color.border".to_string(),
             "border-color-error" => "color.danger".to_string(),
-            "icon-color" => foreground_token_for_variant(component_key, accent, variant),
+            "icon-color" | "accent-color" | "dot-color" | "action-color" => accent.normal_token().to_string(),
+            "checked-background" | "checked-border-color" => {
+                if state == "disabled" {
+                    "color.muted".to_string()
+                } else {
+                    accent.normal_token().to_string()
+                }
+            }
+            "mark-color" | "knob-color" | "alt-color" => "color.background".to_string(),
+            "label-color" | "title-color" | "body-color" | "message-color" | "panel-foreground"
+            | "item-foreground" | "detent-value-color" => "color.foreground".to_string(),
+            "description-color"
+            | "subtitle-color"
+            | "footer-color"
+            | "secondary-color"
+            | "title-disabled-color"
+            | "chevron-color"
+            | "caption-color"
+            | "close-icon-color"
+            | "detent-label-color"
+            | "detent-helper-color" => "color.muted".to_string(),
             "track-color" => "color.secondary".to_string(),
             "fill-color-override" => accent.normal_token().to_string(),
             "accent-color-override" => accent.normal_token().to_string(),
@@ -1296,8 +1489,19 @@ fn default_variant_value(
 
     match prop_name {
         "button-opacity" | "opacity" => TokenOrValue::Float(if state == "disabled" { 0.5 } else { 1.0 }),
-        "font-weight" => TokenOrValue::Int(500),
-        "touch-expansion" => TokenOrValue::Float(4.0),
+        "checked-border-width" => TokenOrValue::Float(0.0),
+        "eyebrow-font-weight" | "title-font-weight" | "action-font-weight" => {
+            TokenOrValue::String("fontWeight.bold".to_string())
+        }
+        "alt-font-weight" | "detent-value-font-weight" => {
+            TokenOrValue::String("fontWeight.semibold".to_string())
+        }
+        "font-weight"
+        | "label-font-weight"
+        | "subtitle-font-weight"
+        | "trailing-font-weight"
+        | "detent-label-font-weight" => TokenOrValue::String("fontWeight.medium".to_string()),
+        "touch-expansion" => TokenOrValue::String("spacing.xs".to_string()),
         _ if prop_type == "string" => TokenOrValue::String("font.primary".to_string()),
         _ => TokenOrValue::Float(default_numeric_value(prop_name, "default")),
     }
@@ -1345,6 +1549,9 @@ fn default_numeric_value(prop_name: &str, size: &str) -> f64 {
     let size_key = normalize_size_key(size);
     match prop_name {
         "border-width" => 1.0,
+        _ if prop_name.ends_with("border-width") => 1.0,
+        "box-border-radius" => 7.0,
+        "frame-radius" => 20.0,
         "menu-height" => 172.0,
         "field-height" => 42.0,
         "control-size" => match size_key.as_str() {
@@ -1573,9 +1780,27 @@ fn default_tokens_json() -> String {
     "tertiary": "Montserrat"
   },
   "fontSize": {
+    "xs": 12,
+    "caption": 13,
+    "helper": 14,
     "sm": 20,
     "md": 22,
     "lg": 24
+  },
+  "borderWidth": {
+    "none": 0,
+    "sm": 1,
+    "focus": 2
+  },
+  "choiceControlSize": {
+    "sm": 24,
+    "md": 28,
+    "lg": 32
+  },
+  "switchSize": {
+    "sm": 20,
+    "md": 24,
+    "lg": 28
   },
   "radius": {
     "sm": 8,
@@ -1618,8 +1843,10 @@ fn default_tokens_json() -> String {
     .to_string()
 }
 
-/// Default button.json plugin content
-fn default_button_plugin_json() -> String { include_str!("../../defaults/plugins/button.json").to_string() }
+/// Default button component schema content.
+fn default_button_plugin_json() -> String {
+    include_str!("../../defaults/components/button.schema.json").to_string()
+}
 
 #[cfg(test)]
 mod tests {
@@ -1700,12 +1927,13 @@ mod tests {
     fn full_pipeline_preserves_inherited_data_through_normalize() {
         // Regression: normalize_plugin_variant_schema / _states_against_default
         // were clobbering the resolved Search plugin because they used the slim
-        // search.json default as the schema reference. Pipeline = raw + extends
+        // search.schema.json default as the schema reference. Pipeline = raw + extends
         // resolve + normalize, mirroring load_all_plugins().
         let input_raw: PluginDefinition =
-            serde_json::from_str(&default_plugin_json("input").expect("input.json missing")).unwrap();
+            serde_json::from_str(&default_plugin_json("input").expect("input.schema.json missing")).unwrap();
         let search_raw: PluginDefinition =
-            serde_json::from_str(&default_plugin_json("search").expect("search.json missing")).unwrap();
+            serde_json::from_str(&default_plugin_json("search").expect("search.schema.json missing"))
+                .unwrap();
         let raw = vec![
             (
                 BuiltinComponentSpec { key: "input", component: "Input", source_file: "input.slint" },
@@ -1739,9 +1967,10 @@ mod tests {
         // defaults. ComponentThemeData::from_plugin should then see those
         // explicit per-size keys and mark each (size, prop) as overridden.
         let input_raw: PluginDefinition =
-            serde_json::from_str(&default_plugin_json("input").expect("input.json missing")).unwrap();
+            serde_json::from_str(&default_plugin_json("input").expect("input.schema.json missing")).unwrap();
         let search_raw: PluginDefinition =
-            serde_json::from_str(&default_plugin_json("search").expect("search.json missing")).unwrap();
+            serde_json::from_str(&default_plugin_json("search").expect("search.schema.json missing"))
+                .unwrap();
         let raw = vec![
             (
                 BuiltinComponentSpec { key: "input", component: "Input", source_file: "input.slint" },
@@ -1790,20 +2019,20 @@ mod tests {
 
     #[test]
     fn real_search_plugin_extends_input_fully() {
-        // The default search.json should be `{ component: "Search", extends: "Input" }`
+        // The default search.schema.json should be `{ component: "Search", extends: "Input" }`
         // and resolve via apply_inheritance to Input's full prop set.
         let raw = vec![
             (
                 BuiltinComponentSpec { key: "input", component: "Input", source_file: "input.slint" },
                 serde_json::from_str::<PluginDefinition>(
-                    &default_plugin_json("input").expect("input.json missing"),
+                    &default_plugin_json("input").expect("input.schema.json missing"),
                 )
                 .unwrap(),
             ),
             (
                 BuiltinComponentSpec { key: "search", component: "Search", source_file: "search.slint" },
                 serde_json::from_str::<PluginDefinition>(
-                    &default_plugin_json("search").expect("search.json missing"),
+                    &default_plugin_json("search").expect("search.schema.json missing"),
                 )
                 .unwrap(),
             ),
@@ -1880,7 +2109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_plugin_definition_migrates_default_size_axis() {
+    fn test_normalize_plugin_definition_migrates_default_size_axis_to_common() {
         let plugin = PluginDefinition {
             extends: None,
             parent_key: None,
@@ -1914,17 +2143,12 @@ mod tests {
             .expect("missing field-height size prop");
 
         assert_eq!(
-            field_height.defaults.values.get("sm"),
+            field_height.defaults.values.get("common"),
             Some(&DefaultValue::Direct(TokenOrValue::Float(44.0)))
         );
-        assert_eq!(
-            field_height.defaults.values.get("md"),
-            Some(&DefaultValue::Direct(TokenOrValue::Float(44.0)))
-        );
-        assert_eq!(
-            field_height.defaults.values.get("lg"),
-            Some(&DefaultValue::Direct(TokenOrValue::Float(44.0)))
-        );
+        assert!(field_height.defaults.values.get("sm").is_none());
+        assert!(field_height.defaults.values.get("md").is_none());
+        assert!(field_height.defaults.values.get("lg").is_none());
     }
 
     #[test]
@@ -2022,10 +2246,12 @@ mod tests {
         let normalized = normalize_plugin_definition("image", plugin);
         assert_eq!(normalized.states, vec!["normal"]);
         assert_eq!(normalized.sizes, vec!["default"]);
-        assert_eq!(normalized.variant_props.len(), 0);
-        assert_eq!(normalized.size_props.len(), 2);
+        assert!(normalized.variant_props.iter().any(|prop| prop.name == "frame-background"));
+        assert!(normalized.variant_props.iter().any(|prop| prop.name == "frame-border-color"));
+        assert!(normalized.variant_props.iter().any(|prop| prop.name == "caption-color"));
         assert!(normalized.size_props.iter().any(|prop| prop.name == "frame-width"));
         assert!(normalized.size_props.iter().any(|prop| prop.name == "frame-height"));
+        assert!(normalized.size_props.iter().any(|prop| prop.name == "frame-radius"));
 
         let frame_height = normalized
             .size_props
@@ -2433,12 +2659,7 @@ mod tests {
             extends: None,
             parent_key: None,
             component: "TextArea".to_string(),
-            variants: vec![
-                "flat".to_string(),
-                "bordered".to_string(),
-                "faded".to_string(),
-                "underlined".to_string(),
-            ],
+            variants: vec!["flat".to_string(), "bordered".to_string(), "underlined".to_string()],
             states: vec!["normal".to_string(), "focused".to_string(), "disabled".to_string()],
             sizes: vec!["sm".to_string(), "md".to_string(), "lg".to_string()],
             variant_props: vec![PropDefinition {
@@ -2466,14 +2687,6 @@ mod tests {
                         ],
                     ),
                     (
-                        "faded",
-                        &[
-                            ("normal", "color.secondary"),
-                            ("focused", "color.secondary"),
-                            ("disabled", "color.secondary"),
-                        ],
-                    ),
-                    (
                         "underlined",
                         &[
                             ("normal", "color.transparent"),
@@ -2487,10 +2700,7 @@ mod tests {
         };
 
         let normalized = normalize_plugin_definition("textarea", plugin);
-        assert_eq!(
-            normalized.variants,
-            vec!["flat".to_string(), "bordered".to_string(), "faded".to_string()]
-        );
+        assert_eq!(normalized.variants, vec!["flat".to_string(), "bordered".to_string()]);
         let background = normalized
             .variant_props
             .iter()

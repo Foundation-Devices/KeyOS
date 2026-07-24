@@ -429,7 +429,7 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
             .join("crates")
             .join("foundation-themes")
             .join("themes")
-            .join("default_theme.json"),
+            .join("base_theme.json"),
         stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
         stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
         stage_dir.join("resources").join("icons").join("loader.svg"),
@@ -2239,7 +2239,7 @@ mod tests {
                 .join("crates")
                 .join("foundation-themes")
                 .join("themes")
-                .join("default_theme.json"),
+                .join("base_theme.json"),
             stage_dir.join("ui").join("ui").join("theme.slint"),
             stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
             stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
@@ -2698,14 +2698,14 @@ serde = "1"
         fs::create_dir_all(source_root.join("target").join("debug")).unwrap();
         fs::write(source_root.join("Cargo.toml"), "[package]\nname = \"foundation-themes\"\n").unwrap();
         fs::write(source_root.join("src").join("lib.rs"), "pub mod build;\n").unwrap();
-        fs::write(source_root.join("themes").join("default_theme.json"), "{}").unwrap();
+        fs::write(source_root.join("themes").join("base_theme.json"), "{}").unwrap();
         fs::write(source_root.join("target").join("debug").join("ignored"), "ignored").unwrap();
 
         stage_cargo_package_snapshot(&source_root, &destination_root).unwrap();
 
         assert!(destination_root.join("Cargo.toml").exists());
         assert!(destination_root.join("src").join("lib.rs").exists());
-        assert!(destination_root.join("themes").join("default_theme.json").exists());
+        assert!(destination_root.join("themes").join("base_theme.json").exists());
         assert!(!destination_root.join("target").exists());
     }
 

@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "component": "ProgressBar",
   "variants": [
     "default",
@@ -131,50 +132,50 @@
       "name": "font-size",
       "displayName": "Font Size",
       "type": "float",
-      "min": 8.0,
-      "max": 32.0,
-      "step": 1.0,
+      "min": 8,
+      "max": 32,
+      "step": 1,
       "defaults": {
-        "default": 13.0,
-        "sm": 12.0,
-        "lg": 14.0
+        "default": 13,
+        "sm": 12,
+        "lg": 14
       }
     },
     {
       "name": "label-gap",
       "displayName": "Label Gap",
       "type": "float",
-      "min": 0.0,
-      "max": 24.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 24,
+      "step": 1,
       "defaults": {
-        "default": 8.0,
-        "sm": 6.0,
-        "lg": 10.0
+        "default": "spacing.sm",
+        "sm": 6,
+        "lg": 10
       }
     },
     {
       "name": "bar-height",
       "displayName": "Bar Height",
       "type": "float",
-      "min": 2.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 2,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 10.0,
-        "sm": 8.0,
-        "lg": 12.0
+        "default": 10,
+        "sm": 8,
+        "lg": 12
       }
     },
     {
       "name": "border-radius",
       "displayName": "Border Radius",
       "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
+      "min": 0,
+      "max": 64,
+      "step": 1,
       "defaults": {
-        "default": 999.0
+        "default": 999
       }
     }
   ]

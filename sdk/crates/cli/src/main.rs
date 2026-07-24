@@ -38,7 +38,7 @@ async fn run() -> Result<()> {
         Commands::Sideload(args) => commands::sideload::execute(&args)?,
         Commands::Sim => commands::sim::execute()?,
         Commands::Cert(args) => commands::cert::execute(&args)?,
-        Commands::Theme => commands::theme::execute()?,
+        Commands::Theme(args) => commands::theme::execute(&args)?,
         Commands::Themes(args) => commands::themes::execute(&args)?,
         Commands::Doctor => commands::doctor::execute()?,
         Commands::Preview(args) => commands::preview::execute(&args)?,

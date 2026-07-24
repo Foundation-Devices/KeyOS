@@ -64,19 +64,20 @@ pub fn token_string(
 
 #[cfg(test)]
 mod tests {
+    use components::theme::create_schema_fallback_theme;
+
     use super::*;
-    use components::theme::create_default_theme;
 
     #[test]
     fn token_length_falls_back_when_missing() {
-        let theme = create_default_theme();
+        let theme = create_schema_fallback_theme();
         let value = token_length(&theme, ColorScheme::Light, "typography", "does-not-exist", 17.0);
         assert_eq!(value, 17.0);
     }
 
     #[test]
     fn token_color_falls_back_when_missing() {
-        let theme = create_default_theme();
+        let theme = create_schema_fallback_theme();
         let fallback = ThemeColor::rgb(1, 2, 3);
         let value = token_color(&theme, ColorScheme::Light, "color", "does-not-exist", fallback);
         assert_eq!(value, fallback);

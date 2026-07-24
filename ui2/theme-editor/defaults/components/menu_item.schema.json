@@ -1,13 +1,18 @@
 {
-  "component": "Card",
+  "schemaVersion": 1,
+  "component": "MenuItem",
   "variants": [
     "default"
   ],
   "states": [
-    "normal"
+    "normal",
+    "pressed",
+    "disabled"
   ],
   "sizes": [
-    "default"
+    "sm",
+    "md",
+    "lg"
   ],
   "variantProps": [],
   "sizeProps": [
@@ -30,18 +35,35 @@
       "max": 64.0,
       "step": 1.0,
       "defaults": {
-        "default": "fontSize.md"
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
       }
     },
     {
-      "name": "card-padding",
-      "displayName": "Card Padding",
+      "name": "item-height",
+      "displayName": "Item Height",
+      "type": "float",
+      "min": 0.0,
+      "max": 160.0,
+      "step": 1.0,
+      "defaults": {
+        "default": 64.0,
+        "sm": 56.0,
+        "lg": 72.0
+      }
+    },
+    {
+      "name": "padding-horizontal",
+      "displayName": "Padding Horizontal",
       "type": "float",
       "min": 0.0,
       "max": 64.0,
       "step": 1.0,
       "defaults": {
-        "default": 20.0
+        "default": "controlPaddingInline.md",
+        "sm": "controlPaddingInline.sm",
+        "lg": "controlPaddingInline.lg"
       }
     },
     {
@@ -52,18 +74,9 @@
       "max": 64.0,
       "step": 1.0,
       "defaults": {
-        "default": 24.0
-      }
-    },
-    {
-      "name": "border-radius",
-      "displayName": "Border Radius",
-      "type": "float",
-      "min": 0.0,
-      "max": 64.0,
-      "step": 1.0,
-      "defaults": {
-        "default": 24.0
+        "default": "iconSize.md",
+        "sm": "iconSize.sm",
+        "lg": "iconSize.lg"
       }
     }
   ]

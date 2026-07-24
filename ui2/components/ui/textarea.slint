@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { TextAreaTheme } from "textarea_theme.slint";
+import {
+    TextAreaTheme,
+    TextAreaThemeVariant,
+    TextAreaVariantProps,
+    TextAreaSizeProps,
+    TextAreaState,
+} from "@theme/textarea_theme.slint";
 
 export enum TextAreaVariant {
     flat,
     bordered,
-    faded,
 }
 
 export component TextArea {
@@ -27,21 +32,20 @@ export component TextArea {
     in property <int> max-rows: 8;
     in property <bool> force-focused: false;
 
-    in property <color> background: root.disabled ? default-background().with-alpha(Theme.is-dark ? 0.8 : 1.0) : default-background();
-    in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
-    in property <color> placeholder-color: Theme.palette-muted;
-    in property <color> border-color: default-border-color();
-    in property <color> border-color-focus: Theme.palette-primary;
-    in property <color> border-color-error: Theme.palette-danger;
-    in property <color> description-color: Theme.palette-muted;
-    in property <color> error-color: Theme.palette-danger;
-    in property <length> border-width: 1px;
-    in property <length> border-radius: TextAreaTheme.size(root.size).border-radius;
-    in property <length> padding-horizontal: TextAreaTheme.size(root.size).padding-horizontal;
-    in property <length> padding-vertical: TextAreaTheme.size(root.size).padding-vertical;
-    in property <length> field-min-height: TextAreaTheme.size(root.size).field-min-height;
-    in property <length> font-size: TextAreaTheme.size(root.size).font-size;
-    in property <string> font-family: TextAreaTheme.size(root.size).font-family;
+    in property <color> background: theme-style.background;
+    in property <color> foreground: theme-style.foreground;
+    in property <color> placeholder-color: theme-style.placeholder-color;
+    in property <color> border-color: theme-style.border-color;
+    in property <color> border-color-error: theme-style.border-color-error;
+    in property <color> description-color: theme-style.description-color;
+    in property <color> error-color: theme-style.error-color;
+    in property <length> border-width: theme-size.border-width;
+    in property <length> border-radius: theme-size.border-radius;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> padding-vertical: theme-size.padding-vertical;
+    in property <length> field-min-height: theme-size.field-min-height;
+    in property <length> font-size: theme-size.font-size;
+    in property <string> font-family: theme-size.font-family;
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
@@ -59,19 +63,18 @@ export component TextArea {
 
     forward-focus: text-area;
 
-    pure function default-background() -> color {
+    pure function theme-variant() -> TextAreaThemeVariant {
         if root.variant == TextAreaVariant.bordered {
-            return Theme.palette-surface;
+            return TextAreaThemeVariant.bordered;
         }
-        return Theme.palette-secondary;
+        return TextAreaThemeVariant.flat;
     }
 
-    pure function default-border-color() -> color {
-        if root.variant == TextAreaVariant.flat {
-            return transparent;
-        }
-        return Theme.palette-border;
-    }
+    property <TextAreaState> theme-state:
+        root.disabled ? TextAreaState.disabled : root.has-focus ? TextAreaState.focused : TextAreaState.normal;
+    property <TextAreaVariantProps> theme-style:
+        TextAreaTheme.style(root.theme-variant(), root.theme-state);
+    property <TextAreaSizeProps> theme-size: TextAreaTheme.size(root.size);
 
     pure function default-row-height() -> length {
         if root.size == ControlSize.sm {
@@ -96,7 +99,6 @@ export component TextArea {
     property <color> actual-foreground: root.foreground;
     property <color> actual-placeholder-color: root.placeholder-color;
     property <color> actual-border-color-default: root.border-color;
-    property <color> actual-border-color-focus: root.border-color-focus;
     property <color> actual-border-color-error: root.border-color-error;
     property <color> actual-description-color: root.description-color;
     property <color> actual-error-color: root.error-color;
@@ -122,8 +124,12 @@ export component TextArea {
         max(
             root.actual-field-min-height,
             resolved-content-height + root.actual-padding-vertical * 2);
+    property <length> visible-content-height:
+        max(0px, resolved-field-height - root.actual-padding-vertical * 2);
+    property <length> scroll-content-height:
+        max(visible-content-height, content-natural-height);
     property <color> active-border-color:
-        root.error != "" ? actual-border-color-error : root.has-focus ? actual-border-color-focus : actual-border-color-default;
+        root.error != "" ? actual-border-color-error : actual-border-color-default;
 
     preferred-width: 320px;
     preferred-height: label-line-height + resolved-field-height + helper-line-height + (root.label != "" ? 6px : 0px) + ((root.error != "" || root.description != "") ? 6px : 0px);
@@ -193,23 +199,50 @@ export component TextArea {
                 wrap: word-wrap;
             }
 
-            text-area := TextInput {
+            text-scroll := Flickable {
                 x: root.actual-padding-horizontal;
                 y: root.actual-padding-vertical;
                 width: field-container.content-width;
-                height: field-container.height - root.actual-padding-vertical * 2;
-                text <=> root.value;
-                color: root.actual-foreground;
-                font-family: root.actual-font-family;
-                font-size: root.actual-font-size;
-                enabled: !root.disabled;
-                read-only: root.read-only;
-                single-line: false;
-                wrap: word-wrap;
-                vertical-alignment: top;
+                height: root.visible-content-height;
+                viewport-width: self.width;
+                viewport-height: root.scroll-content-height;
 
-                edited => {
-                    root.changed(self.text);
+                text-area := TextInput {
+                    width: parent.width;
+                    height: root.scroll-content-height;
+                    text <=> root.value;
+                    color: root.actual-foreground;
+                    font-family: root.actual-font-family;
+                    font-size: root.actual-font-size;
+                    enabled: !root.disabled;
+                    read-only: root.read-only;
+                    single-line: false;
+                    wrap: word-wrap;
+                    vertical-alignment: top;
+                    page-height: text-scroll.height;
+
+                    edited => {
+                        root.changed(self.text);
+                    }
+
+                    cursor-position-changed(cpos) => {
+                        if (cpos.y + text-scroll.viewport-y < 0px) {
+                            text-scroll.viewport-y = min(
+                                0px,
+                                max(text-scroll.height - self.height, -cpos.y));
+                        } else if (cpos.y + text-scroll.viewport-y > text-scroll.height - root.actual-row-height) {
+                            text-scroll.viewport-y = min(
+                                0px,
+                                max(
+                                    text-scroll.height - self.height,
+                                    text-scroll.height - cpos.y - root.actual-row-height));
+                        }
+                        text-scroll.viewport-x = 0px;
+                    }
+                }
+
+                flicked => {
+                    self.viewport-x = 0px;
                 }
             }
 

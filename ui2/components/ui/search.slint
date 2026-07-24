@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { SearchTheme } from "search_theme.slint";
+import { SearchTheme, SearchSizeProps } from "@theme/search_theme.slint";
 import { Input, InputVariant } from "input.slint";
 
 export component Search {
@@ -22,15 +22,15 @@ export component Search {
     in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
     in property <color> placeholder-color: Theme.palette-muted;
     in property <color> border-color: themed-border-color();
-    in property <color> border-color-focus: Theme.palette-primary;
     in property <color> border-color-error: Theme.palette-danger;
     in property <length> border-width: root.has-focus ? 2px : 1px;
-    in property <length> border-radius: SearchTheme.size(root.size).border-radius;
-    in property <length> padding-horizontal: SearchTheme.size(root.size).padding-horizontal;
-    in property <length> padding-vertical: SearchTheme.size(root.size).padding-vertical;
-    in property <length> field-height: SearchTheme.size(root.size).field-height;
-    in property <length> font-size: SearchTheme.size(root.size).font-size;
-    in property <string> font-family: SearchTheme.size(root.size).font-family;
+    in property <length> border-radius: theme-size.border-radius;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> padding-vertical: theme-size.padding-vertical;
+    in property <length> field-height: theme-size.field-height;
+    in property <length> font-size: theme-size.font-size;
+    in property <string> font-family: theme-size.font-family;
+    property <SearchSizeProps> theme-size: SearchTheme.size(root.size);
 
     out property <bool> has-focus: field.has-focus;
 
@@ -79,7 +79,6 @@ export component Search {
         foreground: root.foreground;
         placeholder-color: root.placeholder-color;
         border-color: root.border-color;
-        border-color-focus: root.border-color-focus;
         border-color-error: root.border-color-error;
         border-width: root.border-width;
         border-radius: root.border-radius;

@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "component": "Toast",
+  "variants": [
+    "default"
+  ],
+  "states": [
+    "normal"
+  ],
+  "sizes": [
+    "sm",
+    "md",
+    "lg"
+  ],
+  "variantProps": [
+    {
+      "name": "card-border-width",
+      "displayName": "Card Border Width",
+      "type": "float",
+      "min": 0,
+      "max": 16,
+      "step": 0.5,
+      "defaults": {
+        "default": {
+          "normal": 1
+        }
+      }
+    }
+  ],
+  "sizeProps": [
+    {
+      "name": "font-family",
+      "displayName": "Font Family",
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "defaults": {
+        "default": "font.primary"
+      }
+    },
+    {
+      "name": "font-size",
+      "displayName": "Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "fontSize.md",
+        "sm": "fontSize.sm",
+        "lg": "fontSize.lg"
+      }
+    },
+    {
+      "name": "card-width",
+      "displayName": "Card Width",
+      "type": "float",
+      "min": 0,
+      "max": 512,
+      "step": 1,
+      "defaults": {
+        "default": 360,
+        "sm": 300,
+        "lg": 420
+      }
+    },
+    {
+      "name": "toast-padding",
+      "displayName": "Toast Padding",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 14,
+        "sm": 12,
+        "lg": 16
+      }
+    },
+    {
+      "name": "icon-size",
+      "displayName": "Icon Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 24,
+        "sm": 20,
+        "lg": 28
+      }
+    },
+    {
+      "name": "border-radius",
+      "displayName": "Border Radius",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": "radius.sm",
+        "sm": "radius.sm",
+        "lg": "radius.sm"
+      }
+    },
+    {
+      "name": "action-font-size",
+      "displayName": "Action Font Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 14
+      }
+    },
+    {
+      "name": "close-button-size",
+      "displayName": "Close Button Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 32,
+        "sm": 28,
+        "lg": 36
+      }
+    },
+    {
+      "name": "action-height",
+      "displayName": "Action Height",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 26
+      }
+    },
+    {
+      "name": "action-horizontal-padding",
+      "displayName": "Action Horizontal Padding",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 10
+      }
+    },
+    {
+      "name": "action-radius",
+      "displayName": "Action Radius",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 13
+      }
+    },
+    {
+      "name": "close-icon-size",
+      "displayName": "Close Icon Size",
+      "type": "float",
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "defaults": {
+        "default": 20,
+        "sm": 18,
+        "lg": 22
+      }
+    }
+  ]
+}

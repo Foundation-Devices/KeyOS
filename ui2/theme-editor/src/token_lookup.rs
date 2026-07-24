@@ -12,9 +12,19 @@
 //! token catalog alongside its event-wiring code.
 
 pub const NUMBER_TOKENS: &[&str] = &[
+    "fontSize.xs",
+    "fontSize.caption",
     "fontSize.sm",
     "fontSize.md",
     "fontSize.lg",
+    "fontSize.helper",
+    "fontWeight.normal",
+    "fontWeight.medium",
+    "fontWeight.semibold",
+    "fontWeight.bold",
+    "borderWidth.none",
+    "borderWidth.sm",
+    "borderWidth.focus",
     "spacing.xs",
     "spacing.sm",
     "spacing.md",
@@ -27,6 +37,12 @@ pub const NUMBER_TOKENS: &[&str] = &[
     "controlSize.sm",
     "controlSize.md",
     "controlSize.lg",
+    "choiceControlSize.sm",
+    "choiceControlSize.md",
+    "choiceControlSize.lg",
+    "switchSize.sm",
+    "switchSize.md",
+    "switchSize.lg",
     "iconSize.sm",
     "iconSize.md",
     "iconSize.lg",
@@ -75,8 +91,9 @@ pub fn number_token_key_from_index(index: i32) -> &'static str {
 }
 
 pub fn number_token_index_from_key(key: Option<&str>) -> i32 {
-    // Default falls back to index 1 ("fontSize.md") for legacy compatibility.
-    key.and_then(|k| lookup_token_index(NUMBER_TOKENS, k)).unwrap_or(1)
+    // Default falls back to "fontSize.md" for legacy compatibility.
+    key.and_then(|k| lookup_token_index(NUMBER_TOKENS, k))
+        .unwrap_or_else(|| lookup_token_index(NUMBER_TOKENS, "fontSize.md").unwrap_or(0))
 }
 
 pub fn font_token_key_from_index(index: i32) -> &'static str {

@@ -2,36 +2,40 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { SwitchTheme } from "switch_theme.slint";
+import {
+    SwitchTheme,
+    SwitchVariantProps,
+    SwitchSizeProps,
+    SwitchState,
+} from "@theme/switch_theme.slint";
 
 export component Switch {
     in property <string> label: "";
     in property <string> description: "";
     in property <ControlSize> size: ControlSize.md;
     in-out property <bool> checked: false;
+    in-out property <bool> indeterminate: false;
     in property <bool> disabled: false;
-    in property <string> font-family: SwitchTheme.size(root.size).font-family;
-    in property <length> font-size: SwitchTheme.size(root.size).font-size;
-    in property <length> track-width: SwitchTheme.size(root.size).track-width;
-    in property <length> track-height: SwitchTheme.size(root.size).track-height;
-    in property <length> knob-size: SwitchTheme.size(root.size).knob-size;
-    in property <length> row-height: SwitchTheme.size(root.size).row-height;
+    in property <string> font-family: theme-size.font-family;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> track-height: theme-size.track-height;
+    in property <length> knob-size: theme-size.knob-size;
+    in property <length> row-height: theme-size.row-height;
+    in property <length> description-font-size: theme-size.description-font-size;
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
-    in property <length> description-font-size: Theme.font-size-helper;
-    in property <color> accent-color: root.disabled ? Theme.palette-muted : Theme.palette-primary;
-    in property <color> track-color: root.checked ? root.accent-color : (root.disabled ? Theme.palette-border : Theme.palette-secondary);
-    in property <color> knob-color: Theme.palette-background;
-    in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
-    in property <color> description-color: root.disabled ? Theme.palette-muted : Theme.palette-muted;
+    in property <color> track-color: theme-style.track-color;
+    in property <color> knob-color: theme-style.knob-color;
+    in property <color> label-color: theme-style.label-color;
+    in property <color> description-color: theme-style.description-color;
 
     callback changed(bool);
 
     property <string> actual-font-family: root.font-family;
     property <length> actual-font-size: root.font-size;
-    property <length> actual-track-width: root.track-width;
     property <length> actual-track-height: root.track-height;
+    property <length> actual-track-width: root.actual-track-height * 2;
     property <length> themed-knob-size: max(0px, actual-track-height - 4px);
     // Cap the knob at (track-height - 4px) so it always nests inside the track
     // with 2px of padding on each side, even when the theme JSON sets knob-size
@@ -40,6 +44,10 @@ export component Switch {
     property <length> actual-knob-size:
         min(root.knob-size, max(0px, actual-track-height - 4px));
     property <length> actual-row-height: root.row-height;
+    property <SwitchState> current-state:
+        root.disabled ? SwitchState.disabled : root.indeterminate ? SwitchState.indeterminate : root.checked ? SwitchState.checked : SwitchState.unchecked;
+    property <SwitchVariantProps> theme-style: SwitchTheme.style(root.current-state);
+    property <SwitchSizeProps> theme-size: SwitchTheme.size(root.size);
     property <length> content-gap: root.description != "" ? 2px : 0px;
     property <length> label-row-height: max(root.actual-track-height, label-measure.preferred-height);
     property <length> description-height:
@@ -84,7 +92,7 @@ export component Switch {
         background: root.track-color;
 
         Rectangle {
-            x: root.checked ? parent.width - self.width - 2px : 2px;
+            x: root.indeterminate ? (parent.width - self.width) / 2 : root.checked ? parent.width - self.width - 2px : 2px;
             y: (parent.height - self.height) / 2;
             width: root.actual-knob-size;
             height: root.actual-knob-size;
@@ -124,7 +132,12 @@ export component Switch {
         enabled: !root.disabled;
 
         clicked => {
-            root.checked = !root.checked;
+            if (root.indeterminate) {
+                root.indeterminate = false;
+                root.checked = true;
+            } else {
+                root.checked = !root.checked;
+            }
             root.changed(root.checked);
         }
     }

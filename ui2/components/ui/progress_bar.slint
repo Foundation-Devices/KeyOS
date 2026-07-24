@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { ProgressBarTheme } from "progress_bar_theme.slint";
+import {
+    ProgressBarTheme,
+    ProgressBarSizeProps,
+} from "@theme/progress_bar_theme.slint";
 
 export enum ProgressBarTone {
     default,
@@ -32,15 +35,16 @@ export component ProgressBar {
     in property <int> value-decimals: 0;
     in property <ControlSize> size: ControlSize.md;
     in property <ProgressBarTone> tone: ProgressBarTone.primary;
-    in property <string> font-family: ProgressBarTheme.size(root.size).font-family;
+    in property <string> font-family: theme-size.font-family;
     in property <color> track-color: root.disabled ? Theme.palette-border.with-alpha(Theme.is-dark ? 0.56 : 0.86) : Theme.palette-secondary;
     in property <color> fill-color-override: root.disabled ? root.fill-color().with-alpha(0.42) : root.fill-color();
     in property <color> label-color: root.disabled ? Theme.palette-muted.with-alpha(0.82) : Theme.palette-foreground;
     in property <color> value-color: root.disabled ? Theme.palette-muted.with-alpha(0.82) : Theme.palette-muted;
-    in property <length> bar-height: ProgressBarTheme.size(root.size).bar-height;
+    in property <length> bar-height: theme-size.bar-height;
     in property <length> border-radius: root.actual-bar-height / Theme.capsule-radius-divisor;
-    in property <length> font-size: ProgressBarTheme.size(root.size).font-size;
-    in property <length> label-gap: ProgressBarTheme.size(root.size).label-gap;
+    in property <length> font-size: theme-size.font-size;
+    in property <length> label-gap: theme-size.label-gap;
+    property <ProgressBarSizeProps> theme-size: ProgressBarTheme.size(root.size);
     // ===== THEMEABLE PROPS =====
     in property <float> container-opacity: root.disabled ? 0.84 : 1.0;
     in property <int> label-font-weight: 600;

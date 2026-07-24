@@ -1277,14 +1277,6 @@ export component AppWindow inherits Window {
                                     variant: TextAreaVariant.bordered;
                                     min-rows: 2;
                                 }
-
-                                TextArea {
-                                    width: parent.width;
-                                    label: "Faded";
-                                    value: "A faded textarea.";
-                                    variant: TextAreaVariant.faded;
-                                    min-rows: 2;
-                                }
                             }
 
                             Section {
@@ -1583,14 +1575,76 @@ export component AppWindow inherits Window {
                                 title: "Default";
                                 FramedDemo {
                                     frame-height: 320px;
-                                    Dialog {
+                                    confirm-dialog := Dialog {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Confirm theme";
-                                        message: "This dialog shows the default treatment with primary and secondary actions.";
-                                        icon: Images.icon("info", 24px);
-                                        primary-action: "Apply";
-                                        secondary-action: "Cancel";
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+
+                                            Rectangle {
+                                                width: confirm-dialog.icon-size * 2;
+                                                height: confirm-dialog.icon-size * 2;
+                                                border-radius: self.width / 2;
+                                                background: confirm-dialog.icon-circle-background;
+
+                                                Image {
+                                                    x: (parent.width - self.width) / 2;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: confirm-dialog.icon-size;
+                                                    height: confirm-dialog.icon-size;
+                                                    source: Images.icon("info", 24px);
+                                                    colorize: confirm-dialog.accent-color;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-right: confirm-dialog.close-button-size + 8px;
+                                                spacing: 6px;
+
+                                                Text {
+                                                    text: "Confirm theme";
+                                                    color: confirm-dialog.title-color;
+                                                    font-family: confirm-dialog.font-family;
+                                                    font-size: confirm-dialog.title-font-size;
+                                                    font-weight: confirm-dialog.title-font-weight;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                Text {
+                                                    text: "This dialog shows the default treatment with primary and secondary actions.";
+                                                    color: confirm-dialog.message-color;
+                                                    font-family: confirm-dialog.font-family;
+                                                    font-size: confirm-dialog.font-size;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 1px;
+                                            background: confirm-dialog.separator-color;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: end;
+
+                                            Button {
+                                                text: "Cancel";
+                                                variant: ButtonVariant.secondary;
+                                                size: confirm-dialog.size;
+                                                touch-expansion: 0px;
+                                            }
+
+                                            Button {
+                                                text: "Apply";
+                                                variant: ButtonVariant.primary;
+                                                size: confirm-dialog.size;
+                                                touch-expansion: 0px;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1599,16 +1653,78 @@ export component AppWindow inherits Window {
                                 title: "Danger";
                                 FramedDemo {
                                     frame-height: 320px;
-                                    Dialog {
+                                    delete-dialog := Dialog {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Delete item";
-                                        message: "Danger dialogs use the danger button treatment and accent.";
-                                        icon: Images.icon("circle-alert", 24px);
                                         variant: DialogVariant.danger;
-                                        primary-action: "Delete";
-                                        secondary-action: "Cancel";
                                         size: ControlSize.sm;
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+
+                                            Rectangle {
+                                                width: delete-dialog.icon-size * 2;
+                                                height: delete-dialog.icon-size * 2;
+                                                border-radius: self.width / 2;
+                                                background: delete-dialog.icon-circle-background;
+
+                                                Image {
+                                                    x: (parent.width - self.width) / 2;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: delete-dialog.icon-size;
+                                                    height: delete-dialog.icon-size;
+                                                    source: Images.icon("circle-alert", 24px);
+                                                    colorize: delete-dialog.accent-color;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-right: delete-dialog.close-button-size + 8px;
+                                                spacing: 6px;
+
+                                                Text {
+                                                    text: "Delete item";
+                                                    color: delete-dialog.title-color;
+                                                    font-family: delete-dialog.font-family;
+                                                    font-size: delete-dialog.title-font-size;
+                                                    font-weight: delete-dialog.title-font-weight;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                Text {
+                                                    text: "Danger dialogs use the danger button treatment and accent.";
+                                                    color: delete-dialog.message-color;
+                                                    font-family: delete-dialog.font-family;
+                                                    font-size: delete-dialog.font-size;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 1px;
+                                            background: delete-dialog.separator-color;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: end;
+
+                                            Button {
+                                                text: "Cancel";
+                                                variant: ButtonVariant.secondary;
+                                                size: delete-dialog.size;
+                                                touch-expansion: 0px;
+                                            }
+
+                                            Button {
+                                                text: "Delete";
+                                                variant: ButtonVariant.danger;
+                                                size: delete-dialog.size;
+                                                touch-expansion: 0px;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1622,12 +1738,27 @@ export component AppWindow inherits Window {
                                 title: "Default";
                                 FramedDemo {
                                     frame-height: 420px;
-                                    Sheet {
+                                    details-sheet := Sheet {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Theme details";
-                                        body: "The sheet fills from the bottom using the selected detent.";
                                         selected-detent: 1;
+
+                                        Text {
+                                            text: "Theme details";
+                                            color: details-sheet.title-color;
+                                            font-family: details-sheet.font-family;
+                                            font-size: details-sheet.title-font-size;
+                                            font-weight: details-sheet.title-font-weight;
+                                            wrap: word-wrap;
+                                        }
+
+                                        Text {
+                                            text: "The sheet fills from the bottom using the selected detent.";
+                                            color: details-sheet.body-color;
+                                            font-family: details-sheet.font-family;
+                                            font-size: details-sheet.font-size;
+                                            wrap: word-wrap;
+                                        }
                                     }
                                 }
                             }
@@ -1636,14 +1767,29 @@ export component AppWindow inherits Window {
                                 title: "Compact";
                                 FramedDemo {
                                     frame-height: 320px;
-                                    Sheet {
+                                    compact-sheet := Sheet {
                                         width: parent.width;
                                         height: parent.height;
-                                        title: "Compact sheet";
-                                        body: "Small controls and no handle.";
                                         show-handle: false;
                                         selected-detent: 0;
                                         size: ControlSize.sm;
+
+                                        Text {
+                                            text: "Compact sheet";
+                                            color: compact-sheet.title-color;
+                                            font-family: compact-sheet.font-family;
+                                            font-size: compact-sheet.title-font-size;
+                                            font-weight: compact-sheet.title-font-weight;
+                                            wrap: word-wrap;
+                                        }
+
+                                        Text {
+                                            text: "Small controls and no handle.";
+                                            color: compact-sheet.body-color;
+                                            font-family: compact-sheet.font-family;
+                                            font-size: compact-sheet.font-size;
+                                            wrap: word-wrap;
+                                        }
                                     }
                                 }
                             }

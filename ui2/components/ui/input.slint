@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { InputTheme } from "input_theme.slint";
+import {
+    InputTheme,
+    InputThemeVariant,
+    InputVariantProps,
+    InputSizeProps,
+    InputState,
+} from "@theme/input_theme.slint";
 
 export enum InputVariant {
     default,
@@ -31,17 +37,18 @@ export component Input {
     in property <color> background: root.disabled ? Theme.palette-secondary : themed-background();
     in property <color> foreground: root.disabled ? Theme.palette-muted : Theme.palette-foreground;
     in property <color> placeholder-color: Theme.palette-muted;
-    in property <color> border-color: themed-border-color();
-    in property <color> border-color-focus: Theme.palette-primary;
-    in property <color> border-color-error: Theme.palette-danger;
+    in property <color> border-color:
+        root.variant == InputVariant.filled && !root.has-focus ? transparent : theme-style.border-color;
+    in property <color> border-color-error: theme-style.border-color-error;
     in property <color> label-color: root.disabled ? Theme.palette-muted : Theme.palette-muted;
-    in property <length> border-width: root.has-focus ? 2px : 1px;
-    in property <length> border-radius: InputTheme.size(root.size).border-radius;
-    in property <length> padding-horizontal: InputTheme.size(root.size).padding-horizontal;
-    in property <length> padding-vertical: InputTheme.size(root.size).padding-vertical;
-    in property <length> field-height: InputTheme.size(root.size).field-height;
-    in property <length> font-size: InputTheme.size(root.size).font-size;
-    in property <string> font-family: InputTheme.size(root.size).font-family;
+    in property <length> border-width:
+        root.has-focus ? Theme.border-width-focus : theme-size.border-width;
+    in property <length> border-radius: theme-size.border-radius;
+    in property <length> padding-horizontal: theme-size.padding-horizontal;
+    in property <length> padding-vertical: theme-size.padding-vertical;
+    in property <length> field-height: theme-size.field-height;
+    in property <length> font-size: theme-size.font-size;
+    in property <string> font-family: theme-size.font-family;
     in property <length> label-font-size: Theme.font-size-label;
     in property <int> label-font-weight: 500;
     in property <length> helper-font-size: Theme.font-size-helper;
@@ -67,18 +74,26 @@ export component Input {
         return Theme.palette-surface;
     }
 
-    pure function themed-border-color() -> color {
+    pure function theme-variant() -> InputThemeVariant {
         if root.variant == InputVariant.filled {
-            return transparent;
+            return InputThemeVariant.filled;
         }
-        return Theme.palette-border;
+        if root.variant == InputVariant.outlined {
+            return InputThemeVariant.outlined;
+        }
+        return InputThemeVariant.default;
     }
+
+    property <InputState> theme-state:
+        root.disabled ? InputState.disabled : root.has-focus ? InputState.focused : InputState.normal;
+    property <InputVariantProps> theme-style:
+        InputTheme.style(root.theme-variant(), root.theme-state);
+    property <InputSizeProps> theme-size: InputTheme.size(root.size);
 
     property <color> actual-background: root.background;
     property <color> actual-foreground: root.foreground;
     property <color> actual-placeholder-color: root.placeholder-color;
     property <color> actual-border-color-default: root.border-color;
-    property <color> actual-border-color-focus: root.border-color-focus;
     property <color> actual-border-color-error: root.border-color-error;
     property <length> actual-border-width: root.border-width;
     // Clamp the requested radius to half the field height — a "radius-full"
@@ -88,12 +103,13 @@ export component Input {
         min(root.border-radius, actual-field-height / 2);
     property <length> actual-padding-horizontal: root.padding-horizontal;
     property <length> actual-padding-vertical: root.padding-vertical;
-    property <length> actual-field-height: root.field-height;
+    property <length> actual-field-height:
+        max(root.field-height, actual-font-size * Theme.line-height-ratio + actual-padding-vertical * 2);
     property <length> actual-font-size: root.font-size;
     property <string> actual-font-family: root.font-family;
 
     property <color> active-border-color:
-        root.error != "" ? actual-border-color-error : root.has-focus ? actual-border-color-focus : actual-border-color-default;
+        root.error != "" ? actual-border-color-error : actual-border-color-default;
     property <bool> show-clear-button:
         root.clearable && root.value != "" && !root.disabled && !root.read-only;
     property <length> icon-slot-size: max(side-icon-size, actual-field-height - 20px);
@@ -139,6 +155,9 @@ export component Input {
             property <length> content-left: root.actual-padding-horizontal + prefix-slot-width;
             property <length> content-right: root.actual-padding-horizontal + suffix-slot-width + clear-slot-width;
             property <length> content-width: max(0px, self.width - content-left - content-right);
+            property <length> content-top: root.actual-padding-vertical;
+            property <length> content-height:
+                max(0px, self.height - root.actual-padding-vertical * 2);
 
             if self.has-prefix-icon: Rectangle {
                 x: root.actual-padding-horizontal;
@@ -156,14 +175,16 @@ export component Input {
                 }
             }
 
-            Rectangle {
+            content-clip := Rectangle {
                 x: field-container.content-left;
-                y: 0px;
+                y: field-container.content-top;
                 width: field-container.content-width;
-                height: parent.height;
+                height: field-container.content-height;
                 clip: true;
 
-                if root.value == "" && text-field.preedit-text == "": Text {
+                if root.value == "" && text-field.preedit-text == "": TextInput {
+                    x: 0px;
+                    y: 0px;
                     width: parent.width;
                     height: parent.height;
                     text: root.placeholder;
@@ -172,10 +193,14 @@ export component Input {
                     font-size: root.actual-font-size;
                     horizontal-alignment: root.text-alignment;
                     vertical-alignment: center;
-                    overflow: elide;
+                    enabled: false;
+                    read-only: true;
+                    single-line: true;
                 }
 
                 text-field := TextInput {
+                    x: 0px;
+                    y: 0px;
                     width: parent.width;
                     height: parent.height;
                     text <=> root.value;
@@ -239,6 +264,9 @@ export component Input {
                 }
 
                 clear-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
                     clicked => {
                         root.value = "";
                         root.changed("");

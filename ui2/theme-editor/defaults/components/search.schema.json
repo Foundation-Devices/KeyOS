@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "component": "Search",
+  "extends": "Input",
+  "variantProps": [
+    {
+      "name": "foreground",
+      "displayName": "Foreground",
+      "type": "color",
+      "defaults": {
+        "default": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "disabled": "color.muted"
+        },
+        "filled": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "disabled": "color.muted"
+        },
+        "outlined": {
+          "normal": "color.primary",
+          "focused": "color.primary",
+          "disabled": "color.muted"
+        }
+      }
+    }
+  ]
+}

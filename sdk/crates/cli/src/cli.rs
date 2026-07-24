@@ -72,8 +72,10 @@ pub enum Commands {
     Cert(commands::cert::CertArgs),
 
     /// Open the app theme editor
-    #[command(long_about = "Opens the visual theme editor for the current app's configured theme JSON")]
-    Theme,
+    #[command(
+        long_about = "Opens the visual theme editor for a specified theme JSON, or for the current app's configured theme JSON when no file is given"
+    )]
+    Theme(commands::theme::ThemeArgs),
 
     /// Manage app themes
     #[command(

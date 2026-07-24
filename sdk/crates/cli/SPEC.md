@@ -235,7 +235,7 @@ Template variables currently provided by `foundation new`:
 - `contact_email`
 - `support_url`
 - `icon`
-- `selected_theme_id`
+- `selected_theme_id` - compatibility alias fixed to `base_theme`; new templates should set the app theme parent directly
 - `app_id`
 - `version`
 - `min_keyos_version`
@@ -254,7 +254,7 @@ Shipped templates should use `sdk_keyos_root` for KeyOS source dependencies; the
 Signature:
 
 ```text
-foundation new <name> [--template TEMPLATE] [--theme THEME_ID]
+foundation new <name> [--template TEMPLATE]
                       [--friendly-name NAME] [--launcher-name NAME]
                       [--description TEXT] [--publisher-name NAME]
                       [--contact-email EMAIL] [--support-url URL]
@@ -269,12 +269,12 @@ Behavior:
 - For a field that was not supplied:
   - when stdin is a terminal, prompts for it (pre-filled with the default) and re-asks on invalid input
   - when stdin is not a terminal, uses the default without prompting, so `new` runs unattended
-- Defaults: `--template` is `default-app`, `--theme` is `default_theme`; per-field defaults come from the selected template's `[variables]` in `template.toml`, falling back to built-in values
+- Defaults: `--template` is `default-app`; per-field defaults come from the selected template's `[variables]` in `template.toml`, falling back to built-in values
 - Prompt-backed fields: friendly app name, launcher app name, description, publisher name, contact email, support website URL, app ID, version, minimum KeyOS version
 - The icon path is not configurable; it is always the template default (`resources/icon.svg`)
 - `--app-id` generates a random 16-byte hex ID with `0x` prefix only when omitted; an explicitly empty value stays empty
 - Description, version, and minimum KeyOS version reject empty values; publisher name, contact email, and support URL may be empty
-- `--theme` must name an installed theme id
+- Every app theme inherits from the built-in Base Theme; a template may provide sparse app-specific overrides in `resources/theme.json`
 - Rejects friendly and launcher app names containing characters outside ASCII letters, numbers, spaces, and hyphens
 - Creates the project directory from the selected template
 - Writes `app-config.toml`, `permission_templates.toml`, template source files, and resources

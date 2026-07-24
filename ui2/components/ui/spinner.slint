@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { SpinnerTheme } from "spinner_theme.slint";
+import { SpinnerTheme, SpinnerSizeProps } from "@theme/spinner_theme.slint";
 
 export enum SpinnerSize {
     sm,
@@ -23,8 +23,9 @@ export component Spinner {
     in property <SpinnerTone> tone: SpinnerTone.primary;
     in property <color> track-color: Theme.palette-border.with-alpha(Theme.is-dark ? 0.65 : 0.9);
     in property <color> accent-color-override: accent-color();
-    in property <length> spinner-size: SpinnerTheme.size(root.ctrl-size()).spinner-size;
-    in property <length> stroke-width: SpinnerTheme.size(root.ctrl-size()).stroke-width;
+    in property <length> spinner-size: theme-size.spinner-size;
+    in property <length> stroke-width: theme-size.stroke-width;
+    property <SpinnerSizeProps> theme-size: SpinnerTheme.size(root.ctrl-size());
     in property <float> animation-speed: 60.0;
 
     // ===== THEMEABLE PROPS =====

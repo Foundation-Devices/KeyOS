@@ -1,10 +1,28 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from dialog.json by foundation theme tooling — do not edit by hand.
+// GENERATED from dialog.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
+
+export enum DialogState {
+    normal,
+}
+
+export struct DialogVariantProps {
+    accent-color: color,
+    backdrop-color: color,
+    panel-background: color,
+    panel-border-color: color,
+    panel-border-width: length,
+    icon-circle-background: color,
+    title-color: color,
+    title-font-weight: int,
+    message-color: color,
+    separator-color: color,
+    close-icon-color: color,
+}
 
 export struct DialogSizeProps {
     font-family: string,
@@ -13,41 +31,64 @@ export struct DialogSizeProps {
     panel-padding: length,
     icon-size: length,
     border-radius: length,
+    title-font-size: length,
+    close-button-size: length,
+    close-icon-size: length,
 }
 
 export global DialogTheme {
-    in-out property <DialogSizeProps> size-sm: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-sm,
-        panel-width: 360px,
-        panel-padding: Theme.icon-size-sm,
-        icon-size: Theme.control-radius-sm,
-        border-radius: 20px,
-    };
-    in-out property <DialogSizeProps> size-md: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-md,
-        panel-width: 420px,
-        panel-padding: Theme.icon-size-md,
-        icon-size: Theme.control-radius-md,
-        border-radius: 24px,
-    };
-    in-out property <DialogSizeProps> size-lg: {
-        font-family: Theme.font-primary,
-        font-size: Theme.font-size-lg,
-        panel-width: 480px,
-        panel-padding: Theme.icon-size-lg,
-        icon-size: Theme.control-radius-lg,
-        border-radius: 28px,
-    };
-
+    public pure function style(st: DialogState) -> DialogVariantProps {
+        return {
+            accent-color: Theme.color-primary,
+            backdrop-color: Theme.color-foreground,
+            panel-background: Theme.color-surface,
+            panel-border-color: Theme.color-border,
+            panel-border-width: 1px,
+            icon-circle-background: Theme.color-secondary,
+            title-color: Theme.color-foreground,
+            title-font-weight: Theme.font-weight-bold,
+            message-color: Theme.color-foreground,
+            separator-color: Theme.color-border,
+            close-icon-color: Theme.color-muted,
+        };
+    }
     public pure function size(s: ControlSize) -> DialogSizeProps {
         if s == ControlSize.sm {
-            return self.size-sm;
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-sm,
+                panel-width: 360px,
+                panel-padding: Theme.icon-size-sm,
+                icon-size: Theme.control-radius-sm,
+                border-radius: 20px,
+                title-font-size: 14px,
+                close-button-size: 14px,
+                close-icon-size: 14px,
+            };
         }
-        if s == ControlSize.lg {
-            return self.size-lg;
+        if s == ControlSize.md {
+            return {
+                font-family: Theme.font-primary,
+                font-size: Theme.font-size-md,
+                panel-width: 420px,
+                panel-padding: Theme.icon-size-md,
+                icon-size: Theme.control-radius-md,
+                border-radius: Theme.radius-default,
+                title-font-size: 14px,
+                close-button-size: 14px,
+                close-icon-size: 14px,
+            };
         }
-        return self.size-md;
+        return {
+            font-family: Theme.font-primary,
+            font-size: Theme.font-size-lg,
+            panel-width: 480px,
+            panel-padding: Theme.icon-size-lg,
+            icon-size: Theme.control-radius-lg,
+            border-radius: 28px,
+            title-font-size: 14px,
+            close-button-size: 14px,
+            close-icon-size: 14px,
+        };
     }
 }

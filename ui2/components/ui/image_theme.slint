@@ -1,19 +1,56 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// GENERATED from image.json by foundation theme tooling — do not edit by hand.
+// GENERATED from image.schema.json by foundation theme tooling — do not edit by hand.
 // Token-backed props reference the shared Theme global; JSON literals are inlined.
 
 import { Theme, ControlSize } from "theme.slint";
 
+export enum ImageState {
+    normal,
+}
+
+export struct ImageVariantProps {
+    frame-background: color,
+    frame-border-color: color,
+    frame-border-width: length,
+    alt-background: color,
+    alt-color: color,
+    alt-font-weight: int,
+    caption-color: color,
+}
+
 export struct ImageSizeProps {
     frame-width: length,
     frame-height: length,
+    frame-radius: length,
+    font-family: string,
+    alt-radius: length,
+    alt-font-size: length,
+    caption-font-size: length,
 }
 
 export global ImageTheme {
-    in-out property <ImageSizeProps> size-default: {
-        frame-width: 320px,
-        frame-height: 192px,
-    };
+    public pure function style(st: ImageState) -> ImageVariantProps {
+        return {
+            frame-background: Theme.color-secondary,
+            frame-border-color: Theme.color-border,
+            frame-border-width: 1px,
+            alt-background: Theme.color-foreground,
+            alt-color: Theme.color-background,
+            alt-font-weight: Theme.font-weight-semibold,
+            caption-color: Theme.color-muted,
+        };
+    }
+    public pure function size() -> ImageSizeProps {
+        return {
+            frame-width: 320px,
+            frame-height: 192px,
+            frame-radius: 20px,
+            font-family: Theme.font-primary,
+            alt-radius: 14px,
+            alt-font-size: 14px,
+            caption-font-size: 14px,
+        };
+    }
 }

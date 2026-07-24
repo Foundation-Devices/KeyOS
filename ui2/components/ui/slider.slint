@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Theme, ControlSize } from "theme.slint";
-import { SliderTheme } from "slider_theme.slint";
+import {
+    SliderTheme,
+    SliderVariantProps,
+    SliderSizeProps,
+    SliderState,
+} from "@theme/slider_theme.slint";
 
 export component Slider {
     in property <float> minimum: 0.0;
@@ -13,23 +18,23 @@ export component Slider {
     in property <bool> disabled: false;
     in property <bool> force-focused: false;
 
-    in property <color> track-color: root.disabled ? Theme.palette-border : Theme.palette-primary;
+    in property <color> track-color: theme-style.track-color;
     in property <color> fill-color:
-        root.disabled ? Theme.palette-muted.with-alpha(0.4) : slider-touch.pressed ? Theme.palette-primary-pressed : Theme.palette-primary;
-    in property <color> thumb-color: root.disabled ? Theme.palette-surface.with-alpha(0.88) : Theme.palette-background;
-    in property <color> thumb-border-color: root.disabled ? Theme.palette-border : Theme.palette-primary;
-    in property <length> track-height: SliderTheme.size(root.size).track-height;
+        root.disabled ? theme-style.fill-color : drag-touch.pressed ? Theme.palette-primary-pressed : theme-style.fill-color;
+    in property <color> thumb-color: theme-style.thumb-color;
+    in property <color> thumb-border-color: theme-style.thumb-border-color;
+    in property <length> track-height: theme-size.track-height;
     in property <length> track-radius: root.actual-track-height / Theme.capsule-radius-divisor;
-    in property <length> thumb-size: SliderTheme.size(root.size).thumb-size;
+    in property <length> thumb-size: theme-size.thumb-size;
     in property <length> thumb-radius: root.actual-thumb-size / Theme.capsule-radius-divisor;
-    in property <length> row-height: SliderTheme.size(root.size).row-height;
-    in property <length> track-touch-expansion: SliderTheme.size(root.size).track-touch-expansion;
-    in property <length> thumb-touch-expansion: SliderTheme.size(root.size).thumb-touch-expansion;
+    in property <length> row-height: theme-size.row-height;
+    in property <length> track-touch-expansion: theme-size.track-touch-expansion;
+    in property <length> thumb-touch-expansion: theme-size.thumb-touch-expansion;
+    in property <length> thumb-border-width: theme-size.thumb-border-width;
 
     // ===== THEMEABLE PROPS =====
     // Defaults follow the active theme; callers only set values they override.
     in property <float> slider-opacity: root.disabled ? 0.76 : 1.0;
-    in property <length> thumb-border-width: root.is-focused ? 2px : 1px;
     in property <length> focus-ring-size: 4px;
 
     out property <bool> has-focus: focus-scope.has-focus;
@@ -72,16 +77,25 @@ export component Slider {
         root.actual-track-height + root.actual-track-touch-expansion * 2;
     property <length> actual-thumb-touch-size:
         root.actual-thumb-size + root.actual-thumb-touch-expansion * 2;
+    property <length> actual-focus-ring-size: root.focus-ring-size;
+    property <length> actual-thumb-visual-size:
+        root.actual-thumb-size + root.actual-focus-ring-size * 2;
     property <length> actual-touch-height:
         max(
             root.actual-row-height,
-            max(root.actual-track-touch-height, root.actual-thumb-touch-size));
+            max(
+                root.actual-track-touch-height,
+                max(root.actual-thumb-touch-size, root.actual-thumb-visual-size)));
     property <float> range-start: min(root.minimum, root.maximum);
     property <float> range-end: max(root.minimum, root.maximum);
     property <float> value-range: max(0.0001, root.range-end - root.range-start);
     property <float> clamped-value: clamp(root.value, root.range-start, root.range-end);
     property <float> normalized-value: (root.clamped-value - root.range-start) / root.value-range;
     property <bool> is-focused: (focus-scope.has-focus || root.force-focused) && !root.disabled;
+    property <SliderState> theme-state:
+        root.disabled ? SliderState.disabled : root.is-focused ? SliderState.focused : SliderState.normal;
+    property <SliderVariantProps> theme-style: SliderTheme.style(root.theme-state);
+    property <SliderSizeProps> theme-size: SliderTheme.size(root.size);
     property <color> actual-track-color: root.track-color;
     property <color> actual-fill-color: root.fill-color;
     property <color> actual-thumb-color: root.thumb-color;
@@ -93,8 +107,13 @@ export component Slider {
     property <length> thumb-left: root.track-left + root.normalized-value * root.actual-track-width - root.actual-thumb-size / 2;
     property <length> thumb-top: (root.height - root.actual-thumb-size) / 2;
     property <length> actual-thumb-border-width: root.thumb-border-width;
+    property <length> drag-pointer-offset: 0px;
     property <color> focus-ring-color:
         root.is-focused ? root.actual-thumb-border-color.with-alpha(Theme.is-dark ? 0.28 : 0.16) : transparent;
+
+    pure function pointer-on-thumb(local-x: length, local-y: length) -> bool {
+        return local-x >= root.thumb-left - root.actual-thumb-touch-expansion && local-x <= root.thumb-left + root.actual-thumb-size + root.actual-thumb-touch-expansion && local-y >= root.thumb-top - root.actual-thumb-touch-expansion && local-y <= root.thumb-top + root.actual-thumb-size + root.actual-thumb-touch-expansion;
+    }
 
     preferred-width: 280px;
     preferred-height: root.actual-touch-height;
@@ -124,10 +143,10 @@ export component Slider {
         }
 
         Rectangle {
-            x: root.thumb-left - root.focus-ring-size;
-            y: root.thumb-top - root.focus-ring-size;
-            width: root.actual-thumb-size + root.focus-ring-size * 2;
-            height: root.actual-thumb-size + root.focus-ring-size * 2;
+            x: root.thumb-left - root.actual-focus-ring-size;
+            y: root.thumb-top - root.actual-focus-ring-size;
+            width: root.actual-thumb-size + root.actual-focus-ring-size * 2;
+            height: root.actual-thumb-size + root.actual-focus-ring-size * 2;
             border-radius: self.width / 2;
             background: root.focus-ring-color;
         }
@@ -143,7 +162,7 @@ export component Slider {
             border-color: root.actual-thumb-border-color;
         }
 
-        slider-touch := TouchArea {
+        drag-touch := TouchArea {
             y: (parent.height - self.height) / 2;
             width: parent.width;
             height: root.actual-touch-height;
@@ -151,8 +170,8 @@ export component Slider {
 
             moved => {
                 if self.pressed {
-                    if root.value-from-position(self.mouse-x) != root.value {
-                        root.value = root.value-from-position(self.mouse-x);
+                    if root.value-from-position(self.mouse-x - root.drag-pointer-offset) != root.value {
+                        root.value = root.value-from-position(self.mouse-x - root.drag-pointer-offset);
                         root.changed(root.value);
                     }
                 }
@@ -161,16 +180,23 @@ export component Slider {
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down {
                     focus-scope.focus();
-                    root.value = root.value-from-position(self.mouse-x);
-                    root.changed(root.value);
+                    root.drag-pointer-offset = root.pointer-on-thumb(self.mouse-x, self.mouse-y) ? self.mouse-x - (root.thumb-left + root.actual-thumb-size / 2) : 0px;
+                    if root.value-from-position(self.mouse-x - root.drag-pointer-offset) != root.value {
+                        root.value = root.value-from-position(self.mouse-x - root.drag-pointer-offset);
+                        root.changed(root.value);
+                    }
                     root.pressed();
                 }
                 if event.kind == PointerEventKind.up {
-                    root.value = root.value-from-position(self.mouse-x);
-                    root.changed(root.value);
+                    if root.value-from-position(self.mouse-x - root.drag-pointer-offset) != root.value {
+                        root.value = root.value-from-position(self.mouse-x - root.drag-pointer-offset);
+                        root.changed(root.value);
+                    }
+                    root.drag-pointer-offset = 0px;
                     root.released();
                 }
                 if event.kind == PointerEventKind.cancel {
+                    root.drag-pointer-offset = 0px;
                     root.released();
                 }
             }
