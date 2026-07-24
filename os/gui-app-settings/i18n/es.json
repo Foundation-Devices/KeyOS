@@ -32,7 +32,6 @@
   "apps.installedApps": "Installed Apps",
   "apps.mcpControl": "MCP Control",
   "apps.noInstalledApps": "No installed apps",
-  "apps.noRequestedPermissions": "No requested permissions",
   "apps.openApp": "Open App",
   "apps.publisher": "Publisher",
   "apps.removeApp": "Remove App",

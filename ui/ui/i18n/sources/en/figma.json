@@ -1359,7 +1359,6 @@
       "installedApps": "Installed Apps",
       "mcpControl": "MCP Control",
       "noInstalledApps": "No installed apps",
-      "noRequestedPermissions": "No requested permissions",
       "publisher": "Publisher",
       "removeApp": "Remove App",
       "removeAppDialog": {

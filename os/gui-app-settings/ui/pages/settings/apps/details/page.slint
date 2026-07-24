@@ -256,19 +256,6 @@ component PermissionGroupList inherits VerticalLayout {
     }
 }
 
-component EmptyPermissionsRow inherits Rectangle {
-    height: permission-text.preferred-height + Size.sz8;
-
-    permission-text := TextSm {
-        x: Size.sz4;
-        y: Size.sz4;
-        width: parent.width - (Size.sz4 * 2);
-        text: TR2.lookup(TrId.AppsNoRequestedPermissions);
-        color: Palette.content-primary;
-        wrap: word-wrap;
-    }
-}
-
 export component AppDetailsPage inherits BasePage {
     in property <AppDetailsProps> props;
 
@@ -350,12 +337,10 @@ export component AppDetailsPage inherits BasePage {
                 }
             }
 
-            MenuSection {
+            if AppManagementGlobal.selected-app.approvable_permissions.length > 0: MenuSection {
                 title: TR2.lookup(TrId.AppsRequestedPermissions);
 
                 MenuSectionLayout {
-                    if AppManagementGlobal.selected-app.approvable_permissions.length == 0: EmptyPermissionsRow { }
-
                     PermissionGroupList {
                         groups: AppManagementGlobal.selected-app.approvable_permissions;
                         toggleable: true;
