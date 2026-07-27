@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 
 use super::PersistentState;
 
-pub(crate) const BITCOIN_APP_ID: &str = "0x426974636f696e2057616c6c65740000";
-pub(crate) const SETTINGS_APP_ID_STR: &str = "0xc192b79230473875f159d4423d74d00f";
-pub(crate) const SCAN_QR_ACTION_ID: &str = "scan-qr";
-pub(crate) const LAYOUT_VERSION: u32 = 2;
+pub const BITCOIN_APP_ID: &str = "0x426974636f696e2057616c6c65740000";
+pub const SETTINGS_APP_ID_STR: &str = "0xc192b79230473875f159d4423d74d00f";
+pub const SCAN_QR_ACTION_ID: &str = "scan-qr";
+pub const LAYOUT_VERSION: u32 = 2;
 
 const DOCK_COLLECTION_ID: &str = "dock";
 const NEW_PAGE_COLLECTION_ID: &str = "new-page";
@@ -22,54 +22,185 @@ const STANDARD_PAGE_CAPACITY: usize = 9;
 const DOCK_CAPACITY: usize = 3;
 
 #[derive(Clone)]
-pub(crate) struct LauncherConfig {
-    pub(crate) pages: Vec<LauncherPage>,
-    pub(crate) dock: Vec<LauncherItem>,
+pub struct LauncherConfig {
+    pub pages: Vec<LauncherCollection>,
+    pub dock: LauncherCollection,
+}
+
+/// A grid of numbered slots holding launcher items, gaps allowed.
+#[derive(Clone)]
+pub struct LauncherCollection {
+    capacity: usize,
+    pub items: Vec<SlotItem>,
 }
 
 #[derive(Clone)]
-pub(crate) struct LauncherPage {
-    pub(crate) items: Vec<LauncherPageItem>,
+pub struct SlotItem {
+    pub slot: usize,
+    pub item: LauncherItem,
 }
 
 #[derive(Clone)]
-pub(crate) struct LauncherPageItem {
-    pub(crate) slot: usize,
-    pub(crate) item: LauncherItem,
+pub struct LauncherItem {
+    pub id: String,
+    pub label: String,
+    pub icon_key: String,
+    pub target: LauncherTarget,
+    pub enabled: bool,
+    pub can_remove: bool,
 }
 
 #[derive(Clone)]
-pub(crate) struct LauncherItem {
-    pub(crate) id: String,
-    pub(crate) label: String,
-    pub(crate) icon_key: String,
-    pub(crate) target: LauncherTarget,
-    pub(crate) enabled: bool,
-    pub(crate) can_remove: bool,
-}
-
-#[derive(Clone)]
-pub(crate) enum LauncherTarget {
+pub enum LauncherTarget {
     App { app_id: String },
     Action { action: LauncherAction },
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum LauncherAction {
+pub enum LauncherAction {
     ScanQr,
+}
+
+impl LauncherCollection {
+    fn new(capacity: usize) -> Self { Self { capacity, items: Vec::new() } }
+
+    /// Claim the saved ids into their saved slots; ids that no longer exist leave a gap.
+    fn from_saved_order(remaining: &mut Vec<LauncherItem>, saved_ids: &[String], capacity: usize) -> Self {
+        Self {
+            capacity,
+            items: saved_ids
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, id)| {
+                    (!id.is_empty())
+                        .then(|| claim_item(remaining, id))
+                        .flatten()
+                        .map(|item| SlotItem { slot, item })
+                })
+                .collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool { self.items.is_empty() }
+
+    fn is_free(&self, slot: usize) -> bool { self.items.iter().all(|slot_item| slot_item.slot != slot) }
+
+    fn first_free_slot(&self) -> Option<usize> { (0..self.capacity).find(|slot| self.is_free(*slot)) }
+
+    fn remove(&mut self, slot: usize) -> Option<LauncherItem> {
+        let index = self.items.iter().position(|slot_item| slot_item.slot == slot)?;
+        Some(self.items.remove(index).item)
+    }
+
+    /// Place `item` at `slot`, sliding the run between it and the nearest free slot
+    /// out of the way. Returns the item pushed off the end when the grid is full.
+    fn insert(&mut self, slot: usize, item: LauncherItem) -> Option<LauncherItem> {
+        if self.capacity == 0 {
+            return Some(item);
+        }
+
+        let target = slot.min(self.capacity - 1);
+        self.shift_run(target, self.slide_target(target));
+        let displaced = self.remove(self.capacity);
+        self.items.push(SlotItem { slot: target, item });
+        self.sort();
+        displaced
+    }
+
+    /// The free slot a drop at `slot` slides the run into, or the capacity when there
+    /// is none and the last item is pushed off the end.
+    fn slide_target(&self, slot: usize) -> usize {
+        let target = slot.min(self.capacity.saturating_sub(1));
+        (target..self.capacity)
+            .find(|slot| self.is_free(*slot))
+            .or_else(|| (0..target).rev().find(|slot| self.is_free(*slot)))
+            .unwrap_or(self.capacity)
+    }
+
+    /// Place `item` at `slot`, handing back whatever sat there when the grid is full.
+    fn insert_or_swap(&mut self, slot: usize, item: LauncherItem) -> Option<LauncherItem> {
+        if self.capacity == 0 {
+            return Some(item);
+        }
+
+        let target = slot.min(self.capacity - 1);
+        match self.items.iter().position(|slot_item| slot_item.slot == target) {
+            Some(index) if self.first_free_slot().is_none() => {
+                Some(std::mem::replace(&mut self.items[index].item, item))
+            }
+            _ => self.insert(target, item),
+        }
+    }
+
+    /// Move the item at `from` onto `to`, sliding the run between them one slot
+    /// toward the vacated one, because that is what the drag preview animates.
+    fn reorder(&mut self, from: usize, to: usize) -> bool {
+        let Some(index) = self.items.iter().position(|slot_item| slot_item.slot == from) else {
+            return false;
+        };
+
+        let target = to.min(self.capacity.saturating_sub(1));
+        self.shift_run(target, from);
+        self.items[index].slot = target;
+        self.sort();
+        true
+    }
+
+    /// Slide the run between `target` and the free slot at `free` one step toward
+    /// `free`, leaving `target` empty. `free` is excluded, so an item parked there stays.
+    fn shift_run(&mut self, target: usize, free: usize) {
+        for slot_item in &mut self.items {
+            if (target..free).contains(&slot_item.slot) {
+                slot_item.slot += 1;
+            } else if (free + 1..=target).contains(&slot_item.slot) {
+                slot_item.slot -= 1;
+            }
+        }
+    }
+
+    /// Set the capacity, returning items that no longer fit or share a slot.
+    fn resize(&mut self, capacity: usize) -> Vec<LauncherItem> {
+        self.capacity = capacity;
+        self.sort();
+
+        let mut seen_slots = BTreeSet::new();
+        let mut retained = Vec::new();
+        let mut overflow = Vec::new();
+        for slot_item in self.items.drain(..) {
+            if slot_item.slot < self.capacity && seen_slots.insert(slot_item.slot) {
+                retained.push(slot_item);
+            } else {
+                overflow.push(slot_item.item);
+            }
+        }
+        self.items = retained;
+        overflow
+    }
+
+    fn sort(&mut self) { self.items.sort_by_key(|slot_item| slot_item.slot); }
+
+    /// Item ids by slot, empty strings for gaps: the saved form of a collection.
+    fn order(&self) -> Vec<String> {
+        let mut ids = vec![
+            String::new();
+            self.items.iter().map(|slot_item| slot_item.slot).max().map_or(0, |slot| slot + 1)
+        ];
+        for slot_item in &self.items {
+            ids[slot_item.slot] = slot_item.item.id.clone();
+        }
+        ids
+    }
 }
 
 impl LauncherConfig {
     /// Build the launcher layout from discovered items and any saved ordering.
     ///
-    /// Saved page and dock orders keep their order (ids that no longer exist are dropped);
+    /// Saved page and dock orders keep their slots (ids that no longer exist are dropped);
     /// the default dock items claim their canonical dock slot when nothing else placed them;
     /// any other item without a saved place fills the first open slot on the first non-full
     /// page, opening a new page when every page is full.
-    pub(crate) fn from_persistent(persistent: &PersistentState, discovered: Vec<LauncherItem>) -> Self {
+    pub fn from_persistent(persistent: &PersistentState, discovered: Vec<LauncherItem>) -> Self {
         let mut remaining = discovered;
-        let mut pages: Vec<LauncherPage> = Vec::new();
-        let mut dock: Vec<LauncherItem> = Vec::new();
 
         // Orders saved by an older layout scheme reference stale item ids; ignore
         // them and rebuild from defaults rather than scattering items.
@@ -80,49 +211,46 @@ impl LauncherConfig {
                 (&[], &[])
             };
 
-        for id in saved_dock_order {
-            if let Some(item) = claim_item(&mut remaining, id) {
-                dock.push(item);
-            }
-        }
+        // Ids past the last dock slot have nowhere to land; unclaimed, they fall through to a page.
+        let saved_dock_slots = &saved_dock_order[..saved_dock_order.len().min(DOCK_CAPACITY)];
+        let mut dock = LauncherCollection::from_saved_order(&mut remaining, saved_dock_slots, DOCK_CAPACITY);
 
-        for saved_ids in saved_page_orders {
-            let items: Vec<LauncherPageItem> = saved_ids
-                .iter()
-                .enumerate()
-                .filter_map(|(slot, id)| {
-                    (!id.is_empty())
-                        .then(|| claim_item(&mut remaining, id))
-                        .flatten()
-                        .map(|item| LauncherPageItem { slot, item })
-                })
-                .collect();
-            if !items.is_empty() {
-                pages.push(LauncherPage { items });
-            }
-        }
+        // Dropping the empty pages shifts the rest up, so these capacities are a
+        // guess that the compaction below fixes.
+        let mut pages: Vec<LauncherCollection> = saved_page_orders
+            .iter()
+            .enumerate()
+            .map(|(index, saved_ids)| {
+                LauncherCollection::from_saved_order(&mut remaining, saved_ids, page_capacity_for(index))
+            })
+            .filter(|page| !page.is_empty())
+            .collect();
         Self::compact_pages(&mut pages);
 
         // Settings, Bitcoin, and Scan QR live in the dock by default: when neither
         // the saved dock nor a saved page placed them, insert each at its canonical
         // dock position (covers fresh layouts and layouts saved by older builds).
-        for (index, id) in [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID].into_iter().enumerate() {
-            if dock.len() >= DOCK_CAPACITY {
+        for (slot, id) in [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID].into_iter().enumerate() {
+            if dock.items.len() >= DOCK_CAPACITY {
                 break;
             }
             if let Some(item) = claim_item(&mut remaining, id) {
-                let at = index.min(dock.len());
-                dock.insert(at, item);
+                let displaced = dock.insert(slot, item);
+                debug_assert!(displaced.is_none(), "the dock has a free slot");
             }
         }
 
         for item in remaining {
-            match pages.iter().enumerate().find_map(|(index, page)| {
-                first_open_page_slot(page, page_capacity_for(index)).map(|slot| (index, slot))
-            }) {
+            match pages
+                .iter()
+                .enumerate()
+                .find_map(|(index, page)| page.first_free_slot().map(|slot| (index, slot)))
+            {
                 Some((page_index, slot)) => Self::insert_item_into_pages(&mut pages, page_index, slot, item),
                 None => {
-                    pages.push(LauncherPage { items: vec![LauncherPageItem { slot: 0, item }] });
+                    let mut page = LauncherCollection::new(page_capacity_for(pages.len()));
+                    page.items.push(SlotItem { slot: 0, item });
+                    pages.push(page);
                 }
             }
         }
@@ -132,15 +260,15 @@ impl LauncherConfig {
         Self { pages, dock }
     }
 
-    pub(crate) fn item_by_id(&self, item_id: &str) -> Option<&LauncherItem> {
+    pub fn item_by_id(&self, item_id: &str) -> Option<&LauncherItem> {
         self.pages
             .iter()
-            .flat_map(|page| page.items.iter().map(|page_item| &page_item.item))
-            .chain(self.dock.iter())
+            .chain(std::iter::once(&self.dock))
+            .flat_map(|collection| collection.items.iter().map(|slot_item| &slot_item.item))
             .find(|item| item.id == item_id)
     }
 
-    pub(crate) fn move_item(
+    pub fn move_item(
         &mut self,
         source_collection_id: &str,
         from_index: usize,
@@ -148,154 +276,159 @@ impl LauncherConfig {
         to_index: usize,
     ) -> bool {
         if source_collection_id == target_collection_id {
-            let moved = self.reorder_collection(source_collection_id, from_index, to_index);
-            if moved {
-                self.compact_page_list();
-            }
-            return moved;
-        }
-
-        let Some(item) = self.remove_item_from_collection(source_collection_id, from_index) else {
-            return false;
-        };
-
-        if target_collection_id == DOCK_COLLECTION_ID && self.dock.len() >= DOCK_CAPACITY {
-            let swap_index = to_index.min(self.dock.len().saturating_sub(1));
-            let displaced_item = std::mem::replace(&mut self.dock[swap_index], item);
-            let source_len = self.collection_len(source_collection_id).unwrap_or_default();
-            let restore_index = from_index.min(source_len);
-            if !self.insert_item_into_collection(source_collection_id, restore_index, displaced_item.clone())
-            {
-                self.dock[swap_index] = displaced_item;
+            let Some(collection) = self.collection_mut(source_collection_id) else {
+                return false;
+            };
+            if !collection.reorder(from_index, to_index) {
                 return false;
             }
             self.compact_page_list();
             return true;
         }
 
-        if !self.insert_item_into_collection(target_collection_id, to_index, item.clone()) {
-            let source_len = self.collection_len(source_collection_id).unwrap_or_default();
-            let restore_index = from_index.min(source_len);
-            let _ = self.insert_item_into_collection(source_collection_id, restore_index, item);
-            return false;
-        }
-
-        self.compact_page_list();
-        true
-    }
-
-    pub(crate) fn sync_persistent(&self, persistent: &mut PersistentState) {
-        persistent.page_orders = self.page_orders();
-        persistent.dock_order = self.dock_order();
-        persistent.layout_version = LAYOUT_VERSION;
-    }
-
-    fn reorder_collection(&mut self, collection_id: &str, from_index: usize, to_index: usize) -> bool {
-        if collection_id == DOCK_COLLECTION_ID {
-            reorder_items(&mut self.dock, from_index, to_index);
-            return true;
-        }
-
-        let Some(item) = self.remove_item_from_collection(collection_id, from_index) else {
+        let Some(item) = self.remove_item(source_collection_id, from_index) else {
             return false;
         };
 
-        if self.insert_item_into_collection(collection_id, to_index, item.clone()) {
-            true
-        } else {
-            let _ = self.insert_item_into_collection(collection_id, from_index, item);
-            false
+        match self.place_item(target_collection_id, to_index, item) {
+            Ok(displaced) => {
+                // The drag just vacated its slot, so the swapped-out icon lands
+                // where the dragged one came from.
+                if let Some(displaced) = displaced {
+                    let restored = self.place_item(source_collection_id, from_index, displaced);
+                    debug_assert!(restored.is_ok(), "the drag source outlives the move");
+                }
+                self.compact_page_list();
+                true
+            }
+            Err(item) => {
+                let _ = self.place_item(source_collection_id, from_index, item);
+                false
+            }
         }
     }
 
-    fn collection_len(&self, collection_id: &str) -> Option<usize> {
+    pub fn sync_persistent(&self, persistent: &mut PersistentState) {
+        persistent.page_orders = self.pages.iter().map(LauncherCollection::order).collect();
+        persistent.dock_order = self.dock.order();
+        persistent.layout_version = LAYOUT_VERSION;
+    }
+
+    /// Where a drop at `slot` slides the run to: a free slot, or the capacity when the
+    /// last item is pushed off the end. None when nothing slides, either because a full
+    /// dock swaps the hovered icon out or because there is no such collection.
+    pub fn drop_slide_target(&self, collection_id: &str, slot: usize) -> Option<usize> {
+        let collection = self.collection(collection_id)?;
+        if collection_id == DOCK_COLLECTION_ID && collection.first_free_slot().is_none() {
+            return None;
+        }
+
+        Some(collection.slide_target(slot))
+    }
+
+    /// The icon a drop at `slot` pushes out, which only a full dock does.
+    pub fn displaced_item(&self, collection_id: &str, slot: usize) -> Option<&LauncherItem> {
+        if collection_id != DOCK_COLLECTION_ID || self.dock.first_free_slot().is_some() {
+            return None;
+        }
+
+        let target = slot.min(DOCK_CAPACITY - 1);
+        self.dock.items.iter().find(|slot_item| slot_item.slot == target).map(|slot_item| &slot_item.item)
+    }
+
+    fn collection(&self, collection_id: &str) -> Option<&LauncherCollection> {
         if collection_id == DOCK_COLLECTION_ID {
-            return Some(self.dock.len());
+            return Some(&self.dock);
         }
 
         let page_index = page_index_from_collection_id(collection_id)?;
-        self.pages.get(page_index).map(|_| page_capacity_for(page_index))
+        self.pages.get(page_index)
     }
 
-    fn remove_item_from_collection(&mut self, collection_id: &str, index: usize) -> Option<LauncherItem> {
+    fn collection_mut(&mut self, collection_id: &str) -> Option<&mut LauncherCollection> {
         if collection_id == DOCK_COLLECTION_ID {
-            return (index < self.dock.len()).then(|| self.dock.remove(index));
+            return Some(&mut self.dock);
         }
 
         let page_index = page_index_from_collection_id(collection_id)?;
-        let page = self.pages.get_mut(page_index)?;
-        let item_index = page.items.iter().position(|page_item| page_item.slot == index)?;
-        Some(page.items.remove(item_index).item)
+        self.pages.get_mut(page_index)
     }
 
-    fn insert_item_into_collection(&mut self, collection_id: &str, index: usize, item: LauncherItem) -> bool {
+    fn remove_item(&mut self, collection_id: &str, slot: usize) -> Option<LauncherItem> {
+        self.collection_mut(collection_id)?.remove(slot)
+    }
+
+    /// Place `item` at `slot` of the named collection. A full dock hands back the
+    /// icon it swapped out, having nowhere to spill; pages spill onto the next page.
+    /// `Err` returns the item when the collection does not exist.
+    fn place_item(
+        &mut self,
+        collection_id: &str,
+        slot: usize,
+        item: LauncherItem,
+    ) -> Result<Option<LauncherItem>, LauncherItem> {
         if collection_id == DOCK_COLLECTION_ID {
-            let insert_index = index.min(self.dock.len());
-            self.dock.insert(insert_index, item);
-            return true;
+            return Ok(self.dock.insert_or_swap(slot, item));
         }
 
         if collection_id == NEW_PAGE_COLLECTION_ID {
-            self.insert_item_into_page(self.pages.len(), index, item);
-            return true;
+            let page_index = self.pages.len();
+            Self::insert_item_into_pages(&mut self.pages, page_index, slot, item);
+            return Ok(None);
         }
 
-        if let Some(page_index) =
-            page_index_from_collection_id(collection_id).filter(|page_index| *page_index < self.pages.len())
-        {
-            self.insert_item_into_page(page_index, index, item);
-            return true;
-        }
-
-        false
-    }
-
-    fn insert_item_into_page(&mut self, page_index: usize, index: usize, item: LauncherItem) {
-        Self::insert_item_into_pages(&mut self.pages, page_index, index, item);
-    }
-
-    fn enforce_page_capacity(pages: &mut Vec<LauncherPage>) {
-        let mut page_index = 0;
-        while page_index < pages.len() {
-            Self::rebalance_page_slots(pages, page_index);
-            page_index += 1;
+        match page_index_from_collection_id(collection_id).filter(|index| *index < self.pages.len()) {
+            Some(page_index) => {
+                Self::insert_item_into_pages(&mut self.pages, page_index, slot, item);
+                Ok(None)
+            }
+            None => Err(item),
         }
     }
 
     fn compact_page_list(&mut self) { Self::compact_pages(&mut self.pages); }
 
-    fn compact_pages(pages: &mut Vec<LauncherPage>) {
+    fn compact_pages(pages: &mut Vec<LauncherCollection>) {
         loop {
-            pages.retain(|page| !page.items.is_empty());
+            pages.retain(|page| !page.is_empty());
 
             if pages.is_empty() {
-                pages.push(LauncherPage { items: Vec::new() });
+                pages.push(LauncherCollection::new(page_capacity_for(0)));
                 return;
             }
 
-            Self::enforce_page_capacity(pages);
+            // A page's capacity follows its index, which dropping the empty pages may
+            // have shifted.
+            let mut page_index = 0;
+            while page_index < pages.len() {
+                let overflow = pages[page_index].resize(page_capacity_for(page_index));
+                for item in overflow.into_iter().rev() {
+                    Self::insert_item_into_pages(pages, page_index + 1, 0, item);
+                }
+                page_index += 1;
+            }
 
-            if pages.iter().all(|page| !page.items.is_empty()) {
+            if pages.iter().all(|page| !page.is_empty()) {
                 return;
             }
         }
     }
 
+    /// Place `item` at `slot` of `page_index`, cascading the overflow onto later
+    /// pages and opening new ones as needed.
     fn insert_item_into_pages(
-        pages: &mut Vec<LauncherPage>,
+        pages: &mut Vec<LauncherCollection>,
         mut page_index: usize,
-        index: usize,
+        mut slot: usize,
         mut item: LauncherItem,
     ) {
-        let mut slot = index;
         loop {
             while page_index >= pages.len() {
-                pages.push(LauncherPage { items: Vec::new() });
+                pages.push(LauncherCollection::new(page_capacity_for(pages.len())));
             }
 
-            let capacity = page_capacity_for(page_index);
-            let target_slot = slot.min(capacity.saturating_sub(1));
-            match insert_item_into_page_slot(&mut pages[page_index], capacity, target_slot, item) {
+            debug_assert_eq!(pages[page_index].capacity, page_capacity_for(page_index), "stale capacity");
+            match pages[page_index].insert(slot, item) {
                 Some(overflow) => {
                     item = overflow;
                     page_index += 1;
@@ -305,36 +438,9 @@ impl LauncherConfig {
             }
         }
     }
-
-    fn rebalance_page_slots(pages: &mut Vec<LauncherPage>, page_index: usize) {
-        let capacity = page_capacity_for(page_index);
-        sort_page_items(&mut pages[page_index]);
-
-        let mut seen_slots = BTreeSet::new();
-        let mut retained = Vec::new();
-        let mut overflow = Vec::new();
-        for page_item in pages[page_index].items.drain(..) {
-            if page_item.slot < capacity && seen_slots.insert(page_item.slot) {
-                retained.push(page_item);
-            } else {
-                overflow.push(page_item.item);
-            }
-        }
-        pages[page_index].items = retained;
-
-        for item in overflow.into_iter().rev() {
-            Self::insert_item_into_pages(pages, page_index + 1, 0, item);
-        }
-    }
-
-    fn page_orders(&self) -> Vec<Vec<String>> { self.pages.iter().map(page_order).collect() }
-
-    fn dock_order(&self) -> Vec<String> { self.dock.iter().map(|item| item.id.clone()).collect() }
 }
 
-pub(crate) fn page_collection_id(page_index: usize) -> String {
-    format!("{PAGE_COLLECTION_PREFIX}{page_index}")
-}
+pub fn page_collection_id(page_index: usize) -> String { format!("{PAGE_COLLECTION_PREFIX}{page_index}") }
 
 fn page_capacity_for(page_index: usize) -> usize {
     if page_index == 0 {
@@ -344,41 +450,6 @@ fn page_capacity_for(page_index: usize) -> usize {
     }
 }
 
-fn insert_item_into_page_slot(
-    page: &mut LauncherPage,
-    capacity: usize,
-    slot: usize,
-    item: LauncherItem,
-) -> Option<LauncherItem> {
-    if capacity == 0 {
-        return Some(item);
-    }
-
-    let mut incoming = LauncherPageItem { slot: slot.min(capacity - 1), item };
-    loop {
-        if incoming.slot >= capacity {
-            sort_page_items(page);
-            return Some(incoming.item);
-        }
-
-        if let Some(existing_index) = page.items.iter().position(|page_item| page_item.slot == incoming.slot)
-        {
-            std::mem::swap(&mut page.items[existing_index].item, &mut incoming.item);
-            incoming.slot += 1;
-        } else {
-            page.items.push(incoming);
-            sort_page_items(page);
-            return None;
-        }
-    }
-}
-
-fn sort_page_items(page: &mut LauncherPage) { page.items.sort_by_key(|page_item| page_item.slot); }
-
-fn first_open_page_slot(page: &LauncherPage, capacity: usize) -> Option<usize> {
-    (0..capacity).find(|slot| page.items.iter().all(|page_item| page_item.slot != *slot))
-}
-
 fn claim_item(remaining: &mut Vec<LauncherItem>, id: &str) -> Option<LauncherItem> {
     let index = remaining.iter().position(|item| item.id == id)?;
     Some(remaining.remove(index))
@@ -386,26 +457,6 @@ fn claim_item(remaining: &mut Vec<LauncherItem>, id: &str) -> Option<LauncherIte
 
 fn page_index_from_collection_id(collection_id: &str) -> Option<usize> {
     collection_id.strip_prefix(PAGE_COLLECTION_PREFIX).and_then(|suffix| suffix.parse().ok())
-}
-
-fn reorder_items(items: &mut Vec<LauncherItem>, from_index: usize, to_index: usize) {
-    if from_index >= items.len() || to_index >= items.len() || from_index == to_index {
-        return;
-    }
-
-    let item = items.remove(from_index);
-    items.insert(to_index, item);
-}
-
-fn page_order(page: &LauncherPage) -> Vec<String> {
-    let mut ids = vec![
-        String::new();
-        page.items.iter().map(|page_item| page_item.slot).max().map_or(0, |slot| slot + 1)
-    ];
-    for page_item in &page.items {
-        ids[page_item.slot] = page_item.item.id.clone();
-    }
-    ids
 }
 
 #[cfg(test)]
@@ -423,28 +474,39 @@ mod tests {
         }
     }
 
-    fn item_ids(items: &[LauncherItem]) -> Vec<&str> { items.iter().map(|item| item.id.as_str()).collect() }
-
-    fn page_item_ids(items: &[LauncherPageItem]) -> Vec<&str> {
-        items.iter().map(|page_item| page_item.item.id.as_str()).collect()
+    fn slot_item_ids(items: &[SlotItem]) -> Vec<&str> {
+        items.iter().map(|slot_item| slot_item.item.id.as_str()).collect()
     }
 
-    fn page_item_slots(items: &[LauncherPageItem]) -> Vec<usize> {
-        items.iter().map(|page_item| page_item.slot).collect()
+    fn slot_item_slots(items: &[SlotItem]) -> Vec<usize> {
+        items.iter().map(|slot_item| slot_item.slot).collect()
     }
 
-    fn test_page(items: &[&str]) -> LauncherPage {
-        LauncherPage {
-            items: items
-                .iter()
-                .enumerate()
-                .map(|(slot, id)| LauncherPageItem { slot, item: test_item(id) })
-                .collect(),
-        }
+    fn test_page(items: &[&str]) -> LauncherCollection {
+        test_sparse_page(&items.iter().enumerate().map(|(slot, id)| (slot, *id)).collect::<Vec<_>>())
     }
 
-    fn test_launcher(pages: Vec<LauncherPage>, dock: &[&str]) -> LauncherConfig {
-        LauncherConfig { pages, dock: dock.iter().map(|id| test_item(id)).collect() }
+    fn test_sparse_page(items: &[(usize, &str)]) -> LauncherCollection {
+        let mut page = LauncherCollection::new(GRAPH_PAGE_CAPACITY);
+        page.items = items.iter().map(|(slot, id)| SlotItem { slot: *slot, item: test_item(id) }).collect();
+        page
+    }
+
+    fn test_dock(items: &[(usize, &str)]) -> LauncherCollection {
+        let mut dock = LauncherCollection::new(DOCK_CAPACITY);
+        dock.items = items.iter().map(|(slot, id)| SlotItem { slot: *slot, item: test_item(id) }).collect();
+        dock
+    }
+
+    /// Compacting stamps each page with the capacity its index calls for, the
+    /// same way a rebuilt layout gets one.
+    fn test_launcher(pages: Vec<LauncherCollection>, dock: &[&str]) -> LauncherConfig {
+        let mut launcher = LauncherConfig {
+            pages,
+            dock: test_dock(&dock.iter().enumerate().map(|(slot, id)| (slot, *id)).collect::<Vec<_>>()),
+        };
+        LauncherConfig::compact_pages(&mut launcher.pages);
+        launcher
     }
 
     #[test]
@@ -460,9 +522,13 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]);
+        assert_eq!(
+            slot_item_ids(&config.dock.items),
+            [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]
+        );
+        assert_eq!(slot_item_slots(&config.dock.items), [0, 1, 2]);
         assert_eq!(config.pages.len(), 1);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a", "b"]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a", "b"]);
     }
 
     #[test]
@@ -484,8 +550,12 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a"]);
+        assert_eq!(
+            slot_item_ids(&config.dock.items),
+            [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]
+        );
+        assert_eq!(slot_item_slots(&config.dock.items), [0, 1, 2]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a"]);
     }
 
     #[test]
@@ -506,8 +576,12 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a"]);
+        assert_eq!(
+            slot_item_ids(&config.dock.items),
+            [SETTINGS_APP_ID_STR, BITCOIN_APP_ID, SCAN_QR_ACTION_ID]
+        );
+        assert_eq!(slot_item_slots(&config.dock.items), [0, 1, 2]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a"]);
     }
 
     #[test]
@@ -525,8 +599,9 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), [BITCOIN_APP_ID, SCAN_QR_ACTION_ID]);
-        assert_eq!(page_item_ids(&config.pages[0].items), [SETTINGS_APP_ID_STR]);
+        assert_eq!(slot_item_ids(&config.dock.items), [BITCOIN_APP_ID, SCAN_QR_ACTION_ID]);
+        assert_eq!(slot_item_slots(&config.dock.items), [0, 1]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), [SETTINGS_APP_ID_STR]);
     }
 
     #[test]
@@ -551,9 +626,10 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), ["d1"]);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a", "b", "c", "new"]);
-        assert_eq!(page_item_ids(&config.pages[1].items), ["e"]);
+        assert_eq!(slot_item_ids(&config.dock.items), ["d1"]);
+        assert_eq!(slot_item_slots(&config.dock.items), [0]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a", "b", "c", "new"]);
+        assert_eq!(slot_item_ids(&config.pages[1].items), ["e"]);
     }
 
     #[test]
@@ -570,7 +646,7 @@ mod tests {
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
         assert_eq!(config.pages.len(), 2);
-        assert_eq!(page_item_ids(&config.pages[1].items), ["overflow"]);
+        assert_eq!(slot_item_ids(&config.pages[1].items), ["overflow"]);
     }
 
     #[test]
@@ -591,7 +667,7 @@ mod tests {
 
         assert_eq!(config.pages.len(), 2);
         assert_eq!(config.pages[1].items.len(), STANDARD_PAGE_CAPACITY);
-        assert_eq!(config.pages[1].items.last().map(|page_item| page_item.item.id.as_str()), Some("new"));
+        assert_eq!(config.pages[1].items.last().map(|slot_item| slot_item.item.id.as_str()), Some("new"));
     }
 
     #[test]
@@ -617,8 +693,8 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a", "b", "c", "d", "e", "f"]);
-        assert_eq!(page_item_ids(&config.pages[1].items), ["g", "h", "i"]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a", "b", "c", "d", "e", "f"]);
+        assert_eq!(slot_item_ids(&config.pages[1].items), ["g", "h", "i"]);
     }
 
     #[test]
@@ -628,8 +704,97 @@ mod tests {
 
         assert!(launcher.move_item("page-1", 1, "page-0", 2));
 
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a", "b", "h", "c", "d", "e"]);
-        assert_eq!(page_item_ids(&launcher.pages[1].items), ["f", "g"]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a", "b", "h", "c", "d", "e"]);
+        assert_eq!(slot_item_ids(&launcher.pages[1].items), ["f", "g"]);
+    }
+
+    #[test]
+    fn drop_preview_slides_toward_a_gap_on_either_side() {
+        let launcher = test_launcher(vec![test_page(&["a"])], &["d0", "d1"]);
+
+        // Gap at dock slot 2, so a drop on slot 0 slides the run right into it.
+        assert_eq!(launcher.drop_slide_target("dock", 0), Some(2));
+
+        let launcher =
+            LauncherConfig { pages: vec![test_page(&["a"])], dock: test_dock(&[(1, "d1"), (2, "d2")]) };
+
+        assert_eq!(launcher.drop_slide_target("dock", 2), Some(0));
+    }
+
+    #[test]
+    fn only_a_full_dock_reports_a_displaced_icon() {
+        let launcher = test_launcher(vec![test_page(&["a"])], &["d0", "d1", "d2"]);
+
+        assert_eq!(launcher.displaced_item("dock", 1).map(|item| item.id.as_str()), Some("d1"));
+        assert!(launcher.displaced_item("page-0", 0).is_none());
+
+        let launcher = test_launcher(vec![test_page(&["a"])], &["d0", "d1"]);
+
+        assert!(launcher.displaced_item("dock", 1).is_none());
+    }
+
+    #[test]
+    fn drop_preview_reports_a_swap_on_a_full_dock_and_an_overflow_on_a_full_page() {
+        let launcher = test_launcher(vec![test_page(&["a", "b", "c", "d", "e", "f"])], &["d0", "d1", "d2"]);
+
+        assert_eq!(launcher.drop_slide_target("dock", 1), None);
+        assert_eq!(launcher.drop_slide_target("page-0", 1), Some(GRAPH_PAGE_CAPACITY));
+    }
+
+    #[test]
+    fn dragging_onto_the_last_slot_of_a_full_page_keeps_every_icon_on_it() {
+        let mut launcher = test_launcher(vec![test_page(&["a", "b", "c", "d", "e", "f"])], &[]);
+
+        assert!(launcher.move_item("page-0", 0, "page-0", GRAPH_PAGE_CAPACITY - 1));
+
+        assert_eq!(launcher.pages.len(), 1);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["b", "c", "d", "e", "f", "a"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn reordering_forward_over_a_gap_slides_every_slot_between() {
+        let mut launcher = test_launcher(vec![test_sparse_page(&[(0, "a"), (1, "b"), (3, "c")])], &[]);
+
+        assert!(launcher.move_item("page-0", 0, "page-0", 3));
+
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["b", "c", "a"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 2, 3]);
+    }
+
+    #[test]
+    fn reordering_back_over_a_gap_slides_every_slot_between() {
+        let mut launcher = test_launcher(vec![test_sparse_page(&[(0, "a"), (2, "b"), (3, "c")])], &[]);
+
+        assert!(launcher.move_item("page-0", 3, "page-0", 0));
+
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["c", "a", "b"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 1, 3]);
+    }
+
+    #[test]
+    fn moving_item_to_occupied_slot_shifts_right_when_space_allows() {
+        let mut launcher = test_launcher(vec![test_sparse_page(&[(0, "a"), (1, "b"), (3, "c")])], &["x"]);
+
+        assert!(launcher.move_item("dock", 0, "page-0", 1));
+
+        assert!(launcher.dock.is_empty());
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a", "x", "b", "c"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn moving_item_to_occupied_end_slot_shifts_left_when_space_allows() {
+        let mut launcher = test_launcher(
+            vec![test_sparse_page(&[(0, "a"), (1, "b"), (3, "c"), (4, "d"), (5, "corner")])],
+            &["x"],
+        );
+
+        assert!(launcher.move_item("dock", 0, "page-0", GRAPH_PAGE_CAPACITY - 1));
+
+        assert!(launcher.dock.is_empty());
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a", "b", "c", "d", "corner", "x"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
@@ -638,11 +803,11 @@ mod tests {
 
         assert!(launcher.move_item("page-0", 1, "page-0", 4));
 
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a", "b"]);
-        assert_eq!(page_item_slots(&launcher.pages[0].items), [0, 4]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a", "b"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 4]);
         assert_eq!(
-            launcher.page_orders().first(),
-            Some(&vec!["a".to_string(), String::new(), String::new(), String::new(), "b".to_string()])
+            launcher.pages.first().map(LauncherCollection::order),
+            Some(vec!["a".to_string(), String::new(), String::new(), String::new(), "b".to_string()])
         );
     }
 
@@ -663,8 +828,8 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a", "b"]);
-        assert_eq!(page_item_slots(&config.pages[0].items), [0, 4]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a", "b"]);
+        assert_eq!(slot_item_slots(&config.pages[0].items), [0, 4]);
     }
 
     #[test]
@@ -677,8 +842,8 @@ mod tests {
         launcher.sync_persistent(&mut persistent);
         let config = LauncherConfig::from_persistent(&persistent, vec![test_item("a"), test_item("b")]);
 
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a", "b"]);
-        assert_eq!(page_item_slots(&config.pages[0].items), [0, 4]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a", "b"]);
+        assert_eq!(slot_item_slots(&config.pages[0].items), [0, 4]);
     }
 
     #[test]
@@ -687,10 +852,10 @@ mod tests {
 
         assert!(launcher.move_item("page-0", 1, "page-1", 4));
 
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a"]);
-        assert_eq!(page_item_slots(&launcher.pages[0].items), [0]);
-        assert_eq!(page_item_ids(&launcher.pages[1].items), ["x", "b"]);
-        assert_eq!(page_item_slots(&launcher.pages[1].items), [0, 4]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0]);
+        assert_eq!(slot_item_ids(&launcher.pages[1].items), ["x", "b"]);
+        assert_eq!(slot_item_slots(&launcher.pages[1].items), [0, 4]);
     }
 
     #[test]
@@ -699,9 +864,9 @@ mod tests {
 
         assert!(launcher.move_item("page-0", 1, NEW_PAGE_COLLECTION_ID, 0));
 
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a"]);
-        assert_eq!(page_item_ids(&launcher.pages[1].items), ["b"]);
-        assert_eq!(page_item_slots(&launcher.pages[1].items), [0]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a"]);
+        assert_eq!(slot_item_ids(&launcher.pages[1].items), ["b"]);
+        assert_eq!(slot_item_slots(&launcher.pages[1].items), [0]);
     }
 
     #[test]
@@ -711,8 +876,44 @@ mod tests {
         assert!(launcher.move_item("dock", 0, NEW_PAGE_COLLECTION_ID, 0));
 
         assert!(launcher.dock.is_empty());
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a"]);
-        assert_eq!(page_item_ids(&launcher.pages[1].items), ["x"]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a"]);
+        assert_eq!(slot_item_ids(&launcher.pages[1].items), ["x"]);
+    }
+
+    #[test]
+    fn moving_item_to_empty_dock_slot_preserves_target_slot() {
+        let mut launcher = test_launcher(vec![test_page(&["a"])], &["dock"]);
+
+        assert!(launcher.move_item("page-0", 0, "dock", 2));
+
+        assert_eq!(slot_item_ids(&launcher.dock.items), ["dock", "a"]);
+        assert_eq!(slot_item_slots(&launcher.dock.items), [0, 2]);
+        assert_eq!(launcher.dock.order(), vec!["dock".to_string(), String::new(), "a".to_string()]);
+    }
+
+    #[test]
+    fn sparse_dock_slots_survive_layout_rebuild() {
+        let persistent = PersistentState {
+            dock_order: vec!["dock".to_string(), String::new(), "a".to_string()],
+            layout_version: LAYOUT_VERSION,
+            ..Default::default()
+        };
+
+        let config = LauncherConfig::from_persistent(&persistent, vec![test_item("dock"), test_item("a")]);
+
+        assert_eq!(slot_item_ids(&config.dock.items), ["dock", "a"]);
+        assert_eq!(slot_item_slots(&config.dock.items), [0, 2]);
+    }
+
+    #[test]
+    fn moving_dock_item_to_occupied_slot_shifts_toward_empty_slot() {
+        let mut launcher =
+            LauncherConfig { pages: vec![test_page(&[])], dock: test_dock(&[(0, "a"), (2, "b")]) };
+
+        assert!(launcher.move_item("dock", 0, "dock", 2));
+
+        assert_eq!(slot_item_ids(&launcher.dock.items), ["b", "a"]);
+        assert_eq!(slot_item_slots(&launcher.dock.items), [1, 2]);
     }
 
     #[test]
@@ -722,8 +923,8 @@ mod tests {
         assert!(launcher.move_item("page-0", 0, "page-1", 1));
 
         assert_eq!(launcher.pages.len(), 1);
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["b", "a"]);
-        assert_eq!(page_item_slots(&launcher.pages[0].items), [0, 1]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["b", "a"]);
+        assert_eq!(slot_item_slots(&launcher.pages[0].items), [0, 1]);
     }
 
     #[test]
@@ -739,8 +940,8 @@ mod tests {
         let config = LauncherConfig::from_persistent(&persistent, vec![test_item("a")]);
 
         assert_eq!(config.pages.len(), 1);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["a"]);
-        assert_eq!(page_item_slots(&config.pages[0].items), [0]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["a"]);
+        assert_eq!(slot_item_slots(&config.pages[0].items), [0]);
     }
 
     #[test]
@@ -750,8 +951,8 @@ mod tests {
         assert!(launcher.move_item("dock", 0, "page-0", GRAPH_PAGE_CAPACITY));
 
         assert!(launcher.dock.is_empty());
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a", "b", "c", "d", "e", "x"]);
-        assert_eq!(page_item_ids(&launcher.pages[1].items), ["f"]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["a", "b", "c", "d", "e", "x"]);
+        assert_eq!(slot_item_ids(&launcher.pages[1].items), ["f"]);
     }
 
     #[test]
@@ -767,12 +968,12 @@ mod tests {
         assert!(launcher.move_item("dock", 0, "page-0", 0));
 
         assert!(launcher.dock.is_empty());
-        assert_eq!(page_item_ids(&launcher.pages[0].items), ["x", "a0", "a1", "a2", "a3", "a4"]);
+        assert_eq!(slot_item_ids(&launcher.pages[0].items), ["x", "a0", "a1", "a2", "a3", "a4"]);
         assert_eq!(
-            page_item_ids(&launcher.pages[1].items),
+            slot_item_ids(&launcher.pages[1].items),
             ["a5", "b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7"]
         );
-        assert_eq!(page_item_ids(&launcher.pages[2].items), ["b8"]);
+        assert_eq!(slot_item_ids(&launcher.pages[2].items), ["b8"]);
     }
 
     #[test]
@@ -790,8 +991,9 @@ mod tests {
 
         let config = LauncherConfig::from_persistent(&persistent, discovered);
 
-        assert_eq!(item_ids(&config.dock), ["kept"]);
+        assert_eq!(slot_item_ids(&config.dock.items), ["kept"]);
+        assert_eq!(slot_item_slots(&config.dock.items), [1]);
         assert_eq!(config.pages.len(), 1);
-        assert_eq!(page_item_ids(&config.pages[0].items), ["still-here"]);
+        assert_eq!(slot_item_ids(&config.pages[0].items), ["still-here"]);
     }
 }

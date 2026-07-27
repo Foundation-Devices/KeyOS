@@ -21,8 +21,8 @@ use gui_server_api::{
 use haptics::HapticPattern;
 use jiff::fmt::strtime;
 use layout::{
-    page_collection_id, LauncherAction, LauncherConfig, LauncherItem, LauncherPage, LauncherPageItem,
-    LauncherTarget, BITCOIN_APP_ID, SCAN_QR_ACTION_ID, SETTINGS_APP_ID_STR,
+    page_collection_id, LauncherAction, LauncherCollection, LauncherConfig, LauncherItem, LauncherTarget,
+    SlotItem, BITCOIN_APP_ID, SCAN_QR_ACTION_ID, SETTINGS_APP_ID_STR,
 };
 use slint_keyos_platform::{
     app,
@@ -283,47 +283,31 @@ fn refresh_launcher_apps(state: StoredValue<AppState>) {
     sync_launcher_ui(&ui, &state.launcher);
 }
 
-fn build_item_model(items: &[LauncherItem]) -> ModelRc<LauncherItemData> {
+fn launcher_item_data(slot: usize, item: &LauncherItem) -> LauncherItemData {
+    LauncherItemData {
+        id: SharedString::from(item.id.as_str()),
+        label: SharedString::from(item.label.as_str()),
+        icon_key: SharedString::from(item.icon_key.as_str()),
+        enabled: item.enabled,
+        slot_index: slot as i32,
+        can_remove: item.can_remove,
+    }
+}
+
+fn build_slot_item_model(items: &[SlotItem]) -> ModelRc<LauncherItemData> {
     ModelRc::new(VecModel::from(
-        items
-            .iter()
-            .enumerate()
-            .map(|(slot, item)| LauncherItemData {
-                id: SharedString::from(item.id.as_str()),
-                label: SharedString::from(item.label.as_str()),
-                icon_key: SharedString::from(item.icon_key.as_str()),
-                enabled: item.enabled,
-                slot_index: slot as i32,
-                can_remove: item.can_remove,
-            })
-            .collect::<Vec<_>>(),
+        items.iter().map(|slot_item| launcher_item_data(slot_item.slot, &slot_item.item)).collect::<Vec<_>>(),
     ))
 }
 
-fn build_page_item_model(items: &[LauncherPageItem]) -> ModelRc<LauncherItemData> {
-    ModelRc::new(VecModel::from(
-        items
-            .iter()
-            .map(|page_item| LauncherItemData {
-                id: SharedString::from(page_item.item.id.as_str()),
-                label: SharedString::from(page_item.item.label.as_str()),
-                icon_key: SharedString::from(page_item.item.icon_key.as_str()),
-                enabled: page_item.item.enabled,
-                slot_index: page_item.slot as i32,
-                can_remove: page_item.item.can_remove,
-            })
-            .collect::<Vec<_>>(),
-    ))
-}
-
-fn build_page_model(pages: &[LauncherPage]) -> ModelRc<LauncherPageData> {
+fn build_page_model(pages: &[LauncherCollection]) -> ModelRc<LauncherPageData> {
     ModelRc::new(VecModel::from(
         pages
             .iter()
             .enumerate()
             .map(|(page_index, page)| LauncherPageData {
                 id: SharedString::from(page_collection_id(page_index)),
-                items: build_page_item_model(&page.items),
+                items: build_slot_item_model(&page.items),
             })
             .collect::<Vec<_>>(),
     ))
@@ -332,7 +316,7 @@ fn build_page_model(pages: &[LauncherPage]) -> ModelRc<LauncherPageData> {
 fn sync_launcher_ui(ui: &AppWindow, launcher: &LauncherConfig) {
     let state = ui.global::<State>();
     state.set_pages(build_page_model(&launcher.pages));
-    state.set_dock_items(build_item_model(&launcher.dock));
+    state.set_dock_items(build_slot_item_model(&launcher.dock.items));
     if state.get_current_page() >= launcher.pages.len() as i32 {
         state.set_current_page(launcher.pages.len().saturating_sub(1) as i32);
     }
@@ -622,6 +606,28 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             image
         });
     }
+
+    ui.global::<LauncherCallbacks>().on_drop_slide_target({
+        let state = state.clone();
+        move |collection_id, slot| {
+            state
+                .borrow()
+                .launcher
+                .drop_slide_target(collection_id.as_str(), slot.max(0) as usize)
+                .map_or(-1, |slot| slot as i32)
+        }
+    });
+
+    ui.global::<LauncherCallbacks>().on_displaced_item({
+        let state = state.clone();
+        move |collection_id, slot| {
+            state
+                .borrow()
+                .launcher
+                .displaced_item(collection_id.as_str(), slot.max(0) as usize)
+                .map_or_else(LauncherItemData::default, |item| launcher_item_data(0, item))
+        }
+    });
 
     ui.global::<LauncherCallbacks>().on_move_item({
         move |source_collection_id, from_index, target_collection_id, to_index| {

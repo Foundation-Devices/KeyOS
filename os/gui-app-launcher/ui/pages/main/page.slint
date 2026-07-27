@@ -294,12 +294,13 @@ component LauncherCollectionItem inherits Rectangle {
     in property <LauncherItemData> item;
     in property <bool> show-label: true;
     in property <bool> is-dragging: false;
+    in property <bool> is-leaving: false;
     in property <length> jiggle-x: 0px;
     in property <length> jiggle-y: 0px;
 
     width: 128px;
     height: show-label ? 160px : 128px;
-    opacity: item.enabled ? 100% : 55%;
+    opacity: is-leaving ? 0% : (item.enabled ? 100% : 55%);
     clip: false;
     private property <bool> ignore-release-click: false;
     private property <brush> icon-foreground-color: CurrentTheme.is-dark ? #e0e0e0 : #404040;
@@ -307,10 +308,24 @@ component LauncherCollectionItem inherits Rectangle {
     private property <length> visual-offset-y: State.rearrange-mode && !is-dragging ? jiggle-y : 0px;
     private property <length> press-offset-y: touch.pressed && !is-dragging ? 4px : 0px;
 
+    animate opacity {
+        duration: 180ms;
+        easing: ease-in-out;
+    }
+
     callback activate(length, length, string);
     callback drag-started();
-    callback drag-moved(length, length);
+    callback drag-moved();
     callback drag-finished();
+
+    function store-pointer() {
+        State.drag-pointer-abs-x = touch.absolute-position.x + touch.mouse-x;
+        State.drag-pointer-abs-y = touch.absolute-position.y + touch.mouse-y;
+    }
+    function store-grab() {
+        State.drag-grab-x = touch.mouse-x;
+        State.drag-grab-y = touch.mouse-y;
+    }
 
     hold-timer := Timer {
         interval: 450ms;
@@ -323,8 +338,8 @@ component LauncherCollectionItem inherits Rectangle {
                 State.rearrange-mode = false;
             } else {
                 State.rearrange-mode = true;
-                State.drag-pointer-abs-x = touch.absolute-position.x + touch.mouse-x;
-                State.drag-pointer-abs-y = touch.absolute-position.y + touch.mouse-y;
+                root.store-pointer();
+                root.store-grab();
                 root.drag-started();
             }
         }
@@ -424,9 +439,8 @@ component LauncherCollectionItem inherits Rectangle {
                 root.ignore-release-click = true;
             }
             if (State.rearrange-mode) {
-                State.drag-pointer-abs-x = self.absolute-position.x + self.mouse-x;
-                State.drag-pointer-abs-y = self.absolute-position.y + self.mouse-y;
-                root.drag-moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                root.store-pointer();
+                root.drag-moved();
             }
         }
 
@@ -435,8 +449,8 @@ component LauncherCollectionItem inherits Rectangle {
                 root.ignore-release-click = false;
                 hold-timer.running = false;
                 if (State.rearrange-mode) {
-                    State.drag-pointer-abs-x = self.absolute-position.x + self.mouse-x;
-                    State.drag-pointer-abs-y = self.absolute-position.y + self.mouse-y;
+                    root.store-pointer();
+                    root.store-grab();
                     root.drag-started();
                 } else {
                     hold-timer.running = true;
@@ -444,6 +458,8 @@ component LauncherCollectionItem inherits Rectangle {
             } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
                 hold-timer.running = false;
                 if (State.rearrange-mode) {
+                    root.store-pointer();
+                    root.drag-moved();
                     root.drag-finished();
                 }
             }
@@ -507,8 +523,6 @@ component LauncherCollection inherits Rectangle {
     private property <bool> drag-active: false;
     private property <int> dragged-index: -1;
     private property <int> target-index: -1;
-    private property <length> drag-dx: 0px;
-    private property <length> drag-dy: 0px;
     private property <[length]> jiggle-table: [-1.5px, 1.0px, 0.5px, -0.5px, 1.5px, -1.0px];
     private property <bool> active-local-drag:
         drag-active && State.drag-overlay-visible && State.drag-source-collection-id == root.collection-id;
@@ -546,11 +560,31 @@ component LauncherCollection inherits Rectangle {
         }
         return index;
     }
+    // Mirrors how the drop slides its run: toward the free slot the model picked,
+    // which can sit on either side of the hovered one.
     function external-hover-display-slot(index: int) -> int {
-        if (index >= State.drag-hover-index) {
+        if (State.drag-hover-slide-target < 0) {
+            return index;
+        }
+        if (index >= State.drag-hover-index && index < State.drag-hover-slide-target) {
             return index + 1;
         }
+        if (index > State.drag-hover-slide-target && index <= State.drag-hover-index) {
+            return index - 1;
+        }
         return index;
+    }
+    // A full dock swaps the hovered icon out; a full page pushes its last one onto
+    // the next page. Either way that icon is leaving, so fade it instead of stacking
+    // it on a neighbour.
+    function external-hover-leaves(index: int) -> bool {
+        if (!root.external-hover-active) {
+            return false;
+        }
+        if (State.drag-hover-slide-target < 0) {
+            return index == State.drag-hover-index;
+        }
+        return root.external-hover-display-slot(index) >= root.bounded-slot-count;
     }
     // Map the model slot to the animated visual slot while drag operations make room.
     function display-slot(index: int) -> int {
@@ -562,25 +596,30 @@ component LauncherCollection inherits Rectangle {
         }
         return root.clamped-display-slot(index);
     }
-    // Hit-test from the stored overlay position (window coords): unlike the
-    // element-relative drag deltas, it stays valid when an edge flip slides the
-    // source collection away between the last move event and the release.
+    // Center of the dragged icon, which trails the finger by wherever inside the
+    // icon the drag began.
     function drag-center-x() -> length {
         State.drag-overlay-abs-x + root.shell-size / 2
     }
     function drag-center-y() -> length {
-        State.drag-overlay-abs-y + root.slot-height / 2
+        State.drag-overlay-abs-y + root.shell-size / 2
+    }
+    function drag-hit-x() -> length {
+        State.drag-pointer-abs-x
+    }
+    function drag-hit-y() -> length {
+        State.drag-pointer-abs-y
     }
     function clamped-axis-index(position: length, origin: length, item-size: length, gap: length, count: int) -> int {
         Math.max(0, Math.min(Math.max(0, count - 1), Math.round((position - origin - item-size / 2) / (item-size + gap))))
     }
-    function grid-index(left: length, top: length, item-width: length, item-height: length, column-gap: length, row-gap: length, columns: int, rows: int, max-index: int, ) -> int {
+    function grid-index(position-x: length, position-y: length, left: length, top: length, item-width: length, item-height: length, column-gap: length, row-gap: length, columns: int, rows: int, max-index: int, ) -> int {
         Math.max(
             0,
             Math.min(
                 max-index,
-                root.clamped-axis-index(root.drag-center-x(), left, item-width, column-gap, columns) + root.clamped-axis-index(
-                    root.drag-center-y(),
+                root.clamped-axis-index(position-x, left, item-width, column-gap, columns) + root.clamped-axis-index(
+                    position-y,
                     top,
                     item-height,
                     row-gap,
@@ -590,11 +629,33 @@ component LauncherCollection inherits Rectangle {
     function target-slot-count(target: DropTarget) -> int {
         Math.max(target.item-count, target.slot-count)
     }
-    function is-over-target(target: DropTarget, x-slack: length) -> bool {
-        target.id != "" && root.drag-center-x() >= target.left - x-slack && root.drag-center-x() <= target.left + target.width + x-slack && root.drag-center-y() >= target.top && root.drag-center-y() <= target.top + target.height
+    function is-point-over-target(target: DropTarget, x: length, y: length, x-slack: length) -> bool {
+        target.id != "" && x >= target.left - x-slack && x <= target.left + target.width + x-slack && y >= target.top && y <= target.top + target.height
     }
-    function drop-target-index(target: DropTarget) -> int {
+    // Either point can land the drop. The finger alone rejects drops that visibly
+    // sit on the target; the icon center alone can want a finger position off the
+    // bottom of the screen, because the dock is hard against the edge.
+    function is-over-target(target: DropTarget, x-slack: length) -> bool {
+        root.is-point-over-target(target, root.drag-hit-x(), root.drag-hit-y(), x-slack) || root.is-point-over-target(target, root.drag-center-x(), root.drag-center-y(), x-slack)
+    }
+    // Land where the icon looks like it will land, falling back to the finger
+    // when the icon is off the target.
+    function drop-target-x(target: DropTarget, x-slack: length) -> length {
+        if (root.is-point-over-target(target, root.drag-center-x(), root.drag-center-y(), x-slack)) {
+            return root.drag-center-x();
+        }
+        return root.drag-hit-x();
+    }
+    function drop-target-y(target: DropTarget, x-slack: length) -> length {
+        if (root.is-point-over-target(target, root.drag-center-x(), root.drag-center-y(), x-slack)) {
+            return root.drag-center-y();
+        }
+        return root.drag-hit-y();
+    }
+    function drop-target-index(target: DropTarget, x-slack: length) -> int {
         root.grid-index(
+            root.drop-target-x(target, x-slack),
+            root.drop-target-y(target, x-slack),
             target.left,
             target.top,
             target.shell-size,
@@ -610,7 +671,7 @@ component LauncherCollection inherits Rectangle {
         root.is-over-target(root.cross-target, 0px)
     }
     function cross-target-index() -> int {
-        root.drop-target-index(root.cross-target)
+        root.drop-target-index(root.cross-target, 0px)
     }
     // Horizontal slack so releases inside the screen-edge flip zones still count
     // as drops on the visible page.
@@ -619,7 +680,7 @@ component LauncherCollection inherits Rectangle {
         root.is-over-target(root.page-target, root.page-target-x-slack)
     }
     function page-target-index() -> int {
-        root.drop-target-index(root.page-target)
+        root.drop-target-index(root.page-target, root.page-target-x-slack)
     }
 
     // Nearest same-collection slot for the dragged item. Rounding is relative to the
@@ -627,6 +688,8 @@ component LauncherCollection inherits Rectangle {
     // clamped to the grid so drift on one axis cannot push the index out of range.
     function clamped-target() -> int {
         root.grid-index(
+            root.drag-center-x(),
+            root.drag-center-y(),
             root.absolute-position.x,
             root.absolute-position.y,
             root.shell-size,
@@ -639,10 +702,10 @@ component LauncherCollection inherits Rectangle {
         )
     }
     function overlay-abs-x() -> length {
-        root.absolute-position.x + root.slot-x(root.dragged-index) + root.drag-dx
+        State.drag-pointer-abs-x - State.drag-grab-x
     }
     function overlay-abs-y() -> length {
-        root.absolute-position.y + root.slot-y(root.dragged-index) + root.drag-dy
+        State.drag-pointer-abs-y - State.drag-grab-y
     }
 
     function clear-drag-state() {
@@ -650,11 +713,11 @@ component LauncherCollection inherits Rectangle {
         State.drag-overlay-visible = false;
         State.drag-hover-collection-id = "";
         State.drag-hover-index = -1;
+        State.drag-hover-slide-target = -1;
+        State.drag-displaced-active = false;
         root.drag-active = false;
         root.dragged-index = -1;
         root.target-index = -1;
-        root.drag-dx = 0px;
-        root.drag-dy = 0px;
     }
     TouchArea {
         width: root.width;
@@ -667,6 +730,16 @@ component LauncherCollection inherits Rectangle {
         }
     }
 
+    // Kept alive for the whole drag so the swap cross-fades: a fresh element would
+    // start at full opacity.
+    if root.active-local-drag: LauncherCollectionItem {
+        item: State.drag-displaced-item;
+        show-label: root.show-labels;
+        is-leaving: !State.drag-displaced-active;
+        x: root.slot-x(root.dragged-index);
+        y: root.slot-y(root.dragged-index);
+    }
+
     for item[index] in items: icon := LauncherCollectionItem {
         item: item;
         show-label: root.show-labels;
@@ -676,6 +749,7 @@ component LauncherCollection inherits Rectangle {
         x: root.slot-x(root.display-slot(item.slot-index));
         y: root.slot-y(root.display-slot(item.slot-index));
         visible: !(root.active-local-drag && root.dragged-index == item.slot-index);
+        is-leaving: root.external-hover-leaves(item.slot-index);
 
         animate x {
             duration: 180ms;
@@ -695,11 +769,11 @@ component LauncherCollection inherits Rectangle {
             root.drag-active = true;
             root.dragged-index = item.slot-index;
             root.target-index = item.slot-index;
-            root.drag-dx = 0px;
-            root.drag-dy = 0px;
             State.drag-source-collection-id = root.collection-id;
             State.drag-hover-collection-id = "";
             State.drag-hover-index = -1;
+            State.drag-hover-slide-target = -1;
+            State.drag-displaced-active = false;
             State.drag-overlay-visible = true;
             State.drag-overlay-show-label = root.show-labels;
             State.drag-overlay-item = item;
@@ -707,23 +781,29 @@ component LauncherCollection inherits Rectangle {
             State.drag-overlay-abs-y = root.overlay-abs-y();
         }
 
-        drag-moved(dx, dy) => {
+        drag-moved => {
             if (root.active-local-drag && root.dragged-index == item.slot-index) {
-                root.drag-dx = dx;
-                root.drag-dy = dy;
                 State.drag-overlay-abs-x = root.overlay-abs-x();
                 State.drag-overlay-abs-y = root.overlay-abs-y();
                 if (root.is-over-page-target()) {
                     State.drag-hover-collection-id = root.page-target.id;
                     State.drag-hover-index = root.page-target-index();
+                    State.drag-hover-slide-target = CB.drop-slide-target(root.page-target.id, State.drag-hover-index);
+                    State.drag-displaced-item = CB.displaced-item(root.page-target.id, State.drag-hover-index);
+                    State.drag-displaced-active = State.drag-displaced-item.id != "";
                     root.target-index = root.dragged-index;
                 } else if (root.is-over-cross-target()) {
                     State.drag-hover-collection-id = root.cross-target.id;
                     State.drag-hover-index = root.cross-target-index();
+                    State.drag-hover-slide-target = CB.drop-slide-target(root.cross-target.id, State.drag-hover-index);
+                    State.drag-displaced-item = CB.displaced-item(root.cross-target.id, State.drag-hover-index);
+                    State.drag-displaced-active = State.drag-displaced-item.id != "";
                     root.target-index = root.dragged-index;
                 } else {
                     State.drag-hover-collection-id = "";
                     State.drag-hover-index = -1;
+                    State.drag-hover-slide-target = -1;
+                    State.drag-displaced-active = false;
                     root.target-index = root.clamped-target();
                 }
             }

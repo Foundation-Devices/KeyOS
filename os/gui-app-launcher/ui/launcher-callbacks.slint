@@ -27,6 +27,12 @@ export global LauncherCallbacks {
     callback bitcoin-scrub-update(length, length);
     callback bitcoin-scrub-end();
     callback universal-qr-continue(string);
+    /// Slot the run slides into when dropping at a slot of a collection, or -1
+    /// when nothing slides.
+    pure callback drop-slide-target(string, int) -> int;
+    /// Icon a drop at a slot would push out, with an empty id when it pushes
+    /// nothing out.
+    pure callback displaced-item(string, int) -> LauncherItemData;
     pure callback app-id-to-title(string) -> string;
     pure callback app-icon(string) -> image;
 }
@@ -56,9 +62,20 @@ export global State {
     };
     in-out property <string> drag-hover-collection-id: "";
     in-out property <int> drag-hover-index: -1;
+    // Slot the hovered collection slides its run into, -1 when nothing slides.
+    in-out property <int> drag-hover-slide-target: -1;
+    // Icon the hovered collection would swap out, shown in the slot the drag
+    // vacated because that is where the drop puts it.
+    in-out property <bool> drag-displaced-active: false;
+    in-out property <LauncherItemData> drag-displaced-item;
     // Finger position in window coordinates while a drag is active.
     in-out property <length> drag-pointer-abs-x: 0px;
     in-out property <length> drag-pointer-abs-y: 0px;
+    // Where inside the icon the drag began. The overlay hangs off the finger by
+    // this, so it never depends on the source collection's origin, which slides
+    // away when an edge flip changes page.
+    in-out property <length> drag-grab-x: 0px;
+    in-out property <length> drag-grab-y: 0px;
 
     in property <[LauncherPageData]> pages: [];
     in property <[LauncherItemData]> dock-items: [];
