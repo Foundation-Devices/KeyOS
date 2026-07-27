@@ -1200,21 +1200,20 @@ pub fn write_if_changed(path: &Path, content: &str) {
     fs::write(path, content).unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
 }
 
-/// Replace first occurrence of `from` with `to` in a file.
+/// Replace the first occurrence of `from` with `to` in a file.
 ///
-/// This is idempotent: it skips files that already contain `to`.
+/// Idempotent: a file that already contains `to` is left unchanged. Panics if
+/// the target is missing or, once it is known not to be already patched, `from`
+/// is absent, so a patch that no longer applies fails the build loudly instead
+/// of silently shipping an unpatched binary.
 pub fn replace_in_file(path: &Path, from: &str, to: &str) {
-    if !path.exists() {
-        return;
-    }
     let content =
         fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
     if content.contains(to) {
         return;
     }
     if !content.contains(from) {
-        eprintln!("Warning: pattern not found in {}: {:?}", path.display(), &from[..from.len().min(60)]);
-        return;
+        panic!("Pattern not found in {}: {:?}", path.display(), &from[..from.len().min(60)]);
     }
     let patched = content.replacen(from, to, 1);
     fs::write(path, patched).unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));

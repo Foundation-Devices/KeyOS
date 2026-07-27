@@ -188,4 +188,15 @@ fn patch_app(app_path: &Path) {
         "extern const internalStorage_t N_storage_real;",
         "extern internalStorage_t N_storage_real; /* const stripped by KeyOS */",
     );
+
+    // Transaction Check only works with the vendor's wallet app; any other host
+    // leaves every review stamped with a "Transaction Check unavailable" warning
+    // once the toggle is on, and the feature routes transactions through a
+    // third-party scoring service. Drop it so hosts see it as absent, as on
+    // Nano targets.
+    replace_in_file(
+        &app_path.join("src/feature_transaction_check.h"),
+        "#ifdef SCREEN_SIZE_WALLET\n#define HAVE_TRANSACTION_CHECKS\n#endif",
+        "#if 0 /* disabled on KeyOS */\n#define HAVE_TRANSACTION_CHECKS\n#endif",
+    );
 }

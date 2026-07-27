@@ -103,10 +103,7 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
     let mut build = base_hosted_cc_build();
     build.files(&c_files);
     apply_hosted_base_flag_defines(&mut build);
-    apply_hosted_flag_defines(
-        &mut build,
-        &["IS_NOT_A_PLUGIN", "HAVE_TRANSACTION_CHECKS", "HAVE_LEDGER_PKI", "HAVE_SWAP"],
-    );
+    apply_hosted_flag_defines(&mut build, &["IS_NOT_A_PLUGIN", "HAVE_LEDGER_PKI", "HAVE_SWAP"]);
 
     apply_hosted_io_value_defines(&mut build);
     let value_defines: &[(&str, &str)] = &[
@@ -210,14 +207,7 @@ fn patch_app(app_path: &Path) {
         "# DEFINES += HAVE_BOLOS_APP_STACK_CANARY", // C define name — do not rename
     );
 
-    // 3. features.mk — disable dynamic allocation
-    replace_in_file(
-        &app_path.join("makefile_conf/features.mk"),
-        "ENABLE_DYNAMIC_ALLOC = 1",
-        "ENABLE_DYNAMIC_ALLOC = 0",
-    );
-
-    // 4. src/main.c — add eth_main entry point, rename main→c_main
+    // 3. src/main.c — add eth_main entry point, rename main→c_main
     let main_c = app_path.join("src/main.c");
     if main_c.exists() {
         let mut c = fs::read_to_string(&main_c).unwrap();
@@ -241,7 +231,7 @@ fn patch_app(app_path: &Path) {
         }
     }
 
-    // 4b. N_storage_real: remove `const` so the symbol lands in writable .bss
+    // 3b. N_storage_real: remove `const` so the symbol lands in writable .bss
     // instead of .rodata. On the original hardware N_storage_real lives in NVM
     // (flash) and nvm_write uses a special syscall; on KeyOS we place it in
     // RAM so the Rust pre-initialization and nvm_write can write to it.
@@ -307,9 +297,9 @@ fn patch_app(app_path: &Path) {
     }
 
     // 7-11. Replace ctype.h includes with local stubs
-    // signMessage/cmd_signMessage.c
+    // sign_message/cmd_sign_message.c
     replace_in_file(
-        &app_path.join("src/features/signMessage/cmd_signMessage.c"),
+        &app_path.join("src/features/sign_message/cmd_sign_message.c"),
         "#include <ctype.h>",
         "// #include <ctype.h>\n\nstatic int isspace(int c) {\n    return c == ' ' || c == '\\t' || c == '\\n' || c == '\\r' || c == '\\v' || c == '\\f';\n}\n\nstatic int isprint(int c) {\n    return c >= 32 && c <= 126;\n}",
     );
@@ -328,9 +318,9 @@ fn patch_app(app_path: &Path) {
         "// #include <ctype.h>\n\nstatic int isprint(int c) {\n    return c >= 32 && c <= 126;\n}\n",
     );
 
-    // eth_swap_utils.c
+    // swap/eth_swap_utils.c
     replace_in_file(
-        &app_path.join("src/eth_swap_utils.c"),
+        &app_path.join("src/swap/eth_swap_utils.c"),
         "#include <ctype.h>\n",
         "// #include <ctype.h>\n\nstatic int toupper(int c) {\n    return (c >= 'a' && c <= 'z') ? c - 32 : c;\n}\n",
     );
@@ -340,5 +330,16 @@ fn patch_app(app_path: &Path) {
         &app_path.join("src/nbgl/ui_approve_tx.c"),
         "#include <ctype.h>\n",
         "// #include <ctype.h>\n\nstatic int tolower(int c) {\n    return (c >= 'A' && c <= 'Z') ? c + 32 : c;\n}\n",
+    );
+
+    // Transaction Check only works with the vendor's wallet app; any other host
+    // leaves every review stamped with a "Transaction Check unavailable" warning
+    // once the toggle is on, and the feature routes transactions through a
+    // third-party scoring service. Drop it so hosts see it as absent, as on
+    // Nano targets.
+    replace_in_file(
+        &app_path.join("makefile_conf/features.mk"),
+        "    DEFINES\t+= HAVE_TRANSACTION_CHECKS",
+        "    # DEFINES\t+= HAVE_TRANSACTION_CHECKS (disabled on KeyOS)",
     );
 }
