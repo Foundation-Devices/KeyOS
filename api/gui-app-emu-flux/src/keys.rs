@@ -306,6 +306,33 @@ pub fn ecdsa_verify(pubkey_ctx_id: u32, hash: &[u8], signature: &[u8]) -> bool {
     secp.verify_ecdsa(&message, &sig, &public_key).is_ok()
 }
 
+/// Decompress a SEC1 compressed secp256k1 point (02/03 prefix + X) to the
+/// uncompressed 04 || X || Y form.
+pub fn secp256k1_decompress(compressed: &[u8]) -> Option<[u8; 65]> {
+    let key = PublicKey::from_slice(compressed).ok()?;
+    Some(key.serialize_uncompressed())
+}
+
+/// Verify a DER-encoded ECDSA signature over a 32-byte digest with a raw
+/// secp256k1 public key (compressed or uncompressed form).
+///
+/// High-S signatures are normalized before verification: the SDK's verifier
+/// accepts them, while rust-secp256k1 alone would reject.
+pub fn secp256k1_verify_der(pubkey: &[u8], digest32: &[u8], der_sig: &[u8]) -> bool {
+    let secp = Secp256k1::verification_only();
+    let Ok(key) = PublicKey::from_slice(pubkey) else {
+        return false;
+    };
+    let Ok(message) = secp256k1::Message::from_digest_slice(digest32) else {
+        return false;
+    };
+    let Ok(mut sig) = secp256k1::ecdsa::Signature::from_der(der_sig) else {
+        return false;
+    };
+    sig.normalize_s();
+    secp.verify_ecdsa(&message, &sig, &key).is_ok()
+}
+
 /// Sign a message hash with ECDSA.
 ///
 /// # Arguments

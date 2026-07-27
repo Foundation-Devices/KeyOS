@@ -66,8 +66,6 @@ pub extern "C" fn eth_plugin_prepare_query_contract_id(_query: *mut c_void) {}
 #[no_mangle]
 pub extern "C" fn eth_plugin_prepare_query_contract_ui(_query: *mut c_void) {}
 
-app_flux_runtime::define_pki_bypass_stubs!();
-
 #[cfg(not(keyos))]
 mod hosted_stubs {
     use core::ffi::c_void;

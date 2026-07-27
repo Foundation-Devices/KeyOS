@@ -6,7 +6,6 @@ use core::ffi::c_void;
 app_flux_runtime::flux_app!("Solana", entry = app_main);
 
 app_flux_runtime::define_sdk_io_stubs!();
-app_flux_runtime::define_pki_bypass_stubs!();
 
 // SDK big-number / EC-point stubs (referenced by ed25519_helpers.c in the Solana app).
 // In KeyOS, Ed25519 key derivation and signing go through IPC (os_perso_derive_node_bip32);

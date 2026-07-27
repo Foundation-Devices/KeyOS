@@ -491,18 +491,6 @@ pub extern "C" fn os_flags() -> u32 { 0 }
 #[no_mangle]
 pub extern "C" fn os_perso_is_pin_set() -> u32 { 1 }
 
-#[no_mangle]
-pub extern "C" fn os_pki_load_certificate(
-    _format: u32,
-    _certificate: *const u8,
-    _certificate_len: u32,
-    _trusted_name: *mut u8,
-    _trusted_name_len: *mut u32,
-    _public_key: *mut u8,
-) -> u32 {
-    0
-}
-
 /// `bolos_tag_e` selectors for `os_registry_get_current_app_tag`, from the SDK's `os_app.h`.
 const BOLOS_TAG_APPNAME: u32 = 0x01;
 const BOLOS_TAG_APPVERSION: u32 = 0x02;

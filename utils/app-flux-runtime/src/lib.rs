@@ -5,5 +5,6 @@ pub mod crypto;
 pub mod hash;
 pub mod hmac;
 pub mod nvm;
+pub mod pki;
 pub mod runtime;
 pub mod stubs;

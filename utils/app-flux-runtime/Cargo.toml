@@ -22,5 +22,8 @@ server = { workspace = true }
 sha2 = { workspace = true }
 sha3 = "0.10"
 
+[dev-dependencies]
+secp256k1 = "0.29"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

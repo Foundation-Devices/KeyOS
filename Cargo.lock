@@ -294,6 +294,7 @@ dependencies = [
  "log 0.4.27",
  "num-bigint",
  "num-traits",
+ "secp256k1 0.29.1",
  "server",
  "sha2",
  "sha3",
