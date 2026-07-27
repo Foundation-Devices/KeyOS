@@ -268,6 +268,7 @@ prepare-release VERSION SECRETS_DIR *args:
 
 clean:
     cargo clean
+    cargo clean --manifest-path ui2/Cargo.toml
 
 # Build the local KeyOS API rustdoc site.
 docs-api:
