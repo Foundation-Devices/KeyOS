@@ -87,11 +87,11 @@ impl Default for AppManagerServer {
 impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {
     fn handle(
         &mut self,
-        _msg: GetQrMatchRules,
+        msg: GetQrMatchRules,
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<app_manager::AppQrMatchRules> {
-        self.app_registry.qr_match_rules(&self.third_party_cert_store.trusted_publishers())
+        self.app_registry.qr_match_rules(&msg.app_ids, &self.third_party_cert_store.trusted_publishers())
     }
 }
 
@@ -162,7 +162,10 @@ impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
         _context: &mut ServerContext<Self>,
     ) -> ImportThirdPartyCertificateResult {
         match self.third_party_cert_store.import(&msg.certificate_pem) {
-            Ok(cert) => ImportThirdPartyCertificateResult::Imported(cert),
+            Ok(cert) => {
+                self.notify_trusted_publishers_changed();
+                ImportThirdPartyCertificateResult::Imported(cert)
+            }
             Err(()) => ImportThirdPartyCertificateResult::Invalid,
         }
     }
@@ -187,7 +190,10 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
         }
 
         match self.third_party_cert_store.remove(&msg.public_key) {
-            Ok(true) => RemoveThirdPartyCertificateResult::Removed,
+            Ok(true) => {
+                self.notify_trusted_publishers_changed();
+                RemoveThirdPartyCertificateResult::Removed
+            }
             Ok(false) => RemoveThirdPartyCertificateResult::NotFound,
             Err(e) => {
                 error!("failed to remove third-party certificate: {e:?}");
@@ -545,6 +551,11 @@ impl AppManagerServer {
             diff.removed.len()
         );
         let event = AppEvent::AppSetChanged { installed: diff.installed, removed: diff.removed };
+        self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
+    }
+
+    fn notify_trusted_publishers_changed(&mut self) {
+        let event = AppEvent::TrustedPublishersChanged;
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 

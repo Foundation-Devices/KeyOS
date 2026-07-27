@@ -65,6 +65,8 @@ pub enum AppEvent {
         #[rkyv(with = rkyv::with::Map<WithAppId>)]
         removed: Vec<AppId>,
     },
+
+    TrustedPublishersChanged,
 }
 
 #[derive(Debug, server::Message)]
@@ -230,7 +232,11 @@ impl GetAppName {
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Vec<AppQrMatchRules>)]
-pub struct GetQrMatchRules;
+/// limits the response to the listed apps; an empty list returns all apps.
+pub struct GetQrMatchRules {
+    #[rkyv(with = rkyv::with::Map<WithAppId>)]
+    pub app_ids: Vec<AppId>,
+}
 
 /// Filter applied by [`ListApps`]. A `None` axis matches either value; the axes are
 /// independent, so a Flux app may be built-in or sideloaded.

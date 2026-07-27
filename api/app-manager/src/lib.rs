@@ -78,7 +78,7 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
     where
         P: MessageAllowed<GetQrMatchRules>,
     {
-        self.0.send_blocking_archive(GetQrMatchRules)
+        self.0.send_blocking_archive(GetQrMatchRules { app_ids: Vec::new() })
     }
 
     /// List installed apps, optionally narrowed by `filter`. Pass `AppFilter::default()`

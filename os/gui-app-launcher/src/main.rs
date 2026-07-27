@@ -1433,6 +1433,8 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             log::info!("App set changed: {} installed, {} removed", installed.len(), removed.len());
             refresh_launcher_apps(state);
         }
+
+        app_manager::AppEvent::TrustedPublishersChanged => refresh_launcher_apps(state),
     }
 }
 

@@ -26,7 +26,6 @@ num-traits = "0.2"
 phf = { version = "0.11" }
 power-manager = { workspace = true }
 rand = "0.8"
-regex = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0.139"

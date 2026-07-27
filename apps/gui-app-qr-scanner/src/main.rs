@@ -6,25 +6,27 @@
 
 use {
     crate::{camera_permissions::CameraPermissions, settings_permissions::SettingsPermissions},
-    app_manifest::{QrMatchRule, QrMatchSubRule},
+    app_manifest::{QrMatchRule, QrMatchSubRule, QrPriority},
     camera::{Frame, CAMERA_HEIGHT, CAMERA_WIDTH},
     foundation_ur::{bytewords, Decoder as UrDecoder},
-    regex::Regex,
+    regex_lite::Regex,
     rxing::{
-        common::HybridBinarizer, BarcodeFormat, BinaryBitmap, DecodeHints, Exceptions, Luma8LuminanceSource,
-        MultiFormatReader,
+        common::HybridBinarizer, qrcode::cpp_port::QrReader, BarcodeFormat, BinaryBitmap, DecodeHints,
+        Luma8LuminanceSource, LuminanceSource, Reader,
     },
     serde_json::from_slice,
     slint_keyos_platform::{
-        app,
+        app, async_archive,
         gui_server_api::{
             navigation::qrscanner::{ScanQrMatchedRule, ScanQrMatchingApp, ScanQrOptions, ScanQrResult},
             InputMessage,
         },
         slint::{ComponentHandle, Timer, TimerMode},
-        spawn_local, subscribe_scalar, try_subscribe_scalar, StoredValue,
+        spawn_local, subscribe_archive, subscribe_scalar, try_subscribe_scalar,
+        xous::AppId,
+        StoredValue,
     },
-    std::{collections::HashSet, rc::Rc, time::Duration},
+    std::{rc::Rc, time::Duration},
 };
 
 camera::use_api!();
@@ -53,23 +55,65 @@ enum ScanQrProgress {
 
 struct AppState {
     status: ScanStatus,
-    scanner: MultiFormatReader,
+    scanner: QrReader,
+    hints: DecodeHints,
     frame_raw: Option<Frame>,
     luma_source: Luma8LuminanceSource,
     ur_decoder: UrDecoder,
     request_matching_apps: bool,
-    app_manager: AppManagerApi,
+    match_rules: Vec<CompiledAppQrMatchRules>,
+    #[cfg(all(keyos, not(feature = "production")))]
+    camera_api: Rc<CameraApi>,
+}
+
+struct CompiledAppQrMatchRules {
+    id: AppId,
+    rules: Vec<CompiledQrMatchRule>,
+}
+
+struct CompiledQrMatchRule {
+    id: String,
+    priority: QrPriority,
+    sub_rules: Vec<(String, CompiledQrMatchSubRule)>,
+}
+
+enum CompiledQrMatchSubRule {
+    QR { min_len: Option<usize>, max_len: Option<usize>, regex: Option<Regex> },
+    UR { ur_type: String },
+}
+
+impl TryFrom<QrMatchSubRule> for CompiledQrMatchSubRule {
+    type Error = regex_lite::Error;
+
+    fn try_from(value: QrMatchSubRule) -> Result<Self, Self::Error> {
+        match value {
+            QrMatchSubRule::QR { min_len, max_len, regex_pattern } => Ok(Self::QR {
+                min_len,
+                max_len,
+                regex: regex_pattern.map(|pattern| Regex::new(pattern.as_str())).transpose()?,
+            }),
+            QrMatchSubRule::UR { ur_type } => Ok(Self::UR { ur_type: normalize_ur_type(ur_type.as_str()) }),
+        }
+    }
 }
 
 impl AppState {
     fn scan_qr(&mut self) -> ScanQrProgress {
-        let mut bitmap = BinaryBitmap::new(HybridBinarizer::new(self.luma_source.clone()));
-        let Ok(has_code) = self.scanner.decode_with_state(&mut bitmap).inspect_err(|e| {
-            if !matches!(e, Exceptions::NotFoundException(_)) {
-                log::warn!("Extract error: {:?}", e)
+        let luma8 = self.luma_source.get_matrix_mut();
+        let source = BorrowedLumaSource { data: luma8.as_ref() };
+        let mut bitmap = BinaryBitmap::new(HybridBinarizer::new(source));
+        let has_code = match self.scanner.decode_with_hints(&mut bitmap, &self.hints) {
+            Ok(result) => result,
+            Err(e1) => {
+                bitmap.get_black_matrix_mut().flip_self();
+                match self.scanner.decode_with_hints(&mut bitmap, &self.hints) {
+                    Ok(result) => result,
+                    Err(e2) => {
+                        log::debug!("Extract error: first={e1:?}, second={e2:?}");
+                        return ScanQrProgress::Unchanged;
+                    }
+                }
             }
-        }) else {
-            return ScanQrProgress::Unchanged;
         };
 
         let raw_data = has_code.getRawBytes();
@@ -171,34 +215,25 @@ impl AppState {
     }
 
     fn matching_apps(&self, scan_result: &ScanQrResult) -> Vec<ScanQrMatchingApp> {
-        let app_match_rules = self.app_manager.get_qr_match_rules();
-
-        let matching_apps = app_match_rules
+        let matching_apps = self
+            .match_rules
             .iter()
-            .filter_map(|entry| {
-                let rules = match from_slice::<Vec<QrMatchRule>>(&entry.rules_json) {
-                    Ok(r) if !r.is_empty() => r,
-                    Ok(_) => return None,
-                    Err(e) => {
-                        log::warn!("Skipping QR match rules entry due to parse error: {:?}", e);
-                        return None;
-                    }
-                };
-
-                let matched_rules: Vec<ScanQrMatchedRule> = rules
-                    .into_iter()
+            .map(|entry| {
+                let matched_rules: Vec<ScanQrMatchedRule> = entry
+                    .rules
+                    .iter()
                     .filter_map(|rule| {
-                        let sub_rule_id = first_matching_sub_rule(scan_result, &rule)?;
-                        Some(ScanQrMatchedRule { rule_id: rule.id, priority: rule.priority, sub_rule_id })
+                        let sub_rule_id = first_matching_sub_rule(scan_result, rule)?;
+                        Some(ScanQrMatchedRule {
+                            rule_id: rule.id.clone(),
+                            priority: rule.priority,
+                            sub_rule_id,
+                        })
                     })
                     .collect();
-
-                if matched_rules.is_empty() {
-                    return None;
-                }
-
-                Some(ScanQrMatchingApp { id: entry.id, matched_rules })
+                ScanQrMatchingApp { id: entry.id, matched_rules }
             })
+            .filter(|s| !s.matched_rules.is_empty())
             .collect::<Vec<ScanQrMatchingApp>>();
 
         log::info!("Matched {} apps for scanned QR", matching_apps.len());
@@ -222,23 +257,24 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     let state = {
         let hints = DecodeHints {
-            PossibleFormats: Some(HashSet::from([BarcodeFormat::QR_CODE])),
+            PossibleFormats: Some([BarcodeFormat::QR_CODE].into_iter().collect()),
             TryHarder: Some(true),
-            AlsoInverted: Some(true),
             ..Default::default()
         };
-        let mut scanner = MultiFormatReader::default();
-        scanner.set_hints(&hints);
+        let scanner = QrReader::default();
         let luma_source =
             Luma8LuminanceSource::with_empty_image(CAMERA_WIDTH as usize, CAMERA_HEIGHT as usize);
         let state = AppState {
             status: ScanStatus::Idle,
             scanner,
+            hints,
             ur_decoder: UrDecoder::default(),
             frame_raw: None,
             luma_source,
             request_matching_apps: false,
-            app_manager: AppManagerApi::default(),
+            match_rules: Vec::new(),
+            #[cfg(all(keyos, not(feature = "production")))]
+            camera_api: Rc::new(CameraApi::default()),
         };
         StoredValue::new(state)
     };
@@ -247,8 +283,46 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     log::info!("Running QR scanner");
 
-    // use StoredValue due to mutability requirement of CameraApi
-    let camera_api = StoredValue::new(CameraApi::default());
+    spawn_local(async move {
+        let mut events = subscribe_archive::<app_manager_permissions::AppManagerPermissions, _>(
+            app_manager::messages::SubscribeAppEvents,
+        );
+        let rules = async_archive::<app_manager_permissions::AppManagerPermissions, _>(
+            app_manager::messages::GetQrMatchRules { app_ids: Vec::new() },
+        )
+        .await;
+        state.borrow_mut().match_rules = compile_app_match_rules(rules);
+
+        while let Some(event) = events.next().await {
+            match event {
+                app_manager::AppEvent::AppSetChanged { installed, removed } => {
+                    let replacements = if installed.is_empty() {
+                        Vec::new()
+                    } else {
+                        let rules = async_archive::<app_manager_permissions::AppManagerPermissions, _>(
+                            app_manager::messages::GetQrMatchRules { app_ids: installed.clone() },
+                        )
+                        .await;
+                        compile_app_match_rules(rules)
+                    };
+                    let mut state = state.borrow_mut();
+                    state
+                        .match_rules
+                        .retain(|entry| !installed.contains(&entry.id) && !removed.contains(&entry.id));
+                    state.match_rules.extend(replacements);
+                }
+                app_manager::AppEvent::TrustedPublishersChanged => {
+                    let rules = async_archive::<app_manager_permissions::AppManagerPermissions, _>(
+                        app_manager::messages::GetQrMatchRules { app_ids: Vec::new() },
+                    )
+                    .await;
+                    state.borrow_mut().match_rules = compile_app_match_rules(rules);
+                }
+                _ => {}
+            }
+        }
+    })
+    .detach();
 
     ui.global::<Callbacks>().on_enable_camera_clicked({
         let settings = SettingsApi::default();
@@ -283,19 +357,18 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
-    #[cfg(not(feature = "production"))]
-    ui.global::<Callbacks>().on_title_tapped({
-        let ui = ui.clone_strong();
-        let gui_api = cx.gui.clone();
-        let _camera_api = camera_api.clone();
-        move || {
-            log::info!("Opening camera config page");
+    // Camera config callbacks (only available in non-production keyos builds)
+    #[cfg(all(keyos, not(feature = "production")))]
+    {
+        ui.global::<Callbacks>().on_title_tapped({
+            let ui = ui.clone_strong();
+            let gui_api = cx.gui.clone();
+            move || {
+                log::info!("Opening camera config page");
 
-            // Load current camera params BEFORE hiding the camera
-            #[cfg(keyos)]
-            {
-                let camera = _camera_api.borrow();
-                if let Ok(params) = camera.get_params() {
+                // Load current camera params BEFORE hiding the camera
+                let camera_api = state.borrow().camera_api.clone();
+                if let Ok(params) = camera_api.get_params() {
                     // Load auto control states
                     ui.global::<Global>().set_config_aec_enabled((params.auto_controls & 0x01) != 0);
                     ui.global::<Global>().set_config_awb_enabled((params.auto_controls & 0x02) != 0);
@@ -306,36 +379,35 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                     ui.global::<Global>().set_config_contrast(params.contrast as i32);
                     ui.global::<Global>().set_config_saturation(params.saturation as i32);
                 }
+
+                // Hide the camera while config is open
+                log::info!("Hiding camera");
+                gui_api.hide_camera().ok();
+
+                log::info!("Showing camera config page");
+                ui.global::<Global>().set_show_config(true);
             }
+        });
 
-            // Hide the camera while config is open
-            log::info!("Hiding camera");
-            gui_api.hide_camera().ok();
-
-            log::info!("Showing camera config page");
-            ui.global::<Global>().set_show_config(true);
-        }
-    });
-
-    // Camera config callbacks (only available in non-production keyos builds)
-    #[cfg(all(keyos, not(feature = "production")))]
-    {
         fn param_setter<T: 'static>(
-            camera_api: StoredValue<CameraApi>,
+            state: StoredValue<AppState>,
             f: impl Fn(&mut camera::messages::CameraParams, T) + 'static,
         ) -> impl Fn(T) {
             move |value| {
-                if let Ok(camera) = camera_api.try_borrow() {
-                    let mut params = camera.get_params().unwrap_or_default();
+                if let Ok(state) = state.try_borrow() {
+                    let camera_api = state.camera_api.clone();
+                    drop(state);
+
+                    let mut params = camera_api.get_params().unwrap_or_default();
                     f(&mut params, value);
-                    if let Err(e) = camera.set_params(params) {
+                    if let Err(e) = camera_api.set_params(params) {
                         log::error!("Failed to set params: {:?}", e);
                     }
                 }
             }
         }
 
-        ui.global::<Callbacks>().on_config_aec_toggled(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_aec_toggled(param_setter(state, |params, value| {
             if value {
                 params.auto_controls |= 0x01;
             } else {
@@ -343,7 +415,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
         }));
 
-        ui.global::<Callbacks>().on_config_agc_toggled(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_agc_toggled(param_setter(state, |params, value| {
             if value {
                 params.auto_controls |= 0x04;
             } else {
@@ -351,7 +423,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
         }));
 
-        ui.global::<Callbacks>().on_config_awb_toggled(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_awb_toggled(param_setter(state, |params, value| {
             if value {
                 params.auto_controls |= 0x02;
             } else {
@@ -359,59 +431,53 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
         }));
 
-        ui.global::<Callbacks>().on_config_agc_ceiling_changed(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_agc_ceiling_changed(param_setter(state, |params, value| {
             params.agc_ceiling = value as u8;
         }));
 
-        ui.global::<Callbacks>().on_config_brightness_changed(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_brightness_changed(param_setter(state, |params, value| {
             params.brightness = value as u8;
         }));
 
-        ui.global::<Callbacks>().on_config_contrast_changed(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_contrast_changed(param_setter(state, |params, value| {
             params.contrast = value as u8;
         }));
 
-        ui.global::<Callbacks>().on_config_saturation_changed(param_setter(camera_api, |params, value| {
+        ui.global::<Callbacks>().on_config_saturation_changed(param_setter(state, |params, value| {
             params.saturation = value as u8;
         }));
-    }
 
-    #[cfg(not(feature = "production"))]
-    ui.global::<Callbacks>().on_config_reset_clicked({
-        let ui = ui.clone_strong();
-        let _camera_api = camera_api.clone();
-        move || {
-            // Reset to defaults
-            let defaults = camera::messages::CameraParams::default();
-            // Reset UI controls
-            ui.global::<Global>().set_config_aec_enabled((defaults.auto_controls & 0x01) != 0);
-            ui.global::<Global>().set_config_awb_enabled((defaults.auto_controls & 0x02) != 0);
-            ui.global::<Global>().set_config_agc_enabled((defaults.auto_controls & 0x04) != 0);
-            ui.global::<Global>().set_config_agc_ceiling(defaults.agc_ceiling as i32);
-            ui.global::<Global>().set_config_brightness(defaults.brightness as i32);
-            ui.global::<Global>().set_config_contrast(defaults.contrast as i32);
-            ui.global::<Global>().set_config_saturation(defaults.saturation as i32);
+        ui.global::<Callbacks>().on_config_reset_clicked({
+            let ui = ui.clone_strong();
+            move || {
+                // Reset to defaults
+                let defaults = camera::messages::CameraParams::default();
+                // Reset UI controls
+                ui.global::<Global>().set_config_aec_enabled((defaults.auto_controls & 0x01) != 0);
+                ui.global::<Global>().set_config_awb_enabled((defaults.auto_controls & 0x02) != 0);
+                ui.global::<Global>().set_config_agc_enabled((defaults.auto_controls & 0x04) != 0);
+                ui.global::<Global>().set_config_agc_ceiling(defaults.agc_ceiling as i32);
+                ui.global::<Global>().set_config_brightness(defaults.brightness as i32);
+                ui.global::<Global>().set_config_contrast(defaults.contrast as i32);
+                ui.global::<Global>().set_config_saturation(defaults.saturation as i32);
 
-            #[cfg(keyos)]
-            {
-                let camera = _camera_api.borrow();
-                if let Err(e) = camera.set_params(defaults) {
+                let camera_api = state.borrow().camera_api.clone();
+                if let Err(e) = camera_api.set_params(defaults) {
                     log::error!("Failed to reset params: {:?}", e);
                 }
             }
-        }
-    });
+        });
 
-    #[cfg(not(feature = "production"))]
-    ui.global::<Callbacks>().on_config_close_clicked({
-        let ui = ui.clone_strong();
-        let gui_api = cx.gui.clone();
-        move || {
-            ui.global::<Global>().set_show_config(false);
-            // Resume the camera
-            gui_api.show_camera(CAMERA_Y_POS).ok();
-        }
-    });
+        ui.global::<Callbacks>().on_config_close_clicked({
+            let ui = ui.clone_strong();
+            let gui_api = cx.gui.clone();
+            move || {
+                ui.global::<Global>().set_show_config(false);
+                // Resume the camera
+                gui_api.show_camera(CAMERA_Y_POS).ok();
+            }
+        });
+    }
 
     spawn_local({
         let ui = ui.clone_strong();
@@ -515,6 +581,16 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 ui.global::<Global>().set_message(options.message.into());
                 ui.global::<Global>().set_button_icon(options.button_icon.into());
                 ui.global::<Global>().set_button_text(options.button_text.into());
+                if options.request_matching_apps {
+                    spawn_local(async move {
+                        let rules = async_archive::<app_manager_permissions::AppManagerPermissions, _>(
+                            app_manager::messages::GetQrMatchRules { app_ids: Vec::new() },
+                        )
+                        .await;
+                        state.borrow_mut().match_rules = compile_app_match_rules(rules);
+                    })
+                    .detach();
+                }
                 let mut state = state.borrow_mut();
                 state.request_matching_apps = options.request_matching_apps;
                 state.status = ScanStatus::HasPendingNavRequest;
@@ -523,6 +599,50 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     ui.run().expect("UI running");
+}
+
+fn compile_app_match_rules(match_rules: Vec<app_manager::AppQrMatchRules>) -> Vec<CompiledAppQrMatchRules> {
+    match_rules
+        .into_iter()
+        .filter_map(|entry| {
+            let rules = from_slice::<Vec<QrMatchRule>>(&entry.rules_json)
+                .inspect_err(|e| log::warn!("Skipping QR match rules entry due to parse error: {e:?}"))
+                .ok()?;
+            Some((entry.id, rules))
+        })
+        .map(|(app_id, rules)| {
+            let rules = rules
+                .into_iter()
+                .map(|rule| {
+                    let QrMatchRule { id, priority, sub_rules, .. } = rule;
+                    let sub_rules = sub_rules
+                        .into_iter()
+                        .flat_map(|(sub_rule_id, sub_rule)| {
+                            CompiledQrMatchSubRule::try_from(sub_rule)
+                                .inspect_err(|e| {
+                                    log::warn!("Skipping QR match sub-rule {sub_rule_id:?} in rule {id:?} for app {app_id:?}: invalid regex: {e}")
+                                })
+                                .ok()
+                                .map(|compiled| (sub_rule_id, compiled))
+                        })
+                        .collect::<Vec<_>>();
+
+                    CompiledQrMatchRule { id, priority, sub_rules }
+                })
+                .filter(|CompiledQrMatchRule { id, sub_rules, .. }| {
+                    if sub_rules.is_empty() {
+                        log::warn!("Skipping QR match rule {id:?} for app {app_id:?}: no usable sub-rules");
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            CompiledAppQrMatchRules { id: app_id, rules }
+        })
+        .filter(|app| !app.rules.is_empty())
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -556,7 +676,7 @@ fn rgb_components_to_luma8(r: u8, g: u8, b: u8) -> u8 {
 
 /// Returns the ID of the first sub-rule that matched, or `None` if the rule did not match.
 /// Stops at the first match to avoid redundant regex evaluations.
-fn first_matching_sub_rule(scan_result: &ScanQrResult, rule: &QrMatchRule) -> Option<String> {
+fn first_matching_sub_rule(scan_result: &ScanQrResult, rule: &CompiledQrMatchRule) -> Option<String> {
     rule.sub_rules.iter().find_map(|(id, sub_rule)| {
         if sub_rule_matches(scan_result, sub_rule) {
             Some(id.clone())
@@ -566,9 +686,9 @@ fn first_matching_sub_rule(scan_result: &ScanQrResult, rule: &QrMatchRule) -> Op
     })
 }
 
-fn sub_rule_matches(scan_result: &ScanQrResult, sub_rule: &QrMatchSubRule) -> bool {
+fn sub_rule_matches(scan_result: &ScanQrResult, sub_rule: &CompiledQrMatchSubRule) -> bool {
     match sub_rule {
-        QrMatchSubRule::QR { min_len, max_len, regex_pattern } => {
+        CompiledQrMatchSubRule::QR { min_len, max_len, regex } => {
             let ScanQrResult::Qr { data, .. } = scan_result else {
                 return false;
             };
@@ -585,12 +705,8 @@ fn sub_rule_matches(scan_result: &ScanQrResult, sub_rule: &QrMatchSubRule) -> bo
                 }
             }
 
-            if let Some(pattern) = regex_pattern {
+            if let Some(regex) = regex {
                 let Ok(text) = std::str::from_utf8(data.as_slice()) else {
-                    return false;
-                };
-                let Ok(regex) = Regex::new(pattern.as_str()) else {
-                    log::error!("Regex failed to parse: {}", pattern);
                     return false;
                 };
                 if !regex.is_match(text) {
@@ -600,12 +716,12 @@ fn sub_rule_matches(scan_result: &ScanQrResult, sub_rule: &QrMatchSubRule) -> bo
 
             true
         }
-        QrMatchSubRule::UR { ur_type } => {
+        CompiledQrMatchSubRule::UR { ur_type } => {
             let ScanQrResult::Ur2 { ur_type: scanned_type, .. } = scan_result else {
                 return false;
             };
 
-            normalize_ur_type(ur_type.as_str()) == normalize_ur_type(scanned_type.as_str())
+            ur_type.as_str() == normalize_ur_type(scanned_type.as_str())
         }
     }
 }
@@ -631,6 +747,35 @@ impl From<ScanQrAction> for ScanQrResult {
     }
 }
 
+struct BorrowedLumaSource<'a> {
+    data: &'a [u8],
+}
+impl<'a> BorrowedLumaSource<'a> {
+    const HEIGHT: usize = CAMERA_HEIGHT as usize;
+    const WIDTH: usize = CAMERA_WIDTH as usize;
+}
+
+impl<'a> LuminanceSource for BorrowedLumaSource<'a> {
+    fn get_row(&self, y: usize) -> Vec<u8> {
+        let start = y * Self::WIDTH;
+        self.data[start..start + Self::WIDTH].to_vec()
+    }
+
+    fn get_column(&self, x: usize) -> Vec<u8> {
+        self.data.chunks_exact(Self::WIDTH).map(|row| row[x]).collect()
+    }
+
+    fn get_matrix(&self) -> Vec<u8> { self.data.to_vec() }
+
+    fn get_width(&self) -> usize { Self::WIDTH }
+
+    fn get_height(&self) -> usize { Self::HEIGHT }
+
+    fn invert(&mut self) {}
+
+    fn get_luma8_point(&self, column: usize, row: usize) -> u8 { self.data[row * Self::WIDTH + column] }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -638,19 +783,28 @@ mod tests {
     use app_manifest::{QrMatchRule, QrMatchSubRule, QrPriority};
     use slint_keyos_platform::gui_server_api::navigation::qrscanner::ScanQrResult;
 
-    use super::{first_matching_sub_rule, normalize_ur_type, sub_rule_matches};
+    use super::{
+        first_matching_sub_rule, normalize_ur_type, sub_rule_matches, CompiledQrMatchRule,
+        CompiledQrMatchSubRule,
+    };
 
     fn qr_result(data: &[u8]) -> ScanQrResult { ScanQrResult::new_qr(data) }
 
     fn ur_result(ur_type: &str) -> ScanQrResult { ScanQrResult::new_ur2(ur_type.to_string(), &[]) }
 
-    fn make_rule(id: &str, sub_rules: BTreeMap<String, QrMatchSubRule>) -> QrMatchRule {
-        QrMatchRule {
+    fn sub_rule(sub_rule: QrMatchSubRule) -> CompiledQrMatchSubRule {
+        CompiledQrMatchSubRule::try_from(sub_rule).unwrap()
+    }
+
+    fn make_rule(id: &str, sub_rules: BTreeMap<String, QrMatchSubRule>) -> CompiledQrMatchRule {
+        let rule = QrMatchRule {
             id: id.to_string(),
             id_localizations: BTreeMap::new(),
             sub_rules,
             priority: QrPriority::default(),
-        }
+        };
+        let sub_rules = rule.sub_rules.into_iter().map(|(id, value)| (id, sub_rule(value))).collect();
+        CompiledQrMatchRule { id: rule.id, priority: rule.priority, sub_rules }
     }
 
     // --- normalize_ur_type ---
@@ -670,42 +824,48 @@ mod tests {
 
     #[test]
     fn sub_rule_qr_matches_no_constraints() {
-        let sub_rule = QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None };
+        let sub_rule = sub_rule(QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None });
         assert!(sub_rule_matches(&qr_result(b"anything"), &sub_rule));
     }
 
     #[test]
     fn sub_rule_qr_rejects_ur_result() {
-        let sub_rule = QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None };
+        let sub_rule = sub_rule(QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None });
         assert!(!sub_rule_matches(&ur_result("psbt"), &sub_rule));
     }
 
     #[test]
     fn sub_rule_qr_min_len_enforced() {
-        let sub_rule = QrMatchSubRule::QR { min_len: Some(10), max_len: None, regex_pattern: None };
+        let sub_rule = sub_rule(QrMatchSubRule::QR { min_len: Some(10), max_len: None, regex_pattern: None });
         assert!(!sub_rule_matches(&qr_result(b"short"), &sub_rule));
         assert!(sub_rule_matches(&qr_result(b"exactly_ten"), &sub_rule));
     }
 
     #[test]
     fn sub_rule_qr_max_len_enforced() {
-        let sub_rule = QrMatchSubRule::QR { min_len: None, max_len: Some(5), regex_pattern: None };
+        let sub_rule = sub_rule(QrMatchSubRule::QR { min_len: None, max_len: Some(5), regex_pattern: None });
         assert!(sub_rule_matches(&qr_result(b"hi"), &sub_rule));
         assert!(!sub_rule_matches(&qr_result(b"too_long_string"), &sub_rule));
     }
 
     #[test]
     fn sub_rule_qr_regex_match() {
-        let sub_rule =
-            QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: Some("^UR:".to_string()) };
+        let sub_rule = sub_rule(QrMatchSubRule::QR {
+            min_len: None,
+            max_len: None,
+            regex_pattern: Some("^UR:".to_string()),
+        });
         assert!(sub_rule_matches(&qr_result(b"UR:psbt/..."), &sub_rule));
         assert!(!sub_rule_matches(&qr_result(b"not a ur"), &sub_rule));
     }
 
     #[test]
     fn sub_rule_qr_rejects_non_utf8_when_regex_set() {
-        let sub_rule =
-            QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: Some(".*".to_string()) };
+        let sub_rule = sub_rule(QrMatchSubRule::QR {
+            min_len: None,
+            max_len: None,
+            regex_pattern: Some(".*".to_string()),
+        });
         assert!(!sub_rule_matches(&qr_result(&[0xFF, 0xFE]), &sub_rule));
     }
 
@@ -713,7 +873,7 @@ mod tests {
 
     #[test]
     fn sub_rule_ur_matches_normalized_type() {
-        let sub_rule = QrMatchSubRule::UR { ur_type: "psbt".to_string() };
+        let sub_rule = sub_rule(QrMatchSubRule::UR { ur_type: "psbt".to_string() });
         assert!(sub_rule_matches(&ur_result("crypto-psbt"), &sub_rule));
         assert!(sub_rule_matches(&ur_result("PSBT"), &sub_rule));
         assert!(!sub_rule_matches(&ur_result("hdkey"), &sub_rule));
@@ -721,7 +881,7 @@ mod tests {
 
     #[test]
     fn sub_rule_ur_rejects_qr_result() {
-        let sub_rule = QrMatchSubRule::UR { ur_type: "psbt".to_string() };
+        let sub_rule = sub_rule(QrMatchSubRule::UR { ur_type: "psbt".to_string() });
         assert!(!sub_rule_matches(&qr_result(b"UR:PSBT/..."), &sub_rule));
     }
 

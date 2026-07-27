@@ -11,7 +11,6 @@ use app_manager::{
 use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
 use log::error;
-use regex::Regex;
 use serde_json::to_vec;
 use xous::{AppId, PID};
 
@@ -66,34 +65,6 @@ enum MessageAvailability {
     AutoAllow,
     ApprovalBased,
     Unavailable,
-}
-
-/// Removes sub-rules with invalid regex patterns, then removes rules that become empty.
-/// Logs errors for each dropped sub-rule or empty rule.
-pub(crate) fn prune_qr_match_rules(rules: &mut Vec<app_manifest::QrMatchRule>, app_id: &AppId) {
-    rules.retain_mut(|rule| {
-        rule.sub_rules.retain(|sub_rule_id, sub_rule| {
-            let app_manifest::QrMatchSubRule::QR { regex_pattern: Some(pattern), .. } = sub_rule else {
-                return true;
-            };
-            match Regex::new(pattern) {
-                Ok(_) => true,
-                Err(e) => {
-                    error!(
-                        "Dropping sub-rule {:?} in rule {:?} for app 0x{} due to invalid regex: {}",
-                        sub_rule_id, rule.id, app_id, e
-                    );
-                    false
-                }
-            }
-        });
-        if rule.sub_rules.is_empty() {
-            error!("Rule {:?} for app 0x{} has no sub-rules and will never match", rule.id, app_id);
-            false
-        } else {
-            true
-        }
-    });
 }
 
 const FLUX_APPS_DIR: &str = "/keyos/apps/gui-app-emu-flux/apps";
@@ -258,15 +229,13 @@ impl AppRegistry {
             MAX_MANIFEST_SIZE_BYTES,
         )?;
         let (manifest_json, third_party_signer) = check_manifest_signature(&manifest_raw, source)?;
-        let mut manifest = app_manifest::try_from_bytes(manifest_json)
+        let manifest = app_manifest::try_from_bytes(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
 
         let app_id = AppId(manifest.app_id);
         if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, source) {
             return Ok(None);
         }
-        prune_qr_match_rules(&mut manifest.qr_match_rules, &app_id);
-
         Ok(Some(AppInfo {
             id: app_id,
             app_dir: Some(app_dir.to_string()),
@@ -291,9 +260,14 @@ impl AppRegistry {
             .and_then(|app_info| app_info.info.manifest.app_name.get(&locale.to_string().into()).cloned())
     }
 
-    pub(crate) fn qr_match_rules(&self, publishers: &[ThirdPartyCertificateInfo]) -> Vec<AppQrMatchRules> {
+    pub(crate) fn qr_match_rules(
+        &self,
+        app_ids: &[AppId],
+        publishers: &[ThirdPartyCertificateInfo],
+    ) -> Vec<AppQrMatchRules> {
         self.installed_apps
             .values()
+            .filter(|app_info| app_ids.is_empty() || app_ids.contains(&app_info.id))
             .filter(|app_info| app_info.publisher_and_launchable(publishers).1)
             .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
             .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
@@ -930,6 +904,7 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     use app_manager::decode_app_id_str;
+    use app_manifest::{QrMatchRule, QrMatchSubRule, QrPriority};
 
     use super::*;
 
@@ -1276,80 +1251,31 @@ mod tests {
         assert_eq!(app.publisher_and_launchable(&[]), (String::new(), true));
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // QR match-rule pruning tests (`prune_qr_match_rules`).
-    // ---------------------------------------------------------------------------------------------
-
-    use app_manifest::{QrMatchRule, QrMatchSubRule, QrPriority};
-
-    fn qr_app_id() -> AppId { AppId([0u8; app_manifest::APP_ID_BYTE_LEN]) }
-
-    fn qr_sub_rule(pattern: Option<&str>) -> QrMatchSubRule {
-        QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: pattern.map(str::to_string) }
-    }
-
-    fn make_rule(id: &str, sub_rules: BTreeMap<String, QrMatchSubRule>) -> QrMatchRule {
-        QrMatchRule {
-            id: id.to_string(),
-            id_localizations: BTreeMap::new(),
-            sub_rules,
+    #[test]
+    fn qr_match_rules_filter_by_app_id_and_empty_filter_returns_all() {
+        let requested_id = "0x426974636f696e2057616c6c65740000";
+        let other_id = "0x53656564205661756c74000000000000";
+        let rule = QrMatchRule {
+            id: "test".to_string(),
             priority: QrPriority::default(),
-        }
-    }
+            id_localizations: BTreeMap::new(),
+            sub_rules: BTreeMap::from([(
+                "qr".to_string(),
+                QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None },
+            )]),
+        };
+        let mut requested = built_in_app_info(requested_id, "Bitcoin Wallet", None);
+        requested.manifest.qr_match_rules.push(rule.clone());
+        let mut other = built_in_app_info(other_id, "Seed Vault", None);
+        other.manifest.qr_match_rules.push(rule);
+        let registry = registry_with(vec![requested, other]);
+        let requested_id = decode_app_id_str(requested_id).unwrap();
 
-    #[test]
-    fn valid_regex_sub_rules_survive() {
-        let mut rules = vec![make_rule("r", [("s".to_string(), qr_sub_rule(Some("^abc")))].into())];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].sub_rules.len(), 1);
-    }
+        let filtered = registry.qr_match_rules(&[requested_id], &[]);
 
-    #[test]
-    fn invalid_regex_sub_rule_dropped_rule_survives_if_others_valid() {
-        let mut rules = vec![make_rule(
-            "r",
-            [
-                ("good".to_string(), qr_sub_rule(Some("^abc"))),
-                ("bad".to_string(), qr_sub_rule(Some("[invalid"))),
-            ]
-            .into(),
-        )];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert_eq!(rules.len(), 1);
-        assert!(rules[0].sub_rules.contains_key("good"));
-        assert!(!rules[0].sub_rules.contains_key("bad"));
-    }
-
-    #[test]
-    fn all_sub_rules_invalid_drops_entire_rule() {
-        let mut rules = vec![make_rule("r", [("bad".to_string(), qr_sub_rule(Some("[invalid")))].into())];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert!(rules.is_empty());
-    }
-
-    #[test]
-    fn ur_sub_rules_always_survive_pruning() {
-        let mut rules = vec![make_rule(
-            "r",
-            [("ur".to_string(), QrMatchSubRule::UR { ur_type: "psbt".to_string() })].into(),
-        )];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert_eq!(rules.len(), 1);
-    }
-
-    #[test]
-    fn no_regex_qr_sub_rule_survives_pruning() {
-        let mut rules = vec![make_rule("r", [("any-qr".to_string(), qr_sub_rule(None))].into())];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert_eq!(rules.len(), 1);
-    }
-
-    #[test]
-    fn rule_with_no_sub_rules_is_dropped() {
-        let mut rules = vec![make_rule("empty", BTreeMap::new())];
-        prune_qr_match_rules(&mut rules, &qr_app_id());
-        assert!(rules.is_empty(), "empty-sub-rules rule should be dropped");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, requested_id);
+        assert_eq!(registry.qr_match_rules(&[], &[]).len(), 2);
     }
 
     // ---------------------------------------------------------------------------------------------
