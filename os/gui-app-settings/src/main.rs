@@ -652,28 +652,42 @@ fn read_third_party_certificate(state: &AppState) -> anyhow::Result<Option<Vec<u
     Ok(Some(certificate_pem))
 }
 
-fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> SharedString {
+fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> TrustedPublisherRemovalResult {
     let locale = state.borrow().settings.get_locale();
     let result = { state.borrow().app_manager.remove_third_party_certificate(public_key, locale.lang()) };
     match result {
         Ok(app_manager::RemoveThirdPartyCertificateResult::Removed)
         | Ok(app_manager::RemoveThirdPartyCertificateResult::NotFound) => {
             refresh_trusted_publishers(state);
-            SharedString::default()
+            TrustedPublisherRemovalResult {
+                success: true,
+                title: SharedString::default(),
+                text: SharedString::default(),
+            }
         }
         Ok(app_manager::RemoveThirdPartyCertificateResult::AppRequiresKey(app_name)) => {
-            i18n::replace_placeholders(
-                tr::lookup_id(TrId::AppsModalRemoveXFirstThenRetryHeader),
-                &[app_name.as_str()],
-            )
-            .into()
+            TrustedPublisherRemovalResult {
+                success: false,
+                title: tr::lookup_id(TrId::AppsModalRemoveXFirstThenRetryHeader).into(),
+                text: i18n::replace_placeholders(
+                    tr::lookup_id(TrId::AppsModalRemoveXFirstThenRetryContent),
+                    &[app_name.as_str()],
+                )
+                .into(),
+            }
         }
-        Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => {
-            tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into()
-        }
+        Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => TrustedPublisherRemovalResult {
+            success: false,
+            title: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into(),
+            text: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedContent).into(),
+        },
         Err(e) => {
             log::error!("failed to remove third-party certificate: {e:?}");
-            tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into()
+            TrustedPublisherRemovalResult {
+                success: false,
+                title: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into(),
+                text: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedContent).into(),
+            }
         }
     }
 }

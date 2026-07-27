@@ -74,6 +74,12 @@ export enum TrustedPublisherImportResult {
     failed,
 }
 
+export struct TrustedPublisherRemovalResult {
+    success: bool,
+    title: string,
+    text: string,
+}
+
 export global AppManagementGlobal {
     in property <[AppsListRow]> apps-list-rows: [];
     in-out property <InstalledApp> selected-app;
@@ -87,5 +93,5 @@ export global AppManagementGlobal {
     in property <[TrustedPublisher]> trusted-publishers: [];
     callback refresh-trusted-publishers();
     callback import-trusted-publisher() -> TrustedPublisherImportResult;
-    callback remove-trusted-publisher(string) -> string;
+    callback remove-trusted-publisher(string) -> TrustedPublisherRemovalResult;
 }

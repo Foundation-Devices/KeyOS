@@ -132,6 +132,10 @@ export component Modal inherits Rectangle {
     in property <brush> icon-color: Palette.content-brand;
     in property <string> title;
     in property <string> text;
+    in property <length> modal-width: UISize.modal-width;
+    in property <length> modal-border-width: Size.sz0_25;
+    in property <int> modal-level: 3;
+    in property <length> button-section-padding: Size.sz2;
     in property <string> extra-warning: "";
     in property <brush> extra-warning-color: Palette.content-secondary;
     in property <length> button-spacing: Size.sz4;
@@ -142,7 +146,9 @@ export component Modal inherits Rectangle {
     TouchArea { }
 
     Panel {
-        width: UISize.modal-width;
+        width: root.modal-width;
+        border-width: root.modal-border-width;
+        level: root.modal-level;
         z: 100;
 
         VerticalLayout {
@@ -182,6 +188,9 @@ export component Modal inherits Rectangle {
 
             ButtonSection {
                 spacing: button-spacing;
+                padding-bottom: root.button-section-padding;
+                padding-left: root.button-section-padding;
+                padding-right: root.button-section-padding;
                 @children
             }
         }

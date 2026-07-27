@@ -1377,7 +1377,10 @@
       "size": "Size",
       "title": "Apps",
       "trustedPublisherBasicConstraints": "Basic Constraints",
-      "trustedPublisherCertificateInstalled": "Trusted Publisher certificate successfully installed.",
+      "trustedPublisherCertificateInstalled": {
+        "content": "Trusted Publisher certificate successfully installed.",
+        "header": "Trusted Publisher certificate installed."
+      },
       "trustedPublisherCertificates": "Certificates",
       "trustedPublisherCompany": "Company",
       "trustedPublisherContactEmail": "Contact Email",
@@ -1396,16 +1399,19 @@
       "version": "Version"
     },
     "appsModalInvalidTrustedPublisherCertificate": {
+      "content": "Contact the company producing the certificate.",
       "header": "Invalid Trusted Publisher certificate."
     },
     "appsModalNoTrustedPublishers": {
       "header": "No Trusted Publishers"
     },
     "appsModalRemoveXFirstThenRetry": {
-      "header": "Remove {0} first, then try removing this Trusted Publisher again."
+      "content": "{0} is installed and depends on this certificate. Remove the app first, then try again.",
+      "header": "Unable to remove Trusted Publisher"
     },
     "appsModalTrustedPublisherRemoveFailed": {
-      "header": "Unable to remove this Trusted Publisher."
+      "content": "Unable to remove this Trusted Publisher. Try again. If the problem continues, restart Passport.",
+      "header": "Unable to remove Trusted Publisher"
     },
     "appsModalUnableToRemoveTrustedPublisher": {
       "header": "Unable to remove Trusted Publisher"

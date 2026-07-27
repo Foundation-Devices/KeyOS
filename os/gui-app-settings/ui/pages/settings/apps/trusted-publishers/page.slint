@@ -5,12 +5,12 @@ import {
     BasePage,
     Button,
     ContentSection,
-    Dialog,
     ErrorModal,
     HLine,
     Icon,
     MenuSection,
     MenuSectionLayout,
+    Modal,
     PageBody,
     ScrollFadeMask,
     TextMd,
@@ -213,9 +213,12 @@ export component TrustedPublishersPage inherits BasePage {
     }
 
     if invalid-certificate-visible: ErrorModal {
-        icon: "alert";
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
         title: TR2.lookup(TrId.AppsModalInvalidTrustedPublisherCertificateHeader);
-        text: "";
+        text: TR2.lookup(TrId.AppsModalInvalidTrustedPublisherCertificateContent);
         confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
 
         confirm-clicked => {
@@ -223,20 +226,17 @@ export component TrustedPublishersPage inherits BasePage {
         }
     }
 
-    if certificate-installed-visible: Rectangle {
-        background: Palette.overlay;
+    if certificate-installed-visible: Modal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        title: TR2.lookup(TrId.AppsTrustedPublisherCertificateInstalledHeader);
+        text: TR2.lookup(TrId.AppsTrustedPublisherCertificateInstalledContent);
 
-        Dialog {
-            icon: "check-circle";
-            icon-color: Palette.content-positive;
-            title: TR2.lookup(TrId.AppsTrustedPublisherCertificateInstalled);
-            message: "";
-            ok-text: TR2.lookup(TrId.CommonButtonDone);
-            show-ok: true;
-            show-cancel: false;
-            width: 352px;
-
-            on-ok => {
+        Button {
+            label: TR2.lookup(TrId.CommonButtonDone);
+            clicked => {
                 root.certificate-installed-visible = false;
             }
         }

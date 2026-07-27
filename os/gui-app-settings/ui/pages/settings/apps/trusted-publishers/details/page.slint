@@ -49,6 +49,7 @@ export component TrustedPublisherDetailsPage inherits BasePage {
     in property <TrustedPublisherDetailsProps> props;
 
     private property <bool> remove-confirm-visible: false;
+    private property <string> remove-error-title: "";
     private property <string> remove-error-message: "";
 
     property <bool> at-top: flickable.viewport-y == 0;
@@ -157,7 +158,12 @@ export component TrustedPublisherDetailsPage inherits BasePage {
     }
 
     if remove-confirm-visible: ConfirmationModal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
         icon: "alert";
+        icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.AppsRemoveTrustedPublisher);
         text: TR2.lookup(TrId.AppsRemoveTrustedPublisherConfirm);
         cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
@@ -170,20 +176,27 @@ export component TrustedPublisherDetailsPage inherits BasePage {
 
         confirm-clicked => {
             root.remove-confirm-visible = false;
-            root.remove-error-message = AppManagementGlobal.remove-trusted-publisher(props.public_key);
-            if root.remove-error-message == "" {
+            let result = AppManagementGlobal.remove-trusted-publisher(props.public_key);
+            if result.success {
                 Navigate.backward();
+            } else {
+                root.remove-error-title = result.title;
+                root.remove-error-message = result.text;
             }
         }
     }
 
     if remove-error-message != "": ErrorModal {
-        icon: "alert";
-        title: TR2.lookup(TrId.AppsModalUnableToRemoveTrustedPublisherHeader);
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        title: root.remove-error-title;
         text: root.remove-error-message;
         confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
 
         confirm-clicked => {
+            root.remove-error-title = "";
             root.remove-error-message = "";
         }
     }
