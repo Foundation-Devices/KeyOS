@@ -4,6 +4,7 @@
 import {
     BasePage,
     Button,
+    ButtonSection,
     ContentSection,
     ErrorModal,
     HLine,
@@ -71,9 +72,8 @@ component TrustedPublisherRow inherits Rectangle {
         padding-bottom: Size.sz4;
         spacing: Size.sz4;
 
-        text-column := VerticalLayout {
+        VerticalLayout {
             alignment: center;
-            spacing: Size.sz1;
             width: root.width - (Size.sz4 * 2) - chevron-column.width - parent.spacing;
 
             TextMd {
@@ -96,7 +96,7 @@ component TrustedPublisherRow inherits Rectangle {
         }
 
         chevron-column := Rectangle {
-            width: Size.sz8;
+            width: Size.sz6;
             background: Palette.transparent;
 
             Icon {
@@ -115,8 +115,9 @@ export component TrustedPublishersPage inherits BasePage {
     private property <bool> invalid-certificate-visible: false;
     private property <bool> certificate-installed-visible: false;
     private property <TrustedPublisherImportResult> import-result: TrustedPublisherImportResult.canceled;
+    private property <length> menu-shadow-gutter: Size.sz6;
     property <bool> at-top: flickable.viewport-y == 0;
-    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height - root.menu-shadow-gutter;
 
     init => {
         AppManagementGlobal.refresh-trusted-publishers();
@@ -127,89 +128,109 @@ export component TrustedPublishersPage inherits BasePage {
         title: TR2.lookup(TrId.AppsTrustedPublishers);
     }
 
-    flickable := Flickable {
-        y: header.height;
+    PageBody {
+        y: header.height + Size.sz2;
         width: parent.width;
-        height: parent.height - header.height;
-        viewport-width: self.width;
+        height: parent.height - self.y;
+        spacing: Size.sz10;
 
-        PageBody {
-            width: parent.width;
+        ContentSection {
+            vertical-stretch: 1;
+            spacing: Size.sz10;
 
-            ContentSection {
-                TextSm {
+            TextMd {
+                text: TR2.lookup(TrId.AppsTrustedPublishersIntro);
+                color: Palette.content-secondary;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                x: -Size.sz6;
+                width: parent.width + Size.sz6 * 2;
+                vertical-stretch: 1;
+
+                flickable := Flickable {
                     width: parent.width;
-                    text: TR2.lookup(TrId.AppsTrustedPublishersIntro);
-                    color: Palette.content-tertiary;
-                    horizontal-alignment: left;
-                    wrap: word-wrap;
-                }
+                    height: parent.height;
+                    viewport-width: self.width;
 
-                MenuSection {
-                    title: TR2.lookup(TrId.AppsTrustedPublisherCertificates);
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        padding-left: Size.sz6;
+                        padding-right: Size.sz6;
+                        padding-bottom: root.menu-shadow-gutter;
 
-                    MenuSectionLayout {
-                        if AppManagementGlobal.trusted-publishers.length == 0: Rectangle {
-                            height: 64px;
+                        MenuSection {
+                            title: TR2.lookup(TrId.AppsTrustedPublisherCertificates);
 
-                            TextSm {
-                                x: Size.sz4;
-                                y: (parent.height - self.preferred-height) / 2;
-                                width: parent.width - (Size.sz4 * 2);
-                                text: TR2.lookup(TrId.AppsModalNoTrustedPublishersHeader);
-                                color: Palette.content-tertiary;
-                            }
-                        }
+                            MenuSectionLayout {
+                                if AppManagementGlobal.trusted-publishers.length == 0: Rectangle {
+                                    height: Size.sz16;
 
-                        for publisher[index] in AppManagementGlobal.trusted-publishers: VerticalLayout {
-                            TrustedPublisherRow {
-                                publisher: publisher;
-                                first: index == 0;
-                                last: index == AppManagementGlobal.trusted-publishers.length - 1;
+                                    TextMd {
+                                        x: Size.sz4;
+                                        y: (parent.height - self.preferred-height) / 2;
+                                        width: parent.width - (Size.sz4 * 2);
+                                        text: TR2.lookup(TrId.AppsModalNoTrustedPublishersHeader);
+                                        color: Palette.content-primary;
+                                    }
+                                }
 
-                                clicked => {
-                                    Navigate.trusted-publisher-details({
-                                        name: publisher.name,
-                                        company: publisher.company,
-                                        contact-email: publisher.contact_email,
-                                        support-url: publisher.support_url,
-                                        public-key: publisher.public_key,
-                                        serial-number: publisher.serial_number,
-                                        subject: publisher.subject,
-                                        basic-constraints: publisher.basic_constraints,
-                                        key-usage: publisher.key_usage,
-                                        extended-key-usage: publisher.extended_key_usage,
-                                    }, { });
+                                for publisher[index] in AppManagementGlobal.trusted-publishers: VerticalLayout {
+                                    TrustedPublisherRow {
+                                        publisher: publisher;
+                                        first: index == 0;
+                                        last: index == AppManagementGlobal.trusted-publishers.length - 1;
+
+                                        clicked => {
+                                            Navigate.trusted-publisher-details({
+                                                name: publisher.name,
+                                                company: publisher.company,
+                                                contact-email: publisher.contact_email,
+                                                support-url: publisher.support_url,
+                                                public-key: publisher.public_key,
+                                                serial-number: publisher.serial_number,
+                                                subject: publisher.subject,
+                                                basic-constraints: publisher.basic_constraints,
+                                                key-usage: publisher.key_usage,
+                                                extended-key-usage: publisher.extended_key_usage,
+                                            }, { });
+                                        }
+                                    }
+
+                                    if index < AppManagementGlobal.trusted-publishers.length - 1: HLine { }
                                 }
                             }
-
-                            if index < AppManagementGlobal.trusted-publishers.length - 1: HLine { }
                         }
                     }
                 }
 
-                Button {
-                    label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
-                    clicked => {
-                        root.import-result = AppManagementGlobal.import-trusted-publisher();
-                        if root.import-result == TrustedPublisherImportResult.failed {
-                            root.invalid-certificate-visible = true;
-                        }
-                        if root.import-result == TrustedPublisherImportResult.installed {
-                            root.certificate-installed-visible = true;
-                        }
+                ScrollFadeMask {
+                    x: Size.sz6;
+                    width: parent.width - Size.sz6 * 2;
+                    height: parent.height;
+                    at-top: root.at-top;
+                    at-bottom: root.at-bottom;
+                }
+            }
+        }
+
+        ButtonSection {
+            Button {
+                label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
+                clicked => {
+                    root.import-result = AppManagementGlobal.import-trusted-publisher();
+                    if root.import-result == TrustedPublisherImportResult.failed {
+                        root.invalid-certificate-visible = true;
+                    }
+                    if root.import-result == TrustedPublisherImportResult.installed {
+                        root.certificate-installed-visible = true;
                     }
                 }
             }
         }
-    }
-
-    ScrollFadeMask {
-        y: flickable.y;
-        width: flickable.width;
-        height: flickable.height;
-        at-top: root.at-top;
-        at-bottom: root.at-bottom;
     }
 
     if invalid-certificate-visible: ErrorModal {
