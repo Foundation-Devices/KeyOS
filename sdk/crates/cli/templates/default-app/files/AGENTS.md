@@ -14,3 +14,11 @@ Use `foundation doctor` to inspect the local SDK environment. Prefer `foundation
 `foundation sim` for hosted runtime checks, and `foundation build` only when signed hardware artifacts are needed.
 Do not run `foundation sideload`, `foundation logs`, or `foundation cert gen` unless the user explicitly asks for
 hardware or signing work.
+
+## Driving a real device (passport-drive MCP)
+
+This app ships a `.mcp.json` that registers the `passport-drive` MCP server. With a Passport Prime connected
+over USB, its tools let you act on the real device: capture screenshots, inject taps and swipes, and read its
+logs. The device only exposes this debug channel when Developer Mode is enabled (in the device's Settings, under
+Apps > Developer Mode); with it off, the connection is unavailable. Only drive hardware when the user asks for
+on-device work.

@@ -792,21 +792,28 @@
           "border-radius": "radius.default",
           "handle-width": "controlSize.md",
           "handle-height": 6,
-          "handle-radius": 3
+          "handle-radius": 3,
+          "title-font-size": 24,
+          "divider-height": 1,
+          "detent-card-radius": 24,
+          "detent-label-font-size": 14,
+          "detent-value-font-size": 24
         },
         "sm": {
           "font-size": "fontSize.sm",
           "panel-padding": "controlRadius.sm",
           "content-padding": 16,
           "border-radius": 20,
-          "handle-width": "controlSize.sm"
+          "handle-width": "controlSize.sm",
+          "detent-value-font-size": 22
         },
         "lg": {
           "font-size": "fontSize.lg",
           "panel-padding": "controlRadius.lg",
           "content-padding": 24,
           "border-radius": 28,
-          "handle-width": "controlSize.lg"
+          "handle-width": "controlSize.lg",
+          "detent-value-font-size": 26
         }
       }
     },
@@ -958,14 +965,22 @@
             "description-color": "color.muted"
           },
           "checked": {
-            "track-color": "color.primary"
+            "track-color": "color.primary",
+            "knob-color": "color.background",
+            "label-color": "color.foreground",
+            "description-color": "color.muted"
           },
           "indeterminate": {
-            "track-color": "color.primary"
+            "track-color": "color.primary",
+            "knob-color": "color.background",
+            "label-color": "color.foreground",
+            "description-color": "color.muted"
           },
           "disabled": {
             "track-color": "color.border",
-            "label-color": "color.muted"
+            "knob-color": "color.background",
+            "label-color": "color.muted",
+            "description-color": "color.muted"
           }
         }
       },
@@ -1176,7 +1191,11 @@
           "icon-size": 24,
           "border-radius": "radius.sm",
           "close-button-size": 32,
-          "close-icon-size": 20
+          "close-icon-size": 20,
+          "action-font-size": 14,
+          "action-height": 26,
+          "action-horizontal-padding": 10,
+          "action-radius": 13
         },
         "sm": {
           "font-size": "fontSize.sm",

@@ -171,6 +171,10 @@ component Button {
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 overflow: elide;
+                // Reserve a full line so a caller-constrained height squeezes the
+                // padding (or overflows the pill) rather than clipping the label to
+                // nothing. Propagates up as the button's minimum content height.
+                min-height: text-line-height;
             }
 
             // End icon - height capped to text line height

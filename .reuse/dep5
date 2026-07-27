@@ -15,6 +15,7 @@ Files:
   sdk/nix/sdk-user-flake.lock
   .cargo/audit.toml
   .mcp.json
+  **/.mcp.json
   AGENTS.md
 Copyright: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 License: MIT

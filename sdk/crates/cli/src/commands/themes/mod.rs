@@ -15,6 +15,7 @@
 //!   rust/   <- generated; included by apps via foundation_themes::include_theme!
 //! ```
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -231,7 +232,13 @@ pub fn ensure_project_theme_in(
         &project_json_dir.join(format!("{BASE_THEME_ID}.json")),
     )?;
     write_app_theme_json(theme, sdk, project_root, &app_theme_json)?;
-    prune_foreign_theme_jsons(&project_json_dir)?;
+    // Stage the app theme's full parent chain, so an app can inherit any theme
+    // created with `foundation themes new` — not only base_theme. base_theme and
+    // app_theme are always kept; each custom ancestor is copied in and kept.
+    let mut keep: BTreeSet<String> =
+        [APP_THEME_ID.to_string(), BASE_THEME_ID.to_string()].into_iter().collect();
+    stage_theme_parent_chain(&app_theme_json, &global_json_dir, sdk, &project_json_dir, &mut keep)?;
+    prune_foreign_theme_jsons(&project_json_dir, &keep)?;
 
     // Also emit every schema-backed per-app component theme `.slint` file. The
     // app's component overrides become literals; everything else cascades from
@@ -264,18 +271,71 @@ pub fn ensure_project_theme_in(
 /// so an app build only ever compiles those two. Stale or unrelated themes left
 /// in the project's theme dir (e.g. from an older build that mirrored the whole
 /// shared cache) are dropped.
-fn prune_foreign_theme_jsons(dir: &Path) -> Result<()> {
+fn prune_foreign_theme_jsons(dir: &Path, keep: &BTreeSet<String>) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
         let path = entry?.path();
         if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
         let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
-        if stem != BASE_THEME_ID && stem != APP_THEME_ID {
+        if !keep.contains(stem) {
             fs::remove_file(&path).ok();
         }
     }
     Ok(())
+}
+
+/// Walk the app theme's `parent` chain and copy each ancestor theme JSON into
+/// the staging dir, so the compiler can resolve inheritance beyond base_theme.
+/// `keep` accumulates every staged theme id (the caller seeds it with
+/// base_theme + app_theme). Ancestors are looked up in the global theme cache
+/// first, then the SDK's bundled themes dir.
+fn stage_theme_parent_chain(
+    app_theme_json: &Path,
+    global_json_dir: &Path,
+    sdk: &SdkRoot,
+    project_json_dir: &Path,
+    keep: &mut BTreeSet<String>,
+) -> Result<()> {
+    let mut current = read_theme_parent(app_theme_json)?;
+    while let Some(parent) = current {
+        let parent = normalize_theme_alias(&parent);
+        // A path-based parent (e.g. "./base.json") is resolved by the compiler's
+        // path-aware resolve_parent_reference; ID staging would mangle it into
+        // "<path>.json.json" and fail the lookup. Defer the rest of the chain to
+        // the compiler, which walks it from the referenced file's own location.
+        if is_theme_path(&parent) {
+            break;
+        }
+        // base_theme is always staged already; stop there, and guard cycles.
+        if parent == BASE_THEME_ID || !keep.insert(parent.clone()) {
+            break;
+        }
+        let source = find_theme_json(sdk, &parent)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "app theme inherits from \"{parent}\", but no \"{parent}.json\" was found in {} \
+                 or the SDK themes dir. Run 'foundation themes list' to see available themes.",
+                global_json_dir.display()
+            )
+        })?;
+        let dest = project_json_dir.join(format!("{parent}.json"));
+        copy_if_changed(&source, &dest)?;
+        current = read_theme_parent(&dest)?;
+    }
+    Ok(())
+}
+
+/// Read a theme JSON's `parent` field (trimmed; `None` when absent or empty).
+fn read_theme_parent(path: &Path) -> Result<Option<String>> {
+    let contents = fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(value
+        .get("parent")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|parent| !parent.is_empty())
+        .map(ToOwned::to_owned))
 }
 
 fn write_app_theme_json(theme: &str, sdk: &SdkRoot, project_root: &Path, destination: &Path) -> Result<()> {
