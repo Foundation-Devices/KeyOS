@@ -66,7 +66,7 @@ component SeedWordInput inherits VerticalLayout {
 
 /// Seed-word entry: a 12- or 24-word mnemonic input grid with per-word
 /// validation, an expand-to-24 button, an error line, and a submit button.
-/// Shared by onboarding restore and the Legacy Enter Seed flow. The host
+/// Shared by Vault, onboarding restore, and Legacy Enter Seed flows. The host
 /// supplies the strings, the per-word placeholder, the validators, and handles
 /// submit; word state lives in the component.
 export component SeedEntry inherits VerticalLayout {
@@ -79,19 +79,26 @@ export component SeedEntry inherits VerticalLayout {
 
     property <[string]> words: ["", "", "", "", "", "", "", "", "", "", "", ""];
     property <bool> is-valid: false;
+    property <int> filled-word-count: 0;
     out property <bool> is-24-words: words.length == 24;
 
     /// Clear back to an empty 12-word entry. Call when the screen is shown.
     public function reset() {
         words = ["", "", "", "", "", "", "", "", "", "", "", ""];
         is-valid = false;
+        filled-word-count = 0;
     }
 
     // Element mutation (words[i] = x) isn't tracked reactively, so recompute
     // validity explicitly here.
     function set-word(index: int, word: string) {
+        if (words[index] == "" && word != "") {
+            filled-word-count += 1;
+        } else if (words[index] != "" && word == "") {
+            filled-word-count -= 1;
+        }
         words[index] = word;
-        is-valid = validate-seed(words);
+        is-valid = filled-word-count == words.length && validate-seed(words);
     }
 
     // Guarded read for the inputs: the extra fields (13-24) exist before
@@ -130,7 +137,7 @@ export component SeedEntry inherits VerticalLayout {
             "",
             ""
         ];
-        is-valid = validate-seed(words);
+        is-valid = filled-word-count == words.length && validate-seed(words);
     }
 
     // Scroll the word at `index` up only if it would sit behind the on-screen

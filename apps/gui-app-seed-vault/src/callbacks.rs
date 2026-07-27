@@ -391,7 +391,11 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
 
 // Use inner functions to enable ? early returns
 fn words_to_mnemonic(words: ModelRc<SharedString>) -> Result<Mnemonic, VaultError> {
-    let mnemonic_str = words.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" ");
+    let words = words.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    if words.iter().any(|word| word.trim().is_empty()) {
+        return Err(anyhow::anyhow!("Seed words cannot be empty").into());
+    }
+    let mnemonic_str = words.join(" ");
     Ok(Mnemonic::parse_normalized(&mnemonic_str).context("Could not parse seed words")?)
 }
 fn words_to_entropy(words: ModelRc<SharedString>) -> Result<SharedString, VaultError> {
@@ -411,4 +415,36 @@ fn nsec_to_npub(nsec: SharedString) -> Result<SharedString, VaultError> {
     let secret = nostr::SecretKey::from_bech32(&nsec).context("Could not get nostr secret from nsec")?;
     let key = nostr::Keys::new(secret);
     Ok(key.public_key().to_bech32().map(SharedString::from).context("Could not build nostr npub")?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words_model(phrase: &str) -> ModelRc<SharedString> {
+        ModelRc::new(VecModel::from(phrase.split_whitespace().map(SharedString::from).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn accepts_complete_12_and_24_word_seeds() {
+        let twelve_words =
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let twenty_four_words =
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+
+        assert!(words_to_mnemonic(words_model(twelve_words)).is_ok());
+        assert!(words_to_mnemonic(words_model(twenty_four_words)).is_ok());
+    }
+
+    #[test]
+    fn rejects_incomplete_24_word_seed() {
+        let mut words =
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                .split_whitespace()
+                .map(SharedString::from)
+                .collect::<Vec<_>>();
+        words.resize(24, SharedString::new());
+
+        assert!(words_to_mnemonic(ModelRc::new(VecModel::from(words))).is_err());
+    }
 }
