@@ -865,6 +865,8 @@ component LauncherPaginator inherits Rectangle {
     private property <length> page-viewport-height: first-page-content-height > standard-collection-height ? first-page-content-height : standard-collection-height;
     private property <length> page-span: content-width + page-gap;
     private property <length> graph-card-height: 178px;
+    private property <bool> source-is-only-item-on-last-page:
+        root.pages.length > 0 && State.drag-source-collection-id == root.pages[root.pages.length - 1].id && root.pages[root.pages.length - 1].items.length == 1;
     // The price graph owns its scrub gesture; the page swipe hit area starts
     // below it while page 0 is visible.
     private property <length> swipe-hit-top: root.current-page == 0 ? root.graph-card-height : 0px;
@@ -873,17 +875,29 @@ component LauncherPaginator inherits Rectangle {
     private property <length> edge-zone-width: 18px;
     private property <bool> drag-in-progress: State.drag-overlay-visible && State.drag-source-collection-id != "";
     private property <int> drag-edge-direction: !drag-in-progress ? 0 : (State.drag-pointer-abs-x < root.absolute-position.x + edge-zone-width ? -1 : (State.drag-pointer-abs-x > root.absolute-position.x + root.width - edge-zone-width ? 1 : 0));
+    private property <bool> can-open-new-page-target:
+        drag-in-progress && !root.source-is-only-item-on-last-page && root.current-page >= root.pages.length - 1;
+    private property <bool> show-new-page-target:
+        root.can-open-new-page-target && (root.drag-edge-direction > 0 || root.current-page == root.pages.length);
+    private property <int> visible-page-count: root.pages.length + (root.show-new-page-target ? 1 : 0);
+    private property <int> max-visible-page-index: Math.max(0, root.visible-page-count - 1);
+
+    changed drag-in-progress => {
+        if (!self.drag-in-progress && root.current-page >= root.pages.length) {
+            root.current-page = Math.max(0, root.pages.length - 1);
+        }
+    }
 
     edge-flip-timer := Timer {
         interval: 800ms;
-        running: root.drag-edge-direction != 0 && ((root.drag-edge-direction < 0 && root.current-page > 0) || (root.drag-edge-direction > 0 && root.current-page < root.pages.length - 1));
+        running: root.drag-edge-direction != 0 && root.current-page + root.drag-edge-direction >= 0 && root.current-page + root.drag-edge-direction <= root.max-visible-page-index;
         triggered() => {
-            root.current-page = Math.max(0, Math.min(root.pages.length - 1, root.current-page + root.drag-edge-direction));
+            root.current-page = Math.max(0, Math.min(root.max-visible-page-index, root.current-page + root.drag-edge-direction));
         }
     }
 
     width: content-width;
-    height: page-viewport-height + (pages.length > 1 ? 28px : 0px);
+    height: page-viewport-height + (visible-page-count > 1 ? 28px : 0px);
     clip: false;
     z: State.drag-source-collection-id != "" && State.drag-source-collection-id != "dock" ? 950 : 0;
 
@@ -1030,11 +1044,17 @@ component LauncherPaginator inherits Rectangle {
                             }
                         }
                     }
+
+                    if root.show-new-page-target: Rectangle {
+                        width: root.content-width;
+                        height: root.page-viewport-height;
+                        background: transparent;
+                    }
                 }
             }
         }
 
-        if pages.length > 1: HorizontalLayout {
+        if visible-page-count > 1: HorizontalLayout {
             width: root.width;
             height: 28px;
             alignment: center;
@@ -1044,6 +1064,14 @@ component LauncherPaginator inherits Rectangle {
             for page[page-index] in pages: PageDot {
                 page-index: page-index;
                 selected: page-index == root.current-page;
+                selected-page(idx) => {
+                    root.current-page = idx;
+                }
+            }
+
+            if root.show-new-page-target: PageDot {
+                page-index: root.pages.length;
+                selected: root.current-page == root.pages.length;
                 selected-page(idx) => {
                     root.current-page = idx;
                 }
@@ -1078,6 +1106,8 @@ export component MainPage inherits BasePage {
         paginator-top + (State.current-page == 0 ? graph-height + graph-bottom-gap + page-collection-offset-y : 0px);
     private property <length> active-page-width: content-width - page-collection-inset * 2;
     private property <length> active-page-height: State.current-page == 0 ? graph-page-height : standard-page-height;
+    private property <bool> active-page-is-new-page: State.current-page >= State.pages.length;
+    private property <int> active-page-existing-index: Math.min(State.current-page, Math.max(0, State.pages.length - 1));
     private property <length> dock-icon-inset-x: 24px;
     private property <length> dock-icon-inset-y: 12px;
     private property <length> dock-collection-left: dock-left + dock-icon-inset-x;
@@ -1085,12 +1115,12 @@ export component MainPage inherits BasePage {
     private property <length> dock-collection-width: dock-width - dock-icon-inset-x * 2;
     private property <length> dock-collection-height: 128px;
     private property <DropTarget> active-page-target: {
-        id: State.pages[State.current-page].id,
+        id: root.active-page-is-new-page ? "new-page" : State.pages[root.active-page-existing-index].id,
         left: root.active-page-left,
         top: root.active-page-top,
         width: root.active-page-width,
         height: root.active-page-height,
-        item-count: State.pages[State.current-page].items.length,
+        item-count: root.active-page-is-new-page ? 0 : State.pages[root.active-page-existing-index].items.length,
         slot-count: (State.current-page == 0 ? graph-page-grid-rows : standard-page-grid-rows) * 3,
         columns: 3,
         shell-size: 128px,

@@ -11,6 +11,7 @@ pub(crate) const SCAN_QR_ACTION_ID: &str = "scan-qr";
 pub(crate) const LAYOUT_VERSION: u32 = 2;
 
 const DOCK_COLLECTION_ID: &str = "dock";
+const NEW_PAGE_COLLECTION_ID: &str = "new-page";
 const PAGE_COLLECTION_PREFIX: &str = "page-";
 /// Grid slots on the first launcher page when the Bitcoin price chart is shown:
 /// the chart takes the top row, leaving two rows of three icons.
@@ -231,6 +232,11 @@ impl LauncherConfig {
         if collection_id == DOCK_COLLECTION_ID {
             let insert_index = index.min(self.dock.len());
             self.dock.insert(insert_index, item);
+            return true;
+        }
+
+        if collection_id == NEW_PAGE_COLLECTION_ID {
+            self.insert_item_into_page(self.pages.len(), index, item);
             return true;
         }
 
@@ -685,6 +691,28 @@ mod tests {
         assert_eq!(page_item_slots(&launcher.pages[0].items), [0]);
         assert_eq!(page_item_ids(&launcher.pages[1].items), ["x", "b"]);
         assert_eq!(page_item_slots(&launcher.pages[1].items), [0, 4]);
+    }
+
+    #[test]
+    fn moving_item_to_new_page_collection_appends_page() {
+        let mut launcher = test_launcher(vec![test_page(&["a", "b"])], &[]);
+
+        assert!(launcher.move_item("page-0", 1, NEW_PAGE_COLLECTION_ID, 0));
+
+        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a"]);
+        assert_eq!(page_item_ids(&launcher.pages[1].items), ["b"]);
+        assert_eq!(page_item_slots(&launcher.pages[1].items), [0]);
+    }
+
+    #[test]
+    fn moving_dock_item_to_new_page_collection_appends_page() {
+        let mut launcher = test_launcher(vec![test_page(&["a"])], &["x"]);
+
+        assert!(launcher.move_item("dock", 0, NEW_PAGE_COLLECTION_ID, 0));
+
+        assert!(launcher.dock.is_empty());
+        assert_eq!(page_item_ids(&launcher.pages[0].items), ["a"]);
+        assert_eq!(page_item_ids(&launcher.pages[1].items), ["x"]);
     }
 
     #[test]

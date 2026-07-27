@@ -334,7 +334,7 @@ fn sync_launcher_ui(ui: &AppWindow, launcher: &LauncherConfig) {
     state.set_pages(build_page_model(&launcher.pages));
     state.set_dock_items(build_item_model(&launcher.dock));
     if state.get_current_page() >= launcher.pages.len() as i32 {
-        state.set_current_page(0);
+        state.set_current_page(launcher.pages.len().saturating_sub(1) as i32);
     }
 }
 
