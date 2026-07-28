@@ -557,7 +557,7 @@ fn refresh_trusted_publishers(state: StoredValue<AppState>) {
             company: cert.company.into(),
             contact_email: cert.contact_email.into(),
             support_url: cert.support_url.into(),
-            public_key: format_hex_groups(&cert.public_key, 4, 8).into(),
+            public_key: format_hex_groups(&cert.public_key, 4).into(),
             serial_number: cert.serial_number.replace(':', ": ").into(),
             subject: cert.subject.replace(',', ",\n").into(),
             basic_constraints: cert.basic_constraints.into(),
@@ -571,17 +571,32 @@ fn refresh_trusted_publishers(state: StoredValue<AppState>) {
         .set_trusted_publishers(ModelRc::new(VecModel::from(trusted_publishers)));
 }
 
-fn format_hex_groups(value: &str, group_len: usize, groups_per_line: usize) -> String {
+fn format_hex_groups(value: &str, group_len: usize) -> String {
     let mut formatted = String::with_capacity(value.len() + (value.len() / group_len));
     for (index, ch) in value.chars().enumerate() {
-        if index > 0 && index % (group_len * groups_per_line) == 0 {
-            formatted.push('\n');
-        } else if index > 0 && index % group_len == 0 {
+        if index > 0 && index % group_len == 0 {
             formatted.push(' ');
         }
         formatted.push(ch);
     }
     formatted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_hex_groups;
+
+    #[test]
+    fn public_key_groups_wrap_without_embedded_newlines() {
+        let public_key = "024092324dcf345bffa773d40b164ed250079c3877231b46b6c4f9ccb22b465083";
+
+        let formatted = format_hex_groups(public_key, 4);
+
+        assert_eq!(
+            formatted,
+            "0240 9232 4dcf 345b ffa7 73d4 0b16 4ed2 5007 9c38 7723 1b46 b6c4 f9cc b22b 4650 83"
+        );
+    }
 }
 
 fn import_trusted_publisher(state: StoredValue<AppState>) -> TrustedPublisherImportResult {
