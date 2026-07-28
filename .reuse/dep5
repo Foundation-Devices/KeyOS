@@ -242,6 +242,7 @@ License: MIT OR Apache-2.0
 
 Files:
   apps/simulator/ui/components/*.png
+  apps/gui-app-authenticator/test-fixtures/*.zip
 Copyright: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 License: GPL-3.0-or-later
 

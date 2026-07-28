@@ -32,7 +32,7 @@ macro_rules! use_api {
     };
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CryptoApi<P: CheckedPermissions> {
     pub(crate) conn: CheckedConn<P>,
 }

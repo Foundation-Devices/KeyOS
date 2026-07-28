@@ -1,0 +1,167 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import {
+    AuthenticatorCallbacks as CB,
+} from "../../authenticator-callbacks.slint";
+import { Palette, Size } from "@ui/theme.slint";
+import {
+    NavHeader,
+    PageBody,
+    ScrollBody,
+    ContentSection,
+    ButtonSection,
+    WrappedIcon,
+    HeadingMd,
+    TextMd,
+    Input,
+    Button,
+    ErrorModal,
+    BasePage,
+} from "@ui/widgets.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { DecryptFileProps } from "./props.slint";
+
+export component DecryptFilePage inherits BasePage {
+    in property <DecryptFileProps> props;
+
+    property <string> unlock-error: TR2.lookup(TrId.DecryptFileFailedToUnlockFile);
+    property <string> generic-error-title: TR2.lookup(TrId.DecryptFileModalFailedTitle);
+    property <string> generic-error-text: TR2.lookup(TrId.DecryptFileModalFailedContent);
+    property <string> decrypting-label: TR2.lookup(TrId.DecryptingFileDecrypting);
+    property <bool> password-has-focus: password-input.has-focus;
+
+    // Trigger auto-scroll when the password input gains focus
+    changed password-has-focus => {
+        if (password-has-focus) {
+            content-scroll.viewport-y = -150px;
+        }
+    }
+
+    VerticalLayout {
+        NavHeader {
+            title: TR2.lookup(TrId.DecryptFileTitle);
+            left-icon: "chevron-left";
+
+            clicked => {
+                CB.abandon-decrypt-file();
+                Navigate.backward();
+            }
+        }
+
+        PageBody {
+            p-x: Size.sz4;
+            p-y: Size.sz4;
+
+            content-scroll := ScrollBody {
+                p-x: Size.zero;
+                p-y: Size.zero;
+
+                ContentSection {
+                    spacing: Size.sz6;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        WrappedIcon {
+                            outer-icon: "jumbo-circle";
+                            inner-icon: "file";
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: Size.sz5;
+                        padding-left: Size.sz3;
+                        padding-right: Size.sz3;
+
+                        HeadingMd {
+                            text: props.header;
+                            horizontal-alignment: center;
+                            wrap: no-wrap;
+                            overflow: elide;
+                        }
+
+                        TextMd {
+                            text: TR2.lookup(TrId.DecryptFileContent);
+                            color: Palette.content-tertiary;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    password-input := Input {
+                        placeholder: "";
+                        text: CB.decrypt-password;
+                        input-type: InputType.password;
+                        enabled: !CB.decrypting;
+                        has-notice: CB.decrypt-password-failed;
+                        message: CB.decrypt-password-failed ? unlock-error : "";
+                        accept-button-enabled: !CB.decrypting && self.text != "";
+
+                        edited(text) => {
+                            CB.decrypt-password = text;
+                            CB.decrypt-password-failed = false;
+                            CB.decrypt-generic-failure = false;
+                        }
+
+                        accepted(text) => {
+                            if (text != "" && !CB.decrypting) {
+                                CB.decrypt-password = text;
+                                CB.decrypt-file(text);
+                            }
+                        }
+                    }
+
+                    // Conditional spacer for keyboard scrolling
+                    if password-has-focus: Rectangle {
+                        height: 230px;
+                    }
+
+                    // Permanent footer padding to keep the password error visible and
+                    // leave a little breathing room below the last field.
+                    Rectangle {
+                        height: 20px;
+                    }
+                }
+            }
+
+            ButtonSection {
+                if (CB.decrypting && CB.show-decrypt-cancel): Button {
+                    label: TR2.lookup(TrId.CommonButtonCancel);
+                    importance: secondary;
+
+                    clicked => {
+                        if (CB.decrypting) {
+                            CB.cancel-decrypt-file();
+                        }
+                    }
+                }
+
+                Button {
+                    icon: "";
+                    label: CB.decrypting ? decrypting-label : TR2.lookup(TrId.CommonButtonContinue);
+                    enabled: CB.decrypt-password != "";
+                    loading: CB.decrypting;
+
+                    clicked => {
+                        if (CB.decrypt-password != "" && !CB.decrypting) {
+                            CB.decrypt-file(CB.decrypt-password);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if CB.decrypt-generic-failure: ErrorModal {
+        icon: "alert";
+        icon-color: Palette.content-notice;
+        title: generic-error-title;
+        text: generic-error-text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+
+        confirm-clicked => {
+            CB.decrypt-generic-failure = false;
+        }
+    }
+}

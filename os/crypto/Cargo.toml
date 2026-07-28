@@ -26,8 +26,11 @@ sha2 = "0.10"
 utralib = { workspace = true }
 
 [target.'cfg(not(keyos))'.dependencies]
+aes = "0.8"
+ghash = "0.5"
 hmac = "0.12"
 sha2 = "0.10"
+zeroize = { version = "1.8.1", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

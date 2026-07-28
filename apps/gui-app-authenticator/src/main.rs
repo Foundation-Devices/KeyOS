@@ -5,8 +5,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #[cfg(not(test))]
+use std::{io::Read, path::Path};
+
+#[cfg(not(test))]
+use anyhow::Context;
+#[cfg(not(test))]
 use slint_keyos_platform::file_backed::JsonBacked;
+#[cfg(not(test))]
+use slint_keyos_platform::{
+    gui_server_api::navigation::filepicker::{self, SelectFileOptions},
+    navigation::select_file,
+};
 use {
+    crate::aegis::{AegisError, ParsedAegisExport},
     crate::gui_permissions::GuiPermissions,
     auth::{
         get_timestamp_in_seconds, make_import_label, Auth, AuthDuplicateReason, AuthEditField,
@@ -23,18 +34,127 @@ use {
             GuiServerError, InputMessage,
         },
         navigation::open_qr_scanner,
+        sleep,
         slint::{Model, ModelRc, SharedString, Timer, TimerMode, VecModel},
-        StoredValue,
+        spawn_local, spawn_worker, StoredValue,
     },
     std::{collections::HashSet, rc::Rc, time::Duration},
+    zeroize::Zeroizing,
 };
 
 use crate::fs_permissions::FileSystemPermissions;
+pub mod aegis;
 mod auth;
 pub mod google_migration;
+pub mod kdf;
+pub mod proton;
+
+crypto::use_api!();
 
 const UPDATE_INTERVAL_MS: u64 = 1000;
 const TOTP_TIMESTEP: i32 = 30;
+#[cfg(not(test))]
+const MAX_IMPORT_FILE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
+
+enum ScanImportInput {
+    Url(String),
+    File { bytes: Zeroizing<Vec<u8>>, display_name: String },
+}
+
+fn reset_decrypt_ui_state(ui: &AppWindow) {
+    let ui_state = ui.global::<AuthenticatorCallbacks>();
+    ui_state.set_show_decrypt_cancel(false);
+    ui_state.set_decrypt_password(String::new().into());
+    ui_state.set_decrypt_password_failed(false);
+    ui_state.set_decrypt_generic_failure(false);
+}
+
+fn reset_decrypt_status(ui: &AppWindow) {
+    let ui_state = ui.global::<AuthenticatorCallbacks>();
+    ui_state.set_show_decrypt_cancel(false);
+    ui_state.set_decrypt_password_failed(false);
+    ui_state.set_decrypt_generic_failure(false);
+}
+
+fn clear_decrypt_job(
+    ui: &AppWindow,
+    app_state: &mut AppState,
+    drop_pending_import: bool,
+    clear_password: bool,
+) {
+    let ui_state = ui.global::<AuthenticatorCallbacks>();
+    if drop_pending_import {
+        app_state.pending_decrypt_import = None;
+    }
+    if drop_pending_import {
+        ui_state.set_decrypt_password(String::new().into());
+    }
+    app_state.invalidate_decrypt_job();
+    app_state.decrypt_cancel_timer.stop();
+    ui_state.set_main_result(CallbackResult::success());
+    ui_state.set_decrypting(false);
+    if clear_password {
+        reset_decrypt_ui_state(ui);
+    } else {
+        reset_decrypt_status(ui);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ImportFileFormat {
+    AegisJson,
+    AegisUri,
+    ProtonCsv,
+    ProtonAuthenticatorJson,
+    ProtonZipJson,
+    ProtonZipPgp,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DecryptType {
+    Aegis,
+    OpenPgp,
+    ProtonAuthenticator,
+}
+
+#[derive(Clone)]
+struct DetectedImportFile {
+    // Leaving format in for future debug needs
+    #[allow(unused)]
+    format: ImportFileFormat,
+    decrypt_type: Option<DecryptType>,
+    payload: ImportPayload,
+}
+
+#[derive(Clone)]
+struct PendingDecryptImport {
+    display_name: String,
+    detected: DetectedImportFile,
+}
+
+#[derive(Clone)]
+enum ImportPayload {
+    AegisJsonPlain(Zeroizing<Vec<u8>>),
+    AegisJsonEncrypted(aegis::EncryptedExport),
+    AegisUri(Zeroizing<Vec<u8>>),
+    ProtonCsv(Zeroizing<Vec<u8>>),
+    ProtonAuthenticatorJsonPlain(Zeroizing<Vec<u8>>),
+    ProtonAuthenticatorJsonEncrypted(proton::ProtonAuthenticatorEncryptedExport),
+    ProtonZipJson(Zeroizing<Vec<u8>>),
+    ProtonZipPgp(Zeroizing<Vec<u8>>),
+}
+
+impl DetectedImportFile {
+    fn into_pending_decrypt(self, display_name: String) -> Result<PendingDecryptImport, AuthError> {
+        if self.decrypt_type.is_none() {
+            return Err(AuthError::UnsupportedImportFile(anyhow::anyhow!(
+                "Import file does not require decryption"
+            )));
+        }
+
+        Ok(PendingDecryptImport { display_name, detected: self })
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -64,8 +184,18 @@ pub enum AuthError {
     RedundantArchivalError(usize),
     #[error("Migration parse error: {0}")]
     MigrationParseError(String),
+    #[error("Unsupported import file: {0}")]
+    UnsupportedImportFile(anyhow::Error),
+    #[error("Import decryption password did not match")]
+    DecryptPasswordMismatch,
+    #[error("Aegis import error: {0}")]
+    AegisImportError(#[from] AegisError),
     #[error("No pending imports")]
     NoPendingImportsError,
+    #[error("No pending encrypted import")]
+    NoPendingEncryptedImportError,
+    #[error("{0:?}")]
+    GenericError(#[from] anyhow::Error),
 }
 
 impl From<OrderedTableError<Auth>> for AuthError {
@@ -84,6 +214,21 @@ impl From<MigrationError> for AuthError {
     fn from(value: MigrationError) -> Self { AuthError::MigrationParseError(value.to_string()) }
 }
 
+fn log_import_error_redacted(prefix: &str, error: &AuthError) {
+    let category = match error {
+        AuthError::UnsupportedImportFile(_) => "unsupported import file",
+        AuthError::DecryptPasswordMismatch => "decrypt password mismatch",
+        AuthError::AegisImportError(_) => "Aegis import error",
+        AuthError::GenericError(_) => "generic import error",
+        AuthError::ValidationError(_) => "validation error",
+        AuthError::DuplicateError(_) => "duplicate entry",
+        AuthError::MigrationParseError(_) => "migration parse error",
+        _ => "internal import error",
+    };
+    log::warn!("{prefix}: {category}");
+}
+
+#[cfg_attr(test, allow(dead_code))]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct AuthSettings {
     sort_mode: CardSortMode,
@@ -95,9 +240,14 @@ impl Default for AuthSettings {
 
 struct AppState {
     auth_table: OrderedTable<Auth, FilePersistence<FileSystemPermissions>>,
+    crypto: CryptoApi,
     search_text: String,
     new_code: Option<Auth>,
     pending_imports: Option<Vec<Auth>>,
+    pending_decrypt_import: Option<PendingDecryptImport>,
+    decrypt_pending: bool,
+    decrypt_cancel_timer: Timer,
+    current_decrypt_job_id: u64,
     archive_mode: bool,
     model: Rc<VecModel<AuthView>>,
     #[cfg(not(test))]
@@ -105,6 +255,8 @@ struct AppState {
     #[cfg(test)]
     sort_mode: CardSortMode,
     last_time: u64,
+    #[cfg(not(test))]
+    fs: FileSystem,
 }
 
 impl AuthView {
@@ -126,6 +278,19 @@ impl AuthView {
 }
 
 impl AppState {
+    fn invalidate_decrypt_job(&mut self) {
+        if self.decrypt_pending {
+            let previous_job_id = self.current_decrypt_job_id;
+            self.current_decrypt_job_id = self.current_decrypt_job_id.wrapping_add(1);
+            self.decrypt_pending = false;
+            log::info!(
+                "Decrypt job advanced from {} to {} during cancellation/invalidation",
+                previous_job_id,
+                self.current_decrypt_job_id
+            );
+        }
+    }
+
     fn get_time_to_refresh(&self) -> i32 {
         let system_time = get_timestamp_in_seconds();
         let time_to_refresh = TOTP_TIMESTEP - (system_time % TOTP_TIMESTEP as u64) as i32;
@@ -200,6 +365,12 @@ impl ToValidationString for AuthError {
             }
             AuthError::UnknownQrResultError => {
                 SharedString::from(tr::lookup_id(TrId::MainAdd2FAModalInvalidSecretContent))
+            }
+            AuthError::UnsupportedImportFile(_) => {
+                SharedString::from(tr::lookup_id(TrId::ImportFileModalUnsupportedContent))
+            }
+            AuthError::DecryptPasswordMismatch => {
+                SharedString::from(tr::lookup_id(TrId::DecryptFileFailedToUnlockFile))
             }
             ref other => other.to_string().into(),
         }
@@ -373,6 +544,14 @@ impl CallbackResult {
         )
     }
 
+    fn unsupported_import_file_error() -> Self {
+        Self::failure(
+            ResultLevel::Info,
+            tr::lookup_id(TrId::ImportFileModalUnsupportedHeader).to_string(),
+            tr::lookup_id(TrId::ImportFileModalUnsupportedContent).to_string(),
+        )
+    }
+
     fn navigate_from_scan_qr(&self, from_edit: bool, ui_nav: Navigate<'_>) {
         if from_edit && self.success {
             // Go back to page before qr scan, no action if not coming from edit
@@ -409,9 +588,14 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         auth_table: OrderedTable::new()
             .with_persistence(FilePersistence::new(String::from(DATABASE_FILE), fs::Location::AppData))
             .expect("failed to create authenticator database"),
+        crypto: CryptoApi::default(),
         search_text: String::new(),
         new_code: None,
         pending_imports: None,
+        pending_decrypt_import: None,
+        decrypt_pending: false,
+        decrypt_cancel_timer: Timer::default(),
+        current_decrypt_job_id: 0,
         archive_mode: false,
         model: Rc::new(VecModel::default()),
         #[cfg(not(test))]
@@ -419,6 +603,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         #[cfg(test)]
         sort_mode: CardSortMode::Label,
         last_time: 0,
+        #[cfg(not(test))]
+        fs: Default::default(),
     };
 
     if app_state.auth_table.len() == 0 {
@@ -452,19 +638,29 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<AuthenticatorCallbacks>().on_scan_qr({
         let ui = ui.clone_strong();
         move |caller| {
-            let mut app_state = app_state.borrow_mut();
             let from_edit = caller == ScanQrCaller::Edit;
 
-            let url = match scan_qr_request() {
-                Ok(u) => u,
+            let import_input = match scan_qr_request(app_state) {
+                Ok(input) => input,
                 Err(e) => {
-                    let ui_nav = ui.global::<Navigate>();
-                    CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
+                    if matches!(e, AuthError::UnsupportedImportFile(_)) {
+                        ui.global::<AuthenticatorCallbacks>()
+                            .set_main_result(CallbackResult::unsupported_import_file_error());
+                    } else {
+                        let ui_nav = ui.global::<Navigate>();
+                        CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
+                    }
                     return;
                 }
             };
 
-            app_state.handle_scanned_url(url, from_edit, &ui);
+            let mut app_state = app_state.borrow_mut();
+            match import_input {
+                ScanImportInput::Url(url) => app_state.handle_scanned_url(url, from_edit, &ui),
+                ScanImportInput::File { bytes, display_name } => {
+                    app_state.handle_import_file(bytes, display_name, from_edit, &ui)
+                }
+            }
         }
     });
 
@@ -474,6 +670,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             let mut app_state = app_state.borrow_mut();
             let ui_state = ui.global::<AuthenticatorCallbacks>();
             app_state.search_text = text.to_string().to_lowercase();
+            ui_state.set_main_result(CallbackResult::success());
             ui_state.set_entries(app_state.get_auth_entries());
         }
     });
@@ -489,7 +686,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             }
 
             ui_state.set_entries(app_state.get_auth_entries());
-            app_state.pending_imports = None;
+            app_state.discard_pending_imports();
             ui_state.set_pending_import_count(0);
         }
     });
@@ -499,8 +696,110 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         move || {
             let mut app_state = app_state.borrow_mut();
             let ui_state = ui.global::<AuthenticatorCallbacks>();
-            app_state.pending_imports = None;
+            app_state.discard_pending_imports();
+            app_state.pending_decrypt_import = None;
             ui_state.set_pending_import_count(0);
+            ui_state.set_main_result(CallbackResult::success());
+            ui_state.set_decrypting(false);
+            reset_decrypt_ui_state(&ui);
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_decrypt_file({
+        let ui = ui.clone_strong();
+        move |password| {
+            let password = Zeroizing::new(password.to_string());
+            let (crypto, pending_import, decrypt_job_id) = {
+                let mut app_state = app_state.borrow_mut();
+                let ui_state = ui.global::<AuthenticatorCallbacks>();
+
+                if app_state.decrypt_pending || ui_state.get_decrypting() {
+                    return;
+                }
+
+                ui_state.set_decrypt_password_failed(false);
+                ui_state.set_decrypt_generic_failure(false);
+
+                let Some(pending_import) = app_state.pending_decrypt_import.clone() else {
+                    ui_state.set_decrypt_generic_failure(true);
+                    return;
+                };
+
+                app_state.decrypt_pending = true;
+                app_state.current_decrypt_job_id = app_state.current_decrypt_job_id.wrapping_add(1);
+                let decrypt_job_id = app_state.current_decrypt_job_id;
+                ui_state.set_decrypting(true);
+                ui_state.set_show_decrypt_cancel(false);
+                app_state.decrypt_cancel_timer.stop();
+                app_state.decrypt_cancel_timer.start(TimerMode::SingleShot, Duration::from_secs(5), {
+                    let ui = ui.clone_strong();
+                    move || {
+                        let ui_state = ui.global::<AuthenticatorCallbacks>();
+                        if ui_state.get_decrypting() {
+                            ui_state.set_show_decrypt_cancel(true);
+                        }
+                    }
+                });
+                (app_state.crypto.clone(), pending_import, decrypt_job_id)
+            };
+
+            let ui = ui.clone_strong();
+            spawn_local(async move {
+                // Yield once so the decrypt page can update before starting work
+                sleep(Duration::from_millis(1)).await;
+
+                let mut result =
+                    spawn_worker(async move { adapt_decrypt_import(crypto, pending_import, password).await })
+                        .await;
+                let ui_state = ui.global::<AuthenticatorCallbacks>();
+                let mut app_state = app_state.borrow_mut();
+
+                if decrypt_job_id != app_state.current_decrypt_job_id {
+                    if let Ok(entries) = &mut result {
+                        for entry in entries.iter_mut() {
+                            entry.zeroize_sensitive();
+                        }
+                    }
+                    log::info!("Ignoring stale decrypt result for superseded import job {}", decrypt_job_id);
+                    return;
+                }
+                app_state.decrypt_pending = false;
+                app_state.decrypt_cancel_timer.stop();
+
+                ui_state.set_decrypting(false);
+                reset_decrypt_ui_state(&ui);
+
+                match result {
+                    Ok(entries) => {
+                        app_state.pending_decrypt_import = None;
+                        app_state.stage_pending_imports(entries, &ui);
+                    }
+                    Err((AuthError::DecryptPasswordMismatch, _pending_import)) => {
+                        ui_state.set_decrypt_password_failed(true);
+                    }
+                    Err((e, _pending_import)) => {
+                        log_import_error_redacted("Import decrypt failed", &e);
+                        ui_state.set_decrypt_generic_failure(true);
+                    }
+                }
+            })
+            .detach();
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_cancel_decrypt_file({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            clear_decrypt_job(&ui, &mut app_state, false, false);
+        }
+    });
+
+    ui.global::<AuthenticatorCallbacks>().on_abandon_decrypt_file({
+        let ui = ui.clone_strong();
+        move || {
+            let mut app_state = app_state.borrow_mut();
+            clear_decrypt_job(&ui, &mut app_state, true, true);
         }
     });
 
@@ -714,9 +1013,16 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
 
             let mut app_state = app_state.borrow_mut();
+            let ui_state = ui.global::<AuthenticatorCallbacks>();
             app_state.search_text = String::new();
             app_state.new_code = None;
-            app_state.pending_imports = None;
+            app_state.discard_pending_imports();
+            app_state.pending_decrypt_import = None;
+            app_state.invalidate_decrypt_job();
+            app_state.decrypt_cancel_timer.stop();
+            ui_state.set_pending_import_count(0);
+            ui_state.set_decrypting(false);
+            reset_decrypt_ui_state(&ui);
             app_state.handle_scanned_url(url, false, &ui);
         }
     });
@@ -725,21 +1031,33 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 }
 
 impl AppState {
-    fn handle_scanned_url(&mut self, url: String, from_edit: bool, ui: &AppWindow) {
+    fn stage_pending_imports(&mut self, entries: Vec<Auth>, ui: &AppWindow) {
+        self.discard_pending_imports();
+        let count = entries.len();
         let ui_nav = ui.global::<Navigate>();
         let ui_callbacks = ui.global::<AuthenticatorCallbacks>();
+        self.pending_imports = Some(entries);
+        ui_callbacks.set_pending_import_count(count as i32);
+        ui_nav.invoke_main(
+            MainParams { version: CardPageVersion::Main },
+            NavigateOptions { replace: true, animate: Animate::None },
+        );
+    }
+
+    fn discard_pending_imports(&mut self) {
+        if let Some(mut entries) = self.pending_imports.take() {
+            for entry in &mut entries {
+                entry.zeroize_sensitive();
+            }
+        }
+    }
+
+    fn handle_scanned_url(&mut self, url: String, from_edit: bool, ui: &AppWindow) {
+        let ui_nav = ui.global::<Navigate>();
 
         if google_migration::is_migration_uri(&url) {
             match google_migration::parse_migration_uri(&url) {
-                Ok(entries) => {
-                    let count = entries.len();
-                    self.pending_imports = Some(entries);
-                    ui_callbacks.set_pending_import_count(count as i32);
-                    ui_nav.invoke_main(
-                        MainParams { version: CardPageVersion::Main },
-                        NavigateOptions { replace: true, animate: Animate::None },
-                    );
-                }
+                Ok(entries) => self.stage_pending_imports(entries, ui),
                 Err(e) => {
                     log::warn!("Failed to parse migration URI: {}", e);
                     CallbackResult::from(AuthError::from(e)).navigate_from_scan_qr(from_edit, ui_nav);
@@ -764,6 +1082,53 @@ impl AppState {
                 CallbackResult::from(e).navigate_from_scan_qr(from_edit, ui_nav);
             }
         }
+    }
+
+    fn handle_import_file(
+        &mut self,
+        bytes: Zeroizing<Vec<u8>>,
+        display_name: String,
+        from_edit: bool,
+        ui: &AppWindow,
+    ) {
+        let ui_nav = ui.global::<Navigate>();
+        let ui_state = ui.global::<AuthenticatorCallbacks>();
+
+        if self.decrypt_pending {
+            log::info!("Ignoring file import while a decrypt is still pending");
+            return;
+        }
+
+        let detected = match detect_import_file(bytes.as_slice()) {
+            Ok(detected) => detected,
+            Err(e) => {
+                log::warn!("Import file rejected before dispatch: {}", e);
+                ui_state.set_main_result(CallbackResult::unsupported_import_file_error());
+                return;
+            }
+        };
+
+        match dispatch_import_file(detected, display_name, self) {
+            Ok(Some(entries)) => self.stage_pending_imports(entries, ui),
+            Ok(None) => {
+                ui_state.set_show_decrypt_cancel(false);
+                ui_nav.invoke_decrypt_file(
+                    DecryptFileParams { header: self.pending_import_header() },
+                    NavigateOptions { replace: from_edit, animate: Animate::None },
+                )
+            }
+            Err(e) => {
+                log_import_error_redacted("Import file rejected before decrypt", &e);
+                ui_state.set_main_result(CallbackResult::unsupported_import_file_error());
+            }
+        }
+    }
+
+    fn pending_import_header(&self) -> SharedString {
+        self.pending_decrypt_import
+            .as_ref()
+            .map(|pending| SharedString::from(pending.display_name.as_str()))
+            .unwrap_or_default()
     }
 }
 
@@ -869,11 +1234,18 @@ fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
     let mut occupied_labels: HashSet<String> =
         app_state.auth_table.iter().map(|auth| auth.get_label().to_string()).collect();
 
-    for entry in entries {
+    let mut entries = entries.into_iter();
+    while let Some(entry) = entries.next() {
         let label = pick_next_import_label(entry.get_label(), &occupied_labels);
 
         let mut import_auth = entry;
-        import_auth.edit(AuthEditField::Label(label.clone()))?;
+        if let Err(error) = import_auth.edit(AuthEditField::Label(label.clone())) {
+            import_auth.zeroize_sensitive();
+            for mut entry in entries {
+                entry.zeroize_sensitive();
+            }
+            return Err(error.into());
+        }
         import_auth.color = 0;
 
         app_state.auth_table.separate_categories(|a| a.get_category());
@@ -887,20 +1259,316 @@ fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
     Ok(())
 }
 
-fn scan_qr_request() -> Result<String, AuthError> {
-    log::debug!("Scanning a TOTP QR code");
-    let opt = open_qr_scanner::<GuiPermissions>(ScanQrOptions::default())
-        .map_err(|e| AuthError::NavigateToQrError(e))?;
-    let nav_res = opt.ok_or(AuthError::ScanQrFailedError)?;
+fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
+    let proton_zip_json = proton::extract_zip_entry(bytes, proton::ZIP_JSON_ENTRY);
+    match proton_zip_json {
+        Ok(data_json) => {
+            return Ok(DetectedImportFile {
+                format: ImportFileFormat::ProtonZipJson,
+                decrypt_type: None,
+                payload: ImportPayload::ProtonZipJson(data_json),
+            });
+        }
+        Err(error) => {
+            log::debug!("Proton ZIP JSON probe failed: {error}");
+        }
+    }
 
-    let data = match nav_res {
-        ScanQrResult::Qr { data, .. } => data,
-        ScanQrResult::LeftClicked => return Err(AuthError::ScanQrCanceledError),
-        _ => return Err(AuthError::UnknownQrResultError),
+    let proton_zip_pgp = proton::extract_zip_entry(bytes, proton::ZIP_PGP_ENTRY);
+    match proton_zip_pgp {
+        Ok(data_pgp) => {
+            return Ok(DetectedImportFile {
+                format: ImportFileFormat::ProtonZipPgp,
+                decrypt_type: Some(DecryptType::OpenPgp),
+                payload: ImportPayload::ProtonZipPgp(data_pgp),
+            });
+        }
+        Err(error) => {
+            log::debug!("Proton ZIP PGP probe failed: {error}");
+        }
+    }
+
+    match proton::probe_csv_export(bytes) {
+        Ok(()) => {
+            return Ok(DetectedImportFile {
+                format: ImportFileFormat::ProtonCsv,
+                decrypt_type: None,
+                payload: ImportPayload::ProtonCsv(Zeroizing::new(bytes.to_vec())),
+            });
+        }
+        Err(error) => {
+            let _ = error;
+            log::debug!("Proton CSV probe failed for {}-byte input", bytes.len());
+        }
+    }
+
+    match proton::parse_authenticator_export(bytes) {
+        Ok(parsed) => {
+            return Ok(match parsed {
+                proton::ParsedAuthenticatorExport::Plain(bytes) => DetectedImportFile {
+                    format: ImportFileFormat::ProtonAuthenticatorJson,
+                    decrypt_type: None,
+                    payload: ImportPayload::ProtonAuthenticatorJsonPlain(Zeroizing::new(bytes)),
+                },
+                proton::ParsedAuthenticatorExport::Encrypted(export) => DetectedImportFile {
+                    format: ImportFileFormat::ProtonAuthenticatorJson,
+                    decrypt_type: Some(DecryptType::ProtonAuthenticator),
+                    payload: ImportPayload::ProtonAuthenticatorJsonEncrypted(export),
+                },
+            });
+        }
+        Err(error) => {
+            log::debug!("Proton Authenticator JSON probe failed: {error}");
+        }
+    }
+
+    match aegis::parse_export(bytes) {
+        Ok(parsed) => {
+            return Ok(match parsed {
+                ParsedAegisExport::Plain(db) => DetectedImportFile {
+                    format: ImportFileFormat::AegisJson,
+                    decrypt_type: None,
+                    payload: ImportPayload::AegisJsonPlain(Zeroizing::new(db)),
+                },
+                ParsedAegisExport::Encrypted(export) => DetectedImportFile {
+                    format: ImportFileFormat::AegisJson,
+                    decrypt_type: Some(DecryptType::Aegis),
+                    payload: ImportPayload::AegisJsonEncrypted(export),
+                },
+            });
+        }
+        Err(error) => {
+            log::debug!("Aegis JSON probe failed: {error}");
+        }
+    }
+
+    match aegis::probe_uri_export(bytes) {
+        Ok(()) => {
+            return Ok(DetectedImportFile {
+                format: ImportFileFormat::AegisUri,
+                decrypt_type: None,
+                payload: ImportPayload::AegisUri(Zeroizing::new(bytes.to_vec())),
+            });
+        }
+        Err(error) => {
+            let _ = error;
+            log::debug!("Aegis URI probe failed for {}-byte input", bytes.len());
+        }
+    }
+
+    Err(AuthError::UnsupportedImportFile(anyhow::anyhow!("Unknown import file format")))
+}
+
+fn dispatch_import_file(
+    detected: DetectedImportFile,
+    display_name: String,
+    app_state: &mut AppState,
+) -> Result<Option<Vec<Auth>>, AuthError> {
+    match detected {
+        DetectedImportFile { payload: ImportPayload::AegisJsonPlain(db), .. } => Ok(Some(
+            aegis::ingest_plaintext_db(db.as_slice())
+                .map_err(|e| AuthError::UnsupportedImportFile(e.into()))?,
+        )),
+        detected @ DetectedImportFile { payload: ImportPayload::AegisJsonEncrypted(_), .. } => {
+            app_state.pending_decrypt_import = Some(detected.into_pending_decrypt(display_name)?);
+            Ok(None)
+        }
+        DetectedImportFile { payload: ImportPayload::AegisUri(bytes), .. } => Ok(Some(
+            aegis::ingest_uri_export(bytes.as_slice())
+                .map_err(|e| AuthError::UnsupportedImportFile(e.into()))?,
+        )),
+        DetectedImportFile { payload: ImportPayload::ProtonZipJson(bytes), .. } => {
+            Ok(Some(proton::ingest_json_export(bytes.as_slice()).map_err(AuthError::UnsupportedImportFile)?))
+        }
+        DetectedImportFile { payload: ImportPayload::ProtonCsv(bytes), .. } => {
+            Ok(Some(proton::ingest_csv_export(bytes.as_slice()).map_err(AuthError::UnsupportedImportFile)?))
+        }
+        DetectedImportFile { payload: ImportPayload::ProtonAuthenticatorJsonPlain(bytes), .. } => Ok(Some(
+            proton::ingest_authenticator_plain_export(bytes.as_slice())
+                .map_err(AuthError::UnsupportedImportFile)?,
+        )),
+        detected @ DetectedImportFile {
+            payload: ImportPayload::ProtonAuthenticatorJsonEncrypted(_), ..
+        } => {
+            app_state.pending_decrypt_import = Some(detected.into_pending_decrypt(display_name)?);
+            Ok(None)
+        }
+        detected @ DetectedImportFile { payload: ImportPayload::ProtonZipPgp(_), .. } => {
+            app_state.pending_decrypt_import = Some(detected.into_pending_decrypt(display_name)?);
+            Ok(None)
+        }
+    }
+}
+
+async fn adapt_decrypt_import(
+    crypto: CryptoApi,
+    pending_import: PendingDecryptImport,
+    password: Zeroizing<String>,
+) -> Result<Vec<Auth>, (AuthError, PendingDecryptImport)> {
+    match &pending_import.detected.payload {
+        ImportPayload::AegisJsonEncrypted(export) => {
+            let plaintext =
+                aegis::decrypt_export(&crypto, export, password.as_str()).await.map_err(|error| {
+                    let auth_error = if matches!(error, AegisError::PasswordMismatch) {
+                        AuthError::DecryptPasswordMismatch
+                    } else {
+                        AuthError::AegisImportError(error)
+                    };
+                    (auth_error, pending_import.clone())
+                })?;
+            aegis::ingest_plaintext_db(plaintext.as_slice())
+                .map_err(|e| (AuthError::AegisImportError(e), pending_import))
+        }
+        ImportPayload::ProtonZipPgp(bytes) => {
+            let plaintext = proton::decrypt_pgp_export(bytes.as_slice(), password.as_str()).map_err(
+                |error| match error {
+                    proton::ProtonError::PasswordMismatch => {
+                        (AuthError::DecryptPasswordMismatch, pending_import.clone())
+                    }
+                    proton::ProtonError::Generic(error) => {
+                        (AuthError::GenericError(error), pending_import.clone())
+                    }
+                },
+            )?;
+            proton::ingest_json_export(plaintext.as_slice())
+                .map_err(|e| (AuthError::GenericError(e), pending_import))
+        }
+        ImportPayload::ProtonAuthenticatorJsonEncrypted(export) => {
+            let plaintext = proton::decrypt_authenticator_export(&crypto, export, password.as_str())
+                .await
+                .map_err(|error| match error {
+                    proton::ProtonError::PasswordMismatch => {
+                        (AuthError::DecryptPasswordMismatch, pending_import.clone())
+                    }
+                    proton::ProtonError::Generic(error) => {
+                        (AuthError::GenericError(error), pending_import.clone())
+                    }
+                })?;
+            Ok(proton::ingest_authenticator_plain_export(plaintext.as_slice())
+                .map_err(|e| (AuthError::GenericError(e), pending_import))?)
+        }
+        _ => Err((
+            AuthError::UnsupportedImportFile(anyhow::anyhow!(
+                "Pending decrypt import did not contain decryptable payload"
+            )),
+            pending_import,
+        )),
+    }
+}
+
+#[cfg(not(test))]
+fn execute_file_picker(
+    state: StoredValue<AppState>,
+) -> Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError> {
+    let options = SelectFileOptions::default().with_dirs_allowed(true);
+    let files = match select_file::<GuiPermissions>(options) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            log::info!("Nothing returned from file picker");
+            return Ok(None);
+        }
+        Err(e) => {
+            log::info!("Error while picking file: {:?}", e);
+            return Ok(None);
+        }
     };
 
-    let url = std::str::from_utf8(data.as_slice()).map_err(|e| AuthError::DecodeQrError(e))?;
-    Ok(String::from(url))
+    let (path, location) = match files.files().len() {
+        0 => {
+            log::error!("No files selected");
+            return Ok(None);
+        }
+        1 => files.files()[0].clone(),
+        _ => {
+            log::info!("Multiple files selected, using first only");
+            files.files()[0].clone()
+        }
+    };
+
+    let location = match location {
+        filepicker::Location::Internal => fs::Location::User,
+        filepicker::Location::Airlock => fs::Location::Airlock,
+        filepicker::Location::External => fs::Location::Usb,
+    };
+
+    let opened = state
+        .borrow()
+        .fs
+        .open_file(&path, location, fs::OpenFlags { read: true, write: false, create: false })
+        .context(format!("Failed to open selected file {}", path))
+        .map_err(AuthError::UnsupportedImportFile)?;
+
+    let metadata = opened
+        .metadata()
+        .context(format!("Failed to read metadata for selected file {}", path))
+        .map_err(AuthError::UnsupportedImportFile)?;
+    if metadata.size > MAX_IMPORT_FILE_SIZE_BYTES {
+        return Err(AuthError::UnsupportedImportFile(anyhow::anyhow!(
+            "Selected import file is too large: {} bytes (maximum {} bytes)",
+            metadata.size,
+            MAX_IMPORT_FILE_SIZE_BYTES
+        )));
+    }
+
+    let mut bytes = Zeroizing::new(Vec::new());
+    let _ = opened
+        .take(MAX_IMPORT_FILE_SIZE_BYTES + 1)
+        .read_to_end(&mut *bytes)
+        .context(format!("Failed to read selected file {}", path))
+        .map_err(AuthError::UnsupportedImportFile)?;
+    if bytes.len() as u64 > MAX_IMPORT_FILE_SIZE_BYTES {
+        return Err(AuthError::UnsupportedImportFile(anyhow::anyhow!(
+            "Selected import file is too large: more than {} bytes",
+            MAX_IMPORT_FILE_SIZE_BYTES
+        )));
+    }
+
+    let display_name =
+        Path::new(&path).file_name().and_then(|value| value.to_str()).map(String::from).unwrap_or(path);
+
+    Ok(Some((bytes, display_name)))
+}
+
+#[cfg(test)]
+fn execute_file_picker(
+    _state: StoredValue<AppState>,
+) -> Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError> {
+    Ok(None)
+}
+
+fn scan_import_input_from_file_picker_result(
+    result: Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError>,
+) -> Result<ScanImportInput, AuthError> {
+    let (bytes, display_name) = result?.ok_or(AuthError::ScanQrCanceledError)?;
+    Ok(ScanImportInput::File { bytes, display_name })
+}
+
+fn scan_qr_request(state: StoredValue<AppState>) -> Result<ScanImportInput, AuthError> {
+    let opts = ScanQrOptions {
+        header_title: tr::lookup_id(TrId::ScanTitle).into(),
+        header_left_icon: String::from("chevron-left"),
+        button_icon: String::from("file"),
+        button_text: tr::lookup_id(TrId::CameraImportFromFile).into(),
+        ..ScanQrOptions::default()
+    };
+
+    let opt = open_qr_scanner::<GuiPermissions>(opts).map_err(|e| AuthError::NavigateToQrError(e))?;
+    let nav_res = opt.ok_or(AuthError::ScanQrFailedError)?;
+
+    match nav_res {
+        ScanQrResult::Qr { data, .. } => {
+            let url = std::str::from_utf8(data.as_slice()).map_err(|e| AuthError::DecodeQrError(e))?;
+            Ok(ScanImportInput::Url(String::from(url)))
+        }
+        ScanQrResult::LeftClicked => return Err(AuthError::ScanQrCanceledError),
+        ScanQrResult::ButtonClicked => {
+            // Sleep to avoid the OOM killer closing the authenticator app while the
+            // file picker process starts.
+            std::thread::sleep(Duration::from_millis(500));
+            scan_import_input_from_file_picker_result(execute_file_picker(state))
+        }
+        _ => return Err(AuthError::UnknownQrResultError),
+    }
 }
 
 fn format_totp_code(code: &str) -> String {
@@ -922,293 +1590,6 @@ fn format_totp_code(code: &str) -> String {
 mod tests {
     use super::*;
 
-    const URL1: &str = "otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example";
-    const URL2: &str = "otpauth://totp/Example:alice@google.com?secret=ABSWY3DPEHPK3PXP&issuer=Example";
-    const URL3: &str = "otpauth://totp/D:alice@google.com?secret=BBSWY3DPEHPK3PXP&issuer=D";
-    const URL4: &str = "otpauth://totp/C:alice@google.com?secret=CBSWY3DPEHPK3PXP&issuer=C";
-    const URL5: &str = "otpauth://totp/B:alice@google.com?secret=DBSWY3DPEHPK3PXP&issuer=B";
-    const URL_INVALID: &str = "otpauth://totp/A:alice@google.com?secret=ABSWY3DPEHPK3PXP&issuer=B";
-    const URL6: &str = "otpauth://totp/Example:alice@google.com?secret=EBSWY3DPEHPK3PXP&issuer=Example";
-
-    fn app_state0() -> AppState {
-        AppState {
-            auth_table: OrderedTable::new(),
-            search_text: String::new(),
-            new_code: None,
-            pending_imports: None,
-            archive_mode: false,
-            model: Rc::new(VecModel::default()),
-            sort_mode: CardSortMode::Label,
-            last_time: 0,
-        }
-    }
-
-    fn app_state1() -> AppState {
-        let mut app_state = app_state0();
-        let auth = Auth::new(String::from(URL1), 0).unwrap();
-        app_state.auth_table.push(auth).unwrap();
-        app_state
-    }
-
-    fn app_state3() -> AppState {
-        let mut app_state = app_state0();
-        let auth = Auth::new(String::from(URL3), 0).unwrap();
-        app_state.auth_table.push(auth).unwrap();
-        let auth = Auth::new(String::from(URL4), 0).unwrap();
-        app_state.auth_table.push(auth).unwrap();
-        let auth = Auth::new(String::from(URL5), 0).unwrap();
-        app_state.auth_table.push(auth).unwrap();
-        app_state
-    }
-
-    #[test]
-    fn test_adapt_import_multiple_with_internal_duplicate_labels() {
-        let mut app_state = app_state0();
-        let auth1 = Auth::new(String::from(URL1), 0).unwrap();
-        let auth2 = Auth::new(String::from(URL2), 0).unwrap();
-        app_state.pending_imports = Some(vec![auth1, auth2]);
-
-        adapt_import_multiple(&mut app_state).unwrap();
-
-        assert_eq!(app_state.auth_table.len(), 2);
-        assert_eq!(app_state.auth_table.get(0).unwrap().get_label(), "Example");
-        assert_eq!(app_state.auth_table.get(1).unwrap().get_label(), "[Import] Example");
-    }
-
-    #[test]
-    fn test_adapt_import_multiple_with_repeated_imports() {
-        let mut app_state = app_state1();
-        app_state.pending_imports = Some(vec![Auth::new(String::from(URL2), 0).unwrap()]);
-        adapt_import_multiple(&mut app_state).unwrap();
-        assert_eq!(app_state.auth_table.get(1).unwrap().get_label(), "[Import] Example");
-
-        app_state.pending_imports = Some(vec![Auth::new(String::from(URL6), 0).unwrap()]);
-        adapt_import_multiple(&mut app_state).unwrap();
-
-        assert_eq!(app_state.auth_table.len(), 3);
-        assert_eq!(app_state.auth_table.get(2).unwrap().get_label(), "[Import 1] Example");
-    }
-
-    #[test]
-    fn test_adapt_save() {
-        let mut app_state = app_state3();
-        adapt_set_archived(1, true, &mut app_state).unwrap();
-        let desired_auth = Auth::new(String::from(URL1), 0).unwrap();
-        app_state.new_code = Some(desired_auth.clone());
-        adapt_save(
-            SharedString::from("Example"),
-            SharedString::from("alice@google.com"),
-            SharedString::from("Example"),
-            0,
-            &mut app_state,
-        )
-        .unwrap();
-        assert_eq!(Auth::new(String::from(URL1), 0).unwrap(), app_state.auth_table.get(2).unwrap().clone());
-    }
-
-    #[test]
-    fn test_adapt_scan_qr() {
-        let mut app_state = app_state0();
-        let url = String::from(URL1);
-        let res = adapt_scan_qr(url.clone(), &mut app_state).unwrap();
-        let desired_auth = Auth::new(url, 0).unwrap();
-        let desired_auth_view = AuthView::new(&desired_auth, 0);
-        assert_eq!(res, (desired_auth_view, SharedString::new()));
-        assert_eq!(app_state.new_code.unwrap(), desired_auth);
-    }
-
-    #[test]
-    fn test_adapt_scan_qr_duplicate_totp() {
-        let mut app_state = app_state1();
-        let url = String::from(URL1);
-        let res = adapt_scan_qr(url.clone(), &mut app_state).unwrap_err();
-        match res {
-            AuthError::DuplicateError(AuthDuplicateReason::Totp(other))
-                if other == String::from("Example") =>
-            {
-                ()
-            }
-            _ => panic!("Failed with wrong error: {}", res),
-        }
-        assert!(app_state.new_code.is_none());
-    }
-
-    #[test]
-    fn test_adapt_scan_qr_duplicate_label() {
-        let mut app_state = app_state1();
-        let url = String::from(URL2);
-        let res = adapt_scan_qr(url.clone(), &mut app_state).unwrap();
-        let desired_auth = Auth::new(url, 0).unwrap();
-        let desired_auth_view = AuthView::new(&desired_auth, 0);
-        assert_eq!(
-            res,
-            (desired_auth_view, SharedString::from(tr::lookup_id(TrId::MainAddCodeLabelAlreadyInUse)))
-        );
-        assert_eq!(app_state.new_code.unwrap(), desired_auth);
-    }
-
-    #[test]
-    fn test_adapt_scan_qr_invalid_totp() {
-        let mut app_state = app_state0();
-        let url = String::from(URL_INVALID);
-        let res = adapt_scan_qr(url.clone(), &mut app_state).unwrap_err();
-        match res {
-            AuthError::ValidationError(AuthValidationError::InvalidTotpError(_)) => (),
-            _ => panic!("Failed with wrong error: {}", res),
-        }
-        assert!(app_state.new_code.is_none());
-    }
-
-    #[test]
-    fn test_adapt_validate_new_label() {
-        let label = SharedString::from("Example");
-        let mut app_state = app_state0();
-        let desired_auth = Auth::new(String::from(URL1), 0).unwrap();
-        app_state.new_code = Some(desired_auth.clone());
-        let auth = adapt_validate_new_label(label, &mut app_state).unwrap();
-        assert_eq!(auth, desired_auth);
-    }
-
-    #[test]
-    fn test_adapt_validate_new_label_duplicate() {
-        let label = SharedString::from("Example");
-        let mut app_state = app_state1();
-        let desired_auth = Auth::new(String::from(URL2), 0).unwrap();
-        app_state.new_code = Some(desired_auth.clone());
-        let res = adapt_validate_new_label(label, &mut app_state).unwrap_err();
-        match res {
-            AuthError::DuplicateError(AuthDuplicateReason::Label(other))
-                if other == String::from("Example") =>
-            {
-                ()
-            }
-            _ => panic!("Failed with wrong error: {}", res),
-        }
-    }
-
-    #[test]
-    fn test_adapt_validate_new_label_empty() {
-        let label = SharedString::from("");
-        let mut app_state = app_state1();
-        let desired_auth = Auth::new(String::from(URL2), 0).unwrap();
-        app_state.new_code = Some(desired_auth.clone());
-        let res = adapt_validate_new_label(label, &mut app_state).unwrap_err();
-        match res {
-            AuthError::ValidationError(AuthValidationError::InvalidLabelError) => (),
-            _ => panic!("Failed with wrong error: {}", res),
-        }
-    }
-
-    #[test]
-    fn test_adapt_set_archived() {
-        // Test that archived items are separated from active items
-        let mut app_state = app_state3();
-        adapt_set_archived(1, true, &mut app_state).unwrap();
-
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL5), 0).unwrap(), app_state.auth_table.get(1).unwrap().clone());
-        let mut archived_auth = Auth::new(String::from(URL4), 0).unwrap();
-        archived_auth.archived = true;
-        assert_eq!(archived_auth, app_state.auth_table.get(2).unwrap().clone());
-
-        // Set up for last test
-        adapt_set_archived(1, true, &mut app_state).unwrap();
-        let mut archived_auth_2 = Auth::new(String::from(URL5), 0).unwrap();
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        archived_auth_2.archived = true;
-        assert_eq!(archived_auth_2, app_state.auth_table.get(1).unwrap().clone());
-        assert_eq!(archived_auth, app_state.auth_table.get(2).unwrap().clone());
-
-        // Test that restored items go to end of active items
-        adapt_set_archived(2, false, &mut app_state).unwrap();
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL4), 0).unwrap(), app_state.auth_table.get(1).unwrap().clone());
-        assert_eq!(archived_auth_2, app_state.auth_table.get(2).unwrap().clone());
-    }
-
-    #[test]
-    fn test_adapt_set_archived_negative_index() {
-        let mut app_state = app_state3();
-        let err = adapt_set_archived(-1, true, &mut app_state).unwrap_err();
-        match err {
-            AuthError::IndexError => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
-    #[test]
-    fn test_adapt_set_archived_out_of_bounds() {
-        let mut app_state = app_state3();
-        let err = adapt_set_archived(3, true, &mut app_state).unwrap_err();
-        match err {
-            AuthError::OrderedTableError(OrderedTableError::OutOfBoundsError(i, l)) if i == l && l == 3 => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
-    #[test]
-    fn test_adapt_set_archived_redundant() {
-        let mut app_state = app_state3();
-        adapt_set_archived(2, true, &mut app_state).unwrap();
-        let err = adapt_set_archived(2, true, &mut app_state).unwrap_err();
-        match err {
-            AuthError::RedundantArchivalError(i) if i == 2 => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
-    #[test]
-    fn test_adapt_move_position() {
-        let mut app_state = app_state3();
-        adapt_move_position(0, false, &mut app_state).unwrap();
-        assert_eq!(Auth::new(String::from(URL4), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(1).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL5), 0).unwrap(), app_state.auth_table.get(2).unwrap().clone());
-
-        adapt_move_position(1, true, &mut app_state).unwrap();
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL4), 0).unwrap(), app_state.auth_table.get(1).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL5), 0).unwrap(), app_state.auth_table.get(2).unwrap().clone());
-    }
-
-    #[test]
-    fn test_adapt_move_position_with_archive() {
-        let mut app_state = app_state3();
-        adapt_set_archived(2, true, &mut app_state).unwrap();
-
-        assert_eq!(Auth::new(String::from(URL3), 0).unwrap(), app_state.auth_table.get(0).unwrap().clone());
-        assert_eq!(Auth::new(String::from(URL4), 0).unwrap(), app_state.auth_table.get(1).unwrap().clone());
-        let mut archived_auth = Auth::new(String::from(URL5), 0).unwrap();
-        archived_auth.archived = true;
-        assert_eq!(archived_auth, app_state.auth_table.get(2).unwrap().clone());
-
-        let err = adapt_move_position(1, false, &mut app_state).unwrap_err();
-        match err {
-            AuthError::OrderedTableError(OrderedTableError::CategoryOutOfBoundsError(..)) => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
-    #[test]
-    fn test_adapt_move_position_negative_destination() {
-        let mut app_state = app_state3();
-        let err = adapt_move_position(0, true, &mut app_state).unwrap_err();
-        match err {
-            AuthError::IndexError => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
-    #[test]
-    fn test_adapt_move_position_negative_index() {
-        let mut app_state = app_state3();
-        let err = adapt_move_position(-1, false, &mut app_state).unwrap_err();
-        match err {
-            AuthError::IndexError => (),
-            _ => panic!("Failed with wrong error: {}", err),
-        }
-    }
-
     #[test]
     fn test_format_totp_code_6() {
         let res = format_totp_code("123456");
@@ -1216,68 +1597,17 @@ mod tests {
     }
 
     #[test]
+    fn test_file_picker_preserves_unsupported_import_file_errors() {
+        let result = scan_import_input_from_file_picker_result(Err(AuthError::UnsupportedImportFile(
+            anyhow::anyhow!("Selected import file is too large"),
+        )));
+
+        assert!(matches!(result, Err(AuthError::UnsupportedImportFile(_))));
+    }
+
+    #[test]
     fn test_format_totp_code_8() {
         let res = format_totp_code("12345678");
         assert_eq!(res, String::from("1 2 3 4  5 6 7 8"));
-    }
-
-    #[test]
-    fn test_get_auth_entries() {
-        let app_state = app_state3();
-        // Default sort mode should be Label
-        assert_eq!(app_state.sort_mode, CardSortMode::Label);
-        // Default archive mode should be false
-        assert!(!app_state.archive_mode);
-        let model = app_state.get_auth_entries();
-        assert_eq!(
-            model.row_data(0).unwrap(),
-            AuthView::new(app_state.auth_table.get(2).unwrap(), 0).with_index(2)
-        );
-        assert_eq!(
-            model.row_data(1).unwrap(),
-            AuthView::new(app_state.auth_table.get(1).unwrap(), 0).with_index(1)
-        );
-        assert_eq!(
-            model.row_data(2).unwrap(),
-            AuthView::new(app_state.auth_table.get(0).unwrap(), 0).with_index(0)
-        );
-    }
-
-    #[test]
-    fn test_get_auth_entries_search() {
-        let mut app_state = app_state3();
-        app_state.search_text = String::from("c");
-        let model = app_state.get_auth_entries();
-        assert_eq!(
-            model.row_data(0).unwrap(),
-            AuthView::new(app_state.auth_table.get(1).unwrap(), 0).with_index(1)
-        );
-    }
-
-    #[test]
-    fn test_get_auth_entries_remove_archived() {
-        let mut app_state = app_state3();
-        adapt_set_archived(1, true, &mut app_state).unwrap();
-        let model = app_state.get_auth_entries();
-        assert_eq!(
-            model.row_data(0).unwrap(),
-            AuthView::new(app_state.auth_table.get(1).unwrap(), 0).with_index(1)
-        );
-        assert_eq!(
-            model.row_data(1).unwrap(),
-            AuthView::new(app_state.auth_table.get(0).unwrap(), 0).with_index(0)
-        );
-    }
-
-    #[test]
-    fn test_get_auth_entries_view_archive() {
-        let mut app_state = app_state3();
-        adapt_set_archived(1, true, &mut app_state).unwrap();
-        app_state.archive_mode = true;
-        let model = app_state.get_auth_entries();
-        assert_eq!(
-            model.row_data(0).unwrap(),
-            AuthView::new(app_state.auth_table.get(2).unwrap(), 0).with_index(2)
-        );
     }
 }

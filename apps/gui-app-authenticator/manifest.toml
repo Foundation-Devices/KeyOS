@@ -14,5 +14,10 @@ subRules = { qr = { QR = { regex_pattern = "^otpauth-migration://" } } }
 en = "2FA"
 
 [permissions]
-template = ["gui-app", "fs-generic"]
+template = ["gui-app", "fs-generic", "crypto-aes"]
 "os/gui-server" = ["GetPendingNavRequest"]
+"os/fs" = [
+    "GetAirlockReadAccess",
+    "GetUserReadAccess",
+    "GetUsbReadAccess",
+]

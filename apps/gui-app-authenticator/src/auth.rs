@@ -4,14 +4,18 @@
 // SPDX-FileCopyrightText: 2026 immz https://github.com/immz4
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(not(test))]
+use std::time::Duration;
+
 use {
     crate::{tr, TrId},
     ordered_table::{SortableCard, TableEntry},
     serde::{Deserialize, Serialize},
-    std::time::Duration,
+    std::fmt,
     totp_rs::{TotpUrlError, TOTP},
     url::{form_urlencoded, Url},
     urlencoding::decode,
+    zeroize::Zeroize,
 };
 
 pub const DATABASE_FILE: &str = "authenticator_database_v3.json";
@@ -42,10 +46,11 @@ pub enum AuthCategories {
     Archived,
 }
 
-// Always provide defaults for new values
-// Requires debug to debug associated types in OrderedTable
-// Be careful not to debug log the whole thing with private TOTP keys
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+// Always provide defaults for new values.
+// `OrderedTable` requires its associated types to implement `Debug`, so this
+// type has a custom implementation below that deliberately omits the TOTP
+// key material.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Auth {
     totp: TOTP,
     label: String,
@@ -55,6 +60,20 @@ pub struct Auth {
     pub archived: bool,
     #[serde(default)]
     date: u64,
+}
+
+impl fmt::Debug for Auth {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Auth")
+            .field("label", &self.label)
+            .field("account", &self.totp.account_name)
+            .field("issuer", &self.totp.issuer)
+            .field("color", &self.color)
+            .field("archived", &self.archived)
+            .field("date", &self.date)
+            .finish_non_exhaustive()
+    }
 }
 
 trait AuthValidation {
@@ -216,6 +235,15 @@ impl Auth {
     pub fn get_category(&self) -> u32 {
         (if self.archived { AuthCategories::Archived } else { AuthCategories::Active }) as u32
     }
+
+    pub fn zeroize_sensitive(&mut self) {
+        self.totp.secret.zeroize();
+        self.totp.account_name.zeroize();
+        if let Some(issuer) = &mut self.totp.issuer {
+            issuer.zeroize();
+        }
+        self.label.zeroize();
+    }
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -305,6 +333,15 @@ mod tests {
     fn auth_short() -> Result<Auth, AuthValidationError> {
         let url = String::from("otpauth://totp/GitHub:my-username?secret=5DU3JDHQL4QFTOC4&issuer=GitHub");
         Ok(Auth::new(url, 0)?)
+    }
+
+    #[test]
+    fn debug_output_omits_totp_secret() {
+        let auth = auth1().unwrap();
+        let debug = format!("{auth:?}");
+
+        assert!(!debug.contains("GZ4FORKTNBVFGQTFJJGEIRDOKY"));
+        assert!(!debug.contains("secret"));
     }
 
     fn auth_colon_issuer_unescaped() -> Result<Auth, AuthValidationError> {

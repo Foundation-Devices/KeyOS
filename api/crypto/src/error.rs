@@ -27,7 +27,7 @@ pub enum CryptoError {
     #[error("The length did not fit into the buffer or was 0")]
     InvalidDataLength,
 
-    #[error("The lent buffer didn't contain contigous pages (use POPULATE)")]
+    #[error("The lent buffer didn't contain contiguous pages (use POPULATE)")]
     BufferNotContiguous,
 
     #[error("The process allocated more AES contexts than available")]
@@ -36,7 +36,7 @@ pub enum CryptoError {
     #[error("No more SECURAM key slots left")]
     TooManySecuramKeys,
 
-    #[error("The supplied key was a supported size")]
+    #[error("The supplied key was not a supported size")]
     InvalidKeyLength,
 
     #[error("The buffer length was not divisible by block length")]

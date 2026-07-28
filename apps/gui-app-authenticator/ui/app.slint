@@ -2,13 +2,33 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Router } from "./gen/router.slint";
-import { Images, UISize, Utils, CurrentTheme } from "@ui/theme.slint";
+import {
+    Images,
+    UISize,
+    Utils,
+    CurrentTheme,
+    Palette,
+    ResultLevel,
+} from "@ui/theme.slint";
 import { AuthenticatorCallbacks } from "./authenticator-callbacks.slint";
 import { TR } from "@ui/i18n/i18n.slint";
-import { BaseWindow } from "@ui/widgets.slint";
+import { BaseWindow, ErrorModal } from "@ui/widgets.slint";
+import { TR2, TrId } from "./gen/tr.slint";
 
 export component AppWindow inherits BaseWindow {
     Router { }
+
+    if !AuthenticatorCallbacks.main-result.success: ErrorModal {
+        icon: AuthenticatorCallbacks.main-result.level == ResultLevel.info ? "info" : "alert";
+        icon-color: AuthenticatorCallbacks.main-result.level == ResultLevel.info ? Palette.content-brand : Palette.content-notice;
+        title: AuthenticatorCallbacks.main-result.title;
+        text: AuthenticatorCallbacks.main-result.text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+
+        confirm-clicked => {
+            AuthenticatorCallbacks.main-result = { level: ResultLevel.info, success: true, text: "", title: "" };
+        }
+    }
 }
 
 export * from "gen/exports.slint";

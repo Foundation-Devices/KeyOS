@@ -96,8 +96,8 @@ pub struct DiskEncryptUnsafe {
 pub struct SubscribeDiskEncryptComplete;
 
 /// Fired when a previously-accepted `DiskEncryptUnsafe` finishes.
-/// No strut body, because Pre-DMA failures are reported synchronously and
-/// DMA cannot fail without taking down the system.
+/// This event has no struct body because pre-DMA failures are reported
+/// synchronously, and DMA completion cannot fail without taking down the system.
 #[cfg(keyos)]
 #[derive(Debug, Clone, Copy)]
 pub struct DiskEncryptComplete;

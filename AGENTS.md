@@ -4,6 +4,8 @@
 
 Translation string IDs come from Figma in dot-notation form, e.g. `"camera.qrModalUnknown.title"`.
 
+Do not manually create or invent new key-value pairs in any JSON files under `i18n/` directories. Those files are generated content. `just localize` downloads the latest source strings into `ui/ui/i18n/sources/` from Localazy, then propagates them to each app according to `localizer.json`. Made-up keys or values will be deleted by the next `just localize` run and can cause build failures or missing-string regressions.
+
 **How to resolve an ID to a Slint enum variant:**
 
 1. Look up the ID root (first segment) in `localizer.json` → `apps[].name` to find which app owns it.
@@ -17,6 +19,14 @@ Translation string IDs come from Figma in dot-notation form, e.g. `"camera.qrMod
 **At runtime in Slint:** `TR2.lookup(TrId.QrModalUnknownTitle)`
 
 **At runtime in Rust:** `tr::lookup_id(TrId::QrModalUnknownTitle)` (or via the generated `tr` module).
+
+## Integration tests
+
+For multi-service integration tests, do not use plain `cargo test` to infer pass/fail. Run them through the Just wrapper so the full service harness is exercised and the exit status is explicit:
+
+- `just one-int-test <apps and servers> && echo $?`
+
+Use that form when verifying KeyOS integration tests in this repository.
 
 ## Review guidelines
 

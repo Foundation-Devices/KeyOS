@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { CallbackResult } from "@ui/theme.slint";
+import { CallbackResult, ResultLevel } from "@ui/theme.slint";
 import { AuthView, ScanQrCaller } from "./authenticator-types.slint";
 
 export global AuthenticatorCallbacks {
@@ -21,10 +21,19 @@ export global AuthenticatorCallbacks {
     callback get-view-index([AuthView], int) -> int;
     callback import-multiple();
     callback cancel-import-multiple();
+    callback decrypt-file(string);
+    callback cancel-decrypt-file();
+    callback abandon-decrypt-file();
 
     in property <int> time-until-refresh: 0;
     in-out property <[AuthView]> entries: [];
     in-out property <int> sort-mode: 0;
     in-out property <string> search-text: "";
     in-out property <int> pending-import-count: 0;
+    in-out property <CallbackResult> main-result: { level: ResultLevel.info, success: true, text: "", title: "" };
+    in-out property <bool> decrypting: false;
+    in-out property <bool> show-decrypt-cancel: false;
+    in-out property <string> decrypt-password: "";
+    in-out property <bool> decrypt-password-failed: false;
+    in-out property <bool> decrypt-generic-failure: false;
 }

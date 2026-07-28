@@ -37,6 +37,7 @@ static IS_DARK: AtomicBool = AtomicBool::new(true);
 fn main() -> ! {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
+    xous::set_thread_priority(xous::ThreadPriority::AppHigh0).unwrap();
 
     let gui = GuiApi::register_keyboard(DEFAULT_KEYBOARD_HEIGHT).expect("can't register app UI");
 
