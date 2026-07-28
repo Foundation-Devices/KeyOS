@@ -1004,10 +1004,18 @@ impl RecoveryWorkerServer {
                 bail!("App readback from {fs_elf_path} failed");
             }
 
-            // Read and copy the manifest file
+            // Read the manifest from the archive and verify its hash before writing to the final path
             let tar_manifest_path = format!("{tar_app_path}/manifest.json");
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, &tar_manifest_path, |_| ())?;
+
+            let manifest_hash = self
+                .crypto
+                .sha256(&file_mem.as_slice::<u8>()[..file_size])
+                .context("couldn't calculate manifest file hash")?;
+            if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
+                bail!("App manifest {tar_manifest_path} hash mismatch");
+            }
 
             let fs_manifest_path = &format!("{fs_app_dir}/manifest.json");
 
@@ -1021,7 +1029,7 @@ impl RecoveryWorkerServer {
                 |_| (),
             )?;
 
-            // Read and verify the app manifest file
+            // Verify the bytes persisted to storage as well as the archive bytes checked above.
             let (mem, size) =
                 fw_utils::read_file_progress(&self.fs, fs_manifest_path, Location::System, |_| ())
                     .context("couldn't read the manifest file back")?;
@@ -1030,7 +1038,7 @@ impl RecoveryWorkerServer {
                 .sha256(&mem.as_slice::<u8>()[..size])
                 .context("couldn't calculate manifest file hash")?;
             if !verify_manifest_hash(manifest, &tar_manifest_path, manifest_hash) {
-                bail!("App manifest {fs_manifest_path} hash mismatch");
+                bail!("App manifest {fs_manifest_path} hash mismatch after writing");
             }
 
             progress_fn(((i + 1) as f32) / (apps.len() as f32));
@@ -1059,6 +1067,15 @@ impl RecoveryWorkerServer {
             let (file_mem, file_size) =
                 self.tar_read_file_progress(path, *location, tar_asset_path, |_| ())?;
 
+            // Verify the asset hash before writing to the final path
+            let asset_hash = self
+                .crypto
+                .sha256(&file_mem.as_slice::<u8>()[..file_size])
+                .context("couldn't calculate asset file hash")?;
+            if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
+                bail!("Asset {tar_asset_path} hash mismatch");
+            }
+
             // Remove the version from the path and apply location-specific fixes
             let fs_asset_path = asset_tar_path_to_fs_path(tar_asset_path, *asset_location);
             let mut asset_path_parts = fs_asset_path.split('/').collect::<Vec<_>>();
@@ -1079,15 +1096,15 @@ impl RecoveryWorkerServer {
                 |_| (),
             )?;
 
-            // Read and verify the asset file
-            let (mem, size) = fw_utils::read_file_progress(&self.fs, fs_asset_path, *asset_location, |_| ())
+            // Verify the bytes persisted to storage as well as the archive bytes checked above.
+            let (mem, size) = fw_utils::read_file_progress(&self.fs, &fs_asset_path, *asset_location, |_| ())
                 .context("couldn't read the asset file back")?;
             let asset_hash = self
                 .crypto
                 .sha256(&mem.as_slice::<u8>()[..size])
                 .context("couldn't calculate asset file hash")?;
             if !verify_manifest_hash(manifest, tar_asset_path, asset_hash) {
-                bail!("Asset {tar_asset_path} hash mismatch");
+                bail!("Asset {tar_asset_path} hash mismatch after writing");
             }
 
             progress_fn(((i + 1) as f32) / (assets.len() as f32));
