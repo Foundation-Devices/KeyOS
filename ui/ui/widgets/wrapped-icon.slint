@@ -9,13 +9,23 @@ export component WrappedIcon inherits JumboIcon {
     // "jumbo-circle", "jumbo-shield", "jumbo-underbar"
     in property <string> outer-icon: "jumbo-circle";
     in property <string> inner-icon: "check";
+    private property <length> inner-icon-size: root.height * 96 / 184;
 
     name: outer-icon;
 
-    Icon {
-        name: inner-icon;
-        // Track the outer icon so a resized circle keeps the designed 96-in-184 proportion.
-        size: root.height * 96 / 184;
-        color: Palette.content-brand;
+    Rectangle {
+        width: root.inner-icon-size;
+        height: root.inner-icon-size;
+        clip: false;
+
+        Icon {
+            name: root.inner-icon;
+            size: parent.width;
+            // At 184px, a 10px lift makes all three alert-corner clearances round to 30px.
+            y: root.inner-icon == "alert" && root.name == "jumbo-circle"
+                ? -root.height * 10 / 184
+                : 0px;
+            color: Palette.content-brand;
+        }
     }
 }
