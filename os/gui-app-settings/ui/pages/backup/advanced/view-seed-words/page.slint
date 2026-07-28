@@ -7,14 +7,29 @@ import { ViewSeed } from "@ui/pages.slint";
 import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { Callbacks } from "../../../../callbacks.slint";
+import { PinGlobal } from "../../../../globals/pin-global.slint";
 
 export component ViewSeedWordsPage inherits BasePage {
     in property <ViewSeedWordsProps> props;
 
+    private property <[string]> words: [];
+    private property <image> standard-qr;
+    private property <image> compact-qr;
+
+    init => {
+        if (PinGlobal.verify-pin(TR2.lookup(TrId.ViewSeedWordsTitle), false)) {
+            root.words = Callbacks.get-seed-words();
+            root.standard-qr = Callbacks.get-standard-seed-qr();
+            root.compact-qr = Callbacks.get-compact-seed-qr();
+        } else {
+            Navigate.backward();
+        }
+    }
+
     ViewSeed {
-        words: Callbacks.get-seed-words();
-        standard-qr: Callbacks.get-standard-seed-qr();
-        compact-qr: Callbacks.get-compact-seed-qr();
+        words: root.words;
+        standard-qr: root.standard-qr;
+        compact-qr: root.compact-qr;
         strings: {
             title: TR2.lookup(TrId.ViewSeedWordsTitle),
             standard-qr-header: TR2.lookup(TrId.ViewSeedWordsStandardSeedQr),

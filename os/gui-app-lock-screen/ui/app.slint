@@ -14,7 +14,7 @@ import {
     TextSm,
     BasePage,
     BaseWindow,
-    NavHeader,
+    AppHeader,
     TextMd,
     Icon,
     LoginLayout,
@@ -336,7 +336,11 @@ component VerifyAuth inherits Rectangle {
     if State.is-pin-entry: VerifyPin {
         changed has-focus => {
             if !self.has-focus && !State.is-check-ongoing {
-                root.lost-focus()
+                if (State.nav-request) {
+                    self.focus()
+                } else {
+                    root.lost-focus()
+                }
             }
         }
         init => {
@@ -347,7 +351,11 @@ component VerifyAuth inherits Rectangle {
     if !State.is-pin-entry: VerifyPassword {
         changed has-focus => {
             if !self.has-focus && !State.is-check-ongoing {
-                root.lost-focus()
+                if (State.nav-request) {
+                    self.focus()
+                } else {
+                    root.lost-focus()
+                }
             }
         }
         init => {
@@ -360,13 +368,9 @@ component LoginScreen inherits BasePage {
     callback back();
 
     VerticalLayout {
-        NavHeader {
+        AppHeader {
             title: State.title;
-            left-icon: "chevron-left";
-
-            clicked => {
-                back();
-            }
+            side-padding: Size.sz8;
         }
 
         Rectangle {
@@ -384,11 +388,7 @@ component ChallengeRequest inherits Rectangle {
         State.show-control-center();
     }
 
-    LoginScreen {
-        back => {
-            State.cancelled()
-        }
-    }
+    LoginScreen { }
 }
 
 component LockScreen inherits Rectangle {

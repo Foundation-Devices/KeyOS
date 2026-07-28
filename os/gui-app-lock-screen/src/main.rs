@@ -137,6 +137,7 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
                     log::error!("Failed to parse VerifyPinOptions from a nav request");
                     return;
                 };
+                ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
                 ui_state.set_title(options.title.unwrap_or_default().into());
                 ui_state.set_nav_request(true);
                 ui_state.set_want_security_words(options.want_security_words);
