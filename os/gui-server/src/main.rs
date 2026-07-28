@@ -508,19 +508,42 @@ impl Gui {
                     modal_state.respond(Err(gui_server_api::error::NavigationError::CanceledBySystem));
                 }
                 _ if launcher_already_active => {
-                    if let Some(window) = self.windows.get(&launcher_app_pid) {
-                        if let Err(e) = xous::send_message(
-                            window.input_cid,
-                            xous::Message::new_scalar(InputMessage::Custom1 as usize, 0, 0, 0, 0),
-                        ) {
-                            error!("Failed to notify launcher about home button press: {e:?}");
-                        }
-                    }
+                    self.notify_launcher_clear_rearrange_state();
                 }
                 _ => self.switch_to_window(launcher_app_pid),
             }
         } else {
             warn!("Tried to switch to launcher while no launcher is registered");
+        }
+    }
+
+    fn notify_launcher_clear_rearrange_state(&self) {
+        let Some(launcher_app_pid) = self.app_registry.pid(AppRole::Launcher) else {
+            return;
+        };
+        if let Some(window) = self.windows.get(&launcher_app_pid) {
+            // Custom1 asks the launcher to leave rearrange mode.
+            if let Err(e) = xous::send_message(
+                window.input_cid,
+                xous::Message::new_scalar(InputMessage::Custom1 as usize, 0, 0, 0, 0),
+            ) {
+                error!("Failed to notify launcher to clear rearrange state: {e:?}");
+            }
+        }
+    }
+
+    fn notify_launcher_clear_transient_state(&self) {
+        let Some(launcher_app_pid) = self.app_registry.pid(AppRole::Launcher) else {
+            return;
+        };
+        if let Some(window) = self.windows.get(&launcher_app_pid) {
+            // Custom2 asks the launcher to clear lock-sensitive transient state.
+            if let Err(e) = xous::send_message(
+                window.input_cid,
+                xous::Message::new_scalar(InputMessage::Custom2 as usize, 0, 0, 0, 0),
+            ) {
+                error!("Failed to notify launcher to clear transient state: {e:?}");
+            }
         }
     }
 
@@ -938,6 +961,7 @@ impl Gui {
             self.app_registry.set_pre_lock_app_pid(pre_lock_app);
         }
         self.control_center_collapse();
+        self.notify_launcher_clear_transient_state();
         self.security.log_out();
         self.notify_lockscreen_locked();
         self.switch_to_window(lock_screen_pid);

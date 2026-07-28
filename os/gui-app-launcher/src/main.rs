@@ -336,15 +336,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             InputMessage::Hidden => {
                 let mut state = state.borrow_mut();
                 state.is_visible = false;
-                state.last_scrubbed_point = None;
-                state.last_scrub_update_time = None;
-                state.last_scrub_x = None;
-                // Clear loading state when the launcher is hidden
-                let ui = state.ui();
-                clear_launching_state(&ui);
-                clear_rearrange_state(&ui);
-                clear_bitcoin_scrub(&ui);
-                state.loading_state_timer.stop();
+                clear_transient_state(&mut state);
             }
             InputMessage::Visible => {
                 state.borrow_mut().is_visible = true;
@@ -357,6 +349,10 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             InputMessage::Custom1 => {
                 let ui = state.borrow().ui();
                 clear_rearrange_state(&ui);
+            }
+            InputMessage::Custom2 => {
+                let mut state = state.borrow_mut();
+                clear_transient_state(&mut state);
             }
             _ => {}
         }
@@ -1261,6 +1257,17 @@ fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {
 }
 
 fn clear_launching_state(ui: &AppWindow) { ui.global::<State>().set_loading_item_id("".into()); }
+
+fn clear_transient_state(state: &mut AppState) {
+    state.last_scrubbed_point = None;
+    state.last_scrub_update_time = None;
+    state.last_scrub_x = None;
+    let ui = state.ui();
+    clear_launching_state(&ui);
+    clear_rearrange_state(&ui);
+    clear_bitcoin_scrub(&ui);
+    state.loading_state_timer.stop();
+}
 
 fn clear_dropdown_model(ui: &AppWindow) {
     ui.global::<State>().set_dropdown_model(ModelRc::new(VecModel::from(Vec::<DropdownModel>::new())));
