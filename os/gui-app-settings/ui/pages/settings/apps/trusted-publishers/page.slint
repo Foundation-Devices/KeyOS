@@ -132,10 +132,12 @@ export component TrustedPublishersPage inherits BasePage {
         y: header.height + Size.sz2;
         width: parent.width;
         height: parent.height - self.y;
+        alignment: stretch;
         spacing: Size.sz10;
 
         ContentSection {
             vertical-stretch: 1;
+            alignment: stretch;
             spacing: Size.sz10;
 
             TextMd {
@@ -218,6 +220,8 @@ export component TrustedPublishersPage inherits BasePage {
         }
 
         ButtonSection {
+            vertical-stretch: 0;
+
             Button {
                 label: TR2.lookup(TrId.AppsInstallTrustedPublisherCertificate);
                 clicked => {
