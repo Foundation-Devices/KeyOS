@@ -123,6 +123,7 @@ flash_dump.bin
 
 # Personal AI Configs
 .claude
+.codex*
 # generated files
 DEPENDENCIES.png
 DEPENDENCIES.md
