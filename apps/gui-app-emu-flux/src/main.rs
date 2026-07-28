@@ -54,7 +54,7 @@ struct AppState {
     running: HashMap<PID, String>,
 }
 
-app!("Flux Emulator");
+app!("Legacy Mode");
 
 /// The Flux apps app-manager knows, built-in and sideloaded alike. list_apps iterates a
 /// HashMap, so sort for a stable tile order (and stable tap coordinates in the smoke
