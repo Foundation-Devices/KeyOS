@@ -223,7 +223,7 @@
       "title": "Error"
     },
     "tamperError": {
-      "content": "KeyOS has detected a tamper event.\n\n\nFor security, the master key\nhas been erased from the \ndevice. To proceed, restore \na backup or perform a \nfactory reset.  ",
+      "content": "KeyOS has detected a tamper event.\n\n\nFor security, the Master Key\nhas been erased from the \ndevice. To proceed, restore \na backup or perform a \nfactory reset.  ",
       "title": "Tamper Detected"
     },
     "watchdog": {
