@@ -32,20 +32,20 @@ import { TR2, TrId } from "../../gen/tr.slint";
 
 component FluxContainer inherits Rectangle {
     clip: true;
-    border-radius: Size.sz12;
-    border-width: 1px;
+    width: 472px;
     height: 600px;
     background: transparent;
 
     @children
 
-    // Restore the rounded border because a child image doesn't respect the `clip: true` properly
-    Rectangle {
+    Image {
+        // Preserve the pre-antialiased 48px corners while stretching only the straight edges.
+        source: CurrentTheme.is-dark
+            ? @image-url("../../legacy-frame-overlay-dark-9.png", nine-slice(48))
+            : @image-url("../../legacy-frame-overlay-9.png", nine-slice(48));
+        width: root.width;
         height: root.height;
-        border-radius: root.border-radius;
-        border-width: root.border-width;
-        border-color: #C69574;
-        background: transparent;
+        image-rendering: ImageRendering.pixelated;
     }
 }
 

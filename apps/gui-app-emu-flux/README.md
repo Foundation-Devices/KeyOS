@@ -67,6 +67,14 @@ are framed back to the host. The identity reverts when the emulator is hidden.
 | `utils/app-flux-build-support` | Build-time codegen (NVM region, version) for the children. |
 | `api/gui-app-emu-flux` | The syscall and message API shared by the emulator and the runtime. |
 
+## Legacy frame assets
+
+The theme-specific `ui/legacy-frame-overlay{,-dark}-9.png` files are compact
+97 x 97 nine-slice overlays. Their 48 px margins preserve the pre-antialiased
+corners while stretching one representative row and column for the straight
+edges. Keep the assets and the two `nine-slice(48)` expressions in
+`ui/pages/main/page.slint` synchronized if the corner radius changes.
+
 ## Build
 
 ```bash
