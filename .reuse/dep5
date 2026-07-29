@@ -151,12 +151,6 @@ License: GPL-3.0-only
 Files:
     permission_templates.toml
     **/manifest.toml
-    sam-ba-cipher/license.txt
-    sam-ba-cipher/license_private.pem
-    sam-ba-cipher/README.md
-    sam-ba-cipher/cert.pem
-    sam-ba-cipher/cust.key
-    sam-ba-cipher/key.pem
 Copyright: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 License: GPL-3.0-only
 
@@ -299,7 +293,6 @@ License: GPL-3.0-only
 Files:
   media/*
   apps/gui-app-authenticator/media/*
-  sam-ba-cipher/cust.key
   imports/prepare-release/README.md
 Copyright: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 License: GPL-3.0-or-later
