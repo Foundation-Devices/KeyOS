@@ -47,7 +47,6 @@
   "keycardBackup.manual.modalBewareHeader": "Beware of revealing sensitive information",
   "launcher.appCrash.content": "{0} has crashed with the following exit code: {1}.",
   "launcher.appCrash.header": "App Crashed",
-  "main.addApp": "Add App",
   "main.title": "Legacy Mode",
   "onboarding.backupManualVerify.chooseWord": "Tap on the correct word",
   "onboarding.backupManualVerify.correct": "Correct",

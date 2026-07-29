@@ -200,7 +200,7 @@ component AppTile inherits VerticalLayout {
                     }
 
                     Icon {
-                        name: app-id == "add-app" ? "plus" : icon(name);
+                        name: icon(name);
                         size: Size.sz14;
                         color: Palette.white;
                     }
@@ -216,9 +216,7 @@ component AppTile inherits VerticalLayout {
 
         touchArea := TouchArea {
             clicked => {
-                if (app-id == "add-app") {
-                    Navigate.settings({ });
-                } else if (app-id != "") {
+                if (app-id != "") {
                     if (Callbacks.app-clicked(app-id)) {
                         Global.app-running = true;
                     }
@@ -241,16 +239,12 @@ export component MainPage inherits BasePage {
 
     private property <int> selected-page: 0;
     private property <int> apps-per-page: 6;
-    // +1 for the synthetic Add App tile; * 1.0 forces float division so the
-    // ceiling is right (7 enabled apps plus Add App need a second page).
-    private property <int> total-pages: Math.ceil((Global.apps.length + 1) * 1.0 / apps-per-page);
+    // * 1.0 forces float division so the ceiling is right.
+    private property <int> total-pages: Math.ceil(Global.apps.length * 1.0 / apps-per-page);
 
     function get-app-at(index: int) -> AppEntryValue {
         if (index < Global.apps.length) {
             return Global.apps[index];
-        }
-        if (index == Global.apps.length) {
-            return { name: TR2.lookup(TrId.MainAddApp), app-id: "add-app" };
         }
         return { name: "", app-id: "" };
     }
