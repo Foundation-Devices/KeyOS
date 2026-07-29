@@ -797,7 +797,7 @@ dependencies = [
 [[package]]
 name = "backup-shard"
 version = "0.3.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.8.0#41adf5d9bb54c2c54e101c140a7eede2402d994e"
 dependencies = [
  "dcbor",
  "rkyv",
@@ -1573,7 +1573,7 @@ dependencies = [
 [[package]]
 name = "btp"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.8.0#41adf5d9bb54c2c54e101c140a7eede2402d994e"
 dependencies = [
  "bytemuck",
  "consts 2.0.0 (git+https://github.com/Foundation-Devices/prime-ble-firmware.git)",
@@ -4260,7 +4260,7 @@ dependencies = [
 [[package]]
 name = "foundation-api"
 version = "2.0.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.8.0#41adf5d9bb54c2c54e101c140a7eede2402d994e"
 dependencies = [
  "bc-components",
  "bc-envelope",
@@ -10863,7 +10863,7 @@ dependencies = [
 [[package]]
 name = "quantum-link-macros"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.8.0#41adf5d9bb54c2c54e101c140a7eede2402d994e"
 dependencies = [
  "proc-macro2",
  "quote",
