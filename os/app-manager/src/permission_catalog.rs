@@ -55,20 +55,21 @@ static SUBGROUP_LABELS: &[(&str, crate::tr::TrId)] = &[
     ("ui-and-input.navigation-response", crate::tr::TrId::PermissionInterfaceAndNavigationNavigation),
 ];
 
-/// English labels for the top-level permission groups (the part of a subgroup before the
-/// first `.`), under which the permission UI collapses the subgroups.
-// TODO(SFT-7229): localize these labels too.
-static GROUP_LABELS: &[(&str, &str)] = &[
-    ("app-management", "Apps and publisher trust"),
-    ("cryptography", "Cryptography"),
-    ("device-connectivity", "Bluetooth, NFC, and USB"),
-    ("device-secrets", "Device secrets and identity"),
-    ("file-system", "File system"),
-    ("network-and-pairing", "Network sync and pairing"),
-    ("peripherals", "Peripherals"),
-    ("power-and-firmware", "Power and firmware"),
-    ("settings", "Settings"),
-    ("ui-and-input", "Interface and navigation"),
+/// Each top-level permission group (the part of a subgroup before the first `.`) mapped to the
+/// [`TrId`] of its display name. The permission UI collapses subgroups under these labels.
+///
+/// [`TrId`]: crate::tr::TrId
+static GROUP_LABELS: &[(&str, crate::tr::TrId)] = &[
+    ("app-management", crate::tr::TrId::PermissionAppManagementMain),
+    ("cryptography", crate::tr::TrId::PermissionCryptographyMain),
+    ("device-connectivity", crate::tr::TrId::PermissionDeviceConnectivityMain),
+    ("device-secrets", crate::tr::TrId::PermissionDeviceSecretsMain),
+    ("file-system", crate::tr::TrId::PermissionFileSystemMain),
+    ("network-and-pairing", crate::tr::TrId::PermissionNetworkAndPairingMain),
+    ("peripherals", crate::tr::TrId::PermissionPeripheralsMain),
+    ("power-and-firmware", crate::tr::TrId::PermissionPowerAndFirmwareMain),
+    ("settings", crate::tr::TrId::PermissionSettingsMain),
+    ("ui-and-input", crate::tr::TrId::PermissionInterfaceAndNavigationMain),
 ];
 
 /// The permission policy a server declared for one of its messages.
@@ -127,9 +128,14 @@ impl MessageMetadata {
     /// The top-level group: the part of the subgroup before the first `.`.
     pub(crate) fn group(&self) -> &str { self.subgroup.split('.').next().unwrap_or_default() }
 
-    pub(crate) fn group_label(&self) -> &str {
+    /// The top-level group's display name, localized in `locale` (unknown locales fall back to
+    /// English). An unmapped group falls back to its raw key.
+    pub(crate) fn group_label(&self, locale: &str) -> &str {
         let key = self.group();
-        GROUP_LABELS.iter().find(|(candidate, _)| *candidate == key).map(|(_, label)| *label).unwrap_or(key)
+        if let Some(id) = GROUP_LABELS.iter().find(|(candidate, _)| *candidate == key).map(|(_, id)| *id) {
+            return crate::tr::lookup_id_in(locale, id);
+        }
+        key
     }
 
     /// Whether an app carrying `app_signature` meets this message's signature requirement.

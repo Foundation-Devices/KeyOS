@@ -780,7 +780,7 @@ fn push_permission_subgroup(
         None => {
             groups.push(InstalledAppPermissionGroup {
                 key: entry.group().to_string(),
-                label: entry.group_label().to_string(),
+                label: entry.group_label(locale).to_string(),
                 subgroups: Vec::new(),
             });
             groups.last_mut().expect("group pushed")
