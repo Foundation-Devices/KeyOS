@@ -6,13 +6,12 @@ use {
     base64::engine::general_purpose::STANDARD as BASE64,
     base64::Engine,
     serde::Deserialize,
-    subtle::ConstantTimeEq,
-    xous::{DropDeallocate, MemoryFlags},
-    zeroize::{Zeroize, Zeroizing},
+    zeroize::Zeroizing,
 };
 
 use crate::{
-    auth::get_timestamp_in_seconds,
+    auth::{build_totp_url, get_timestamp_in_seconds, make_totp_auth, zeroize_auth_entries},
+    import_crypto::{decrypt_gcm, GcmDecryptError},
     kdf::{self, ScryptRequest},
     Auth, AuthEditField, CryptoApi,
 };
@@ -222,15 +221,15 @@ pub async fn decrypt_export(
         let slot_nonce = decode_external_nonce(&slot.key_params.nonce)?;
         let slot_tag = decode_external_tag(&slot.key_params.tag)?;
 
-        match decrypt_gcm(crypto, derived_key.as_slice(), slot_nonce, slot_tag, &wrapped_key) {
+        match decrypt_gcm(crypto, derived_key.as_slice(), slot_nonce, slot_tag, &wrapped_key, None) {
             Ok(key) => {
                 db_key = Some(Zeroizing::new(key));
                 break;
             }
-            Err(AegisError::AuthenticationFailed) => {
+            Err(GcmDecryptError::AuthenticationFailed) => {
                 continue;
             }
-            Err(other) => return Err(other),
+            Err(GcmDecryptError::Operation(error)) => return Err(error.into()),
         }
     }
 
@@ -238,8 +237,14 @@ pub async fn decrypt_export(
 
     let db_nonce = decode_external_nonce(&export.db_params.nonce)?;
     let db_tag = decode_external_tag(&export.db_params.tag)?;
-    let plaintext =
-        Zeroizing::new(decrypt_gcm(crypto, db_key.as_slice(), db_nonce, db_tag, &export.ciphertext)?);
+    let plaintext = Zeroizing::new(
+        decrypt_gcm(crypto, db_key.as_slice(), db_nonce, db_tag, &export.ciphertext, None).map_err(
+            |error| match error {
+                GcmDecryptError::AuthenticationFailed => AegisError::AuthenticationFailed,
+                GcmDecryptError::Operation(error) => error.into(),
+            },
+        )?,
+    );
 
     Ok(plaintext)
 }
@@ -293,46 +298,9 @@ fn parse_plaintext_entry(entry: AegisEntry) -> Result<Auth, AegisError> {
     let info: AegisEntryInfo =
         serde_json::from_value(entry.info).context("Aegis TOTP entry is missing required info fields")?;
 
-    let (display_label, url) = match entry.issuer.is_empty() {
-        true => (
-            entry.name.clone(),
-            format!(
-                "otpauth://totp/{}?secret={}&algorithm={}&digits={}&period={}",
-                urlencoding::encode(&entry.name),
-                urlencoding::encode(&info.secret),
-                urlencoding::encode(&info.algo),
-                info.digits,
-                info.period,
-            ),
-        ),
-        false => (
-            entry.issuer.clone(),
-            format!(
-                "otpauth://totp/{}:{}?secret={}&algorithm={}&digits={}&period={}&issuer={}",
-                urlencoding::encode(&entry.issuer),
-                urlencoding::encode(&entry.name),
-                urlencoding::encode(&info.secret),
-                urlencoding::encode(&info.algo),
-                info.digits,
-                info.period,
-                urlencoding::encode(&entry.issuer),
-            ),
-        ),
-    };
-
-    let mut auth = Auth::new(url, get_timestamp_in_seconds()).map_err(anyhow::Error::new)?;
-    if !display_label.is_empty() {
-        auth.edit(AuthEditField::Label(display_label)).map_err(anyhow::Error::new)?;
-    } else if auth.get_issuer().is_empty() {
-        auth.edit(AuthEditField::Label(auth.get_account().to_string())).map_err(anyhow::Error::new)?;
-    }
-    Ok(auth)
-}
-
-fn zeroize_auth_entries(entries: &mut [Auth]) {
-    for entry in entries {
-        entry.zeroize_sensitive();
-    }
+    let issuer = (!entry.issuer.is_empty()).then_some(entry.issuer.as_str());
+    let url = build_totp_url(&info.secret, &entry.name, issuer, &info.algo, info.digits, info.period)?;
+    make_totp_auth(&url, issuer).map_err(AegisError::from)
 }
 
 fn decode_hex(input: &str) -> Result<Vec<u8>, AegisError> {
@@ -367,51 +335,6 @@ fn decode_hex_nibble(value: u8) -> Result<u8, AegisError> {
         b'A'..=b'F' => Ok(value - b'A' + 10),
         _ => Err(anyhow!("Invalid hex data in Aegis export").into()),
     }
-}
-
-fn decrypt_gcm(
-    crypto: &CryptoApi,
-    key: &[u8],
-    nonce: [u8; 12],
-    expected_tag: [u8; 16],
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, AegisError> {
-    // Keep the AES-GCM context scoped to a single decrypt operation so the server-side
-    // key material and GCM state are cleared immediately when this function returns.
-    let aes = crypto
-        .setup_aes(key, crypto::AesMode::Gcm { iv: nonce })
-        .map_err(|e| anyhow!("AES setup failed: {}", e))?;
-
-    let mapped_len = ciphertext.len().next_multiple_of(0x1000).max(0x1000);
-    let mut buffer = xous::map_memory(None, None, mapped_len, MemoryFlags::W | MemoryFlags::POPULATE)
-        .map(DropDeallocate::new)
-        .map_err(|_| anyhow!("AES execution failed: failed to map AES buffer"))?;
-    buffer.as_slice_mut()[..ciphertext.len()].copy_from_slice(ciphertext);
-
-    if let Err(e) = aes.execute(*buffer, 0, ciphertext.len(), crypto::Direction::Decrypt) {
-        let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-        plaintext.zeroize();
-        return Err(anyhow!("AES execution failed: {}", e).into());
-    }
-
-    let actual_tag = match aes.gcm_tag() {
-        Ok(tag) => tag,
-        Err(e) => {
-            let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-            plaintext.zeroize();
-            return Err(anyhow!("AES execution failed: {}", e).into());
-        }
-    };
-    if !bool::from(actual_tag.ct_eq(&expected_tag)) {
-        let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-        plaintext.zeroize();
-        return Err(AegisError::AuthenticationFailed);
-    }
-
-    let plaintext = buffer.as_slice()[..ciphertext.len()].to_vec();
-    let plaintext_buf: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-    plaintext_buf.zeroize();
-    Ok(plaintext)
 }
 
 #[cfg(test)]

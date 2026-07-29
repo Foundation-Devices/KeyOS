@@ -22,12 +22,14 @@ i18n = { path = "../../i18n" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 ordered-table = { path = "../../utils/ordered-table" }
+pbkdf2 = "0.12.2"
 pgp = { version = "0.20.0", default-features = false }
 prost = "0.14.3"
 scrypt = "0.11.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 server = { path = "../../server" }
+sha2 = "0.10.9"
 slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
 subtle = { version = "2.6", default-features = false }
 thiserror = "1.0"

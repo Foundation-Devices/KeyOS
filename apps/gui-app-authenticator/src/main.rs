@@ -19,6 +19,7 @@ use slint_keyos_platform::{
 use {
     crate::aegis::{AegisError, ParsedAegisExport},
     crate::gui_permissions::GuiPermissions,
+    crate::twofas::{ParsedTwoFasExport, TwoFasError},
     auth::{
         get_timestamp_in_seconds, make_import_label, Auth, AuthDuplicateReason, AuthEditField,
         AuthValidationError, DATABASE_FILE,
@@ -46,8 +47,10 @@ use crate::fs_permissions::FileSystemPermissions;
 pub mod aegis;
 mod auth;
 pub mod google_migration;
+mod import_crypto;
 pub mod kdf;
 pub mod proton;
+pub mod twofas;
 
 crypto::use_api!();
 
@@ -108,6 +111,7 @@ enum ImportFileFormat {
     ProtonAuthenticatorJson,
     ProtonZipJson,
     ProtonZipPgp,
+    TwoFasJson,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -115,6 +119,7 @@ enum DecryptType {
     Aegis,
     OpenPgp,
     ProtonAuthenticator,
+    TwoFas,
 }
 
 #[derive(Clone)]
@@ -142,6 +147,8 @@ enum ImportPayload {
     ProtonAuthenticatorJsonEncrypted(proton::ProtonAuthenticatorEncryptedExport),
     ProtonZipJson(Zeroizing<Vec<u8>>),
     ProtonZipPgp(Zeroizing<Vec<u8>>),
+    TwoFasJsonPlain(Zeroizing<Vec<u8>>),
+    TwoFasJsonEncrypted(twofas::EncryptedExport),
 }
 
 impl DetectedImportFile {
@@ -1322,6 +1329,26 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
+    match twofas::parse_export(bytes) {
+        Ok(parsed) => {
+            return Ok(match parsed {
+                ParsedTwoFasExport::Plain => DetectedImportFile {
+                    format: ImportFileFormat::TwoFasJson,
+                    decrypt_type: None,
+                    payload: ImportPayload::TwoFasJsonPlain(Zeroizing::new(bytes.to_vec())),
+                },
+                ParsedTwoFasExport::Encrypted(export) => DetectedImportFile {
+                    format: ImportFileFormat::TwoFasJson,
+                    decrypt_type: Some(DecryptType::TwoFas),
+                    payload: ImportPayload::TwoFasJsonEncrypted(export),
+                },
+            });
+        }
+        Err(error) => {
+            log::debug!("2FAS JSON probe failed: {error}");
+        }
+    }
+
     match aegis::parse_export(bytes) {
         Ok(parsed) => {
             return Ok(match parsed {
@@ -1397,6 +1424,14 @@ fn dispatch_import_file(
             app_state.pending_decrypt_import = Some(detected.into_pending_decrypt(display_name)?);
             Ok(None)
         }
+        DetectedImportFile { payload: ImportPayload::TwoFasJsonPlain(bytes), .. } => Ok(Some(
+            twofas::ingest_plaintext_export(bytes.as_slice())
+                .map_err(|error| AuthError::UnsupportedImportFile(anyhow::Error::new(error)))?,
+        )),
+        detected @ DetectedImportFile { payload: ImportPayload::TwoFasJsonEncrypted(_), .. } => {
+            app_state.pending_decrypt_import = Some(detected.into_pending_decrypt(display_name)?);
+            Ok(None)
+        }
     }
 }
 
@@ -1418,6 +1453,23 @@ async fn adapt_decrypt_import(
                 })?;
             aegis::ingest_plaintext_db(plaintext.as_slice())
                 .map_err(|e| (AuthError::AegisImportError(e), pending_import))
+        }
+        ImportPayload::TwoFasJsonEncrypted(export) => {
+            let plaintext =
+                twofas::decrypt_export(&crypto, export, password.as_str()).await.map_err(|error| {
+                    let auth_error = match error {
+                        TwoFasError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
+                        TwoFasError::Generic(error) => AuthError::GenericError(error),
+                    };
+                    (auth_error, pending_import.clone())
+                })?;
+            twofas::ingest_decrypted_services(plaintext.as_slice()).map_err(|error| {
+                let auth_error = match error {
+                    TwoFasError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
+                    TwoFasError::Generic(error) => AuthError::GenericError(error),
+                };
+                (auth_error, pending_import)
+            })
         }
         ImportPayload::ProtonZipPgp(bytes) => {
             let plaintext = proton::decrypt_pgp_export(bytes.as_slice(), password.as_str()).map_err(

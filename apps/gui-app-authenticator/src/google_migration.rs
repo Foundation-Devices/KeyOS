@@ -9,7 +9,7 @@ use base64::Engine;
 use prost::Message;
 use url::Url;
 
-use crate::{get_timestamp_in_seconds, Auth, AuthValidationError};
+use crate::{auth::build_totp_url, get_timestamp_in_seconds, Auth, AuthValidationError};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/google_auth_migration.rs"));
@@ -29,6 +29,8 @@ pub enum MigrationError {
     AllHotpSkipped,
     #[error("Auth validation error: {0}")]
     AuthValidationError(#[from] AuthValidationError),
+    #[error("Invalid TOTP parameters: {0}")]
+    TotpParameters(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -78,15 +80,7 @@ pub fn parse_migration_uri(uri: &str) -> Result<Vec<Auth>, MigrationError> {
             _ => 6,
         };
 
-        let url = format!(
-            "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm={}&digits={}&period=30",
-            urlencoding::encode(&label),
-            urlencoding::encode(&otp.name),
-            urlencoding::encode(&secret),
-            urlencoding::encode(&label),
-            urlencoding::encode(algo_str),
-            digits,
-        );
+        let url = build_totp_url(&secret, &otp.name, Some(&label), algo_str, digits, 30)?;
 
         let auth = Auth::new(url, get_timestamp_in_seconds())?;
         entries.push(auth);

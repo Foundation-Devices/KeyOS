@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use argon2::{Algorithm, Argon2, AssociatedData, ParamsBuilder, Version};
+use pbkdf2::pbkdf2_hmac;
 use scrypt::{scrypt, Params as ScryptParams};
+use sha2::Sha256;
 use zeroize::Zeroizing;
 
+const MAX_PBKDF2_OUT_LEN: usize = 64;
 const MAX_SCRYPT_N: u32 = 65_536;
 const MAX_SCRYPT_R: u32 = 8;
 const MAX_SCRYPT_P: u32 = 16;
@@ -38,12 +41,34 @@ pub struct Argon2idRequest {
     pub out_len: usize,
 }
 
+#[derive(Clone)]
+pub struct Pbkdf2Sha256Request {
+    pub password: Zeroizing<Vec<u8>>,
+    pub salt: Zeroizing<Vec<u8>>,
+    pub iterations: u32,
+    pub out_len: usize,
+}
+
 pub async fn derive_scrypt(request: ScryptRequest) -> Result<Vec<u8>, KdfError> {
     derive_scrypt_sync(&request)
 }
 
 pub async fn derive_argon2id(request: Argon2idRequest) -> Result<Vec<u8>, KdfError> {
     derive_argon2id_sync(&request)
+}
+
+pub async fn derive_pbkdf2_sha256(request: Pbkdf2Sha256Request) -> Result<Vec<u8>, KdfError> {
+    derive_pbkdf2_sha256_sync(&request)
+}
+
+fn derive_pbkdf2_sha256_sync(request: &Pbkdf2Sha256Request) -> Result<Vec<u8>, KdfError> {
+    if request.iterations == 0 || request.out_len == 0 || request.out_len > MAX_PBKDF2_OUT_LEN {
+        return Err(KdfError::InvalidParameter);
+    }
+
+    let mut output = vec![0u8; request.out_len];
+    pbkdf2_hmac::<Sha256>(&request.password, &request.salt, request.iterations, &mut output);
+    Ok(output)
 }
 
 fn derive_scrypt_sync(request: &ScryptRequest) -> Result<Vec<u8>, KdfError> {
@@ -101,8 +126,35 @@ mod tests {
     use hex_literal::hex;
     use zeroize::Zeroizing;
 
-    use super::{derive_argon2id_sync, derive_scrypt_sync, Argon2idRequest, KdfError, ScryptRequest};
+    use super::{
+        derive_argon2id_sync, derive_pbkdf2_sha256_sync, derive_scrypt_sync, Argon2idRequest, KdfError,
+        Pbkdf2Sha256Request, ScryptRequest,
+    };
 
+    // RFC 7914 §11, p. 12, vector 1:
+    // https://datatracker.ietf.org/doc/html/rfc7914#section-11
+    #[test]
+    fn pbkdf2_sha256_matches_rfc7914_section_11_vector_1() {
+        let derived = derive_pbkdf2_sha256_sync(&Pbkdf2Sha256Request {
+            password: Zeroizing::new(b"passwd".to_vec()),
+            salt: Zeroizing::new(b"salt".to_vec()),
+            iterations: 1,
+            out_len: 64,
+        })
+        .unwrap();
+        let expected = hex!(
+            "
+            55 ac 04 6e 56 e3 08 9f ec 16 91 c2 25 44 b6 05
+            f9 41 85 21 6d de 04 65 e6 8b 9d 57 c2 0d ac bc
+            49 ca 9c cc f1 79 b6 45 99 16 64 b3 9d 77 ef 31
+            7c 71 b8 45 b1 e3 0b d5 09 11 20 41 d3 a1 97 83
+            "
+        );
+        assert_eq!(derived, expected);
+    }
+
+    // RFC 7914 §12, p. 13, vector 1:
+    // https://datatracker.ietf.org/doc/html/rfc7914#section-12
     #[test]
     fn scrypt_matches_rfc7914_empty_vector() {
         let derived = derive_scrypt_sync(&ScryptRequest {
@@ -125,6 +177,8 @@ mod tests {
         assert_eq!(derived, expected);
     }
 
+    // RFC 7914 §12, p. 13, vector 2:
+    // https://datatracker.ietf.org/doc/html/rfc7914#section-12
     #[test]
     fn scrypt_matches_rfc7914_password_nacl_vector() {
         let derived = derive_scrypt_sync(&ScryptRequest {
@@ -147,6 +201,8 @@ mod tests {
         assert_eq!(derived, expected);
     }
 
+    // RFC 9106 §5.3, p. 18, Argon2id vector:
+    // https://www.ietf.org/rfc/rfc9106.pdf
     #[test]
     fn argon2id_matches_rfc9106_section_5_3_vector() {
         let derived = derive_argon2id_sync(&Argon2idRequest {

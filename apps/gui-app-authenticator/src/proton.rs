@@ -15,14 +15,16 @@ use {
         collections::{BTreeMap, HashMap},
         io::{Cursor, Read},
     },
-    subtle::ConstantTimeEq,
     url::Url,
-    xous::{DropDeallocate, MemoryFlags},
-    zeroize::{Zeroize, Zeroizing},
+    zeroize::Zeroizing,
     zip::{CompressionMethod, ZipArchive},
 };
 
-use crate::{auth::get_timestamp_in_seconds, Auth, AuthEditField, TrId};
+use crate::{
+    auth::{build_totp_url, make_totp_auth, zeroize_auth_entries},
+    import_crypto::{decrypt_gcm, GcmDecryptError},
+    Auth, TrId,
+};
 
 pub const ZIP_JSON_ENTRY: &str = "Proton Pass/data.json";
 pub const ZIP_PGP_ENTRY: &str = "Proton Pass/data.pgp";
@@ -196,11 +198,19 @@ pub async fn decrypt_authenticator_export(
     let expected_tag: [u8; LEGACY_GCM_TAG_LEN] = content[ciphertext_end..].try_into().unwrap();
     let ciphertext = &content[LEGACY_GCM_NONCE_LEN..ciphertext_end];
 
-    match decrypt_gcm(crypto, key.as_slice(), nonce, expected_tag, ciphertext) {
-        Ok(plaintext) => Ok(Zeroizing::new(plaintext)),
-        Err(ProtonError::PasswordMismatch) => Err(ProtonError::PasswordMismatch),
-        Err(other) => Err(other),
-    }
+    let plaintext = decrypt_gcm(
+        crypto,
+        key.as_slice(),
+        nonce,
+        expected_tag,
+        ciphertext,
+        Some(PROTON_AUTHENTICATOR_PASSWORD_EXPORT_AAD),
+    )
+    .map_err(|error| match error {
+        GcmDecryptError::AuthenticationFailed => ProtonError::PasswordMismatch,
+        GcmDecryptError::Operation(error) => error.into(),
+    })?;
+    Ok(Zeroizing::new(plaintext))
 }
 
 pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
@@ -233,12 +243,6 @@ pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
     }
 
     Ok(entries)
-}
-
-fn zeroize_auth_entries(entries: &mut [Auth]) {
-    for entry in entries {
-        entry.zeroize_sensitive();
-    }
 }
 
 pub fn ingest_authenticator_plain_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
@@ -336,16 +340,6 @@ fn parse_csv_entry(row: Result<ProtonCsvItem, csv::Error>) -> anyhow::Result<Opt
     make_totp_auth(totp_uri.as_str(), name).map(Some)
 }
 
-fn make_totp_auth(totp_uri: &str, label: Option<&str>) -> anyhow::Result<Auth> {
-    let mut auth = Auth::new(totp_uri.to_string(), get_timestamp_in_seconds()).map_err(anyhow::Error::new)?;
-    if let Some(label) = label.filter(|label| !label.is_empty()) {
-        auth.edit(AuthEditField::Label(label.to_string())).map_err(anyhow::Error::new)?;
-    } else if auth.get_issuer().is_empty() {
-        auth.edit(AuthEditField::Label(auth.get_account().to_string())).map_err(anyhow::Error::new)?;
-    }
-    Ok(auth)
-}
-
 async fn derive_authenticator_key(
     password: &[u8],
     salt: &[u8],
@@ -397,52 +391,7 @@ fn normalize_proton_pass_totp_uri(totp_uri: &str, name: Option<&str>) -> anyhow:
 
     let account =
         name.filter(|name| !name.is_empty()).unwrap_or_else(|| tr::lookup_id(TrId::MainImportNoName));
-    Ok(format!("otpauth://totp/{}?secret={}", urlencoding::encode(account), urlencoding::encode(totp_uri),))
-}
-
-fn decrypt_gcm(
-    crypto: &CryptoApi,
-    key: &[u8],
-    nonce: [u8; LEGACY_GCM_NONCE_LEN],
-    expected_tag: [u8; LEGACY_GCM_TAG_LEN],
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, ProtonError> {
-    let aes = crypto
-        .setup_aes(key, crypto::AesMode::Gcm { iv: nonce })
-        .map_err(|e| anyhow::anyhow!("AES setup failed: {}", e))?;
-    aes.add_aad(PROTON_AUTHENTICATOR_PASSWORD_EXPORT_AAD)
-        .map_err(|e| anyhow::anyhow!("AES AAD setup failed: {}", e))?;
-
-    let mapped_len = ciphertext.len().next_multiple_of(0x1000).max(0x1000);
-    let mut buffer = xous::map_memory(None, None, mapped_len, MemoryFlags::W | MemoryFlags::POPULATE)
-        .map(DropDeallocate::new)
-        .map_err(|_| anyhow::anyhow!("AES execution failed: failed to map AES buffer"))?;
-    buffer.as_slice_mut()[..ciphertext.len()].copy_from_slice(ciphertext);
-
-    if let Err(e) = aes.execute(*buffer, 0, ciphertext.len(), crypto::Direction::Decrypt) {
-        let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-        plaintext.zeroize();
-        return Err(anyhow::anyhow!("AES execution failed: {}", e).into());
-    }
-
-    let actual_tag = match aes.gcm_tag() {
-        Ok(tag) => tag,
-        Err(e) => {
-            let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-            plaintext.zeroize();
-            return Err(anyhow::anyhow!("AES execution failed: {}", e).into());
-        }
-    };
-    if !bool::from(actual_tag.ct_eq(&expected_tag)) {
-        let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-        plaintext.zeroize();
-        return Err(ProtonError::PasswordMismatch);
-    }
-
-    let plaintext = buffer.as_slice()[..ciphertext.len()].to_vec();
-    let plaintext_buf: &mut [u8] = &mut buffer.as_slice_mut()[..ciphertext.len()];
-    plaintext_buf.zeroize();
-    Ok(plaintext)
+    build_totp_url(totp_uri, account, None, "SHA1", 6, 30)
 }
 
 fn classify_pgp_error(error: &PgpError) -> Option<ProtonError> {

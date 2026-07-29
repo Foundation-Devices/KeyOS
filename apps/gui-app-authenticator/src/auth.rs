@@ -9,10 +9,11 @@ use std::time::Duration;
 
 use {
     crate::{tr, TrId},
+    anyhow::{anyhow, Context},
     ordered_table::{SortableCard, TableEntry},
     serde::{Deserialize, Serialize},
     std::fmt,
-    totp_rs::{TotpUrlError, TOTP},
+    totp_rs::{Algorithm, TotpUrlError, TOTP},
     url::{form_urlencoded, Url},
     urlencoding::decode,
     zeroize::Zeroize,
@@ -244,6 +245,53 @@ impl Auth {
         }
         self.label.zeroize();
     }
+}
+
+pub fn make_totp_auth(totp_url: &str, label: Option<&str>) -> anyhow::Result<Auth> {
+    let mut auth = Auth::new(totp_url.to_owned(), get_timestamp_in_seconds()).map_err(anyhow::Error::new)?;
+    if let Some(label) = label.filter(|label| !label.is_empty()) {
+        auth.edit(AuthEditField::Label(label.to_string())).map_err(anyhow::Error::new)?;
+    } else if auth.get_issuer().is_empty() {
+        auth.edit(AuthEditField::Label(auth.get_account().to_string())).map_err(anyhow::Error::new)?;
+    }
+    Ok(auth)
+}
+
+pub fn zeroize_auth_entries(entries: &mut [Auth]) {
+    for entry in entries {
+        entry.zeroize_sensitive();
+    }
+}
+
+pub fn build_totp_url(
+    secret: &str,
+    account: &str,
+    issuer: Option<&str>,
+    algorithm: &str,
+    digits: u32,
+    period: u64,
+) -> anyhow::Result<String> {
+    let algorithm = match algorithm {
+        "SHA1" => Algorithm::SHA1,
+        "SHA256" => Algorithm::SHA256,
+        "SHA512" => Algorithm::SHA512,
+        _ => return Err(anyhow!("Invalid TOTP algorithm {algorithm}")),
+    };
+    let secret = base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret)
+        .context("Invalid TOTP secret encoding")?;
+    let digits = usize::try_from(digits).context("Invalid TOTP digit count")?;
+    let mut totp = TOTP::new_unchecked(
+        algorithm,
+        digits,
+        1,
+        period,
+        secret,
+        issuer.map(str::to_string),
+        account.to_string(),
+    );
+    let url = totp.get_url();
+    totp.secret.zeroize();
+    Ok(url)
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
