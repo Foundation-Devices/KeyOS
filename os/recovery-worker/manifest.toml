@@ -25,6 +25,7 @@ template = ["fs-generic", "crypto-sha"]
     "GetBootWriteAccess",
     "GetSystemReadAccess",
     "GetSystemWriteAccess",
+    "FlushFs",
     "WriteBlocks",
 ]
 "os/power-manager" = ["Reboot"]

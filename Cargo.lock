@@ -11255,6 +11255,7 @@ dependencies = [
  "fs",
  "fw-utils",
  "hex",
+ "keyos",
  "log 0.4.27",
  "num-derive",
  "num-traits",

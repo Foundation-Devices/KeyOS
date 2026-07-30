@@ -4,6 +4,7 @@
 #![no_std]
 
 pub mod batt;
+pub mod recovery;
 
 #[cfg(keyos)]
 pub mod stack_canary;

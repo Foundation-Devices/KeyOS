@@ -35,6 +35,9 @@ pub const MANIFEST_FILE_PATH: &str = "/release/manifest.json";
 /// The path to the firmware file.
 pub const FIRMWARE_FILE_PATH: &str = "/keyos/app.bin";
 
+/// The path to the staged firmware file.
+pub const STAGED_FIRMWARE_FILE_PATH: &str = "/keyos.update/app.bin";
+
 /// The outcome of applying updates.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum UpdateOutcome {
@@ -134,6 +137,8 @@ where
 }
 
 /// Finalizes the update by swapping the updated firmware into place and removing the old version.
+///
+/// This is idempotent so an interrupted swap can be completed on the next boot.
 pub fn finalize_update<F>(fs: &mut F) -> whence::Result<(), Error>
 where
     F: FsAdapter,
@@ -141,13 +146,43 @@ where
 {
     fs.flush(fs::Location::System).whence()?;
 
-    // Swap the names of the original and updated firmware to complete the update. Then delete
-    // the old firmware.
-    fs.rename(KEYOS_DIR_PATH, KEYOS_OLD_DIR_PATH, fs::Location::System).whence()?;
-    fs.rename(KEYOS_UPDATE_DIR_PATH, KEYOS_DIR_PATH, fs::Location::System).whence()?;
-    fs.remove(KEYOS_OLD_DIR_PATH, fs::Location::System).whence()?;
+    let keyos_exists = path_exists(fs, KEYOS_DIR_PATH)?;
+    let update_exists = path_exists(fs, KEYOS_UPDATE_DIR_PATH)?;
+    let old_exists = path_exists(fs, KEYOS_OLD_DIR_PATH)?;
+
+    if !keyos_exists && !update_exists {
+        return Err(Error::Unexpected("firmware swap has no current or staged firmware".into())).whence();
+    }
+
+    if keyos_exists && update_exists {
+        if old_exists {
+            return Err(Error::Unexpected("firmware swap already has an old firmware directory".into()))
+                .whence();
+        }
+        fs.rename(KEYOS_DIR_PATH, KEYOS_OLD_DIR_PATH, fs::Location::System).whence()?;
+    }
+
+    if update_exists {
+        fs.rename(KEYOS_UPDATE_DIR_PATH, KEYOS_DIR_PATH, fs::Location::System).whence()?;
+    }
+
+    if old_exists || (keyos_exists && update_exists) {
+        fs.remove(KEYOS_OLD_DIR_PATH, fs::Location::System).whence()?;
+    }
 
     Ok(())
+}
+
+fn path_exists<F>(fs: &F, path: &str) -> Result<bool, Error>
+where
+    F: FsAdapter,
+    F::Permissions: BasicFsPermissions,
+{
+    match fs.metadata(path, fs::Location::System) {
+        Ok(_) => Ok(true),
+        Err(fs::Error::FileNotFound) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Applies a series of releases to the update directory.
@@ -762,6 +797,34 @@ mod tests {
         assert!(fs
             .open_file("/updates/release_v1.1.0.tar", fs::Location::System, fs::OpenFlags::READ_ONLY)
             .is_err());
+    }
+
+    #[test]
+    fn finalize_update_recovers_after_first_rename() {
+        let mut fs = FsTest::default();
+        fs.write_file("keyos/app.bin", b"old firmware", fs::Location::System);
+        fs.write_file("keyos.update/app.bin", b"new firmware", fs::Location::System);
+
+        fs.rename(KEYOS_DIR_PATH, KEYOS_OLD_DIR_PATH, fs::Location::System).unwrap();
+        finalize_update(&mut fs).unwrap();
+
+        assert_eq!(fs.read_file_contents(FIRMWARE_FILE_PATH, fs::Location::System).unwrap(), b"new firmware");
+        assert!(matches!(
+            fs.metadata(KEYOS_OLD_DIR_PATH, fs::Location::System),
+            Err(fs::Error::FileNotFound)
+        ));
+    }
+
+    #[test]
+    fn finalize_update_is_idempotent_after_success() {
+        let mut fs = FsTest::default();
+        fs.write_file("keyos/app.bin", b"old firmware", fs::Location::System);
+        fs.write_file("keyos.update/app.bin", b"new firmware", fs::Location::System);
+
+        finalize_update(&mut fs).unwrap();
+        finalize_update(&mut fs).unwrap();
+
+        assert_eq!(fs.read_file_contents(FIRMWARE_FILE_PATH, fs::Location::System).unwrap(), b"new firmware");
     }
 
     #[test]

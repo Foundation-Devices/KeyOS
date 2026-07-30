@@ -37,6 +37,8 @@ pub enum Error {
     InsufficientBattery,
     #[error("firmware rollback prevented: current timestamp = {current}, update timestamp = {update}")]
     RollbackPrevented { current: u32, update: u32 },
+    #[error("unexpected firmware version after reboot: expected {expected}, got {actual}")]
+    UnexpectedVersionAfterReboot { expected: String, actual: String },
 }
 
 impl From<std::io::Error> for Error {

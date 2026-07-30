@@ -372,7 +372,7 @@ impl<F: FsAdapter> UpdateDownloader<F> {
     }
 }
 
-fn patches_dir() -> String { format!("{}/patches", fs::SYSTEM_STATE_ROOT) }
+pub(crate) fn patches_dir() -> String { format!("{}/patches", fs::SYSTEM_STATE_ROOT) }
 
 #[cfg(test)]
 mod tests {

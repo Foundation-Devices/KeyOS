@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::collections::HashSet;
+use std::io::Write;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -30,6 +31,22 @@ const KEYOS_RECOVERY_FILE_PATH: &str = "keyos/app.new";
 
 const TEMP_ARCHIVE_PATH: &str = "keyos/recovtmp.tar";
 const TEMP_ARCHIVE_LOCATION: Location = Location::System;
+
+#[derive(Debug)]
+struct FinalizeOsBinaryError {
+    error: anyhow::Error,
+    firmware_swapped: bool,
+}
+
+impl FinalizeOsBinaryError {
+    fn before_swap(error: impl Into<anyhow::Error>) -> Self {
+        Self { error: error.into(), firmware_swapped: false }
+    }
+
+    fn after_swap(error: impl Into<anyhow::Error>) -> Self {
+        Self { error: error.into(), firmware_swapped: true }
+    }
+}
 
 /// Temporary file path for OS binary verification
 const TEMP_OS_BINARY_PATH: &str = "keyos/app.tmp";
@@ -393,6 +410,13 @@ impl RecoveryWorkerServer {
         }
         num_steps_done += num_steps_read_app_bin;
 
+        log::info!("Marking update state invalidated by Recovery");
+        if let Err(e) = self.mark_update_state_invalidated() {
+            log::error!("Failed to mark update state invalidated by Recovery: {e:?}");
+            self.last_error = Some(format!("Failed to mark update state invalidated by Recovery: {e:?}"));
+            return false;
+        }
+
         log::info!("Finalizing {}", os_binary.clone());
         if let Err(e) = self.finalize_os_binary(false, &os_binary, |progress| {
             let Some(subscriber) = &subscriber else { return };
@@ -406,8 +430,11 @@ impl RecoveryWorkerServer {
                 })
                 .ok();
         }) {
-            log::error!("Failed to finalize os binary: {e:?}");
-            self.last_error = Some(format!("Failed to finalize os binary: {e:?}"));
+            log::error!("Failed to finalize os binary: {:?}", e.error);
+            self.last_error = Some(format!("Failed to finalize os binary: {:?}", e.error));
+            if !e.firmware_swapped {
+                self.remove_update_state_invalidated_marker();
+            }
             return false;
         }
         num_steps_done += num_steps_finalize_os_binary;
@@ -443,8 +470,9 @@ impl RecoveryWorkerServer {
                     })
                     .ok();
             }) {
-                log::error!("Failed to finalize bootloader: ({bootloader}): {e:?}");
-                self.last_error = Some(format!("Failed to finalize bootloader: ({bootloader}): {e:?}"));
+                log::error!("Failed to finalize bootloader: ({bootloader}): {:?}", e.error);
+                self.last_error =
+                    Some(format!("Failed to finalize bootloader: ({bootloader}): {:?}", e.error));
                 return false;
             }
             num_steps_done += num_steps_finalize_bootloader;
@@ -491,6 +519,31 @@ impl RecoveryWorkerServer {
         }
 
         true
+    }
+
+    fn mark_update_state_invalidated(&mut self) -> anyhow::Result<()> {
+        let path = keyos::recovery::UPDATE_STATE_INVALIDATED_MARKER_PATH;
+        self.fs.ensure_parent_dir_exists(path, fs::Location::System)?;
+        let mut marker = self.fs.open_file(path, fs::Location::System, fs::OpenFlags::CREATE)?;
+        marker.write_all(b"1")?;
+        marker.flush()?;
+        self.fs.flush(fs::Location::System)?;
+        Ok(())
+    }
+
+    fn remove_update_state_invalidated_marker(&mut self) {
+        let path = keyos::recovery::UPDATE_STATE_INVALIDATED_MARKER_PATH;
+        match self.fs.remove(path, fs::Location::System) {
+            Ok(()) => {
+                if let Err(e) = self.fs.flush(fs::Location::System) {
+                    log::warn!("failed to flush removed update state invalidation marker: {e:?}");
+                }
+            }
+            Err(fs::Error::FileNotFound) => {}
+            Err(e) => log::warn!(
+                "failed to remove update state invalidation marker after failed Recovery swap: {e:?}"
+            ),
+        }
     }
 
     fn copy_binary(
@@ -659,12 +712,15 @@ impl RecoveryWorkerServer {
         is_bootloader: bool,
         binary: &str,
         progress_fn: impl Fn(f32),
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), FinalizeOsBinaryError> {
         let state = if is_bootloader { &self.bootloader_state } else { &self.os_binary_state };
         let RecoveryState::Copied { is_pre_release, timestamp, .. } = state else {
-            bail!("No valid binary state to finalize for {binary}");
+            return Err(FinalizeOsBinaryError::before_swap(anyhow::anyhow!(
+                "No valid binary state to finalize for {binary}"
+            )));
         };
-        let (old_name, new_name, location) = os_binary_to_file_name_and_location(binary)?;
+        let (old_name, new_name, location) =
+            os_binary_to_file_name_and_location(binary).map_err(FinalizeOsBinaryError::before_swap)?;
         let final_name = if binary == "app.bin" { "keyos/app.bin" } else { binary };
 
         progress_fn(0.0);
@@ -726,11 +782,13 @@ impl RecoveryWorkerServer {
         };
 
         if !rename_ok {
-            bail!("unable to rename {binary}");
+            return Err(FinalizeOsBinaryError::before_swap(anyhow::anyhow!("unable to rename {binary}")));
         }
 
         if !timestamp_update_ok {
-            bail!("unable to set firmware timestamp");
+            return Err(FinalizeOsBinaryError::after_swap(anyhow::anyhow!(
+                "unable to set firmware timestamp"
+            )));
         }
 
         progress_fn(1.0);

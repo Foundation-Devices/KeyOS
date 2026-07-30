@@ -15,6 +15,7 @@ constant_time_eq = "0.4.2"
 cosign2 = { path = "../../imports/cosign2/cosign2", default-features = false }
 fs = { workspace = true }
 hex = { version = "0.4.3", features = ["serde"] }
+keyos = { path = "../../keyos" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 num-derive = "0.4"

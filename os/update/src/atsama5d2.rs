@@ -13,7 +13,7 @@ use update::{messages::*, Error, MIN_UPDATE_BATTERY_PERCENT};
 use whence::WhenceExt;
 use xous_ticktimer::TicktimerCallback;
 
-use crate::core::{UpdateEvent, UpdateOutcome, FIRMWARE_FILE_PATH};
+use crate::core::{UpdateEvent, UpdateOutcome, FIRMWARE_FILE_PATH, STAGED_FIRMWARE_FILE_PATH};
 use crate::downloader::{EventOutcome, UpdateDownloader};
 use crate::fs_permissions::FileSystemPermissions;
 use crate::state::{DownloadedUpdate, UpdateState};
@@ -41,7 +41,17 @@ pub struct Server {
 impl Server {
     pub fn new(sid: xous::SID) -> Self {
         let fs = FileSystem::default();
-        let state = UpdateState::load();
+        let mut state = UpdateState::load();
+        if let Err(e) = clear_state_after_recovery(&fs, &mut state) {
+            if e.marker_observed {
+                log::error!("failed to clear update state after Recovery: {:?}", e.error);
+                if let Err(e) = reset_update_state(&fs, &mut state) {
+                    log::error!("failed to persist fail-closed update state clear after Recovery: {e:?}");
+                }
+            } else {
+                log::error!("failed to check Recovery update-state marker: {:?}", e.error);
+            }
+        }
         let downloader = UpdateDownloader::new(fs.clone());
         let download_stall_cb = TicktimerCallback::new(sid).expect("could not register callback");
         Self {
@@ -56,6 +66,48 @@ impl Server {
             download_stall_cb,
             install_running: false,
             sender: ServerSender::new(sid),
+        }
+    }
+}
+
+fn clear_state_after_recovery(
+    fs: &FileSystem,
+    state: &mut JsonBacked<UpdateState, FileSystemPermissions>,
+) -> Result<(), crate::state::ConsumeUpdateStateInvalidatedMarkerError> {
+    let consumed =
+        crate::state::consume_update_state_invalidated_marker(fs, || reset_update_state(fs, state))?;
+
+    if consumed {
+        log::info!("Recovery detected, cleared update state");
+    }
+
+    Ok(())
+}
+
+fn reset_update_state(
+    fs: &FileSystem,
+    state: &mut JsonBacked<UpdateState, FileSystemPermissions>,
+) -> Result<(), fs::Error> {
+    let pending_release_paths = state.pending_apply.clone();
+    remove_release_files(fs, &pending_release_paths);
+
+    state.set_auto_save(false);
+    {
+        let mut state = state.guard();
+        **state = UpdateState::default();
+    }
+    let save_result = state.try_save();
+    state.set_auto_save(true);
+    save_result
+}
+
+fn remove_release_files(fs: &FileSystem, release_paths: &[String]) {
+    for release_path in release_paths {
+        match fs.remove(release_path.as_str(), fs::Location::System) {
+            Ok(()) | Err(fs::Error::FileNotFound) => {}
+            Err(e) => {
+                log::warn!("failed to remove abandoned update release file {release_path}: {e:?}");
+            }
         }
     }
 }
@@ -284,7 +336,8 @@ impl server::ArchiveHandler<FirmwareInstallWorkerEvent> for Server {
                         }
                         UpdateOutcome::Partial(remaining_release_paths) => {
                             log::info!("release requires a reboot, saving remaining releases and rebooting");
-                            self.state.guard().pending_apply = remaining_release_paths;
+                            let expected_version = self.firmware_version_at(STAGED_FIRMWARE_FILE_PATH)?;
+                            self.save_resume_state(remaining_release_paths, expected_version)?;
                             core::finalize_update(&mut self.fs)?;
                             self.notify_and_reboot(ProgressUpdate::Rebooting)?;
                         }
@@ -347,7 +400,40 @@ impl Server {
 
         log::info!("continuing previous firmware update procedure");
 
-        let remaining_release_paths = std::mem::take(&mut self.state.guard().pending_apply);
+        if self.state.finalize_update_pending {
+            core::finalize_update(&mut self.fs)?;
+            self.state.guard().finalize_update_pending = false;
+        }
+
+        let expected_version = self.state.expected_version_on_resume.clone();
+        if let Some(expected_version) = expected_version {
+            let actual_version = self.firmware_version()?;
+            if actual_version != expected_version {
+                log::error!(
+                    "firmware version mismatch after reboot: expected {expected_version}, actual {actual_version}"
+                );
+                let abandoned_release_paths = self.state.pending_apply.clone();
+                remove_release_files(&self.fs, &abandoned_release_paths);
+                {
+                    let mut state = self.state.guard();
+                    state.expected_version_on_resume = None;
+                    state.finalize_update_pending = false;
+                    state.pending_apply.clear();
+                }
+                return Err(Error::UnexpectedVersionAfterReboot {
+                    expected: expected_version,
+                    actual: actual_version,
+                })
+                .whence();
+            }
+        }
+
+        let remaining_release_paths = {
+            let mut state = self.state.guard();
+            state.expected_version_on_resume = None;
+            state.finalize_update_pending = false;
+            std::mem::take(&mut state.pending_apply)
+        };
 
         self.spawn_apply_releases(remaining_release_paths);
 
@@ -372,8 +458,12 @@ impl Server {
     }
 
     fn firmware_version(&self) -> whence::Result<String, Error> {
+        self.firmware_version_at(FIRMWARE_FILE_PATH)
+    }
+
+    fn firmware_version_at(&self, firmware_path: &str) -> whence::Result<String, Error> {
         let mut firmware_file =
-            self.fs.open_file(FIRMWARE_FILE_PATH, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
+            self.fs.open_file(firmware_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
         let mut data = vec![0; cosign2::Header::DEFAULT_SIZE];
         firmware_file.read_exact(&mut data).whence()?;
         let header = cosign2::Header::parse_unverified(&data, cosign2::Header::DEFAULT_SIZE, false)
@@ -382,6 +472,23 @@ impl Server {
             .ok_or(Error::Cosign2HeaderMissing)
             .whence()?;
         Ok(header.version().to_owned())
+    }
+
+    fn save_resume_state(
+        &mut self,
+        pending_apply: Vec<String>,
+        expected_version_on_resume: String,
+    ) -> whence::Result<(), Error> {
+        self.state.set_auto_save(false);
+        {
+            let mut state = self.state.guard();
+            state.pending_apply = pending_apply;
+            state.expected_version_on_resume = Some(expected_version_on_resume);
+            state.finalize_update_pending = true;
+        }
+        let save_result = self.state.try_save();
+        self.state.set_auto_save(true);
+        save_result.whence()
     }
 
     fn spawn_apply_releases(&mut self, release_paths: Vec<String>) {
