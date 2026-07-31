@@ -212,10 +212,33 @@ impl Gui {
                 return None;
             };
 
-            // Resize to 0.5x in both directions
+            // Resize to 0.5x in both directions using a 2x2 box filter, so that every
+            // source pixel (including thin 1px lines) contributes to the preview
+            // instead of being dropped by point-sampling only the even rows/columns
+            fn pixels_avg(a: u32, b: u32, c: u32, d: u32) -> u32 {
+                let mut out = 0u32;
+                for shift in [0, 8, 16, 24] {
+                    let sum = ((a >> shift) & 0xff)
+                        + ((b >> shift) & 0xff)
+                        + ((c >> shift) & 0xff)
+                        + ((d >> shift) & 0xff);
+                    out |= ((sum / 4) & 0xff) << shift;
+                }
+                out
+            }
+
+            let src = display_buffer.as_slice();
             for y in 0..SCREEN_HEIGHT / 2 {
+                let row0 = y * 2 * SCREEN_WIDTH;
+                let row1 = row0 + SCREEN_WIDTH;
                 for x in 0..SCREEN_WIDTH / 2 {
-                    let pixel: u32 = display_buffer.as_slice()[y * 2 * SCREEN_WIDTH + x * 2];
+                    let col0 = x * 2;
+                    let pixel = pixels_avg(
+                        src[row0 + col0],
+                        src[row0 + col0 + 1],
+                        src[row1 + col0],
+                        src[row1 + col0 + 1],
+                    );
                     // Swap back R and B from hw representation
                     #[cfg(keyos)]
                     let pixel =

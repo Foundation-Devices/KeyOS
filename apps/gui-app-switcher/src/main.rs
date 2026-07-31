@@ -68,9 +68,21 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
         move |input| match input.msg {
             InputMessage::Visible => {
-                AppState::center_card(&ui, 0);
                 if state.borrow().is_app_list_empty() {
                     gui_api.switch_to_launcher().ok();
+                    return;
+                }
+
+                AppState::center_card(&ui, 0);
+
+                if state.borrow_mut().take_first_show() {
+                    // Update Flickable once after layout is done
+                    let ui = ui.clone_strong();
+                    slint_keyos_platform::spawn_local(async move {
+                        slint_keyos_platform::sleep(std::time::Duration::from_millis(150)).await;
+                        AppState::center_card(&ui, 0);
+                    })
+                    .detach();
                 }
             }
 

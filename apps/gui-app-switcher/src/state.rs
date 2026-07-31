@@ -31,6 +31,7 @@ pub(crate) struct AppState {
     app_first_touch_pos: Option<Touch>,
     app_touch_index: Option<usize>,
     last_touch_pos: Option<Touch>,
+    shown_once: bool,
 }
 
 /// Preferred direction (bias) when choosing a card to center.
@@ -51,6 +52,8 @@ impl AppState {
     }
 
     pub(crate) fn is_app_list_empty(&self) -> bool { self.apps.is_empty() }
+
+    pub(crate) fn take_first_show(&mut self) -> bool { !std::mem::replace(&mut self.shown_once, true) }
 
     pub fn handle_app_activated(&mut self, ui: &AppWindow, pid: PID) {
         let Some(app_idx) = self.apps.iter().position(|app| app.pid == pid.get() as i32) else {
