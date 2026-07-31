@@ -23,7 +23,7 @@ SignWithFidoKey = { id = 20, type = "blockingArchive", approval = "autoAllow" }
 GetOsVersionInfo = { id = 21, type = "blockingArchive", permissionGroup = "device-secrets.general-status", approval = "autoAllow" }
 ScChallenge = { id = 22, type = "blockingArchive" }
 IsPinSet = { id = 23, type = "blockingArchive", approval = "autoAllow" }
-GetDeviceId = { id = 24, type = "blockingArchive", approval = "autoAllow" }
+GetDeviceId = { id = 24, type = "blockingArchive", permissionGroup = "device-secrets.general-status", approval = "autoAllow" }
 KeycardAuthenticityMac = { id = 25, type = "blockingArchive" }
 GetBluetoothChallengeSecret = { id = 26, type = "blockingArchive" }
 SetBluetoothCheckSecretSent = { id = 27, type = "blockingScalar" }
