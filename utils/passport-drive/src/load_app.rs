@@ -10,13 +10,35 @@ use usb_debug_protocol::{
     Command, ProtocolError, UsbDebugClient, LOAD_APP_CHUNK_MAX, LOAD_APP_FILE_PATH_MAX,
 };
 
+/// Whether a bundle-root file has to be there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Presence {
+    Required,
+    Optional,
+}
+
+/// The bundle-root files, in upload order. `resources/**` is walked separately, since it is a
+/// tree rather than a fixed name.
+const BUNDLE_FILES: &[(&str, Presence)] = &[
+    ("app.elf", Presence::Required),
+    ("manifest.json", Presence::Required),
+    ("icon.bin", Presence::Optional),
+    ("icon-dark.bin", Presence::Optional),
+];
+
 pub(crate) struct LoadAppReport {
     pub app_id: String,
-    pub elf_bytes: usize,
-    pub manifest_bytes: usize,
-    pub icon_bytes: Option<usize>,
+    /// The uploaded bundle-root files and their sizes, in upload order. Optional files the
+    /// bundle omits are absent rather than zero-sized.
+    pub files: Vec<(&'static str, usize)>,
     pub resource_files: usize,
     pub resource_bytes: usize,
+}
+
+impl LoadAppReport {
+    pub(crate) fn files_summary(&self) -> String {
+        self.files.iter().map(|(name, bytes)| format!("{name}: {bytes} bytes")).collect::<Vec<_>>().join(", ")
+    }
 }
 
 /// Which sideload directory the bundle lands in on the device.
@@ -61,27 +83,21 @@ pub(crate) fn load_app(
         std::fs::metadata(app_path).with_context(|| format!("Cannot access {}", app_path.display()))?;
     ensure!(metadata.is_dir(), "{} is not a directory", app_path.display());
 
-    let elf_path = app_path.join("app.elf");
-    let manifest_path = app_path.join("manifest.json");
-    let icon_path = app_path.join("icon.bin");
-    let resources_path = app_path.join("resources");
+    let files = read_bundle_files(app_path)?;
+    let resource_files = collect_resource_files(&app_path.join("resources"))?;
 
-    let elf = read_bundle_file(&elf_path)?;
-    let manifest = read_bundle_file(&manifest_path)?;
-    let icon = if icon_path.exists() { Some(read_bundle_file(&icon_path)?) } else { None };
-    let resource_files = collect_resource_files(&resources_path)?;
-
-    ensure!(!elf.is_empty(), "{} is empty", elf_path.display());
-    ensure!(!manifest.is_empty(), "{} is empty", manifest_path.display());
-    let app_id = validate_manifest_json(&manifest)?;
-    warn_on_flux_mismatch(&manifest, kind);
+    let manifest = files
+        .iter()
+        .find(|(name, _)| *name == "manifest.json")
+        .map(|(_, bytes)| bytes.as_slice())
+        .expect("manifest.json is a required bundle file");
+    let app_id = validate_manifest_json(manifest)?;
+    warn_on_flux_mismatch(manifest, kind);
     let app_id_bytes = decode_app_id(&app_id)?;
 
     send_ack(transport, kind.begin_command(app_id_bytes), "starting load_app", Duration::from_secs(5))?;
-    upload_file(transport, "app.elf", &elf)?;
-    upload_file(transport, "manifest.json", &manifest)?;
-    if let Some(icon) = icon.as_deref() {
-        upload_file(transport, "icon.bin", icon)?;
+    for (name, bytes) in &files {
+        upload_file(transport, name, bytes)?;
     }
     let mut resource_bytes = 0usize;
     for resource in &resource_files {
@@ -93,12 +109,27 @@ pub(crate) fn load_app(
 
     Ok(LoadAppReport {
         app_id,
-        elf_bytes: elf.len(),
-        manifest_bytes: manifest.len(),
-        icon_bytes: icon.as_ref().map(Vec::len),
+        files: files.iter().map(|(name, bytes)| (*name, bytes.len())).collect(),
         resource_files: resource_files.len(),
         resource_bytes,
     })
+}
+
+/// Read the bundle-root files to upload, skipping the optional ones the bundle does not ship.
+fn read_bundle_files(app_path: &Path) -> Result<Vec<(&'static str, Vec<u8>)>> {
+    let mut files = Vec::new();
+    for &(name, presence) in BUNDLE_FILES {
+        let path = app_path.join(name);
+        if presence == Presence::Optional && !path.exists() {
+            continue;
+        }
+        let bytes = read_bundle_file(&path)?;
+        if presence == Presence::Required {
+            ensure!(!bytes.is_empty(), "{} is empty", path.display());
+        }
+        files.push((name, bytes));
+    }
+    Ok(files)
 }
 
 fn upload_file(transport: &UsbDebugClient, filename: &str, data: &[u8]) -> Result<()> {

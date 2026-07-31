@@ -34,7 +34,9 @@ export global LauncherCallbacks {
     /// nothing out.
     pure callback displaced-item(string, int) -> LauncherItemData;
     pure callback app-id-to-title(string) -> string;
-    pure callback app-icon(string) -> image;
+    /// Bundled app icon for an icon key, in its dark variant when the second
+    /// argument is true and the app ships one.
+    pure callback app-icon(string, bool) -> image;
 }
 
 export global State {

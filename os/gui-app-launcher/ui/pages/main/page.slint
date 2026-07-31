@@ -383,7 +383,7 @@ component LauncherCollectionItem inherits Rectangle {
                 height: parent.height;
                 background: transparent;
 
-                property <image> app-icon: CB.app-icon(root.item.icon-key);
+                property <image> app-icon: CB.app-icon(root.item.icon-key, CurrentTheme.is-dark);
 
                 if self.app-icon.width > 0: Image {
                     width: parent.width;

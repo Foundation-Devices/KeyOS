@@ -17,7 +17,7 @@ import {
     TextMd,
     TextSm,
 } from "@ui/widgets.slint";
-import { Importance, Palette, Size } from "@ui/theme.slint";
+import { CurrentTheme, Importance, Palette, Size } from "@ui/theme.slint";
 
 import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
@@ -44,7 +44,7 @@ component AppSummaryCard inherits Rectangle {
         icon-frame := Rectangle {
             // Empty image (width 0) means the app ships no icon.bin; fall back to
             // the shield placeholder.
-            property <image> app-icon: AppManagementGlobal.app-icon(root.app.app_id);
+            property <image> app-icon: AppManagementGlobal.app-icon(root.app.app_id, CurrentTheme.is-dark);
 
             width: Size.sz13;
             height: Size.sz13;

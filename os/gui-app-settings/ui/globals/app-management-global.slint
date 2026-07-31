@@ -88,7 +88,9 @@ export global AppManagementGlobal {
     callback launch-installed-app(string);
     callback set-app-permission-subgroup-grant(string, string, bool) -> bool;
     callback remove-installed-app(string) -> string;
-    pure callback app-icon(string) -> image;
+    /// Bundled app icon for an app id, in its dark variant when the second
+    /// argument is true and the app ships one.
+    pure callback app-icon(string, bool) -> image;
 
     in property <[TrustedPublisher]> trusted-publishers: [];
     callback refresh-trusted-publishers();

@@ -634,8 +634,8 @@ impl Builder {
             let app_name = app_src.name().to_string();
             println!("Bundling app {}", app_name);
             let bundle_dir = apps_dir.join(filesystem_app_dir_name(&app_name));
-            // Built-ins stage their icon in the shared app-icons dir as <app-id>.bin (the device
-            // reads it from CommonAssets); only local crates ship one, and prebuilt crates none.
+            // Built-ins stage their icons in the shared app-icons dir as <app-id>[-dark].bin (the
+            // device reads them from CommonAssets); only local crates ship one, prebuilt crates none.
             let icon_dest = matches!(app_src, CrateSpec::Local(_))
                 .then(|| app_icons_dir.join(format!("{}.bin", hex::encode(load_manifest(&app_name).app_id))));
             app_data.push(self.bundle_app(&app_name, &app_bin, &bundle_dir, icon_dest.as_deref()));
@@ -654,9 +654,9 @@ impl Builder {
     }
 
     /// Build one app crate into a signed, sideloadable bundle: a directory named by the app id
-    /// holding `app.elf`, `manifest.json` (with `fileHashes`), and `icon.bin` when the crate ships
-    /// one. Signs with the developer key from `cosign2_config`, or the repo `cosign2.toml` (which is
-    /// not a trusted publisher) when none is given; a hosted build is left unsigned. Returns the
+    /// holding `app.elf`, `manifest.json` (with `fileHashes`), and `icon[-dark].bin` for the icons
+    /// the crate ships. Signs with the developer key from `cosign2_config`, or the repo `cosign2.toml` (which
+    /// is not a trusted publisher) when none is given; a hosted build is left unsigned. Returns the
     /// bundle directory. Whether the app is a Flux child is decided by the device directory it lands
     /// in, not by anything here.
     pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> PathBuf {
@@ -664,8 +664,8 @@ impl Builder {
         let app_id_hex = hex::encode(load_manifest(app_name).app_id);
         let bundle_dir = out.join(&app_id_hex);
         fs::remove_dir_all(&bundle_dir).ok();
-        // A standalone bundle carries its icon inside as `icon.bin`, where the registry looks for a
-        // third-party app's icon.
+        // A standalone bundle carries its icons inside as `icon.bin` and `icon-dark.bin`, where the
+        // registry looks for a third-party app's icon.
         let icon_dest = bundle_dir.join("icon.bin");
         let bundled = self.bundle_app(app_name, &app_bin, &bundle_dir, Some(&icon_dest));
 
@@ -688,10 +688,11 @@ impl Builder {
         bundle_dir
     }
 
-    /// Bundle one already-built app into `bundle_dir`: strip its ELF to `app.elf`, stage `icon.bin`
-    /// to `icon_dest` when given, and write `manifest.json` with `fileHashes`. The caller
-    /// wipes/creates the parent as needed; `icon_dest` is where the icon lands (inside the bundle
-    /// for standalone bundles, the shared app-icons dir for built-ins) or `None` to stage no icon.
+    /// Bundle one already-built app into `bundle_dir`: strip its ELF to `app.elf`, stage the icons
+    /// at `icon_dest` when given, and write `manifest.json` with `fileHashes`. The caller
+    /// wipes/creates the parent as needed; `icon_dest` is where the light icon lands (inside the
+    /// bundle for standalone bundles, the shared app-icons dir for built-ins), with any dark
+    /// variant beside it, or `None` to stage no icon.
     fn bundle_app(
         &self,
         app_name: &str,
@@ -706,7 +707,7 @@ impl Builder {
         if let Some(icon_dest) = icon_dest {
             stage_bundled_icon(app_name, icon_dest);
         }
-        // fileHashes must be taken after the icon is staged, so an in-bundle icon.bin is covered.
+        // fileHashes must be taken after the icons are staged, so in-bundle icon files are covered.
         let mut manifest: Manifest = load_manifest(app_name);
         manifest.file_hashes = bundle_file_hashes(bundle_dir);
         let manifest_path = bundle_dir.join("manifest.json");
@@ -1132,19 +1133,39 @@ fn sign_bundle(cosign2: &Cosign2, mode: SigningMode, bundled: &BundledApp) {
     }
 }
 
-/// Convert a built-in app's source icon into `dest` as a raw `icon.bin`. The source is
-/// discovered by the SDK convention `resources/icon.(svg|png)` under the app crate; apps
-/// without one ship no icon.
+/// Convert a built-in app's source icons into raw `.bin` files: the light icon at `dest` and,
+/// for a crate that ships one, the dark icon at its `-dark` sibling. Sources are discovered by
+/// the SDK convention `resources/icon[-dark].(svg|png)` under the app crate; apps without a
+/// light icon ship none.
 fn stage_bundled_icon(crate_name: &str, dest: &Path) {
     let crate_dir = get_crate_dir(crate_name);
-    let Some(source) = ["resources/icon.svg", "resources/icon.png"]
-        .into_iter()
-        .map(|rel| crate_dir.join(rel))
-        .find(|path| path.exists())
-    else {
+    let find_source =
+        |names: [&str; 2]| names.into_iter().map(|rel| crate_dir.join(rel)).find(|path| path.exists());
+
+    let dark_source = find_source(["resources/icon-dark.svg", "resources/icon-dark.png"]);
+    let Some(source) = find_source(["resources/icon.svg", "resources/icon.png"]) else {
+        assert!(
+            dark_source.is_none(),
+            "{crate_name} ships resources/icon-dark.* without the resources/icon.* it falls back to"
+        );
         return;
     };
-    let (_, icon_data) = slint_keyos_platform_build::convert_image_to_raw(&source)
+
+    write_raw_icon(&source, dest);
+    if let Some(dark_source) = dark_source {
+        write_raw_icon(&dark_source, &dark_icon_path(dest));
+    }
+}
+
+/// The dark icon's staged path: the `-dark` sibling of the light icon, so both
+/// `app-icons/<app-id>.bin` and an in-bundle `icon.bin` gain a matching `-dark.bin`.
+fn dark_icon_path(dest: &Path) -> PathBuf {
+    let stem = dest.file_stem().unwrap_or_default().to_string_lossy();
+    dest.with_file_name(format!("{stem}-dark.bin"))
+}
+
+fn write_raw_icon(source: &Path, dest: &Path) {
+    let (_, icon_data) = slint_keyos_platform_build::convert_image_to_raw(source)
         .unwrap_or_else(|e| panic!("Could not convert bundled icon {}: {e}", source.display()));
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).unwrap_or_else(|e| panic!("Could not create {}: {e}", parent.display()));
@@ -1176,4 +1197,18 @@ fn bundle_file_hashes(bundle_dir: &Path) -> BTreeMap<String, String> {
         }
     }
     hashes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_dark_icon_is_the_dark_suffixed_sibling() {
+        assert_eq!(
+            dark_icon_path(Path::new("keyos/app-icons/00112233445566778899aabbccddeeff.bin")),
+            PathBuf::from("keyos/app-icons/00112233445566778899aabbccddeeff-dark.bin")
+        );
+        assert_eq!(dark_icon_path(Path::new("bundle/icon.bin")), PathBuf::from("bundle/icon-dark.bin"));
+    }
 }

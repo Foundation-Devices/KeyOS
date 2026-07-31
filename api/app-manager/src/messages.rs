@@ -264,13 +264,22 @@ pub struct ListApps {
     pub filter: AppFilter,
 }
 
+/// Which themed variant of an app's bundled icon to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum IconVariant {
+    Light,
+    Dark,
+}
+
 /// Fetch the raw bytes of a single app's bundled icon, keyed by its hex app id
 /// (as returned in [`InstalledAppInfo::app_id`]). Returns `None` when the app
-/// is unknown, has no bundled icon, or the icon cannot be read.
+/// is unknown, has no bundled icon, or the icon cannot be read. A dark-variant
+/// request falls back to the light icon for apps that ship no dark icon.
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Option<Vec<u8>>)]
 pub struct GetAppIcon {
     pub app_id: String,
+    pub variant: IconVariant,
 }
 
 /// How the user answered a permission prompt (or moved a Settings toggle) for one

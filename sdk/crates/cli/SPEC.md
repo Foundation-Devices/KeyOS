@@ -152,7 +152,8 @@ Observed behavior:
 - `launcher-app-name` falls back to `friendly-app-name`
 - `friendly-app-name` and `launcher-app-name` may contain only ASCII letters, numbers, spaces, and hyphens
 - `app-id` must be a `0x`-prefixed even-length hex string
-- `icon` is validated relative to the project root and must be exactly `96x96px`
+- `icon` is validated relative to the project root and must be exactly `110x110px`
+- a `<stem>-dark.*` sibling of `icon` is the optional dark-theme variant, validated to the same size
 - `theme`, when present, names either an app-local editable JSON file or a base theme id
 - `permissions.template` expands through `permission_templates.toml`
 - explicit permission entries merge with expanded templates
@@ -370,13 +371,15 @@ target/keyos/<app-name>/app.elf
 target/keyos/<app-name>/manifest.json
 ```
 
-- Converts the app icon into bundle-local raw image data for app-manager UI surfaces:
+- Converts the app icon into bundle-local raw image data for app-manager UI surfaces, and the
+  dark-theme sibling beside it when the app ships one:
 
 ```text
 target/keyos/<app-name>/icon.bin
+target/keyos/<app-name>/icon-dark.bin
 ```
 
-- Refuses to build when the source icon is not exactly `96x96px`
+- Refuses to build when the source icon is not exactly `110x110px`
 
 - Converts and stages app assets into:
 

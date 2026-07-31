@@ -90,11 +90,11 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.send_blocking_archive(ListApps { locale: locale.to_string(), filter })
     }
 
-    pub fn get_app_icon(&self, app_id: &str) -> Option<Vec<u8>>
+    pub fn get_app_icon(&self, app_id: &str, variant: IconVariant) -> Option<Vec<u8>>
     where
         P: MessageAllowed<GetAppIcon>,
     {
-        self.0.send_blocking_archive(GetAppIcon { app_id: app_id.to_string() })
+        self.0.send_blocking_archive(GetAppIcon { app_id: app_id.to_string(), variant })
     }
 
     pub fn set_app_permission_grant(

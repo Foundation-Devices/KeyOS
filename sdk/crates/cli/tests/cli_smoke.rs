@@ -241,7 +241,7 @@ fn build_refuses_invalid_icon_size_before_cargo() {
     let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
 
     assert!(!build.status.success());
-    assert!(stderr(&build).contains("Icon must be 96x96px"), "stderr was: {}", stderr(&build));
+    assert!(stderr(&build).contains("Icon must be 110x110px"), "stderr was: {}", stderr(&build));
     assert!(env.read_log("cargo.log").is_empty());
 }
 
@@ -535,7 +535,7 @@ impl TestEnv {
             "#,
         )
         .unwrap();
-        fs::write(self.app.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#)
+        fs::write(self.app.join("resources").join("icon.svg"), r#"<svg width="110" height="110"></svg>"#)
             .unwrap();
         fs::write(
             self.app.join("ui").join("app.slint"),

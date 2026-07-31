@@ -724,7 +724,8 @@ mod tests {
         )
         .unwrap();
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="110" height="110"></svg>"#)
+            .unwrap();
 
         fs::write(root.join("src").join("lib.rs"), "pub fn sample() {}\n").unwrap();
         fs::write(root.join("stamp.txt"), "v1\n").unwrap();

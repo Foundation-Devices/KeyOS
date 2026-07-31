@@ -4,9 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use app_manager::{
-    AppQrMatchRules, InstalledAppInfo, InstalledAppPermissionGroup, InstalledAppPermissionSubgroup,
-    LaunchError, PermissionRequestInfo, PermissionRequestInfoResult, ThirdPartyCertificateInfo,
-    SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR,
+    AppQrMatchRules, IconVariant, InstalledAppInfo, InstalledAppPermissionGroup,
+    InstalledAppPermissionSubgroup, LaunchError, PermissionRequestInfo, PermissionRequestInfoResult,
+    ThirdPartyCertificateInfo, SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR,
 };
 use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
@@ -30,14 +30,19 @@ pub(crate) const FLUX_EMULATOR_APP_ID: AppId = AppId(*b"gui-app-emu-flux");
 /// to the "only sideloaded apps are removable" rule. The trusted OS binary decides this,
 /// never the app's own (signed-but-self-asserted) manifest.
 const REMOVABLE_BUILTIN: &[AppId] = &[FLUX_EMULATOR_APP_ID];
-// SDK-generated 256x256 RGBA icons are archived RawImage values: 256 KiB of
-// pixels plus rkyv header/alignment overhead. Leave margin for format drift.
+// Each icon file holds one 110x110 RGBA archived RawImage (~47 KiB of pixels)
+// plus rkyv header/alignment overhead. Leave margin for format drift and
+// oversized sources.
 const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
 const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
 /// Filename of a sideloaded app's icon within its bundle, next to `app.elf`. The SDK writes it
 /// here, mirroring this name with its own constant (it can't depend on this crate). Built-in
 /// icons instead live in CommonAssets (`app-icons/<app-id>.bin`).
 const BUNDLED_ICON_FILE: &str = "icon.bin";
+/// Filename of the dark-theme icon beside [`BUNDLED_ICON_FILE`], staged only by apps that ship
+/// one; the light icon serves both themes otherwise. Built-in dark icons are the
+/// `app-icons/<app-id>-dark.bin` sibling in CommonAssets.
+const BUNDLED_DARK_ICON_FILE: &str = "icon-dark.bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppSource {
@@ -348,10 +353,24 @@ impl AppRegistry {
     }
 
     /// Blind-read the app's icon, returning `None` when the app ships no icon (the common
-    /// case) or it can't be read. Built-in icons live in CommonAssets (keyed by app id);
-    /// sideloaded icons live in the app bundle.
-    pub(crate) fn app_icon_bytes(&self, app_id: AppId) -> Option<Vec<u8>> {
-        let (path, location) = self.installed_apps.get(&app_id)?.icon_path()?;
+    /// case) or it can't be read. Most apps ship no dark variant, so a missing one is not an
+    /// error: the light icon answers a dark-variant request instead. Built-in icons live in
+    /// CommonAssets (keyed by app id); sideloaded icons live in the app bundle.
+    pub(crate) fn app_icon_bytes(&self, app_id: AppId, variant: IconVariant) -> Option<Vec<u8>> {
+        let app = self.installed_apps.get(&app_id)?;
+        if matches!(variant, IconVariant::Dark) {
+            if let Some((path, location)) = app.icon_path(IconVariant::Dark) {
+                match read_capped_file(&path, location, MAX_APP_ICON_SIZE_BYTES) {
+                    Ok(bytes) if !bytes.is_empty() => return Some(bytes),
+                    // An empty file would decode to a blank image, so let the light icon answer.
+                    Ok(_) => log::warn!("dark app icon for app_id=0x{app_id} is empty"),
+                    Err(e) if is_file_not_found(&e) => {}
+                    Err(e) => log::warn!("failed to read the dark app icon for app_id=0x{app_id}: {e:?}"),
+                }
+            }
+        }
+
+        let (path, location) = app.icon_path(IconVariant::Light)?;
         read_capped_file(&path, location, MAX_APP_ICON_SIZE_BYTES)
             .map_err(|e| log::warn!("failed to read app icon for app_id=0x{app_id}: {e:?}"))
             .ok()
@@ -716,12 +735,22 @@ impl AppInfo {
 
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
 
-    fn icon_path(&self) -> Option<(String, fs::Location)> {
+    fn icon_path(&self, variant: IconVariant) -> Option<(String, fs::Location)> {
         match self.source {
-            AppSource::BuiltIn => Some((format!("app-icons/{}.bin", self.id), fs::Location::CommonAssets)),
+            AppSource::BuiltIn => {
+                let suffix = match variant {
+                    IconVariant::Light => "",
+                    IconVariant::Dark => "-dark",
+                };
+                Some((format!("app-icons/{}{suffix}.bin", self.id), fs::Location::CommonAssets))
+            }
             AppSource::ThirdParty => {
+                let file = match variant {
+                    IconVariant::Light => BUNDLED_ICON_FILE,
+                    IconVariant::Dark => BUNDLED_DARK_ICON_FILE,
+                };
                 let app_dir = self.app_dir.as_deref()?;
-                Some((format!("{app_dir}/{BUNDLED_ICON_FILE}"), fs::Location::System))
+                Some((format!("{app_dir}/{file}"), fs::Location::System))
             }
         }
     }
@@ -811,6 +840,12 @@ fn read_capped_file(path: &str, location: fs::Location, max_size_bytes: u64) -> 
     let mut bytes = Vec::with_capacity(metadata.size as usize);
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// Whether a read failed only because the file is absent, which for the optional dark icon is
+/// the common case rather than a fault.
+fn is_file_not_found(error: &anyhow::Error) -> bool {
+    matches!(error.downcast_ref::<fs::Error>(), Some(fs::Error::FileNotFound))
 }
 
 #[cfg(keyos)]
@@ -965,6 +1000,30 @@ mod tests {
     fn app_icon_read_cap_allows_raw_256_rgba_icon() {
         let pixel_bytes = 256 * 256 * 4;
         assert!(MAX_APP_ICON_SIZE_BYTES > pixel_bytes);
+    }
+
+    #[test]
+    fn dark_icon_path_is_the_dark_suffixed_sibling() {
+        let built_in = built_in_app_info(THIRD_PARTY_APP_ID, "Example App", None);
+        assert_eq!(
+            built_in.icon_path(IconVariant::Light),
+            Some((format!("app-icons/{THIRD_PARTY_APP_DIR}.bin"), fs::Location::CommonAssets))
+        );
+        assert_eq!(
+            built_in.icon_path(IconVariant::Dark),
+            Some((format!("app-icons/{THIRD_PARTY_APP_DIR}-dark.bin"), fs::Location::CommonAssets))
+        );
+
+        let third_party = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        let bundle_dir = format!("/keyos/sideloaded-apps/{THIRD_PARTY_APP_DIR}");
+        assert_eq!(
+            third_party.icon_path(IconVariant::Light),
+            Some((format!("{bundle_dir}/icon.bin"), fs::Location::System))
+        );
+        assert_eq!(
+            third_party.icon_path(IconVariant::Dark),
+            Some((format!("{bundle_dir}/icon-dark.bin"), fs::Location::System))
+        );
     }
 
     fn registry_with(apps: Vec<AppInfo>) -> AppRegistry {

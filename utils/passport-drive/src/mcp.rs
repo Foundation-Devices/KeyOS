@@ -558,13 +558,11 @@ impl PassportServer {
             .map_err(|e| format!("load_app failed: {e:#}"))?;
 
         Ok(text_result(&format!(
-            "Loaded {} into {}/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
+            "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
             report.app_id,
             kind.device_dir(),
             report.app_id,
-            report.elf_bytes,
-            report.manifest_bytes,
-            report.icon_bytes.unwrap_or(0),
+            report.files_summary(),
             report.resource_files,
             report.resource_bytes
         )))

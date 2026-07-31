@@ -459,17 +459,17 @@ mod tests {
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         write_config(root, "Demo App");
-        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
 
         let result = check_app_icon_size_from(root);
 
         assert!(!result.passed);
-        assert!(result.status.contains("Icon must be 96x96px"));
-        assert!(result.status.contains("128x96px"));
+        assert!(result.status.contains("Icon must be 110x110px"));
+        assert!(result.status.contains("96x96px"));
     }
 
     #[test]
-    fn app_icon_size_check_accepts_96px_icon() {
+    fn app_icon_size_check_accepts_110px_icon() {
         let root_dir = make_temp_dir("doctor-valid-icon");
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
@@ -479,7 +479,7 @@ mod tests {
         let result = check_app_icon_size_from(root);
 
         assert!(result.passed);
-        assert_eq!(result.status, "OK (96x96px)");
+        assert_eq!(result.status, "OK (110x110px)");
     }
 
     #[test]
@@ -511,5 +511,5 @@ mod tests {
         .unwrap();
     }
 
-    fn valid_icon_svg() -> &'static str { r#"<svg width="96" height="96"></svg>"# }
+    fn valid_icon_svg() -> &'static str { r#"<svg width="110" height="110"></svg>"# }
 }

@@ -25,7 +25,8 @@ This template creates a GUI app with:
 - `src/main.rs` - Minimal application entry point
 - `ui/` - Slint UI files
   - `app.slint` - Main component gallery using shared `@ui` imports
-- `resources/icon.svg` - 96x96px app icon image converted into the hardware app icon
+- `resources/icon.svg` - 110x110px app icon image converted into the hardware app icon
+- `resources/icon-dark.svg` - optional 110x110px dark-theme variant; without it the light icon serves both themes
 - `resources/theme.json` - App-local theme opened by `foundation theme`
 - `resources/images/sample-scene.svg` - Sample app-owned image, loaded with `Images.image("sample-scene")`
 
@@ -48,7 +49,7 @@ After creating a project from this template, you can:
 
 1. Run `foundation theme` to edit `resources/theme.json`
 2. Run `foundation sim` to inspect the theme in the simulator
-3. Replace `resources/icon.svg` with your own 96x96px icon
+3. Replace `resources/icon.svg` with your own 110x110px icon
 4. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
 5. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
 

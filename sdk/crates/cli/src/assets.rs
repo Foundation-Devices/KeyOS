@@ -9,6 +9,9 @@ use anyhow::{bail, Context, Result};
 use foundation_core::{AppConfig, SdkRoot};
 
 pub const BUNDLED_ICON_FILE: &str = "icon.bin";
+/// The dark-theme icon beside [`BUNDLED_ICON_FILE`], staged only when the app ships one.
+/// The app manager reads it under this name; the light icon serves both themes otherwise.
+pub const BUNDLED_DARK_ICON_FILE: &str = "icon-dark.bin";
 
 const ASSET_TOOL_BINARY: &str = "foundation-asset-tool";
 const ASSET_TOOL_ENV: &str = "FOUNDATION_ASSET_TOOL";
@@ -37,7 +40,7 @@ fn stage_hardware_assets_with_tool(
     Ok(resources_dir)
 }
 
-/// Stage the single bundled icon next to app.elf. Resolves the asset tool on its
+/// Stage the bundled icons next to app.elf. Resolves the asset tool on its
 /// own; callers staging a full asset set should go through stage_hardware_assets
 /// so the resolve happens once.
 pub fn stage_bundled_icon(config: &AppConfig, project_root: &Path, output_dir: &Path) -> Result<()> {
@@ -51,8 +54,19 @@ fn stage_bundled_icon_with_tool(
     tool: &AssetTool,
 ) -> Result<()> {
     let icon_source = project_root.join(&config.icon);
-    let icon_destination = output_dir.join(BUNDLED_ICON_FILE);
-    convert_image_file(&icon_source, &icon_destination, tool)
+    convert_image_file(&icon_source, &output_dir.join(BUNDLED_ICON_FILE), tool)?;
+
+    let dark_destination = output_dir.join(BUNDLED_DARK_ICON_FILE);
+    match config.dark_icon(project_root) {
+        Some(dark_source) => convert_image_file(&dark_source, &dark_destination, tool)?,
+        // Not every caller wipes its output dir first (the simulator app dir is staged in
+        // place), so an app that drops its dark icon would keep being served the old one.
+        None if dark_destination.exists() => fs::remove_file(&dark_destination)
+            .with_context(|| format!("Failed to remove stale {}", dark_destination.display()))?,
+        None => {}
+    }
+
+    Ok(())
 }
 
 fn stage_images(project_root: &Path, resources_dir: &Path, tool: &AssetTool) -> Result<()> {
@@ -326,8 +340,41 @@ mod tests {
             stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
 
         assert!(output_dir.join("icon.bin").exists());
+        assert!(!output_dir.join("icon-dark.bin").exists());
         assert!(resources_dir.join("images").join("nested").join("photo.raw").exists());
         assert_eq!(fs::read(resources_dir.join("fonts").join("Brand.ttf")).unwrap(), b"font");
+    }
+
+    #[test]
+    fn stages_dark_icon_when_the_app_ships_one() {
+        let root_dir = make_temp_dir("dark-icon-assets");
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), svg()).unwrap();
+        fs::write(root.join("resources").join("icon-dark.svg"), svg()).unwrap();
+
+        let output_dir = root.join("target").join("keyos").join("demo-app");
+        stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
+
+        assert!(output_dir.join("icon.bin").exists());
+        assert!(output_dir.join("icon-dark.bin").exists());
+    }
+
+    #[test]
+    fn drops_the_staged_dark_icon_once_the_app_stops_shipping_one() {
+        let root_dir = make_temp_dir("dropped-dark-icon-assets");
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), svg()).unwrap();
+        fs::write(root.join("resources").join("icon-dark.svg"), svg()).unwrap();
+        let output_dir = root.join("target").join("keyos").join("demo-app");
+        stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
+
+        fs::remove_file(root.join("resources").join("icon-dark.svg")).unwrap();
+        stage_hardware_assets_with_tool(&app_config(), root, &output_dir, &asset_tool_stub()).unwrap();
+
+        assert!(output_dir.join("icon.bin").exists());
+        assert!(!output_dir.join("icon-dark.bin").exists());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
+use app_manager::IconVariant;
 use fs::{FileSystemEventType, Location};
 use gui_server_api::{
     consts::CLOSE_TIMEOUT_EXIT_CODE,
@@ -581,14 +582,17 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let app_icon_cache = RefCell::new(lru::LruCache::<String, Image>::new(
             NonZeroUsize::new(32).expect("cache cap is non-zero"),
         ));
-        ui.global::<LauncherCallbacks>().on_app_icon(move |icon_key| {
-            let cache_key = format!("{}@{}x{}:smooth", icon_key.as_str(), APP_ICON_SIZE, APP_ICON_SIZE);
+        ui.global::<LauncherCallbacks>().on_app_icon(move |icon_key, is_dark| {
+            let (variant, theme_key) =
+                if is_dark { (IconVariant::Dark, "dark") } else { (IconVariant::Light, "light") };
+            let cache_key =
+                format!("{}@{}x{}:smooth:{theme_key}", icon_key.as_str(), APP_ICON_SIZE, APP_ICON_SIZE);
             if let Some(image) = app_icon_cache.borrow_mut().get(cache_key.as_str()).cloned() {
                 log::debug!("app icon cache hit on {cache_key}");
                 return image;
             }
 
-            let icon_bytes = app_manager.get_app_icon(icon_key.as_str()).unwrap_or_default();
+            let icon_bytes = app_manager.get_app_icon(icon_key.as_str(), variant).unwrap_or_default();
             let image = scale_image(
                 raw_image_from_bytes(&icon_bytes),
                 APP_ICON_SIZE as f32,
@@ -706,8 +710,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
 /// Load an app's bundled icon, scaled for the universal-QR match dropdown. Returns
 /// an empty image (falls back to no/themed icon) when the app ships no icon.
-fn dropdown_app_icon(app_manager: &AppManagerApi, app_id_hex: &str) -> Image {
-    let icon_bytes = app_manager.get_app_icon(app_id_hex).unwrap_or_default();
+fn dropdown_app_icon(app_manager: &AppManagerApi, app_id_hex: &str, variant: IconVariant) -> Image {
+    let icon_bytes = app_manager.get_app_icon(app_id_hex, variant).unwrap_or_default();
     if icon_bytes.is_empty() {
         return Image::default();
     }
@@ -784,6 +788,11 @@ async fn open_universal_qr_scan(state: StoredValue<AppState>) {
 
     let locale = "en"; // TODO: i18n, get the locale from the settings
     let app_manager = state.borrow().app_manager.clone();
+    let variant = if state.borrow().ui().global::<CurrentTheme>().get_is_dark() {
+        IconVariant::Dark
+    } else {
+        IconVariant::Light
+    };
     let mut matched: Vec<_> = matching_apps
         .iter()
         .filter_map(|app| {
@@ -793,7 +802,7 @@ async fn open_universal_qr_scan(state: StoredValue<AppState>) {
                 return None;
             };
             let app_id_hex = format!("0x{app_id}");
-            let icon_image = dropdown_app_icon(&app_manager, &app_id_hex);
+            let icon_image = dropdown_app_icon(&app_manager, &app_id_hex, variant);
             Some((
                 DropdownModel {
                     label: app_name.clone().into(),

@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 pub const APP_CONFIG_FILE: &str = "app-config.toml";
 pub const PERMISSION_TEMPLATES_FILE: &str = "permission_templates.toml";
 pub const DISPLAY_APP_NAME_ALLOWED_CHARS: &str = "A-Z, a-z, 0-9, spaces, and hyphens";
-pub const APP_ICON_SIZE_PX: u32 = 96;
+pub const APP_ICON_SIZE_PX: u32 = 110;
+/// The formats an app icon may be authored in, matching what `validate_icon_file` measures.
+const ICON_EXTENSIONS: [&str; 6] = ["svg", "png", "webp", "jpg", "jpeg", "bmp"];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -211,7 +213,20 @@ impl AppConfig {
 
     pub fn validate_icon(&self, project_root: &Path) -> Result<IconDimensions, ConfigError> {
         let icon_path = project_root.join(&self.icon);
-        validate_icon_file(&icon_path)
+        let dimensions = validate_icon_file(&icon_path)?;
+        if let Some(dark_path) = self.dark_icon(project_root) {
+            validate_icon_file(&dark_path)?;
+        }
+        Ok(dimensions)
+    }
+
+    /// The dark-theme icon that ships alongside `icon` when present: a `<stem>-dark.*` sibling of
+    /// the configured icon path, in any of the formats an icon may itself be authored in.
+    pub fn dark_icon(&self, project_root: &Path) -> Option<PathBuf> {
+        let icon_path = project_root.join(&self.icon);
+        let stem = icon_path.file_stem()?.to_str()?;
+        let parent = icon_path.parent()?;
+        ICON_EXTENSIONS.iter().map(|ext| parent.join(format!("{stem}-dark.{ext}"))).find(|path| path.exists())
     }
 
     pub fn validate_app_names(&self) -> Result<(), ConfigError> {
@@ -679,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_96px_svg_icon() {
+    fn validate_accepts_110px_svg_icon() {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
@@ -688,7 +703,20 @@ mod tests {
         let config = test_config("demo-app");
         let dimensions = config.validate_icon(&root).unwrap();
 
-        assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
+        assert_eq!(dimensions, IconDimensions { width: 110, height: 110 });
+    }
+
+    #[test]
+    fn dark_icon_is_found_in_every_format_an_icon_may_use() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(root);
+        fs::write(root.join("resources").join("icon-dark.webp"), b"icon").unwrap();
+
+        let config = test_config("demo-app");
+
+        assert_eq!(config.dark_icon(root), Some(root.join("resources").join("icon-dark.webp")));
     }
 
     #[test]
@@ -696,26 +724,26 @@ mod tests {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
 
         let config = test_config("demo-app");
         assert!(matches!(
             config.validate_icon(root),
-            Err(ConfigError::InvalidIconSize { width: 128, height: 96, .. })
+            Err(ConfigError::InvalidIconSize { width: 96, height: 96, .. })
         ));
     }
 
     #[test]
-    fn validate_accepts_96px_png_icon_header() {
+    fn validate_accepts_110px_png_icon_header() {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
-        fs::write(root.join("resources").join("icon.svg"), png_header(96, 96)).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), png_header(110, 110)).unwrap();
 
         let config = test_config("demo-app");
         let dimensions = validate_icon_file(&root.join(&config.icon)).unwrap();
 
-        assert_eq!(dimensions, IconDimensions { width: 96, height: 96 });
+        assert_eq!(dimensions, IconDimensions { width: 110, height: 110 });
     }
 
     fn test_config(app_name: &str) -> AppConfig {
@@ -737,7 +765,8 @@ mod tests {
     }
 
     fn write_valid_icon(root: &Path) {
-        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="96" height="96"></svg>"#).unwrap();
+        fs::write(root.join("resources").join("icon.svg"), r#"<svg width="110" height="110"></svg>"#)
+            .unwrap();
     }
 
     fn png_header(width: u32, height: u32) -> Vec<u8> {

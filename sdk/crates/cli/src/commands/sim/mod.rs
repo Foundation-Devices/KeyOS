@@ -135,7 +135,7 @@ fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path, dest_na
     let manifest_json = generate_manifest_json(config, project_root)?;
     fs::write(dest_dir.join("manifest.json"), manifest_json)?;
 
-    // Stage icon.bin next to app.elf so the simulator's app-manager serves it
+    // Stage the icons next to app.elf so the simulator's app-manager serves them
     // over the same GetAppIcon IPC as hardware.
     stage_bundled_icon(config, project_root, &dest_dir)?;
 

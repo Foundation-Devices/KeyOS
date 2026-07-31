@@ -761,13 +761,11 @@ fn main() -> Result<()> {
             eprintln!("Uploading app from {}...", app_path.display());
             let report = load_app::load_app(&client, &app_path, kind)?;
             eprintln!(
-                "Loaded {} into {}/{} (app.elf: {} bytes, manifest.json: {} bytes, icon.bin: {} bytes, resources: {} files / {} bytes).",
+                "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
                 report.app_id,
                 kind.device_dir(),
                 report.app_id,
-                report.elf_bytes,
-                report.manifest_bytes,
-                report.icon_bytes.unwrap_or(0),
+                report.files_summary(),
                 report.resource_files,
                 report.resource_bytes
             );

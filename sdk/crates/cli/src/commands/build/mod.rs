@@ -114,6 +114,9 @@ pub fn execute(args: &BuildArgs) -> Result<()> {
     println!("  app.elf (signed)");
     println!("  manifest.json (signed)");
     println!("  icon.bin");
+    if config.dark_icon(project_root).is_some() {
+        println!("  icon-dark.bin");
+    }
     println!("  resources/");
     println!("Version: {}", config.version);
 

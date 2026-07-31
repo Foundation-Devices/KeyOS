@@ -318,16 +318,19 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
 
     // Icon bytes are fetched on demand by app id and decoded here; the LRU caps
     // how many decoded icons stay resident so the listing never carries them.
-    let icon_cache: Rc<RefCell<lru::LruCache<SharedString, Image>>> = Rc::new(RefCell::new(
+    // Keying by theme too keeps a themed app's two icons from evicting each other.
+    let icon_cache: Rc<RefCell<lru::LruCache<(SharedString, bool), Image>>> = Rc::new(RefCell::new(
         lru::LruCache::new(NonZeroUsize::new(APP_ICON_CACHE_CAP).expect("cache cap is non-zero")),
     ));
-    globals.on_app_icon(move |app_id| {
-        if let Some(image) = icon_cache.borrow_mut().get(&app_id).cloned() {
+    globals.on_app_icon(move |app_id, is_dark| {
+        let cache_key = (app_id.clone(), is_dark);
+        if let Some(image) = icon_cache.borrow_mut().get(&cache_key).cloned() {
             return image;
         }
-        let bytes = state.borrow().app_manager.get_app_icon(app_id.as_str()).unwrap_or_default();
+        let variant = if is_dark { app_manager::IconVariant::Dark } else { app_manager::IconVariant::Light };
+        let bytes = state.borrow().app_manager.get_app_icon(app_id.as_str(), variant).unwrap_or_default();
         let image = slint_keyos_platform::raw_image::raw_image_from_bytes(&bytes);
-        icon_cache.borrow_mut().put(app_id, image.clone());
+        icon_cache.borrow_mut().put(cache_key, image.clone());
         image
     });
 

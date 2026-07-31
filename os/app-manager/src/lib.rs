@@ -139,7 +139,7 @@ impl BlockingArchiveHandler<GetAppIcon> for AppManagerServer {
                 return None;
             }
         };
-        self.app_registry.app_icon_bytes(app_id)
+        self.app_registry.app_icon_bytes(app_id, msg.variant)
     }
 }
 
