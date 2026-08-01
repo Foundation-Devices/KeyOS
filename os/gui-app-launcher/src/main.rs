@@ -34,7 +34,7 @@ use slint_keyos_platform::{
         global::{OnboardingStatus, SystemTheme, TimeZone, UseStandardTimeFormat},
         messages::SubscribeSystemTheme,
     },
-    skia::{scale_image, GraphPoint, PricePoint},
+    skia::{scale_image, GraphPoint, GraphStyle, PricePoint},
     sleep,
     slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel},
     spawn_local, subscribe_archive, subscribe_scalar, StoredValue,
@@ -985,7 +985,6 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
             } else {
                 ((current_price as f32 - first_price as f32) / first_price as f32) * 100.0
             };
-
             let sign = if change_percentage.is_sign_positive() { '+' } else { '-' };
             let change_percentage_formatted = format!("{sign}{:.2}%", change_percentage.abs());
 
@@ -1019,7 +1018,7 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
                 GRAPH_WIDTH,
                 GRAPH_HEIGHT,
                 GRAPH_MAX_HEIGHT,
-                is_dark_mode,
+                GraphStyle { is_price_positive: change_percentage >= 0.0, is_dark_mode },
             );
             ui_state.set_bitcoin_graph_image(graph_image);
 
@@ -1054,7 +1053,7 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
                 GRAPH_WIDTH,
                 GRAPH_HEIGHT,
                 GRAPH_MAX_HEIGHT,
-                is_dark_mode,
+                GraphStyle { is_price_positive: true, is_dark_mode },
             );
             ui_state.set_bitcoin_graph_image(graph_image);
 

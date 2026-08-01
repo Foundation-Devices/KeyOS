@@ -13,6 +13,7 @@ import {
     Circle,
     Divider,
     HeadingMd,
+    HeadingXl,
     Icon,
     IconButton,
     PopupMenu,
@@ -22,7 +23,6 @@ import {
 } from "@ui/widgets.slint";
 import {
     CurrentTheme,
-    Font,
     IconSize,
     Images,
     Palette,
@@ -71,145 +71,146 @@ struct DropTarget {
 
 component PriceGraph inherits Rectangle {
     in property <length> content-width;
+    in property <length> card-height;
+    in property <length> shadow-top-overhang;
 
     // Scrub marker coordinates arrive in the rendered bitmap's coordinate space.
-    property <length> graph-source-width: max(1px, State.bitcoin-graph-image.width * 1px);
-    property <length> graph-source-height: max(1px, State.bitcoin-graph-image.height * 1px);
+    property <length> graph-width: max(1px, State.bitcoin-graph-image.width * 1px);
+    property <length> graph-height: max(1px, State.bitcoin-graph-image.height * 1px);
+    property <length> shadow-horizontal-overhang: 12px;
+    property <length> shadow-bottom-overhang: 18px;
     property <length> scrub-marker-size: 10px;
-    property <length> scrub-timestamp-width: 188px;
     property <bool> is-touch-active: false;
     property <bool> is-scrubbing-gesture: false;
+    private property <bool> show-last-update: State.is-price-stale && !State.is-price-expired && !State.bitcoin-scrub-active;
 
     width: content-width;
-    height: 178px;
+    height: card-height;
 
-    Rectangle {
-        x: 16px;
-        y: 12px;
-        width: parent.width - 32px;
-        height: 36px;
+    // This image contains only the exterior shadow, leaving the transparent
+    // graph tile and its contents unobscured.
+    Image {
+        x: (parent.width - root.graph-width) / 2 - root.shadow-horizontal-overhang;
+        y: -root.shadow-top-overhang;
+        width: root.graph-width + root.shadow-horizontal-overhang * 2;
+        height: parent.height + root.shadow-top-overhang + root.shadow-bottom-overhang;
+        source: Images.nine-slice("images/launcher-graph-shadow");
+        image-fit: fill;
+    }
 
-        Text {
-            x: 0px;
-            y: -4px;
-            width: parent.width - (State.bitcoin-scrub-active ? root.scrub-timestamp-width + 12px : 120px);
-            height: 44px;
-            text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : Utils.currency-symbol(State.bitcoin-currency-code) + (State.bitcoin-scrub-active ? State.bitcoin-scrub-price : State.bitcoin-price);
-            color: Palette.content-primary;
-            font-family: Font.heading-xl.family;
-            font-size: Font.heading-xl.size;
-            font-weight: Font.heading-xl.weight;
-            letter-spacing: Font.heading-xl.letter-spacing;
-            vertical-alignment: center;
+    HorizontalLayout {
+        alignment: space-between;
+        padding-left: Size.sz4 + (parent.width - root.graph-width) / 2;
+        padding-right: Size.sz4 + (parent.width - root.graph-width) / 2;
+        padding-top: Size.sz2_5;
+
+        VerticalLayout {
+            alignment: start;
+            spacing: 0px;
+            vertical-stretch: 0;
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: Size.sz1;
+
+                HeadingXl {
+                    text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : Utils.currency-symbol(State.bitcoin-currency-code);
+                    color: root.show-last-update ? Palette.content-disabled : Palette.content-tertiary;
+                }
+
+                HeadingXl {
+                    text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : (State.bitcoin-scrub-active ? State.bitcoin-scrub-price : State.bitcoin-price);
+                    color: root.show-last-update ? Palette.content-disabled : Palette.content-primary;
+                }
+            }
+
+            TextSm {
+                text: (!State.is-price-stale || State.bitcoin-scrub-active) ? TR2.lookup(TrId.MainBitcoin) + " " + State.bitcoin-currency-code : "";
+                color: Palette.content-tertiary;
+            }
         }
 
-        if !State.is-price-expired && !State.bitcoin-scrub-active: Rectangle {
-            width: 104px;
+        if !State.bitcoin-scrub-active && !State.is-price-stale: Rectangle {
+            width: pill-content.preferred-width;
             height: 32px;
-            x: parent.width - self.width;
-            y: 2px;
+            vertical-stretch: 0;
             border-radius: self.height / 2;
             background: State.is-price-positive ? Palette.content-positive : Palette.content-negative;
 
-            HorizontalLayout {
+            pill-content := HorizontalLayout {
                 alignment: center;
-                spacing: 4px;
-                padding-left: 10px;
-                padding-right: 12px;
+                spacing: Size.sz2;
+                padding-top: Size.sz1;
+                padding-bottom: Size.sz1;
+                padding-left: Size.sz3;
+                padding-right: Size.sz3;
 
-                Rectangle {
-                    width: 16px;
-                    height: parent.height;
-                    background: transparent;
+                VerticalLayout {
+                    alignment: center;
 
                     Icon {
-                        x: 0px;
-                        y: (parent.height - self.height) / 2;
-                        name: State.is-price-positive ? "arrow-up-right" : "arrow-down-right";
-                        size: 16px;
-                        color: Palette.white;
+                        name: State.is-price-positive ? "trend-up" : "trend-down";
+                        size: Size.sz6;
+                        color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
                     }
                 }
 
-                Text {
+                TextSm {
                     text: State.bitcoin-price-change-percent;
-                    color: Palette.white;
-                    font-size: 18px;
-                    font-weight: 600;
+                    color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
                     vertical-alignment: center;
                 }
             }
         }
 
-        if State.bitcoin-scrub-active: Rectangle {
-            width: root.scrub-timestamp-width;
-            height: 44px;
-            x: parent.width - self.width;
-            y: -19px;
+        if root.show-last-update: VerticalLayout {
+            alignment: start;
+            spacing: Size.sz1;
+            vertical-stretch: 0;
 
-            Text {
-                y: 16px;
-                width: parent.width;
-                height: 22px;
+            TextSm {
+                text: TR2.lookup(TrId.MainLastUpdate);
+                color: Palette.content-tertiary;
+                horizontal-alignment: right;
+            }
+
+            TextSm {
+                text: TR2.format(TrId.MainXAgo, [State.last-update-time]);
+                color: Palette.content-tertiary;
+                horizontal-alignment: right;
+            }
+        }
+
+        if !State.bitcoin-scrub-active && State.is-price-stale && State.is-price-expired: TextSm {
+            text: State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected);
+            color: Palette.content-tertiary;
+            vertical-stretch: 0;
+        }
+
+        if State.bitcoin-scrub-active: VerticalLayout {
+            alignment: start;
+            spacing: 0px;
+            vertical-stretch: 0;
+
+            TextSm {
                 text: State.bitcoin-point-date;
                 color: Palette.content-tertiary;
-                font-size: 18px;
-                font-weight: 600;
                 horizontal-alignment: right;
-                vertical-alignment: center;
             }
 
-            Text {
-                y: 37px;
-                width: parent.width;
-                height: 22px;
+            TextSm {
                 text: State.bitcoin-point-time;
                 color: Palette.content-tertiary;
-                font-size: 18px;
-                font-weight: 600;
                 horizontal-alignment: right;
-                vertical-alignment: center;
             }
-        }
-    }
-
-    if State.is-price-stale && !State.bitcoin-scrub-active: Rectangle {
-        x: 16px;
-        y: 46px;
-        width: parent.width - 32px;
-        height: 26px;
-
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: State.is-price-expired ? (State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected)) : TR2.lookup(TrId.MainLastUpdate) + " " + TR2.format(TrId.MainXAgo, [State.last-update-time]);
-            color: Palette.content-tertiary;
-            font-size: 14px;
-            vertical-alignment: center;
-        }
-    }
-
-    if !State.is-price-stale || State.bitcoin-scrub-active: Rectangle {
-        x: 16px;
-        y: 50px;
-        width: parent.width - 32px;
-        height: 22px;
-
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: TR2.lookup(TrId.MainBitcoin) + " " + State.bitcoin-currency-code;
-            color: Palette.content-tertiary;
-            font-size: 14px;
-            vertical-alignment: center;
         }
     }
 
     graph-strip := Rectangle {
         x: (parent.width - self.width) / 2;
         y: parent.height - self.height;
-        width: root.graph-source-width;
-        height: root.graph-source-height;
+        width: root.graph-width;
+        height: root.graph-height;
         background: transparent;
         border-top-left-radius: 0px;
         border-top-right-radius: 0px;
@@ -895,6 +896,7 @@ component LauncherPaginator inherits Rectangle {
     in property <length> content-width;
     in property <length> collection-inset-x: 12px;
     in property <length> collection-offset-y: -3px;
+    in property <length> graph-shadow-top-overhang;
     in property <DropTarget> dock-target: {
         id: "",
         left: 0px,
@@ -1013,17 +1015,19 @@ component LauncherPaginator inherits Rectangle {
             clip: false;
 
             Rectangle {
-                property <length> swipe-area-top: root.rearrange-top-bleed + root.swipe-hit-top;
-                y: -root.rearrange-top-bleed;
+                y: -root.rearrange-top-bleed - root.graph-shadow-top-overhang;
                 width: parent.width;
-                height: root.page-viewport-height + root.rearrange-top-bleed;
+                height: root.page-viewport-height + root.rearrange-top-bleed + root.graph-shadow-top-overhang;
                 background: transparent;
                 clip: true;
 
+                property <length> swipe-area-top: root.rearrange-top-bleed + root.graph-shadow-top-overhang + root.swipe-hit-top;
+
                 rearrange-sgr := SwipeGestureHandler {
                     enabled: State.rearrange-mode && State.drag-source-collection-id == "";
+                    x: 0px;
                     y: parent.swipe-area-top;
-                    width: parent.width;
+                    width: root.content-width;
                     height: max(0px, root.page-viewport-height - root.swipe-hit-top);
                     handle-swipe-right: root.current-page > 0;
                     handle-swipe-left: root.current-page < root.pages.length - 1;
@@ -1060,8 +1064,9 @@ component LauncherPaginator inherits Rectangle {
 
                 sgr := SwipeGestureHandler {
                     enabled: !State.rearrange-mode && State.drag-source-collection-id == "";
+                    x: 0px;
                     y: parent.swipe-area-top;
-                    width: parent.width;
+                    width: root.content-width;
                     height: max(0px, root.page-viewport-height - root.swipe-hit-top);
                     handle-swipe-right: root.current-page > 0;
                     handle-swipe-left: root.current-page < root.pages.length - 1;
@@ -1103,6 +1108,8 @@ component LauncherPaginator inherits Rectangle {
                                 x: 0px;
                                 y: 0px;
                                 content-width: root.content-width;
+                                card-height: root.graph-card-height;
+                                shadow-top-overhang: root.graph-shadow-top-overhang;
                             }
 
                             LauncherCollection {
@@ -1179,6 +1186,7 @@ export component MainPage inherits BasePage {
     private property <int> standard-page-grid-rows: 3;
     private property <length> graph-height: 178px;
     private property <length> graph-bottom-gap: 20px;
+    private property <length> graph-shadow-top-overhang: 6px;
     private property <length> graph-page-height: graph-page-grid-rows * icon-row-height + Math.max(0, graph-page-grid-rows - 1) * icon-row-gap;
     private property <length> standard-page-height: standard-page-grid-rows * icon-row-height + Math.max(0, standard-page-grid-rows - 1) * icon-row-gap;
     private property <length> active-page-left: frame-side-padding + page-collection-inset;
@@ -1239,6 +1247,7 @@ export component MainPage inherits BasePage {
         content-width: root.content-width;
         collection-inset-x: root.page-collection-inset;
         collection-offset-y: root.page-collection-offset-y;
+        graph-shadow-top-overhang: root.graph-shadow-top-overhang;
         first-collection-height: root.graph-page-height;
         standard-collection-height: root.standard-page-height;
         pages: State.pages;

@@ -28,6 +28,12 @@ pub struct GraphPoint {
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GraphStyle {
+    pub is_price_positive: bool,
+    pub is_dark_mode: bool,
+}
+
 pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec<GraphPoint> {
     if data.len() < 2 {
         return Vec::new();
@@ -69,7 +75,7 @@ pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec
         .collect()
 }
 
-pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, is_dark_mode: bool) -> Image {
+pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, style: GraphStyle) -> Image {
     let mut pixel_buffer = SharedPixelBuffer::<Rgba8Pixel>::new(w, h);
     let mut pixmap = tiny_skia::PixmapMut::from_bytes(pixel_buffer.make_mut_bytes(), w, h).unwrap();
     pixmap.fill(Color::TRANSPARENT);
@@ -81,9 +87,9 @@ pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, is_dark_
     let is_flatline = data.len() == 2 && data[0].price == data[1].price && data[0].is_pad;
 
     if is_flatline {
-        draw_flatline_graph(&mut pixmap, data, w, h, max_height, is_dark_mode);
+        draw_flatline_graph(&mut pixmap, data, w, h, max_height, style.is_dark_mode);
     } else {
-        draw_normal_graph(&mut pixmap, data, w, h, max_height, is_dark_mode);
+        draw_normal_graph(&mut pixmap, data, w, h, max_height, style.is_price_positive, style.is_dark_mode);
     }
 
     Image::from_rgba8_premultiplied(pixel_buffer)
@@ -97,23 +103,16 @@ fn draw_flatline_graph(
     max_height: u32,
     is_dark_mode: bool,
 ) {
-    const SHADOW_HEIGHT: usize = 6;
-
     let stale_fg_color = if is_dark_mode {
         Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff)
     } else {
         Color::from_rgba8(0x95, 0x93, 0x94, 0xff)
     };
-    let shadow = Color::from_rgba8(0x11, 0x11, 0x11, 0x0d);
-
     let max_y = h.saturating_sub(BOTTOM_VERTICAL_MARGIN);
     let adjusted_value = max_y as f32 - h as f32 * 0.25;
-    let shadow_offset = SHADOW_HEIGHT.saturating_sub(1) as f32;
     let y = max_y as f32 - adjusted_value;
-    let y_shadow = max_y as f32 - (adjusted_value - shadow_offset).max(0.0);
 
     let mut pb_line_stale = PathBuilder::new();
-    let mut pb_line_shadow_stale = PathBuilder::new();
     let mut pb_fill_stale = PathBuilder::new();
 
     let min_timestamp = data[0].timestamp;
@@ -131,22 +130,16 @@ fn draw_flatline_graph(
 
     pb_line_stale.move_to(x0, y);
     pb_line_stale.line_to(x1, y);
-    pb_line_shadow_stale.move_to(x0, y_shadow);
-    pb_line_shadow_stale.line_to(x1, y_shadow);
 
     let mut border_path = PathBuilder::default();
     border_path.push_rect(Rect::from_xywh(0., 0., w as f32, h as f32).unwrap());
     let border_path = border_path.finish().unwrap();
 
     let graph_stale_path = pb_line_stale.finish().unwrap();
-    let shadow_stale_path = pb_line_shadow_stale.finish().unwrap();
     let fill_path_stale = pb_fill_stale.finish().unwrap();
 
     let mut paint_line_stale = Paint::default();
     paint_line_stale.set_color(stale_fg_color);
-    let mut paint_line_shadow_stale = Paint::default();
-    paint_line_shadow_stale.set_color(shadow);
-
     let (start, end) =
         (Point::from_xy(w as f32 / 2.0, h as f32), Point::from_xy(w as f32 / 2.0, (h - max_height) as f32));
 
@@ -168,12 +161,6 @@ fn draw_flatline_graph(
         dash: Some(StrokeDash::new(vec![10.0, 10.0], 0.0).unwrap()),
         ..Default::default()
     };
-    let shadow_stroke = Stroke {
-        width: SHADOW_HEIGHT as f32,
-        dash: Some(StrokeDash::new(vec![10.0, 10.0], 0.0).unwrap()),
-        ..Default::default()
-    };
-
     let mut mask = Mask::new(w, h).unwrap();
     mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
 
@@ -186,7 +173,7 @@ fn draw_flatline_graph(
         Some(&mask),
     );
 
-    // Draw stale line and shadow
+    // Draw stale line.
     pixmap.stroke_path(
         &graph_stale_path,
         &paint_line_stale,
@@ -194,14 +181,6 @@ fn draw_flatline_graph(
         Transform::identity(),
         Some(&mask),
     );
-    pixmap.stroke_path(
-        &shadow_stale_path,
-        &paint_line_shadow_stale,
-        &shadow_stroke,
-        Transform::identity(),
-        Some(&mask),
-    );
-
     draw_graph_border(pixmap, w, h);
 }
 
@@ -211,38 +190,34 @@ fn draw_normal_graph(
     w: u32,
     h: u32,
     max_height: u32,
+    is_price_positive: bool,
     is_dark_mode: bool,
 ) {
-    const SHADOW_HEIGHT: usize = 6;
-
-    // Matches Palette.content-positive (UIColors.green-500).
-    let fg_color = Color::from_rgba8(0x2e, 0x94, 0x83, 0xff);
+    // Match the price-change pill's Palette.content-positive/negative color.
+    let (fresh_r, fresh_g, fresh_b) = if is_price_positive {
+        (0x2e, 0x94, 0x83) // UIColors.green-500
+    } else {
+        (0xff, 0x33, 0x33) // UIColors.red-500
+    };
+    let fg_color = Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0xff);
     let stale_fg_color = match is_dark_mode {
         true => Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff), // #5A595A
         false => Color::from_rgba8(0x95, 0x93, 0x94, 0xff), // #959394
     };
-    let shadow = Color::from_rgba8(0x11, 0x11, 0x11, 0x0d);
-
     let mut pb_line = PathBuilder::new();
-    let mut pb_line_shadow = PathBuilder::new();
     let mut pb_line_stale = PathBuilder::new();
-    let mut pb_line_shadow_stale = PathBuilder::new();
     let mut pb_fill_fresh = PathBuilder::new();
     let mut pb_fill_stale = PathBuilder::new();
 
-    let max_y = h.saturating_sub(BOTTOM_VERTICAL_MARGIN) as f32;
     let mut points = Vec::with_capacity(data.len());
     for point in graph_points(data, w, h, max_height) {
-        let shadow_offset = SHADOW_HEIGHT.saturating_sub(1) as f32;
-        let adjusted_value = max_y - point.y;
-        let y_shadow = max_y - (adjusted_value - shadow_offset).max(0.0);
-        points.push((point.x, point.y, y_shadow));
+        points.push((point.x, point.y));
     }
 
     let mut last_segment_stale = None;
     for i in 1..points.len() {
-        let (prev_x, prev_y, prev_y_shadow) = points[i - 1];
-        let (x, y, y_shadow) = points[i];
+        let (prev_x, prev_y) = points[i - 1];
+        let (x, y) = points[i];
         let is_pad_segment = data[i - 1].is_pad || data[i].is_pad;
         let fill = if is_pad_segment { &mut pb_fill_stale } else { &mut pb_fill_fresh };
         fill.move_to(prev_x, h as f32);
@@ -255,17 +230,13 @@ fn draw_normal_graph(
         if is_pad_segment {
             if start_new_run {
                 pb_line_stale.move_to(prev_x, prev_y);
-                pb_line_shadow_stale.move_to(prev_x, prev_y_shadow);
             }
             pb_line_stale.line_to(x, y);
-            pb_line_shadow_stale.line_to(x, y_shadow);
         } else {
             if start_new_run {
                 pb_line.move_to(prev_x, prev_y);
-                pb_line_shadow.move_to(prev_x, prev_y_shadow);
             }
             pb_line.line_to(x, y);
-            pb_line_shadow.line_to(x, y_shadow);
         }
         last_segment_stale = Some(is_pad_segment);
     }
@@ -275,19 +246,13 @@ fn draw_normal_graph(
     let border_path = border_path.finish().unwrap();
 
     let graph_path = pb_line.finish();
-    let shadow_path = pb_line_shadow.finish();
     let graph_stale_path = pb_line_stale.finish();
-    let shadow_stale_path = pb_line_shadow_stale.finish();
     let fill_path_fresh = pb_fill_fresh.finish();
     let fill_path_stale = pb_fill_stale.finish();
     let mut paint_line = Paint::default();
     paint_line.set_color(fg_color);
-    let mut paint_line_shadow = Paint::default();
-    paint_line_shadow.set_color(shadow);
     let mut paint_line_stale = Paint::default();
     paint_line_stale.set_color(stale_fg_color);
-    let mut paint_line_shadow_stale = Paint::default();
-    paint_line_shadow_stale.set_color(shadow);
 
     let (start, end) =
         (Point::from_xy(w as f32 / 2.0, h as f32), Point::from_xy(w as f32 / 2.0, (h - max_height) as f32));
@@ -305,8 +270,11 @@ fn draw_normal_graph(
         ..Default::default()
     };
 
-    let fresh_stops =
-        [(0.0, Color::from_rgba8(0x2e, 0x94, 0x83, 0x14)), (1.0, Color::from_rgba8(0x2e, 0x94, 0x83, 0xcc))];
+    // Keep the existing 8%-to-80% opacity gradient while applying the sign color.
+    let fresh_stops = [
+        (0.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0x14)),
+        (1.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0xcc)),
+    ];
     let fresh_stops: Vec<_> =
         fresh_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
     let paint_fill_fresh = Paint {
@@ -315,8 +283,6 @@ fn draw_normal_graph(
     };
 
     let graph_stroke = Stroke { width: 2.0, ..Default::default() };
-    let shadow_stroke = Stroke { width: SHADOW_HEIGHT as f32, ..Default::default() };
-
     let mut mask = Mask::new(w, h).unwrap();
     mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
 
@@ -328,13 +294,10 @@ fn draw_normal_graph(
         pixmap.fill_path(path, &paint_fill_fresh, FillRule::EvenOdd, Transform::identity(), Some(&mask));
     }
 
-    // Draw lines and shadows
-    for (path, paint, stroke) in [
-        (&graph_path, &paint_line, &graph_stroke),
-        (&shadow_path, &paint_line_shadow, &shadow_stroke),
-        (&graph_stale_path, &paint_line_stale, &graph_stroke),
-        (&shadow_stale_path, &paint_line_shadow_stale, &shadow_stroke),
-    ] {
+    // Draw lines.
+    for (path, paint, stroke) in
+        [(&graph_path, &paint_line, &graph_stroke), (&graph_stale_path, &paint_line_stale, &graph_stroke)]
+    {
         if let Some(path) = path {
             pixmap.stroke_path(path, paint, stroke, Transform::identity(), Some(&mask));
         }
