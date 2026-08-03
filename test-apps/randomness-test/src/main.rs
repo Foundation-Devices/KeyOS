@@ -23,7 +23,7 @@ fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    let trng = trng::Trng::new().unwrap();
+    let trng = trng::Trng::new();
 
     check_random_generator(|buf| getrandom(bytemuck::cast_slice_mut(buf)).unwrap(), "getrandom");
     check_random_generator(|buf| trng.fill_buf(buf, TrngSource::Combined).unwrap(), "combined");

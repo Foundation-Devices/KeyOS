@@ -52,6 +52,7 @@ template = ["gui-app", "fs-generic"]
     "Lockout",
     "GetSeedFingerprint",
     "ComputeSeedFingerprint",
+    "GetRandom",
 ]
 "os/settings" = [
     "SetSystemTheme",

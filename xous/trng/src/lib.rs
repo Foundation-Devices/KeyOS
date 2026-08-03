@@ -20,9 +20,14 @@ pub enum TrngSource {
 }
 
 impl Trng {
-    pub fn new() -> Result<Self, xous::Error> {
-        let conn = xous::connect(xous::SID::from_bytes(api::SERVER_NAME_TRNG).unwrap())?;
-        Ok(Trng { conn })
+    /// Connect to the TRNG server, a mandatory base-tier service every process
+    /// depends on transitively through `getrandom`. Failure to connect means
+    /// the system is already unable to boot, so this does not return a
+    /// `Result` for callers to recover from.
+    pub fn new() -> Self {
+        let conn = xous::connect(xous::SID::from_bytes(api::SERVER_NAME_TRNG).unwrap())
+            .expect("could not connect to the TRNG server");
+        Trng { conn }
     }
 
     pub fn get_u32(&self) -> Result<u32, xous::Error> { Ok(self.get_u64()? as u32) }

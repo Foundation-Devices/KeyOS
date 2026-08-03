@@ -25,13 +25,13 @@ impl AvalancheNoiseRng {
             return;
         }
 
-        self.enable_adc();
-
-        for word in data {
-            *word = self.conditioned_word();
-        }
-
-        self.adc.sleep();
+        self.with_adc(|noise| {
+            for word in data {
+                let mut hasher = Sha256::new();
+                noise.hash_samples(&mut hasher);
+                *word = word_from_digest(hasher);
+            }
+        });
     }
 
     pub(crate) fn fill_raw_samples(&self, data: &mut [u32]) {
@@ -39,13 +39,31 @@ impl AvalancheNoiseRng {
             return;
         }
 
+        self.with_adc(|noise| {
+            for sample in data {
+                *sample = noise.raw_sample() as u32;
+            }
+        });
+    }
+
+    /// Run `f` with the ADC powered up, putting it back to sleep afterwards.
+    /// Sampling outside a session returns whatever the powered-down ADC holds.
+    pub(crate) fn with_adc<R>(&self, f: impl FnOnce(&Self) -> R) -> R {
         self.enable_adc();
-
-        for sample in data {
-            *sample = self.raw_sample() as u32;
-        }
-
+        let result = f(self);
         self.adc.sleep();
+        result
+    }
+
+    /// Absorb one output word's worth of raw ADC noise samples into `hasher`.
+    ///
+    /// Callers must start a fresh hasher per output word: carrying state across
+    /// words would keep producing pseudorandom-looking output if the ADC became
+    /// stuck, masking that failure until online health checks are available.
+    pub(crate) fn hash_samples(&self, hasher: &mut Sha256) {
+        for _ in 0..RAW_SAMPLES_PER_WORD {
+            hasher.update(self.raw_sample().to_le_bytes());
+        }
     }
 
     fn enable_adc(&self) {
@@ -59,18 +77,10 @@ impl AvalancheNoiseRng {
         self.adc.start();
         self.adc.read(NOISE_CHANNEL)
     }
+}
 
-    /// Collect `RAW_SAMPLES_PER_WORD` raw ADC noise samples and extract 32 bits
-    /// of conditioned output from their SHA-256 digest. The hasher is
-    /// deliberately reinitialized for each word: carrying state across words
-    /// would keep producing pseudorandom-looking output if the ADC became stuck,
-    /// masking that failure until online health checks are available.
-    fn conditioned_word(&self) -> u32 {
-        let mut hasher = Sha256::new();
-        for _ in 0..RAW_SAMPLES_PER_WORD {
-            hasher.update(self.raw_sample().to_le_bytes());
-        }
-        let digest = hasher.finalize();
-        u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
-    }
+/// Finish `hasher` and take 32 bits of its digest as one output word.
+pub(crate) fn word_from_digest(hasher: Sha256) -> u32 {
+    let digest = hasher.finalize();
+    u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
 }

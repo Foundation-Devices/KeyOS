@@ -710,14 +710,7 @@ impl server::BlockingArchiveHandler<GetRandom> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <GetRandom as server::BlockingArchive>::Response {
-        let num_in = [0u8; 32];
-        let mut rand_out = self.se.nonce_rand(&num_in).map_err(|_| AccessDenied)?;
-
-        for (out, rand_byte) in rand_out.iter_mut().zip(rand::random::<[u8; 32]>()) {
-            *out ^= rand_byte;
-        }
-
-        Ok(rand_out)
+        self.se.random().map_err(|_| AccessDenied)
     }
 }
 
@@ -828,6 +821,7 @@ impl Default for Server {
         let se = cryptoauthlib::Device::init(dma_permissions::DmaPermissions).unwrap();
         let mut se_serial = [0; 9];
         se.read_serial_number(&mut se_serial).unwrap();
+
         Self {
             se,
             crypto: CryptoApi::default(),

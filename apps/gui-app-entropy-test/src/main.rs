@@ -77,7 +77,7 @@ impl TestSource {
 
 fn source_from_index(index: i32) -> TestSource {
     // Must match the SegmentedControl labels order in ui/app.slint:
-    // 0 = "MCU", 1 = "Avalanche", 2 = "Combined", 3 = "Raw ADC".
+    // 0 = "MCU", 1 = "Aval", 2 = "Combi", 3 = "Raw ADC".
     match index {
         0 => TestSource::Mcu,
         1 => TestSource::Avalanche,
@@ -90,7 +90,7 @@ fn source_name(source: TestSource) -> &'static str {
     match source {
         TestSource::Mcu => "MCU hardware TRNG",
         TestSource::Avalanche => "Avalanche (SHA-256 conditioned)",
-        TestSource::Combined => "Combined (MCU XOR SHA-256 conditioned avalanche)",
+        TestSource::Combined => "Combined (SHA-256 avalanche, XORed with MCU)",
         TestSource::AvalancheRaw => "Avalanche raw 12-bit ADC",
     }
 }
@@ -595,7 +595,7 @@ fn run_test(
     total: usize,
     stop: &AtomicBool,
 ) -> Result<(Stats, bool), String> {
-    let trng = Trng::new().map_err(|e| format!("TRNG init failed: {e:?}"))?;
+    let trng = Trng::new();
     let mut stats = Stats::new(source);
     let mut buf = [0u32; BATCH_SAMPLES];
     let mut done = 0usize;

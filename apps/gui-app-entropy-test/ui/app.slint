@@ -80,7 +80,7 @@ export component AppWindow inherits BaseWindow {
                     }
 
                     SegmentedControl {
-                        labels: ["MCU", "Avalanche", "Combined", "Raw ADC"];
+                        labels: ["MCU", "Aval", "Combi", "Raw ADC"];
                         selected_index <=> State.source-index;
                         enabled: !State.running;
                     }

@@ -7,9 +7,10 @@ use anyhow::Context;
 use fs::messages::FormatEncryptedVolume;
 use quantum_link::foundation_api::onboarding::OnboardingState;
 use security::{
-    messages::{ComputeSeedFingerprint, GetSeedFingerprint, SetSeedAndPin},
+    messages::{ComputeSeedFingerprint, GetRandom, GetSeedFingerprint, SetSeedAndPin},
     Seed,
 };
+use sha2::{Digest, Sha256};
 use slint_keyos_platform::{
     async_archive, async_scalar,
     gui_server_api::navigation::qrscanner::{ScanQrOptions, ScanQrResult},
@@ -27,6 +28,10 @@ use crate::{
     tr, Animate, MasterSeedState, Navigate, NavigateOptions, QlStatus, SeedGlobal, TrId,
 };
 
+/// Domain separator for folding secure element randomness into a new master
+/// seed; see [`create_new_master_seed`].
+const SEED_DOMAIN: &[u8] = b"keyos-onboarding-master-seed-v1";
+
 pub async fn create_new_master_seed(state: StoredValue<AppState>) {
     wrap_set_seed(state, true, async move {
         log::info!("Starting master seed creation process");
@@ -35,6 +40,18 @@ pub async fn create_new_master_seed(state: StoredValue<AppState>) {
 
         let mut seed_bytes = [0u8; 16];
         getrandom::getrandom(&mut seed_bytes).context("Failed to generate random seed")?;
+
+        // Fold in the secure element's own RNG (independent of the trng
+        // service getrandom draws from) via a hash rather than XOR, so
+        // unpredictability doesn't rest on an assumption that the two
+        // sources can't observe or predict each other.
+        let se_random = async_archive::<SecurityPermissions, _>(GetRandom).await.context("GetRandom")?;
+        let mut hasher = Sha256::new();
+        hasher.update(SEED_DOMAIN);
+        hasher.update(seed_bytes);
+        hasher.update(se_random);
+        seed_bytes.copy_from_slice(&hasher.finalize()[..16]);
+
         let seed = Seed::Twelve(seed_bytes);
 
         async_archive::<SecurityPermissions, _>(SetSeedAndPin { seed, pin, pin_entry })

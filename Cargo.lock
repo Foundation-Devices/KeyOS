@@ -5225,6 +5225,7 @@ dependencies = [
  "seed-quiz",
  "serde",
  "server",
+ "sha2",
  "slint-keyos-platform",
  "slint-keyos-platform-build",
  "thiserror 2.0.19",

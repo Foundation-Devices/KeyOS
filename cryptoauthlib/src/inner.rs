@@ -190,6 +190,35 @@ impl Device {
         handle_error(status)
     }
 
+    /// Read 32 bytes from the device's internal random number generator.
+    ///
+    /// This does not wear out any EEPROM: on the ATECC608B, the Random
+    /// command's mode byte (which selects "update seed" vs. "no seed update"
+    /// on older CryptoAuthentication parts) is documented as ignored, and its
+    /// execution time -- ~7 ms for a repeat call within one wake cycle, ~13 ms
+    /// for the first, against ~18-19 ms for a real EEPROM `Write` and ~1 ms for
+    /// `Read`/`Sha` -- doesn't fit a command that includes an EEPROM program
+    /// cycle either. The ~7 ms floor is consistent with the noise-source
+    /// sampling and SP 800-90B health testing the datasheet says run "at the
+    /// time of use" on every call, and the first-call delta with the one-time
+    /// NIST DRBG instantiation that reruns on every wake/power cycle
+    /// (confirmed by the datasheet's timing table notes) -- not with any
+    /// per-call persistence.
+    ///
+    /// Note that the device returns a fixed value instead of random data while
+    /// its configuration zone is unlocked, so callers must not treat this as
+    /// the sole source of entropy
+    pub fn random(&self) -> Result<[u8; 32], Error> {
+        let mut rand_out = [0; 32];
+        // SAFETY: `self.0` was returned by `atcab_init_ext` in `Device::init` and is only
+        // ever handed out by this type once that call succeeded, so it is a valid,
+        // initialized device handle. `rand_out.as_mut_ptr()` is valid for a 32-byte write,
+        // matching the fixed `RANDOM_NUM_SIZE` the C side `memcpy`s into it.
+        let status = unsafe { bindings::atcab_random_ext(self.0, rand_out.as_mut_ptr()) };
+        handle_error(status)?;
+        Ok(rand_out)
+    }
+
     pub fn nonce_rand(&self, num_in: &[u8]) -> Result<[u8; 32], Error> {
         let mut result = [0; 32];
         let status = unsafe { bindings::calib_nonce_rand(self.0, num_in.as_ptr(), result.as_mut_ptr()) };

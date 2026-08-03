@@ -37,6 +37,7 @@ security = { workspace = true }
 seed-quiz = { path = "../../utils/seed-quiz" }
 serde = { workspace = true }
 server = { workspace = true }
+sha2 = { workspace = true }
 slint-keyos-platform = { workspace = true }
 thiserror = { workspace = true }
 update = { workspace = true }
