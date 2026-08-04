@@ -3,11 +3,15 @@
 
 import {
     BasePage,
+    Button,
+    ButtonSection,
+    ErrorModal,
     HLine,
     IconButton,
     Icon,
     MenuActionItem,
     MenuBooleanItem,
+    Modal,
     ScrollFadeMask,
     TextMd,
     TextSm,
@@ -21,6 +25,7 @@ import {
     AppManagementGlobal,
     AppsListRow,
     AppsListRowKind,
+    InstallAppResult,
     InstalledApp,
 } from "../../../globals/app-management-global.slint";
 import { SettingGlobal } from "../../../globals/setting-global.slint";
@@ -150,6 +155,17 @@ component AppListCard inherits Rectangle {
 export component AppsPage inherits BasePage {
     in property <AppsProps> props;
 
+    private property <InstallAppResult> install-result: AppManagementGlobal.install-result;
+    // A pure binding, never assigned: dismissing clears the result on the global instead, since
+    // assigning a property here would drop its binding and hide every later outcome.
+    private property <bool> install-outcome-visible: !install-result.canceled
+        && install-result.title != "";
+    // Height the Install App button reserves at the bottom of the page: the button plus the
+    // gutter below it. Size.sz8 is what a PageBody-based page leaves under its ButtonSection
+    // (its own Size.sz6 padding plus the section's Size.sz2), so this page's button sits where
+    // every other page's does.
+    private property <length> install-button-band: Size.sz15 + Size.sz8;
+
     init => {
         AppManagementGlobal.refresh-installed-apps();
     }
@@ -167,7 +183,7 @@ export component AppsPage inherits BasePage {
     apps-list := ListView {
         y: header.height;
         width: parent.width;
-        height: parent.height - header.height;
+        height: parent.height - header.height - root.install-button-band;
         viewport-width: self.width;
         mouse-drag-pan-enabled: true;
         vertical-scrollbar-policy: always-off;
@@ -270,5 +286,54 @@ export component AppsPage inherits BasePage {
         height: apps-list.height;
         at-top: apps-list.viewport-y == 0;
         at-bottom: -apps-list.viewport-y + apps-list.height >= apps-list.viewport-height;
+    }
+
+    ButtonSection {
+        x: Size.sz6;
+        y: parent.height - root.install-button-band;
+        width: parent.width - Size.sz6 * 2;
+        height: root.install-button-band;
+        padding-bottom: Size.sz8;
+
+        Button {
+            label: TR2.lookup(TrId.AppsInstallApp);
+
+            enabled: !AppManagementGlobal.installing;
+
+            clicked => {
+                AppManagementGlobal.install-app();
+            }
+        }
+    }
+
+    if install-outcome-visible && install-result.success: Modal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        title: root.install-result.title;
+        text: root.install-result.text;
+
+        Button {
+            label: TR2.lookup(TrId.CommonButtonDone);
+            clicked => {
+                AppManagementGlobal.install-result = { canceled: true };
+            }
+        }
+    }
+
+    if install-outcome-visible && !install-result.success: ErrorModal {
+        icon: "alert";
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        title: root.install-result.title;
+        text: root.install-result.text;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            AppManagementGlobal.install-result = { canceled: true };
+        }
     }
 }

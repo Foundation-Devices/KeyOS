@@ -34,7 +34,7 @@ const REMOVABLE_BUILTIN: &[AppId] = &[FLUX_EMULATOR_APP_ID];
 // plus rkyv header/alignment overhead. Leave margin for format drift and
 // oversized sources.
 const MAX_APP_ICON_SIZE_BYTES: u64 = 300 * 1024;
-const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
+pub(crate) const MAX_MANIFEST_SIZE_BYTES: u64 = 128 * 1024;
 /// Filename of a sideloaded app's icon within its bundle, next to `app.elf`. The SDK writes it
 /// here, mirroring this name with its own constant (it can't depend on this crate). Built-in
 /// icons instead live in CommonAssets (`app-icons/<app-id>.bin`).
@@ -129,6 +129,14 @@ impl AppRegistryDiff {
 
         Self { installed, removed }
     }
+}
+
+/// Whether an installed app is a Flux child or a standard one, which decides the sideload root
+/// its bundle lives under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AppKind {
+    Standard,
+    Flux,
 }
 
 #[derive(Debug, Default)]
@@ -257,6 +265,12 @@ impl AppRegistry {
         self.installed_apps
             .get(id)
             .and_then(|app_info| app_info.manifest.app_name.get(&locale.to_string().into()).cloned())
+    }
+
+    /// An installed app's display name, falling back to English then its app id. `None` only when
+    /// the app is not installed.
+    pub(crate) fn display_name(&self, app_id: &AppId, locale: &str) -> Option<String> {
+        self.installed_apps.get(app_id).map(|app_info| app_info.localized_name(locale))
     }
 
     pub(crate) fn app_name_by_pid(&self, pid: PID, locale: &str) -> Option<String> {
@@ -401,6 +415,20 @@ impl AppRegistry {
 
     pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
 
+    /// The key that signed the bundle installed under this app id, `None` when no app is installed
+    /// under it. The key is itself optional: a hosted build's manifests are unsigned.
+    pub(crate) fn bundle_signer(&self, app_id: &AppId) -> Option<Option<[u8; 33]>> {
+        self.installed_apps.get(app_id).map(|app_info| app_info.third_party_signer)
+    }
+
+    /// Which sideload root holds the bundle installed under this app id, `None` when no app is
+    /// installed under it.
+    pub(crate) fn bundle_kind(&self, app_id: &AppId) -> Option<AppKind> {
+        self.installed_apps
+            .get(app_id)
+            .map(|app_info| if app_info.is_flux { AppKind::Flux } else { AppKind::Standard })
+    }
+
     /// AppIds of every installed Flux child (built-in or sideloaded). The emulator host
     /// itself is not flux, so this returns the children only. Each child persists its NVM
     /// to its own AppData, a tree that removing the emulator does not otherwise touch.
@@ -410,6 +438,17 @@ impl AppRegistry {
 
     pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
         self.running_apps.values().any(|running_app| running_app.info.id == *app_id)
+    }
+
+    /// Whether an app id belongs to a firmware-shipped app.
+    ///
+    /// A scan registers built-ins before sideloads and skips a second bundle claiming an id it
+    /// already has, so a sideloaded bundle under a built-in's id can never take effect.
+    /// Whether an app id belongs to the firmware, installed right now or not. Removing the Flux
+    /// emulator deletes its built-in children with it, so the set comes from what the image shipped.
+    pub(crate) fn is_built_in(&self, app_id: &AppId) -> bool {
+        self.installed_apps.get(app_id).is_some_and(|app_info| app_info.source == AppSource::BuiltIn)
+            || permission_catalog::system_manifests().iter().any(|m| m.app_id == app_id.0)
     }
 
     pub(crate) fn removable_bundle_dir(&self, app_id: AppId) -> Option<String> {
@@ -893,6 +932,14 @@ fn check_manifest_signature(
     Ok((manifest_raw, None))
 }
 
+/// Verify a sideloaded bundle's manifest, returning its header-stripped JSON and the developer
+/// key that signed it (`None` on hosted builds, where manifests are unsigned).
+pub(crate) fn verified_third_party_manifest(
+    manifest_raw: &[u8],
+) -> anyhow::Result<(&[u8], Option<[u8; 33]>)> {
+    check_manifest_signature(manifest_raw, AppSource::ThirdParty)
+}
+
 fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, source: AppSource) -> bool {
     if source != AppSource::ThirdParty {
         return true;
@@ -1273,6 +1320,34 @@ mod tests {
 
         let mismatched = format!("{SIDELOADED_FLUX_APPS_DIR}/ffffffffffffffffffffffffffffffff");
         assert!(!sideloaded_app_dir_matches_app_id(Some(&mismatched), &app_id, AppSource::ThirdParty));
+    }
+
+    /// An archive claiming a built-in's app id is refused at install time, because a scan would
+    /// register the built-in first and skip the sideloaded bundle as a duplicate.
+    #[test]
+    fn built_in_app_ids_are_recognized() {
+        let built_in_id = "0x426974636f696e2057616c6c65740000";
+        let registry = registry_with(vec![
+            built_in_app_info(built_in_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf")),
+            app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH)),
+        ]);
+
+        assert!(registry.is_built_in(&decode_app_id_str(built_in_id).unwrap()));
+        assert!(!registry.is_built_in(&decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()));
+        assert!(!registry.is_built_in(&decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap()));
+    }
+
+    #[test]
+    fn display_name_falls_back_when_the_manifest_lacks_the_locale() {
+        let app_id = decode_app_id_str(THIRD_PARTY_APP_ID).unwrap();
+        let registry =
+            registry_with(vec![app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH))]);
+
+        assert_eq!(registry.display_name(&app_id, "en").as_deref(), Some("Example App"));
+        assert_eq!(registry.display_name(&app_id, "es").as_deref(), Some("Example App"));
+
+        let unknown = decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap();
+        assert_eq!(registry.display_name(&unknown, "en"), None, "only an absent app has no name");
     }
 
     #[test]

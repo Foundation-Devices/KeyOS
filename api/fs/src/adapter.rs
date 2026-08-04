@@ -534,7 +534,10 @@ pub mod test_utils {
     impl FsTest {
         fn root(&self, location: Location) -> &PathBuf { self.roots.get(&location).unwrap() }
 
+        /// Set the file to exactly these bytes. The adapter's create opens an existing file in
+        /// place, as the device does, so an existing file is removed first.
         pub fn write_file(&self, path: &str, contents: &[u8], location: Location) {
+            let _ = self.remove(path, location);
             let parts: Vec<&str> = path.rsplitn(2, '/').collect();
             if parts.len() == 2 {
                 self.create_dir(parts[1], location).unwrap();
@@ -683,7 +686,7 @@ pub mod test_utils {
                 .read(flags.read)
                 .write(flags.write)
                 .create(flags.create)
-                .truncate(flags.create)
+                .truncate(false)
                 .open(&full_path)?;
 
             Ok(TestFile::new(file))

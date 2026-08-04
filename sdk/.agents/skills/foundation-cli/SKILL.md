@@ -36,6 +36,7 @@ Command quick reference:
 - `foundation clean`: remove generated app build and theme files (`target/`, `manifest.toml`, `ui/ui`); leaves authored source and `~/.foundation/themes` untouched.
 - `foundation preview`: open Slint UI in the SDK viewer.
 - `foundation sim`: build and run in the hosted simulator.
+- `foundation pack`: build and wrap the signed bundle into one `.app` archive, installable from the device's Settings.
 - `foundation sideload`: copy and optionally launch on connected Passport hardware.
 - `foundation logs`: open the Passport USB log viewer.
 - `foundation cert gen` / `foundation cert print`: create or inspect publisher signing certificates.

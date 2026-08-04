@@ -369,6 +369,7 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     globals
         .on_remove_trusted_publisher(move |public_key| remove_trusted_publisher(state, public_key.as_str()));
     globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
+    globals.on_install_app(move || install_app(state.clone()));
 }
 
 fn refresh_installed_apps(state: StoredValue<AppState>) {
@@ -707,6 +708,133 @@ fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> T
                 text: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedContent).into(),
             }
         }
+    }
+}
+
+/// Install an app from an archive the user picks on local storage, without blocking the UI.
+///
+/// The archive only travels through here by name: app-manager opens it itself, so nothing this
+/// app can be tricked into reading ends up in a bundle directory. The call returns at once and
+/// the outcome lands on the global the page binds to, so this app keeps drawing while the bundle
+/// is copied. App-manager does not: it serves one message at a time, so it is busy for the whole
+/// copy either way. The picker still parks the runtime thread (`select_file` is `block_on`).
+fn install_app(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    let global = ui.global::<AppManagementGlobal>();
+    if global.get_installing() {
+        return;
+    }
+    global.set_installing(true);
+    global.set_install_result(InstallAppResult { canceled: true, ..Default::default() });
+
+    spawn_local(async move {
+        let result = pick_and_install(state.clone()).await;
+        let ui = state.borrow().ui();
+        let global = ui.global::<AppManagementGlobal>();
+        global.set_installing(false);
+        global.set_install_result(result);
+    })
+    .detach();
+}
+
+async fn pick_and_install(state: StoredValue<AppState>) -> InstallAppResult {
+    let options = SelectFileOptions::default()
+        .with_start_location(Location::Airlock)
+        .with_allowed_locations(AllowedLocations::specific([
+            Location::Airlock,
+            Location::Internal,
+            Location::External,
+        ]))
+        .with_allowed_extensions(AllowedExtensions::specific([app_archive::ARCHIVE_EXTENSION]))
+        .with_hidden_allowed(false)
+        .with_dirs_allowed(true)
+        .with_multiple_selection_mode(false);
+
+    let selected = match select_file::<GuiPermissions>(options) {
+        Ok(selected) => selected.and_then(|selected| selected.files().get(0).cloned()),
+        Err(e) => {
+            log::error!("failed to select an app archive: {e:?}");
+            return install_app_failure(
+                TrId::AppsModalInstallFailedHeader,
+                TrId::AppsModalInstallFailedContent,
+            );
+        }
+    };
+    let Some((path, location)) = selected else {
+        return InstallAppResult { canceled: true, ..Default::default() };
+    };
+
+    let location = match location {
+        Location::Internal => app_manager::ArchiveLocation::Internal,
+        Location::External => app_manager::ArchiveLocation::Usb,
+        Location::Airlock => app_manager::ArchiveLocation::Airlock,
+    };
+
+    let locale = state.borrow().settings.get_locale();
+    let result =
+        slint_keyos_platform::try_async_archive::<app_manager_permissions::AppManagerPermissions, _>(
+            app_manager::InstallAppArchive {
+                path: path.to_string(),
+                location,
+                locale: locale.lang().to_string(),
+            },
+        )
+        .await;
+    match result {
+        Ok(Ok(app_manager::InstallAppArchiveResult { app_name })) => {
+            refresh_installed_apps(state);
+            InstallAppResult {
+                canceled: false,
+                success: true,
+                title: tr::lookup_id(TrId::AppsModalInstallSuccessHeader).into(),
+                text: i18n::replace_placeholders(
+                    tr::lookup_id(TrId::AppsModalInstallSuccessContent),
+                    &[app_name.as_str()],
+                )
+                .into(),
+            }
+        }
+        Ok(Err(app_manager::InstallError::NotAnApp)) => install_app_failure(
+            TrId::AppsModalInstallInvalidFileHeader,
+            TrId::AppsModalInstallInvalidFileContent,
+        ),
+        Ok(Err(app_manager::InstallError::InvalidSignature)) => {
+            install_app_failure(TrId::AppsModalInvalidSignatureHeader, TrId::AppsModalInvalidSignatureContent)
+        }
+        Ok(Err(app_manager::InstallError::FluxEmulatorMissing)) => {
+            install_app_failure(TrId::AppsModalInstallNoLegacyHeader, TrId::AppsModalInstallNoLegacyContent)
+        }
+        // One modal for both: either way the app id is taken, and the user does nothing different
+        // about it depending on who took it.
+        Ok(Err(app_manager::InstallError::BuiltInApp | app_manager::InstallError::PublisherMismatch)) => {
+            install_app_failure(
+                TrId::AppsModalInstallAppIDExistsHeader,
+                TrId::AppsModalInstallAppIDExistsContent,
+            )
+        }
+        Ok(Err(app_manager::InstallError::AppRunning)) => install_app_failure(
+            TrId::AppsModalInstallAppRunningHeader,
+            TrId::AppsModalInstallAppRunningContent,
+        ),
+        Ok(Err(app_manager::InstallError::Fs(_) | app_manager::InstallError::Internal)) => {
+            // app-manager may have dropped the app it was replacing before refusing, so the
+            // cached list can name an app that is gone.
+            refresh_installed_apps(state);
+            install_app_failure(TrId::AppsModalInstallFailedHeader, TrId::AppsModalInstallFailedContent)
+        }
+        Err(e) => {
+            log::error!("failed to install an app archive: {e:?}");
+            install_app_failure(TrId::AppsModalInstallFailedHeader, TrId::AppsModalInstallFailedContent)
+        }
+    }
+}
+
+fn install_app_failure(title: TrId, text: TrId) -> InstallAppResult {
+    InstallAppResult {
+        canceled: false,
+        success: false,
+        title: tr::lookup_id(title).into(),
+        text: tr::lookup_id(text).into(),
     }
 }
 

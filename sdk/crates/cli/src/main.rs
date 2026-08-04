@@ -33,8 +33,11 @@ async fn run() -> Result<()> {
         Commands::New(args) => commands::new::execute(&args)?,
         Commands::Develop => commands::develop::execute()?,
         Commands::Exit => commands::exit::execute()?,
-        Commands::Build(args) => commands::build::execute(&args)?,
+        Commands::Build(args) => {
+            commands::build::execute(&args)?;
+        }
         Commands::Clean => commands::clean::execute()?,
+        Commands::Pack(args) => commands::pack::execute(&args)?,
         Commands::Sideload(args) => commands::sideload::execute(&args)?,
         Commands::Sim => commands::sim::execute()?,
         Commands::Cert(args) => commands::cert::execute(&args)?,

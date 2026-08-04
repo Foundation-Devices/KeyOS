@@ -18,6 +18,11 @@ template = ["fs-generic", "crypto-sha"]
     "GetSystemWriteAccess",
     "GetSystemAppDataReadAccess",
     "GetSystemAppDataWriteAccess",
+    # Read-only, and only where a user can put a file: an app archive is installed from the
+    # storage the user picked it on (see InstallAppArchive).
+    "GetUserReadAccess",
+    "GetUsbReadAccess",
+    "GetAirlockReadAccess",
     "Remove",
     "RemoveAppData",
     "RegisterAppResources",

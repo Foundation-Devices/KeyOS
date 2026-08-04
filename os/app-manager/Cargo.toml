@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
+app-archive = { workspace = true, features = ["unpack"] }
 app-manager = { workspace = true }
 app-manifest = { path = "../app-manifest" }
 const-oid = { version = "0.9", features = ["db"] }
@@ -39,6 +40,10 @@ xous = { path = "../../xous/xous-rs" }
 [target.'cfg(not(keyos))'.dependencies]
 secp256k1 = "0.29"
 sha2 = { workspace = true }
+
+[dev-dependencies]
+flate2 = "1.1"
+fs = { workspace = true, features = ["test"] }
 
 [build-dependencies]
 localizer-codegen = { workspace = true }

@@ -80,6 +80,16 @@ export struct TrustedPublisherRemovalResult {
     text: string,
 }
 
+// Outcome of installing an app from an archive the user picked. `canceled` means the
+// user backed out of the file picker, so nothing is shown; otherwise the page shows
+// `title`/`text` in a success or error modal.
+export struct InstallAppResult {
+    canceled: bool,
+    success: bool,
+    title: string,
+    text: string,
+}
+
 export global AppManagementGlobal {
     in property <[AppsListRow]> apps-list-rows: [];
     in-out property <InstalledApp> selected-app;
@@ -88,6 +98,13 @@ export global AppManagementGlobal {
     callback launch-installed-app(string);
     callback set-app-permission-subgroup-grant(string, string, bool) -> bool;
     callback remove-installed-app(string) -> string;
+    /// Starts an install and returns at once; the result arrives on `install-result`, which is
+    /// unset again while one is running so a second tap cannot start over the first.
+    callback install-app();
+    in property <bool> installing;
+    /// in-out so the page can clear it when the user dismisses the outcome: a page-side dismissed
+    /// flag would have to be assigned, and an assignment drops its binding for good.
+    in-out property <InstallAppResult> install-result;
     /// Bundled app icon for an app id, in its dark variant when the second
     /// argument is true and the app ships one.
     pure callback app-icon(string, bool) -> image;

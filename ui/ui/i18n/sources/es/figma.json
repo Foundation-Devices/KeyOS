@@ -1354,6 +1354,7 @@
       "description": "Description",
       "detailsTitle": "App Details",
       "developerMode": "Developer Mode",
+      "installApp": "Install App",
       "installTrustedPublisherCertificate": "Install Certificate",
       "installedApps": "Installed Apps",
       "mcpControl": "MCP Control",
@@ -1396,6 +1397,34 @@
       "unableToRemoveApp": "Unable to remove App",
       "usbLogging": "USB Logging",
       "version": "Version"
+    },
+    "appsModalInstallAppIDExists": {
+      "content": "This app has an ID that matches an existing KeyOS app. Contact the app publisher.",
+      "header": "App ID Already Exists"
+    },
+    "appsModalInstallAppRunning": {
+      "content": "Close the app from the task manager before attempting to make changes.",
+      "header": "App Is Running"
+    },
+    "appsModalInstallFailed": {
+      "content": "The app could not be installed. Contact the app publisher.",
+      "header": "Install Failed"
+    },
+    "appsModalInstallInvalidFile": {
+      "content": "This file is not valid. Contact the app publisher.",
+      "header": "Invalid App File"
+    },
+    "appsModalInstallNoLegacy": {
+      "content": "This app has a Legacy app dependency. Install that first, then try again.",
+      "header": "Legacy App Not Installed"
+    },
+    "appsModalInstallSuccess": {
+      "content": "{0} is installed.",
+      "header": "App Installed"
+    },
+    "appsModalInvalidSignature": {
+      "content": "Install failed. Passport is unable to verify the app signature. Contact the app publisher.",
+      "header": "Invalid Signature"
     },
     "appsModalInvalidTrustedPublisherCertificate": {
       "content": "Contact the company producing the certificate.",

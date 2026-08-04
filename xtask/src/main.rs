@@ -222,6 +222,11 @@ enum Commands {
         /// Build for the simulator (hosted) instead of hardware; leaves the bundle unsigned.
         #[arg(long)]
         hosted: bool,
+        /// Also pack the bundle into a single <APP>.app archive, for installing the app from the
+        /// device's Settings instead of over usb-debug. A hosted bundle is unsigned and its app.elf
+        /// is a host binary, so the device could only reject an archive of one.
+        #[arg(long, conflicts_with = "hosted")]
+        archive: bool,
     },
     /// Build a full flash-able firmware image, combining the bootloader, the recovery and normal images.
     /// Run the following first (in this order):
@@ -377,14 +382,17 @@ fn main() {
         Commands::Build { build_args, dont_sign } => {
             build(build_args, dont_sign);
         }
-        Commands::BuildApp { app, out, cosign2, hosted } => {
+        Commands::BuildApp { app, out, cosign2, hosted, archive } => {
             let builder = if hosted { Builder::hosted() } else { Builder::hardware() };
             let out = out.unwrap_or_else(|| builder.get_target_root().join("app-bundles"));
-            let bundle_dir = builder.build_app(&app, &out, cosign2);
+            let bundle = builder.build_app(&app, &out, cosign2);
             println!();
-            println!("App bundle ready at {}", bundle_dir.display());
+            println!("App bundle ready at {}", bundle.dir.display());
             println!("Sideload it (device unlocked, Developer Mode on) with:");
-            println!("    passport-drive load_app {}", bundle_dir.display());
+            println!("    passport-drive load_app {}", bundle.dir.display());
+            if archive {
+                pack_app_archive(&bundle, &out.join(app_archive::archive_file_name(&app)));
+            }
         }
         Commands::BuildFirmwareImage { samba_crypt_args } => {
             create_boot_image(samba_crypt_args);
@@ -427,6 +435,21 @@ fn main() {
         Commands::Reload { crate_name } => hot_reload::reload_service(crate_name),
         Commands::Watch { crate_name } => hot_reload::watch_service(crate_name),
     }
+}
+
+/// Pack a built bundle into an app archive the device can install from a USB drive.
+fn pack_app_archive(bundle: &BundledApp, archive_path: &std::path::Path) {
+    let report = app_archive::pack_bundle(&bundle.dir, archive_path, &bundle.hashed_files)
+        .unwrap_or_else(|e| panic!("Could not pack {}: {e}", bundle.dir.display()));
+    println!();
+    println!(
+        "App archive ready at {} ({} entries, {} bytes from {} bytes of bundle)",
+        report.archive_path.display(),
+        report.entries,
+        report.archive_bytes,
+        report.bundle_bytes
+    );
+    println!("Copy it to a USB drive and install it from Settings > Apps on the device.");
 }
 
 fn build(mut build_args: BuildArgs, dont_sign: bool) {

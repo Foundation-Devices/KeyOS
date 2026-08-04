@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+app-archive = { workspace = true }
 app-manager = { workspace = true }
 backup = { workspace = true }
 bip39 = "2.2"

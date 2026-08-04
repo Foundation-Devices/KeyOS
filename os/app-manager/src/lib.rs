@@ -8,6 +8,7 @@ use server::{
 };
 use xous::{AppId, SystemEvent, PID};
 
+mod install;
 mod launch;
 mod permission_catalog;
 mod permission_grants;
@@ -24,15 +25,16 @@ use std::collections::{HashMap, HashSet};
 
 use app_manager::{
     AppEvent, GetPermissionRequestInfo, GetThirdPartyCertificates, ImportThirdPartyCertificate,
-    ImportThirdPartyCertificateResult, LaunchError, PermissionGrantDecision, PermissionRequestInfoResult,
-    RemoveInstalledApp, RemoveInstalledAppResult, RemoveThirdPartyCertificate,
-    RemoveThirdPartyCertificateResult, SetAppPermissionGrant, SetAppPermissionGrantResult,
-    ThirdPartyCertificateInfo,
+    ImportThirdPartyCertificateResult, InstallAppArchive, InstallAppArchiveResult, InstallError, LaunchError,
+    PermissionGrantDecision, PermissionRequestInfoResult, RemoveInstalledApp, RemoveInstalledAppResult,
+    RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, SetAppPermissionGrant,
+    SetAppPermissionGrantResult, ThirdPartyCertificateInfo,
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetQrMatchRules, InstalledAppInfo, LaunchApp, LaunchAppBlocking, ListApps,
     RefreshInstalledApps, SubscribeAppEvents,
 };
+use fs::adapter::FsAdapter;
 use permission_grants::PermissionGrantStore;
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
@@ -235,50 +237,30 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
 
         info!("removing app 0x{} from {app_dir}", hex::encode(app_id.0));
 
-        if !self.permission_grants.remove_app_grants(app_id) {
-            error!("failed to revoke permission grants for app 0x{}", hex::encode(app_id.0));
-            return RemoveInstalledAppResult::InternalError;
-        }
-        self.transient_permission_denies.remove(&app_id);
-
-        // Wipe the app's AppData before removing the bundle so a later install
-        // reusing this AppId can't inherit the removed app's persisted data.
-        // Fail the removal if the wipe fails rather than report the app gone
+        // Before the bundle, so a failure reports the removal failed rather than the app gone
         // while its data is still on disk.
-        if let Err(e) = FileSystem::default().remove_app_data(app_id) {
-            error!("failed to remove AppData for app 0x{}: {e:?}", hex::encode(app_id.0));
+        if !self.forget_app_state(app_id) {
             return RemoveInstalledAppResult::InternalError;
         }
 
         // Flux children persist their NVM to their own AppData (nvm.bin), which removing
         // the emulator does not otherwise reach: the bundle removal below deletes only the
         // built-in children's bundles, and sideloaded children live under a separate root.
-        // Wipe every installed Flux child's AppData so no child's data outlives its host.
         if app_id == crate::registry::FLUX_EMULATOR_APP_ID {
             for child_id in self.app_registry.flux_child_app_ids() {
-                if let Err(e) = FileSystem::default().remove_app_data(child_id) {
-                    error!("failed to remove AppData for Flux child 0x{}: {e:?}", hex::encode(child_id.0));
+                if !self.forget_app_state(child_id) {
                     return RemoveInstalledAppResult::InternalError;
                 }
-                // Drop each child's registered manifest from the name server too. A child
-                // launched before this removal otherwise keeps its manifest, and the server
-                // ownership and permissions riding on it, registered until reboot: stale state
-                // outliving the bundle that is about to be deleted.
-                self.app_registry.clear_registered_manifest(child_id);
             }
         }
 
-        let remove_result = FileSystem::default().remove(&app_dir, fs::Location::System);
-
-        match remove_result {
+        match FileSystem::default().remove(&app_dir, fs::Location::System) {
             Ok(()) | Err(fs::Error::FileNotFound) => {}
             Err(e) => {
                 error!("failed to remove app bundle {app_dir}: {e:?}");
                 return RemoveInstalledAppResult::InternalError;
             }
         }
-
-        self.app_registry.clear_registered_manifest(app_id);
 
         match self.rescan_and_cache() {
             Ok(()) => {
@@ -290,6 +272,48 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
                 RemoveInstalledAppResult::InternalError
             }
         }
+    }
+}
+
+impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: InstallAppArchive,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<InstallAppArchiveResult, InstallError> {
+        let installed =
+            install::install_archive(&FileSystem::default(), &msg.path, msg.location, &self.app_registry);
+
+        // Whether it worked or not: an install that fails partway has already removed the bundle
+        // it was replacing, so the registry every reader sees is stale either way.
+        let rescanned = self.rescan_and_cache();
+
+        let install::Installed { app_id, app_dir } =
+            installed.inspect_err(|e| error!("could not install an app from {}: {e:?}", msg.path))?;
+
+        // The bundle is on disk but nothing knows about it until the rescan, so a failure here
+        // leaves an app the user cannot see: report it rather than claim the install worked.
+        if let Err(e) = rescanned {
+            error!("could not refresh installed apps after installing {}: {e:?}", msg.path);
+            return Err(InstallError::Internal);
+        }
+
+        // A bundle the scan rejects (a colliding server name, say) is invisible in Settings, so
+        // drop it rather than leave it eating space. An update that gets this far has already
+        // removed the bundle it replaced, so the id keeps nothing but the grants and data this
+        // clears.
+        let Some(app_name) = self.app_registry.display_name(&app_id, &msg.locale) else {
+            error!("installed app 0x{} did not enter the registry", hex::encode(app_id.0));
+            self.forget_app_state(app_id);
+            if let Err(e) = FileSystem::default().remove_if_exists(&app_dir, fs::Location::System) {
+                error!("could not remove the bundle that did not register: {e:?}");
+            }
+            return Err(InstallError::Internal);
+        };
+
+        info!("installed app 0x{} from {}", hex::encode(app_id.0), msg.path);
+        Ok(InstallAppArchiveResult { app_name })
     }
 }
 
@@ -371,6 +395,7 @@ impl BlockingArchiveHandler<GetPermissionRequestInfo> for AppManagerServer {
 
 impl Server for AppManagerServer {
     fn on_start(&mut self, context: &mut ServerContext<Self>) {
+        install::sweep_staged_bundles(&FileSystem::default());
         self.rescan_and_cache().expect("Failed to scan installed apps");
         FileSystem::default().subscribe_filesystem_events(context, fs::Location::AppData);
 
@@ -391,6 +416,26 @@ impl AppManagerServer {
         self.permission_grants.set_server_cache(cache);
         self.notify_app_set_changed(diff);
         Ok(())
+    }
+
+    /// Drop everything an app id owns besides its bundle: permission grants, stored data, and the
+    /// manifest it registered with the name server. Grants and AppData are keyed by app id alone
+    /// and no scan prunes them, so a bundle removed without this leaves approvals and data for
+    /// whatever installs under the id next to inherit. Returns whether all of it went; the reason
+    /// is logged.
+    fn forget_app_state(&mut self, app_id: AppId) -> bool {
+        if !self.permission_grants.remove_app_grants(app_id) {
+            error!("failed to revoke permission grants for app 0x{}", hex::encode(app_id.0));
+            return false;
+        }
+        self.transient_permission_denies.remove(&app_id);
+
+        if let Err(e) = FileSystem::default().remove_app_data(app_id) {
+            error!("failed to remove AppData for app 0x{}: {e:?}", hex::encode(app_id.0));
+            return false;
+        }
+        self.app_registry.clear_registered_manifest(app_id);
+        true
     }
 }
 

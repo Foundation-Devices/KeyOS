@@ -85,6 +85,7 @@ toml = { workspace = true }
 dialoguer = { workspace = true }
 dirs = { workspace = true }
 semver = { workspace = true }
+app-archive = { path = "../../../app-archive", features = ["pack"] }
 cosign2 = { path = "../../../imports/cosign2/cosign2" }
 hex = "0.4"
 sha2 = "0.10"

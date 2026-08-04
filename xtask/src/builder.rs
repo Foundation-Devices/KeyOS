@@ -656,10 +656,9 @@ impl Builder {
     /// Build one app crate into a signed, sideloadable bundle: a directory named by the app id
     /// holding `app.elf`, `manifest.json` (with `fileHashes`), and `icon[-dark].bin` for the icons
     /// the crate ships. Signs with the developer key from `cosign2_config`, or the repo `cosign2.toml` (which
-    /// is not a trusted publisher) when none is given; a hosted build is left unsigned. Returns the
-    /// bundle directory. Whether the app is a Flux child is decided by the device directory it lands
-    /// in, not by anything here.
-    pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> PathBuf {
+    /// is not a trusted publisher) when none is given; a hosted build is left unsigned. Whether the
+    /// app is a Flux child is decided by the device directory it lands in, not by anything here.
+    pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> BundledApp {
         let app_bin = self.build_local_crate(app_name);
         let app_id_hex = hex::encode(load_manifest(app_name).app_id);
         let bundle_dir = out.join(&app_id_hex);
@@ -685,7 +684,7 @@ impl Builder {
             sign_bundle(&cosign2, SigningMode::Developer, &bundled);
         }
 
-        bundle_dir
+        bundled
     }
 
     /// Bundle one already-built app into `bundle_dir`: strip its ELF to `app.elf`, stage the icons
@@ -710,13 +709,20 @@ impl Builder {
         // fileHashes must be taken after the icons are staged, so in-bundle icon files are covered.
         let mut manifest: Manifest = load_manifest(app_name);
         manifest.file_hashes = bundle_file_hashes(bundle_dir);
+        let hashed_files = manifest.file_hashes.keys().cloned().collect();
         let manifest_path = bundle_dir.join("manifest.json");
         serde_json::to_writer(
             fs::File::create(&manifest_path).expect("Couldn't open target manifest file"),
             &manifest,
         )
         .expect("Json serialization failed");
-        BundledApp { app_name: app_name.to_string(), elf_path, manifest_path }
+        BundledApp {
+            dir: bundle_dir.to_path_buf(),
+            app_name: app_name.to_string(),
+            elf_path,
+            manifest_path,
+            hashed_files,
+        }
     }
 
     /// After a hosted rebuild, re-stage an app that already has a bundle under the hosted apps tree
@@ -1102,11 +1108,15 @@ pub fn load_manifest(crate_name: &str) -> Manifest {
     manifest
 }
 
-/// One app bundled and ready to sign: the paths cosign2 signs in place.
-struct BundledApp {
+/// One app bundled: where it landed, the paths cosign2 signs in place, and the files its manifest
+/// hashes.
+pub struct BundledApp {
+    pub dir: PathBuf,
     app_name: String,
     elf_path: PathBuf,
     manifest_path: PathBuf,
+    /// Bundle-relative names of the files the manifest's `fileHashes` covers.
+    pub hashed_files: Vec<String>,
 }
 
 /// Sign a bundle's `app.elf` and `manifest.json` in place with `cosign2`. The two are signed

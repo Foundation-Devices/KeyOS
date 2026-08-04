@@ -29,6 +29,7 @@ members = [
     "api/spi",
     "api/update",
     "api/usb",
+    "app-archive",
     "apps/app-flux-ethereum",
     "apps/app-flux-solana",
     "apps/gui-app-authenticator",
@@ -187,6 +188,7 @@ members = [
 
 [workspace.dependencies]
 # workspace members
+app-archive = { path = "app-archive" }
 app-flux-build-support = { path = "utils/app-flux-build-support" }
 app-flux-runtime = { path = "utils/app-flux-runtime" }
 app-manager = { path = "api/app-manager" }

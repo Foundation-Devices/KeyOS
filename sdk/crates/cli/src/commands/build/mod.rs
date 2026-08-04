@@ -40,8 +40,15 @@ const TARGET_TRIPLE: &str = "armv7a-unknown-xous-elf";
 /// specifications such as armv7a-unknown-xous-elf.
 const RUSTFLAGS_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pie -Zunstable-options";
 
+/// What a build left on disk, for the commands that run one before doing their own work.
+pub struct BuiltBundle {
+    pub bundle_dir: PathBuf,
+    /// Bundle-relative names of the files the manifest's `fileHashes` covers.
+    pub hashed_files: Vec<String>,
+}
+
 /// Execute the build command
-pub fn execute(args: &BuildArgs) -> Result<()> {
+pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     let release = args.release;
 
     println!("Building KeyOS application...");
@@ -96,6 +103,7 @@ pub fn execute(args: &BuildArgs) -> Result<()> {
 
     println!("Generating manifest.json...");
     let file_hashes = bundle_file_hashes(&output_dir)?;
+    let hashed_files = file_hashes.keys().cloned().collect();
     let manifest_path = output_dir.join("manifest.json");
     generate_manifest(config, project_root, &manifest_path, file_hashes)?;
 
@@ -120,7 +128,7 @@ pub fn execute(args: &BuildArgs) -> Result<()> {
     println!("  resources/");
     println!("Version: {}", config.version);
 
-    Ok(())
+    Ok(BuiltBundle { bundle_dir: output_dir, hashed_files })
 }
 
 /// Get the effective cosign2 config path for this app.

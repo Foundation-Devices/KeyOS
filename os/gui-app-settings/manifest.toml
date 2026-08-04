@@ -15,6 +15,7 @@ template = ["gui-app", "fs-generic"]
     "ImportThirdPartyCertificate",
     "RemoveThirdPartyCertificate",
     "RemoveInstalledApp",
+    "InstallAppArchive",
 ]
 "os/backup" = ["StatusSubscribe", "CreateBackup", "CreateBackupFile"]
 "os/bt" = ["GetBleVersionInfo", "SubscribeBleState", "GetBtAddr"]

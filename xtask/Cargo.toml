@@ -14,6 +14,7 @@ edition = "2021"
 # Dependency versions enforced by Cargo.lock.
 [dependencies]
 anyhow = "1"
+app-archive = { workspace = true, features = ["pack"] }
 app-manifest = { path = "../os/app-manifest" }
 cargo_metadata = "0.18"
 chrono = "0.4"

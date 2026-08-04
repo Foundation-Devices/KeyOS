@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 app-manifest = { path = "../../os/app-manifest" }
+fs = { workspace = true }
 log = { workspace = true }
 num-derive = { workspace = true }
 num-traits = { workspace = true }
@@ -21,7 +22,6 @@ thiserror = { workspace = true }
 xous = { workspace = true }
 
 [target.'cfg(not(keyos))'.dependencies]
-fs = { workspace = true }
 serde_json = { workspace = true }
 
 [lints.rust]

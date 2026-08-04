@@ -283,6 +283,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "app-archive"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "app-flux-build-support"
 version = "0.1.0"
 dependencies = [
@@ -361,6 +371,7 @@ name = "app-manager-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app-archive",
  "app-manager",
  "app-manifest",
  "const-oid",
@@ -368,6 +379,7 @@ dependencies = [
  "cosign2",
  "crypto",
  "file-backed",
+ "flate2",
  "fs",
  "fw-utils",
  "hex",
@@ -5378,6 +5390,7 @@ name = "gui-app-settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app-archive",
  "app-manager",
  "backup",
  "bip39",
@@ -16351,6 +16364,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "app-archive",
  "app-manifest",
  "cargo_metadata",
  "chrono",

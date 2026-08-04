@@ -169,6 +169,22 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.try_send_blocking_archive(RemoveInstalledApp { app_id: *app_id })
     }
 
+    pub fn install_app_archive(
+        &self,
+        path: impl Into<String>,
+        location: ArchiveLocation,
+        locale: &str,
+    ) -> Result<Result<InstallAppArchiveResult, InstallError>, xous::Error>
+    where
+        P: MessageAllowed<InstallAppArchive>,
+    {
+        self.0.try_send_blocking_archive(InstallAppArchive {
+            path: path.into(),
+            location,
+            locale: locale.to_string(),
+        })
+    }
+
     /// Subscribe the calling server to app lifecycle events (launch/crash).
     ///
     /// The subscriber must implement `server::ArchiveEventHandler<AppEvent>`.

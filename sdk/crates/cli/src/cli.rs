@@ -54,6 +54,12 @@ pub enum Commands {
     )]
     Clean,
 
+    /// Pack the signed app bundle into a single installable archive
+    #[command(
+        long_about = "Builds and signs the application, then packs the bundle into a single .app archive. Copy it to a USB drive or the airlock and install it on Passport Prime from Settings > Apps, without usb-debug or Developer Mode"
+    )]
+    Pack(commands::pack::PackArgs),
+
     /// Build, sign, upload, and launch on hardware over usb-debug
     #[command(
         long_about = "Builds and signs the application, uploads it to a connected Passport Prime over usb-debug, and launches it through passport-drive MCP by default"

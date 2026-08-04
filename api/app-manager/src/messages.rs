@@ -341,3 +341,52 @@ pub struct RemoveInstalledApp {
     #[rkyv(with = WithAppId)]
     pub app_id: AppId,
 }
+
+/// Storage an app archive may be installed from: the places a user can put a file, and no
+/// system location. It bounds what [`InstallAppArchive`] can be pointed at, so a caller cannot
+/// walk app-manager through the system volume with a crafted path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ArchiveLocation {
+    Internal,
+    Usb,
+    Airlock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InstallAppArchiveResult {
+    pub app_name: String,
+}
+
+/// Why an install did not happen. Every variant is a state the archive or the device is in, so
+/// the caller can say something specific without the server sending it a string.
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum InstallError {
+    /// The file is not a readable app archive, or breaks the archive format's rules.
+    NotAnApp,
+    /// The archive's manifest carries no valid publisher signature.
+    InvalidSignature,
+    /// A Flux app, which only the Flux emulator can run, and the emulator is not installed.
+    FluxEmulatorMissing,
+    /// The archive claims the app id of an app that ships with the firmware, which no
+    /// installed app may replace.
+    BuiltInApp,
+    /// An app with this id is installed, but from another publisher, so this archive would be a
+    /// different app taking over its permission grants and stored data rather than an update.
+    PublisherMismatch,
+    /// The app is already installed and running, so its bundle cannot be replaced.
+    AppRunning,
+    /// The filesystem refused an operation the install needed.
+    Fs(fs::Error),
+    /// Anything else; the server logs what actually happened.
+    Internal,
+}
+
+/// Install an app from an archive the user picked on local storage.
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<InstallAppArchiveResult, InstallError>)]
+pub struct InstallAppArchive {
+    pub path: String,
+    pub location: ArchiveLocation,
+    /// Locale for the installed app's name in the response.
+    pub locale: String,
+}
