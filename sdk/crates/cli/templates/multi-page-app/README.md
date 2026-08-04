@@ -28,7 +28,6 @@ This template creates a multi-page GUI app with:
   - `pages/page.slint` - Default route page
   - `pages/props.slint` - Default route props
   - `pages/second/` - Second page component
-- `i18n/` - Internationalization files (English and Spanish)
 - `resources/icon.svg` - 110x110px app icon image converted into the hardware app icon
 - `resources/icon-dark.svg` - optional 110x110px dark-theme variant; without it the light icon serves both themes
 - `resources/theme.json` - App-local theme opened by `foundation theme`
@@ -60,20 +59,18 @@ The router automatically generates the `Navigate` global from the page structure
 2. Add `page.slint` with your page component
 3. Add a neighboring `props.slint` that exports a `struct` annotated with `@rust-attr(route(...))`
 4. Mark exactly one page as the default route with `@rust-attr(route(default, path = "..."))`
-5. Add translations to `i18n/en.json` and `i18n/es.json` if needed
 
 ## Customization
 
 After creating a project from this template, you can:
 
 1. Modify page layouts in `ui/pages/*/page.slint`
-2. Edit `i18n/en.json` and `i18n/es.json` to update text
-3. Replace `resources/icon.svg` with your own 110x110px icon
-4. Run `foundation theme` to edit `resources/theme.json`
-5. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
-6. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
-7. Add more pages following the pattern above
-8. Add page-specific route state in each page's `props.slint`
+2. Replace `resources/icon.svg` and `resources/icon-dark.svg` with your own 110x110px icons
+3. Run `foundation theme` to edit `resources/theme.json`
+4. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
+5. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
+6. Add more pages following the pattern above
+7. Add page-specific route state in each page's `props.slint`
 
 ## Building
 

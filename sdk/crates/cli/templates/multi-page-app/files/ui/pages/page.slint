@@ -6,37 +6,33 @@ import { Button } from "@ui/button.slint";
 import { Card } from "@ui/card.slint";
 import { Navigate } from "../gen/navigate.slint";
 
-component PageAction inherits Button {
-    size: ControlSize.md;
-}
-
 export component MainPagePage inherits Rectangle {
     background: Theme.palette-background;
 
     VerticalLayout {
         width: parent.width;
         height: parent.height;
-        padding-left: 24px;
-        padding-right: 24px;
-        padding-top: 24px + UISize.control-center-status-bar-height;
-        padding-bottom: 24px;
-        spacing: 16px;
+        padding-left: Theme.spacing-xl;
+        padding-right: Theme.spacing-xl;
+        padding-top: Theme.spacing-xl + UISize.control-center-status-bar-height;
+        padding-bottom: Theme.spacing-xl;
+        spacing: Theme.spacing-lg;
 
         Text {
             text: "{{friendly_app_name}}";
             color: Theme.palette-foreground;
-            font-family: "Montserrat";
-            font-size: 24px;
-            font-weight: 700;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-title;
+            font-weight: Theme.font-weight-bold;
             horizontal-alignment: center;
         }
 
         Text {
-            text: "A simple routed demo app for the KeyOS SDK.";
+            text: "A simple app with room to grow.";
             color: Theme.palette-muted;
-            font-family: "Montserrat";
-            font-size: 17px;
-            font-weight: 500;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-subtitle;
+            font-weight: Theme.font-weight-medium;
             wrap: word-wrap;
             horizontal-alignment: center;
         }
@@ -45,7 +41,7 @@ export component MainPagePage inherits Rectangle {
             width: 100%;
             height: 148px;
             background: Theme.palette-card;
-            border-radius: 20px;
+            border-radius: Theme.radius-default;
             clip: true;
 
             Image {
@@ -57,29 +53,31 @@ export component MainPagePage inherits Rectangle {
         }
 
         Text {
-            text: "ROUTE /MAIN";
+            text: "HOME";
             color: Theme.palette-muted;
-            font-family: "Montserrat";
-            font-size: 15px;
-            font-weight: 600;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-label;
+            font-weight: Theme.font-weight-semibold;
             horizontal-alignment: center;
         }
 
         Card {
             width: 100%;
-            size: lg;
-            title: "Main page";
-            body: "This multi-page starter follows the current KeyOS app routing layout and is sized to feel closer to a real device screen.";
-            footer: "The default route lives at ui/pages/page.slint with its props in ui/pages/props.slint.";
+            size: ControlSize.lg;
+            title: "Welcome to {{friendly_app_name}}";
+            body: "This is your home screen. Add the content and actions that matter most.";
+            footer: "Use the button below to explore the second page.";
         }
 
         Rectangle {
             vertical-stretch: 1;
         }
 
-        PageAction {
+        Button {
             width: 100%;
             text: "Go to second page";
+            size: ControlSize.md;
+            full-width: true;
             clicked => {
                 Navigate.second-page({ });
             }

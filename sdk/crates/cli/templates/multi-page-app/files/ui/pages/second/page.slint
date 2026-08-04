@@ -6,55 +6,53 @@ import { Button } from "@ui/button.slint";
 import { Card } from "@ui/card.slint";
 import { Navigate } from "../../gen/navigate.slint";
 
-component PageAction inherits Button {
-    size: ControlSize.md;
-}
-
 export component SecondPagePage inherits Rectangle {
     background: Theme.palette-background;
 
     VerticalLayout {
         width: parent.width;
         height: parent.height;
-        padding-left: 24px;
-        padding-right: 24px;
-        padding-top: 24px + UISize.control-center-status-bar-height;
-        padding-bottom: 24px;
-        spacing: 16px;
+        padding-left: Theme.spacing-xl;
+        padding-right: Theme.spacing-xl;
+        padding-top: Theme.spacing-xl + UISize.control-center-status-bar-height;
+        padding-bottom: Theme.spacing-xl;
+        spacing: Theme.spacing-lg;
 
         Text {
             text: "Page 2";
             color: Theme.palette-foreground;
-            font-family: "Montserrat";
-            font-size: 24px;
-            font-weight: 700;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-title;
+            font-weight: Theme.font-weight-bold;
             horizontal-alignment: center;
         }
 
         Text {
-            text: "Navigation is wired up and shared SDK assets resolve from the generated shared SDK surface.";
+            text: "A second screen for more content and actions.";
             color: Theme.palette-muted;
-            font-family: "Montserrat";
-            font-size: 17px;
-            font-weight: 500;
+            font-family: Theme.font-primary;
+            font-size: Theme.font-size-subtitle;
+            font-weight: Theme.font-weight-medium;
             wrap: word-wrap;
             horizontal-alignment: center;
         }
 
         Card {
             width: 100%;
-            size: lg;
-            title: "Second page";
-            body: "Use this page to confirm routing, back navigation, and simulator behavior while you build out real screens.";
+            size: ControlSize.lg;
+            title: "You made it";
+            body: "Use this page for the next step in your app's flow.";
         }
 
         Rectangle {
             vertical-stretch: 1;
         }
 
-        PageAction {
+        Button {
             width: 100%;
-            text: "Back to page 1";
+            text: "Back to home";
+            size: ControlSize.md;
+            full-width: true;
             clicked => {
                 Navigate.backward();
             }

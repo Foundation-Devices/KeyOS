@@ -22,7 +22,7 @@ template-name/
     ├── build.rs           # Build script
     ├── src/               # Source files
     ├── ui/                # UI files (for GUI apps)
-    ├── i18n/              # Internationalization
+    ├── i18n/              # Optional internationalization files
     └── resources/         # App icon, app theme, and app-owned resources
 ```
 
@@ -73,9 +73,7 @@ The template processor handles files differently based on type:
 The default KeyOS GUI application with:
 - A generated shared SDK `@ui` component surface
 - A card-based hero panel and primary action button
-- English and Spanish localizations
-- English and Spanish localizations
-- SVG placeholder icon
+- Light and dark SVG placeholder icons
 - App theme JSON under `resources/theme.json`
 - Sample app-owned image under `resources/images/`, loaded with `Images.image`
 - Single-page layout (no router)
@@ -88,8 +86,7 @@ A multi-page KeyOS GUI application with:
 - Router-based navigation
 - shared SDK cards and primary action buttons
 - Generated private SDK UI/resource search tree supplied by the SDK
-- English and Spanish localizations
-- SVG placeholder icon
+- Light and dark SVG placeholder icons
 - App theme JSON under `resources/theme.json`
 - Sample app-owned image under `resources/images/`, loaded with `Images.image`
 - Example of page-based architecture

@@ -49,7 +49,7 @@ After creating a project from this template, you can:
 
 1. Run `foundation theme` to edit `resources/theme.json`
 2. Run `foundation sim` to inspect the theme in the simulator
-3. Replace `resources/icon.svg` with your own 110x110px icon
+3. Replace `resources/icon.svg` and `resources/icon-dark.svg` with your own 110x110px icons
 4. Add app images under `resources/images/` and load them from Slint with `Images.image("<name>")`
 5. Add app fonts under `resources/fonts/` and use their family names in Slint `font-family` properties
 

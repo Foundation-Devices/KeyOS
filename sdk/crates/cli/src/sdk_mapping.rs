@@ -176,7 +176,8 @@ mod tests {
         ensure_project_sdk_mapping(project_root, &sdk).unwrap();
 
         let project_current = project_root.join(".foundation-sdk").join("current");
-        assert_eq!(fs::read_link(&project_current).unwrap(), current);
+        let normalized_current = fs::canonicalize(install_root).unwrap().join("current");
+        assert_eq!(fs::read_link(&project_current).unwrap(), normalized_current);
         assert!(project_root.join(project_sdk_keyos_root_path()).exists());
     }
 

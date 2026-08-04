@@ -90,6 +90,7 @@
             );
 
           shellHook = ''
+            export FOUNDATION_DEVELOP_SHELL=1
             export FOUNDATION_SDK_ROOT="''${FOUNDATION_SDK_ROOT:-$PWD}"
             export FOUNDATION_SDK_BIN="''${FOUNDATION_SDK_BIN:-$FOUNDATION_SDK_ROOT/bin}"
 

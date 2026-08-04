@@ -11,6 +11,8 @@ use foundation_core::{
     AppConfig, SdkRoot, APP_CONFIG_FILE, APP_ICON_SIZE_PX, DISPLAY_APP_NAME_ALLOWED_CHARS,
 };
 
+use crate::cargo_support::is_development_environment_active;
+
 /// Check result with status and optional fix message
 struct CheckResult {
     name: String,
@@ -106,9 +108,7 @@ fn check_nix() -> CheckResult {
 }
 
 fn check_nix_shell() -> CheckResult {
-    let in_nix = std::env::var("IN_NIX_SHELL").is_ok()
-        || std::env::var("NIX_BUILD_TOP").is_ok()
-        || std::env::var("FOUNDATION_SDK_ROOT").is_ok();
+    let in_nix = is_development_environment_active();
 
     CheckResult {
         name: "Checking Nix shell environment".to_string(),

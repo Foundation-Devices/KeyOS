@@ -15,6 +15,8 @@ use anyhow::{Context, Result};
 use foundation_core::SdkRoot;
 use tempfile::TempDir;
 
+use crate::cargo_support::FOUNDATION_DEVELOP_SHELL_ENV;
+
 /// SDK version embedded in the CLI
 const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 const SDK_USER_FLAKE_SOURCE: &str = "nix/sdk-user-flake.nix";
@@ -81,6 +83,7 @@ pub fn execute() -> Result<()> {
         .arg("-c");
     shell.configure_command(&mut command, &shell_config_dir);
     let status = command
+        .env(FOUNDATION_DEVELOP_SHELL_ENV, "1")
         .env("FOUNDATION_SDK_ROOT", sdk.root())
         .env("FOUNDATION_SDK_BIN", sdk.root().join("bin"))
         .status()

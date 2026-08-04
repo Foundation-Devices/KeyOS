@@ -76,7 +76,7 @@ fn removed_legacy_command_names_fail() {
 fn environment_commands_work_in_smoke_env() {
     let env = TestEnv::new();
 
-    let doctor = env.command().arg("doctor").output().unwrap();
+    let doctor = env.command().env("FOUNDATION_DEVELOP_SHELL", "1").arg("doctor").output().unwrap();
     assert!(doctor.status.success(), "doctor failed: {}", stderr(&doctor));
     assert!(stdout(&doctor).contains("All checks passed"));
 
@@ -148,7 +148,8 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(viewer_log.contains(&expected_ui_arg), "viewer log missing {expected_ui_arg}: {viewer_log}");
     assert!(viewer_log.contains("ui/app.slint"));
 
-    let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
+    let build =
+        env.command_in(env.app_root()).env("FOUNDATION_DEVELOP_SHELL", "1").arg("build").output().unwrap();
     assert!(build.status.success(), "build failed: {}", stderr(&build));
     let built_manifest = env.app_root().join("target").join("keyos").join("smoke-app").join("manifest.json");
     assert!(built_manifest.exists());
@@ -160,7 +161,7 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 
     let sideload = env
         .command_in(env.app_root())
-        .env("IN_NIX_SHELL", "1")
+        .env("FOUNDATION_DEVELOP_SHELL", "1")
         .arg("sideload")
         .arg("--no-run")
         .output()
@@ -223,7 +224,8 @@ fn build_refuses_invalid_app_names_before_cargo() {
     )
     .unwrap();
 
-    let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
+    let build =
+        env.command_in(env.app_root()).env("FOUNDATION_DEVELOP_SHELL", "1").arg("build").output().unwrap();
 
     assert!(!build.status.success());
     assert!(stderr(&build).contains("friendly-app-name"), "stderr was: {}", stderr(&build));
@@ -238,7 +240,8 @@ fn build_refuses_invalid_icon_size_before_cargo() {
     fs::write(env.app_root().join("resources").join("icon.svg"), r#"<svg width="128" height="96"></svg>"#)
         .unwrap();
 
-    let build = env.command_in(env.app_root()).env("IN_NIX_SHELL", "1").arg("build").output().unwrap();
+    let build =
+        env.command_in(env.app_root()).env("FOUNDATION_DEVELOP_SHELL", "1").arg("build").output().unwrap();
 
     assert!(!build.status.success());
     assert!(stderr(&build).contains("Icon must be 110x110px"), "stderr was: {}", stderr(&build));

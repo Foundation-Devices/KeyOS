@@ -107,7 +107,7 @@ Then port files:
 | `Cargo.toml` | Keep the generated one; re-add your extra `[dependencies]` (see §3). |
 | `build.rs` | Keep the generated one; re-apply custom `CompileOptions` fields (`include_router`, `include_translations`, …). |
 | `src/main.rs` | Copy yours, then apply the `app_ui2!` change (§5). |
-| `src/theme.rs` | **Do not copy.** Keep the generated one; move any custom overrides into `customize_theme()` (§6). |
+| `src/theme.rs` | **Do not copy.** Keep the generated one; move any custom overrides into `apply_system_theme()` after `apply_theme!` (§6). |
 | `src/*` (your modules) | Copy; fix service-API breakages (§8–§9). |
 | `theme/theme.json` | Move to `resources/theme.json` (§6). |
 | `ui/app.slint`, `ui/pages/**` | Copy; fix `@ui/theme.slint` imports and button sizes (§4). |
@@ -359,7 +359,7 @@ fn app_main(cx: AppContext, ui: AppWindow) { … }
 | Application | ~200 hand-written lines (`apply_theme`, `button_style`, `button_size`, `token_color`, per-variant `Theme` setters) | `foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);` |
 | Editing | hand-edit JSON | `foundation theme` (visual editor) or hand-edit JSON |
 
-The new `src/theme.rs` is ~40 lines; the system-theme subscription loop (`subscribe_scalar::<SettingsPermissions, _>(SubscribeSystemTheme)` → `ColorScheme::Dark/Light`) is unchanged. App-specific tweaks go at the bottom of `customize_theme()`:
+The new `src/theme.rs` is ~40 lines; the system-theme subscription loop (`subscribe_scalar::<SettingsPermissions, _>(SubscribeSystemTheme)` → `ColorScheme::Dark/Light`) is unchanged. App-specific tweaks go at the bottom of `apply_system_theme()`, after the inherited theme is applied:
 
 ```rust
 foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);
@@ -611,7 +611,7 @@ messages named below are: the rest are Foundation-only, and §7.3's rule decides
 4. [ ] `main.rs`: `app_ui!` → `app_ui2!`; drop `kind = …`.
 5. [ ] Keep generated `Cargo.toml` / `build.rs` / `theme.rs` / `.gitignore` / `permission_templates.toml`; re-add your extra dependencies and custom `CompileOptions` / permission templates.
 6. [ ] Move `theme/theme.json` → `resources/theme.json`; if it inherited a non-`default_theme` base, port that base into `~/.foundation/themes/json/`.
-7. [ ] Move custom theme overrides into `customize_theme()` (Rust) and/or `components.<key>` (JSON).
+7. [ ] Move custom theme overrides into `apply_system_theme()` after `apply_theme!` (Rust) and/or `components.<key>` (JSON).
 8. [ ] Fix `@ui/theme.slint` imports: `ControlSize`, drop `ButtonStyleProps`/`ButtonSizeProps`, export `Images`.
 9. [ ] Move images → `resources/images/` + `Images.image("name")`; fonts → `resources/fonts/`.
 10. [ ] Re-add custom permissions on top of the new templates; check each granted message still exists (renamed `Sha*`; genuinely removed: USB-logging/MCP/i2c/gpio/`ShowControlCenter`/`SetWakeLock`/`ClearPairedDevice`/`DiskEncryptionKeysReady`) and is grantable under the new policy metadata. Note `FlushFs` was only dropped from the `fs-generic` *template*, not removed — grant it directly if the app calls filesystem-level `flush()`.

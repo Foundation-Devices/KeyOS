@@ -52,7 +52,6 @@ my-app/
 ├── build.rs
 ├── src/
 ├── ui/
-├── i18n/
 └── resources/
     ├── images/  # app-owned images
     ├── fonts/   # optional app-owned fonts

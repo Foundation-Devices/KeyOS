@@ -5,35 +5,17 @@ import {
     Theme,
     UISize,
     Images,
-    ButtonVariant,
-    ButtonState,
     ControlSize,
 } from "@ui/theme.slint";
 import { Callbacks } from "callbacks.slint";
 import { Button } from "@ui/button.slint";
 import { Card } from "@ui/card.slint";
 
-export { Callbacks, Theme, Images, ButtonVariant, ButtonState, ControlSize }
-component PrimaryAction inherits Button {
-    background: Theme.palette-primary;
-    foreground: #ffffff;
-    border-color: transparent;
-    border-width: 0px;
-    font-weight: 600;
-    font-family: "Montserrat";
-    button-opacity: self.disabled ? 0.5 : 1.0;
-    touch-expansion: 4px;
-    font-size: 24px;
-    padding-horizontal: 24px;
-    padding-vertical: 12px;
-    icon-size: 24px;
-    border-radius: 24px;
-}
-
+export { Callbacks, Theme, Images, ControlSize }
 export component AppWindow inherits Window {
     title: "{{friendly_app_name}}";
-    preferred-width: 480px;
-    preferred-height: 800px;
+    preferred-width: UISize.screen-width;
+    preferred-height: UISize.screen-height;
     background: Theme.palette-background;
 
     Rectangle {
@@ -44,18 +26,18 @@ export component AppWindow inherits Window {
         VerticalLayout {
             width: parent.width;
             height: parent.height;
-            padding-left: 24px;
-            padding-right: 24px;
-            padding-top: 32px + UISize.control-center-status-bar-height;
-            padding-bottom: 24px;
-            spacing: 20px;
+            padding-left: Theme.spacing-xl;
+            padding-right: Theme.spacing-xl;
+            padding-top: Theme.spacing-xl + UISize.control-center-status-bar-height;
+            padding-bottom: Theme.spacing-xl;
+            spacing: Theme.spacing-xl;
 
             Text {
                 text: "{{friendly_app_name}}";
                 color: Theme.palette-muted;
-                font-family: "Montserrat";
-                font-size: 18px;
-                font-weight: 600;
+                font-family: Theme.font-primary;
+                font-size: Theme.font-size-body;
+                font-weight: Theme.font-weight-semibold;
                 horizontal-alignment: center;
             }
 
@@ -63,7 +45,7 @@ export component AppWindow inherits Window {
                 width: 100%;
                 height: 154px;
                 background: Theme.palette-card;
-                border-radius: 20px;
+                border-radius: Theme.radius-default;
                 clip: true;
 
                 Image {
@@ -75,28 +57,30 @@ export component AppWindow inherits Window {
             }
 
             Text {
-                text: "BUILD READY";
+                text: "WELCOME";
                 color: Theme.palette-muted;
-                font-family: "Montserrat";
-                font-size: 15px;
-                font-weight: 600;
+                font-family: Theme.font-primary;
+                font-size: Theme.font-size-label;
+                font-weight: Theme.font-weight-semibold;
                 horizontal-alignment: center;
             }
 
             Card {
                 width: 100%;
-                title: "Ready to build";
-                body: "This starter app uses the synced shared SDK component surface.";
-                footer: "This template now uses the synced public SDK surface.";
+                title: "Welcome to {{friendly_app_name}}";
+                body: "A simple, secure experience starts here.";
+                footer: "Tap below to get started.";
             }
 
             Rectangle {
                 vertical-stretch: 1;
             }
 
-            PrimaryAction {
+            Button {
                 width: 100%;
-                text: "Log a message";
+                text: "Get started";
+                size: ControlSize.lg;
+                full-width: true;
                 clicked => {
                     Callbacks.button-clicked();
                 }

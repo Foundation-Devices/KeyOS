@@ -114,15 +114,15 @@ component Swatch inherits Rectangle {
     height: 72px;
     background: root.swatch-color;
     border-color: Theme.palette-border;
-    border-width: 1px;
-    border-radius: 8px;
+    border-width: Theme.border-width-sm;
+    border-radius: Theme.radius-sm;
 
     Text {
-        x: 8px;
-        y: parent.height - self.preferred-height - 8px;
-        width: parent.width - 16px;
+        x: Theme.spacing-sm;
+        y: parent.height - self.preferred-height - Theme.spacing-sm;
+        width: parent.width - 2 * Theme.spacing-sm;
         text: root.label;
-        color: #ffffff;
+        color: Theme.color-white;
         font-family: Theme.font-primary;
         font-size: Theme.font-size-helper;
         font-weight: Theme.font-weight-bold;
@@ -134,11 +134,11 @@ component Page inherits Rectangle {
     in property <string> title: "";
     in property <string> summary: "";
     preferred-height: page-content.preferred-height;
-    background: transparent;
+    background: Theme.color-transparent;
 
     page-content := VerticalLayout {
         width: parent.width;
-        spacing: 18px;
+        spacing: Theme.spacing-lg;
 
         PageTitle {
             width: parent.width;
@@ -161,11 +161,11 @@ component Page inherits Rectangle {
 component Section inherits Rectangle {
     in property <string> title: "";
     preferred-height: section-content.preferred-height;
-    background: transparent;
+    background: Theme.color-transparent;
 
     section-content := VerticalLayout {
         width: parent.width;
-        spacing: 10px;
+        spacing: Theme.spacing-sm;
 
         SectionLabel {
             width: parent.width;
@@ -176,7 +176,7 @@ component Section inherits Rectangle {
 
         Rectangle {
             width: parent.width;
-            height: 1px;
+            height: Theme.border-width-sm;
             background: Theme.palette-border.with-alpha(Theme.is-dark ? 0.64 : 0.8);
         }
     }
@@ -188,8 +188,8 @@ component FramedDemo inherits Rectangle {
     height: root.frame-height;
     background: Theme.palette-secondary.with-alpha(Theme.is-dark ? 0.28 : 0.36);
     border-color: Theme.palette-border;
-    border-width: 1px;
-    border-radius: 8px;
+    border-width: Theme.border-width-sm;
+    border-radius: Theme.radius-sm;
     clip: true;
 
     @children
@@ -203,10 +203,10 @@ export component AppWindow inherits Window {
     in-out property <[bool]> accordion-multi-expanded: [true, true];
 
     title: "Kitchen Sink";
-    preferred-width: 480px;
-    preferred-height: 800px;
-    width: 480px;
-    height: 800px;
+    preferred-width: UISize.screen-width;
+    preferred-height: UISize.screen-height;
+    width: UISize.screen-width;
+    height: UISize.screen-height;
     background: Theme.palette-background;
 
     Rectangle {
@@ -217,17 +217,17 @@ export component AppWindow inherits Window {
         VerticalLayout {
             width: root.width;
             height: root.height;
-            padding-left: 20px;
-            padding-right: 20px;
-            padding-top: 18px + UISize.control-center-status-bar-height;
-            padding-bottom: 24px;
-            spacing: 14px;
+            padding-left: Theme.spacing-xl;
+            padding-right: Theme.spacing-xl;
+            padding-top: Theme.spacing-lg + UISize.control-center-status-bar-height;
+            padding-bottom: Theme.spacing-xl;
+            spacing: Theme.spacing-md;
 
             // Pin the selector to its closed control height; the option list is
             // a PopupWindow that floats above the content below. Without the pin
             // the slot grows to fit the open list, leaving a gap when closed.
             Rectangle {
-                width: root.width - 40px;
+                width: root.width - 2 * Theme.spacing-xl;
                 height: component-dropdown.preferred-height;
 
                 component-dropdown := Dropdown {
@@ -270,7 +270,7 @@ export component AppWindow inherits Window {
 
             Rectangle {
                 width: 100%;
-                height: 1px;
+                height: Theme.border-width-sm;
                 background: Theme.palette-border;
             }
 
@@ -291,8 +291,8 @@ export component AppWindow inherits Window {
                     viewport-height: gallery-content.preferred-height;
 
                     gallery-content := VerticalLayout {
-                        width: root.width - 40px;
-                        spacing: 22px;
+                        width: root.width - 2 * Theme.spacing-xl;
+                        spacing: Theme.spacing-xl;
 
                         if root.selected-component == 0: Page {
                             title: "Button";
@@ -373,7 +373,7 @@ export component AppWindow inherits Window {
                                 Button {
                                     width: parent.width;
                                     text: "Start icon";
-                                    start-icon: Images.icon("check", 24px);
+                                    start-icon: Images.icon("check", Theme.icon-size-md);
                                     variant: ButtonVariant.primary;
                                     full-width: true;
                                 }
@@ -381,7 +381,7 @@ export component AppWindow inherits Window {
                                 Button {
                                     width: parent.width;
                                     text: "End icon";
-                                    end-icon: Images.icon("arrow-right", 24px);
+                                    end-icon: Images.icon("arrow-right", Theme.icon-size-md);
                                     variant: ButtonVariant.secondary;
                                     full-width: true;
                                 }
@@ -428,21 +428,21 @@ export component AppWindow inherits Window {
                                 title: "Variants";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 14px;
+                                    spacing: Theme.spacing-md;
                                     IconButton {
-                                        icon: Images.icon("settings", 24px);
+                                        icon: Images.icon("settings", Theme.icon-size-md);
                                         label: "Default";
                                         variant: IconButtonVariant.default;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("settings", 24px);
+                                        icon: Images.icon("settings", Theme.icon-size-md);
                                         label: "Ghost";
                                         variant: IconButtonVariant.ghost;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("settings", 24px);
+                                        icon: Images.icon("settings", Theme.icon-size-md);
                                         label: "Outlined";
                                         variant: IconButtonVariant.outlined;
                                     }
@@ -453,27 +453,27 @@ export component AppWindow inherits Window {
                                 title: "Sizes and shape";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 14px;
+                                    spacing: Theme.spacing-md;
                                     IconButton {
-                                        icon: Images.icon("plus", 20px);
+                                        icon: Images.icon("plus", Theme.icon-size-sm);
                                         label: "Small";
                                         size: IconButtonSize.sm;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("plus", 24px);
+                                        icon: Images.icon("plus", Theme.icon-size-md);
                                         label: "Medium";
                                         size: IconButtonSize.md;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("plus", 28px);
+                                        icon: Images.icon("plus", Theme.icon-size-lg);
                                         label: "Large";
                                         size: IconButtonSize.lg;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("plus", 24px);
+                                        icon: Images.icon("plus", Theme.icon-size-md);
                                         label: "Square";
                                         shape: IconButtonShape.square;
                                         variant: IconButtonVariant.outlined;
@@ -485,21 +485,21 @@ export component AppWindow inherits Window {
                                 title: "States";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 14px;
+                                    spacing: Theme.spacing-md;
                                     IconButton {
-                                        icon: Images.icon("heart", 24px);
+                                        icon: Images.icon("heart", Theme.icon-size-md);
                                         label: "Focused";
                                         force-focused: true;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("heart", 24px);
+                                        icon: Images.icon("heart", Theme.icon-size-md);
                                         label: "Pressed";
                                         force-pressed: true;
                                     }
 
                                     IconButton {
-                                        icon: Images.icon("heart", 24px);
+                                        icon: Images.icon("heart", Theme.icon-size-md);
                                         label: "Disabled";
                                         disabled: true;
                                     }
@@ -515,7 +515,7 @@ export component AppWindow inherits Window {
                                 title: "Variants";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 10px;
+                                    spacing: Theme.spacing-sm;
                                     Chip {
                                         text: "Filled";
                                         variant: ChipVariant.filled;
@@ -540,7 +540,7 @@ export component AppWindow inherits Window {
                                 title: "Colors";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Chip {
                                         text: "Default";
                                         variant: ChipVariant.soft;
@@ -562,7 +562,7 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Chip {
                                         text: "Danger";
                                         variant: ChipVariant.soft;
@@ -581,7 +581,7 @@ export component AppWindow inherits Window {
                                 title: "Sizes and parameters";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Chip {
                                         text: "Small";
                                         size: ChipSize.sm;
@@ -603,10 +603,10 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Chip {
                                         text: "Icon";
-                                        icon: Images.icon("star", 20px);
+                                        icon: Images.icon("star", Theme.icon-size-sm);
                                         variant: ChipVariant.soft;
                                         color: ChipColor.warning;
                                     }
@@ -681,8 +681,8 @@ export component AppWindow inherits Window {
                                     label: "Large";
                                     value: "Large";
                                     size: ControlSize.lg;
-                                    prefix-icon: Images.icon("lock", 24px);
-                                    suffix-icon: Images.icon("check", 24px);
+                                    prefix-icon: Images.icon("lock", Theme.icon-size-md);
+                                    suffix-icon: Images.icon("check", Theme.icon-size-md);
                                 }
 
                                 Input {
@@ -1057,16 +1057,16 @@ export component AppWindow inherits Window {
                                 FramedDemo {
                                     frame-height: 240px;
                                     Tabs {
-                                        x: 12px;
-                                        y: 12px;
-                                        width: parent.width - 24px;
-                                        height: parent.height - 24px;
+                                        x: Theme.spacing-md;
+                                        y: Theme.spacing-md;
+                                        width: parent.width - 2 * Theme.spacing-md;
+                                        height: parent.height - 2 * Theme.spacing-md;
                                         options: ["General", "Security", "Profile"];
                                         panels: ["General settings", "Security controls", "Profile details"];
                                         icons: [
-                                            Images.icon("settings", 24px),
-                                            Images.icon("lock", 24px),
-                                            Images.icon("user", 24px)
+                                            Images.icon("settings", Theme.icon-size-md),
+                                            Images.icon("lock", Theme.icon-size-md),
+                                            Images.icon("user", Theme.icon-size-md)
                                         ];
                                         orientation: TabsOrientation.vertical;
                                         variant: TabsVariant.bordered;
@@ -1330,7 +1330,7 @@ export component AppWindow inherits Window {
                                     subtitle: "Subtitle text";
                                     body: "A selected card uses the accent color to make theme changes easy to spot.";
                                     footer: "Footer metadata";
-                                    icon: Images.icon("star", 24px);
+                                    icon: Images.icon("star", Theme.icon-size-md);
                                     selected: true;
                                 }
 
@@ -1338,7 +1338,7 @@ export component AppWindow inherits Window {
                                     width: parent.width;
                                     title: "Interactive Card";
                                     body: "Interactive cards preserve the same visual structure while enabling click behavior.";
-                                    icon: Images.icon("settings", 24px);
+                                    icon: Images.icon("settings", Theme.icon-size-md);
                                     interactive: true;
                                 }
                             }
@@ -1373,26 +1373,26 @@ export component AppWindow inherits Window {
                                     MenuItem {
                                         label: "Selected item";
                                         subtitle: "Start icon and selected state";
-                                        start-icon: Images.icon("check", 24px);
+                                        start-icon: Images.icon("check", Theme.icon-size-md);
                                         selected: true;
                                     }
 
                                     MenuItem {
                                         label: "Trailing value";
                                         trailing-text: "Cmd+S";
-                                        end-icon: Images.icon("chevron-right", 24px);
+                                        end-icon: Images.icon("chevron-right", Theme.icon-size-md);
                                     }
 
                                     MenuItem {
                                         label: "Destructive";
-                                        start-icon: Images.icon("trash-2", 24px);
+                                        start-icon: Images.icon("trash-2", Theme.icon-size-md);
                                         destructive: true;
                                     }
 
                                     MenuItem {
                                         label: "Disabled";
                                         disabled: true;
-                                        end-icon: Images.icon("lock", 24px);
+                                        end-icon: Images.icon("lock", Theme.icon-size-md);
                                     }
                                 }
                             }
@@ -1404,8 +1404,8 @@ export component AppWindow inherits Window {
                                     full-width: true;
                                     MenuRow {
                                         interactive: true;
-                                        content-padding-horizontal: 16px;
-                                        content-padding-vertical: 12px;
+                                        content-padding-horizontal: Theme.spacing-lg;
+                                        content-padding-vertical: Theme.spacing-md;
                                         RowLabel {
                                             copy: "MenuRow with arbitrary child content";
                                         }
@@ -1547,7 +1547,7 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     width: parent.width;
                                     height: 120px;
-                                    spacing: 28px;
+                                    spacing: Theme.spacing-xl;
                                     Divider {
                                         orientation: DividerOrientation.vertical;
                                     }
@@ -1580,7 +1580,7 @@ export component AppWindow inherits Window {
                                         height: parent.height;
 
                                         HorizontalLayout {
-                                            spacing: 12px;
+                                            spacing: Theme.spacing-md;
 
                                             Rectangle {
                                                 width: confirm-dialog.icon-size * 2;
@@ -1593,15 +1593,15 @@ export component AppWindow inherits Window {
                                                     y: (parent.height - self.height) / 2;
                                                     width: confirm-dialog.icon-size;
                                                     height: confirm-dialog.icon-size;
-                                                    source: Images.icon("info", 24px);
+                                                    source: Images.icon("info", Theme.icon-size-md);
                                                     colorize: confirm-dialog.accent-color;
                                                 }
                                             }
 
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
-                                                padding-right: confirm-dialog.close-button-size + 8px;
-                                                spacing: 6px;
+                                                padding-right: confirm-dialog.close-button-size + Theme.spacing-sm;
+                                                spacing: Theme.spacing-xs;
 
                                                 Text {
                                                     text: "Confirm theme";
@@ -1623,12 +1623,12 @@ export component AppWindow inherits Window {
                                         }
 
                                         Rectangle {
-                                            height: 1px;
+                                            height: Theme.border-width-sm;
                                             background: confirm-dialog.separator-color;
                                         }
 
                                         HorizontalLayout {
-                                            spacing: 10px;
+                                            spacing: Theme.spacing-sm;
                                             alignment: end;
 
                                             Button {
@@ -1660,7 +1660,7 @@ export component AppWindow inherits Window {
                                         size: ControlSize.sm;
 
                                         HorizontalLayout {
-                                            spacing: 12px;
+                                            spacing: Theme.spacing-md;
 
                                             Rectangle {
                                                 width: delete-dialog.icon-size * 2;
@@ -1673,15 +1673,15 @@ export component AppWindow inherits Window {
                                                     y: (parent.height - self.height) / 2;
                                                     width: delete-dialog.icon-size;
                                                     height: delete-dialog.icon-size;
-                                                    source: Images.icon("circle-alert", 24px);
+                                                    source: Images.icon("circle-alert", Theme.icon-size-md);
                                                     colorize: delete-dialog.accent-color;
                                                 }
                                             }
 
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
-                                                padding-right: delete-dialog.close-button-size + 8px;
-                                                spacing: 6px;
+                                                padding-right: delete-dialog.close-button-size + Theme.spacing-sm;
+                                                spacing: Theme.spacing-xs;
 
                                                 Text {
                                                     text: "Delete item";
@@ -1703,12 +1703,12 @@ export component AppWindow inherits Window {
                                         }
 
                                         Rectangle {
-                                            height: 1px;
+                                            height: Theme.border-width-sm;
                                             background: delete-dialog.separator-color;
                                         }
 
                                         HorizontalLayout {
-                                            spacing: 10px;
+                                            spacing: Theme.spacing-sm;
                                             alignment: end;
 
                                             Button {
@@ -1807,7 +1807,7 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: parent.height;
                                         message: "Default toast";
-                                        icon: Images.icon("info", 24px);
+                                        icon: Images.icon("info", Theme.icon-size-md);
                                         variant: ToastVariant.default;
                                         action: "Undo";
                                     }
@@ -1819,7 +1819,7 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: parent.height;
                                         message: "Success toast";
-                                        icon: Images.icon("check", 24px);
+                                        icon: Images.icon("check", Theme.icon-size-md);
                                         variant: ToastVariant.success;
                                     }
                                 }
@@ -1830,7 +1830,7 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: parent.height;
                                         message: "Warning toast";
-                                        icon: Images.icon("circle-alert", 24px);
+                                        icon: Images.icon("circle-alert", Theme.icon-size-md);
                                         variant: ToastVariant.warning;
                                         position: ToastPosition.top;
                                     }
@@ -1842,7 +1842,7 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: parent.height;
                                         message: "Error toast";
-                                        icon: Images.icon("x", 24px);
+                                        icon: Images.icon("x", Theme.icon-size-md);
                                         variant: ToastVariant.error;
                                     }
                                 }
@@ -1933,7 +1933,7 @@ export component AppWindow inherits Window {
                                 title: "Sizes";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 20px;
+                                    spacing: Theme.spacing-xl;
                                     alignment: start;
                                     Spinner {
                                         size: SpinnerSize.sm;
@@ -1953,7 +1953,7 @@ export component AppWindow inherits Window {
                                 title: "Tones";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 20px;
+                                    spacing: Theme.spacing-xl;
                                     alignment: start;
                                     Spinner {
                                         tone: SpinnerTone.primary;
@@ -1986,21 +1986,21 @@ export component AppWindow inherits Window {
                                 title: "Sizes";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 20px;
+                                    spacing: Theme.spacing-xl;
                                     Icon {
-                                        icon: Images.icon("check", 20px);
+                                        icon: Images.icon("check", Theme.icon-size-sm);
                                         size: ControlSize.sm;
                                         icon-color: Theme.palette-primary;
                                     }
 
                                     Icon {
-                                        icon: Images.icon("settings", 24px);
+                                        icon: Images.icon("settings", Theme.icon-size-md);
                                         size: ControlSize.md;
                                         icon-color: Theme.palette-foreground;
                                     }
 
                                     Icon {
-                                        icon: Images.icon("star", 28px);
+                                        icon: Images.icon("star", Theme.icon-size-lg);
                                         size: ControlSize.lg;
                                         icon-color: Theme.color-warning;
                                     }
@@ -2011,19 +2011,19 @@ export component AppWindow inherits Window {
                                 title: "Colors";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 20px;
+                                    spacing: Theme.spacing-xl;
                                     Icon {
-                                        icon: Images.icon("heart", 24px);
+                                        icon: Images.icon("heart", Theme.icon-size-md);
                                         icon-color: Theme.palette-danger;
                                     }
 
                                     Icon {
-                                        icon: Images.icon("lock", 24px);
+                                        icon: Images.icon("lock", Theme.icon-size-md);
                                         icon-color: Theme.color-success;
                                     }
 
                                     Icon {
-                                        icon: Images.icon("info", 24px);
+                                        icon: Images.icon("info", Theme.icon-size-md);
                                         icon-color: Theme.color-info;
                                     }
                                 }
@@ -2038,7 +2038,7 @@ export component AppWindow inherits Window {
                                 title: "Palette";
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Swatch {
                                         swatch-color: Theme.palette-primary;
                                         label: "Primary";
@@ -2057,7 +2057,7 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    spacing: Theme.spacing-sm;
                                     Swatch {
                                         swatch-color: Theme.palette-surface;
                                         label: "Surface";
@@ -2118,22 +2118,22 @@ export component AppWindow inherits Window {
                                     width: parent.width;
                                     spacing: Theme.spacing-md;
                                     Rectangle {
-                                        width: 64px;
-                                        height: 64px;
+                                        width: Theme.control-size-lg;
+                                        height: Theme.control-size-lg;
                                         background: Theme.palette-primary;
                                         border-radius: Theme.radius-sm;
                                     }
 
                                     Rectangle {
-                                        width: 64px;
-                                        height: 64px;
+                                        width: Theme.control-size-lg;
+                                        height: Theme.control-size-lg;
                                         background: Theme.palette-primary;
                                         border-radius: Theme.radius-md;
                                     }
 
                                     Rectangle {
-                                        width: 64px;
-                                        height: 64px;
+                                        width: Theme.control-size-lg;
+                                        height: Theme.control-size-lg;
                                         background: Theme.palette-primary;
                                         border-radius: Theme.radius-lg;
                                     }
@@ -2141,26 +2141,26 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 10px;
+                                    spacing: Theme.spacing-sm;
                                     Rectangle {
                                         width: Theme.control-size-sm;
-                                        height: 10px;
+                                        height: Theme.spacing-sm;
                                         background: Theme.palette-border;
-                                        border-radius: 5px;
+                                        border-radius: Theme.radius-full;
                                     }
 
                                     Rectangle {
                                         width: Theme.control-size-md;
-                                        height: 10px;
+                                        height: Theme.spacing-sm;
                                         background: Theme.palette-border;
-                                        border-radius: 5px;
+                                        border-radius: Theme.radius-full;
                                     }
 
                                     Rectangle {
                                         width: Theme.control-size-lg;
-                                        height: 10px;
+                                        height: Theme.spacing-sm;
                                         background: Theme.palette-border;
-                                        border-radius: 5px;
+                                        border-radius: Theme.radius-full;
                                     }
                                 }
                             }
@@ -2168,8 +2168,8 @@ export component AppWindow inherits Window {
 
                         Rectangle {
                             width: parent.width;
-                            height: 24px;
-                            background: transparent;
+                            height: Theme.spacing-xl;
+                            background: Theme.color-transparent;
                         }
                     }
                 }

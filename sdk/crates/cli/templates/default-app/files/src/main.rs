@@ -7,7 +7,7 @@ use slint_keyos_platform::app_ui2;
 
 app_ui2!("{{friendly_app_name}}");
 
-fn app_main(cx: AppContext, ui: AppWindow) {
+fn app_main(_cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
@@ -15,7 +15,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     // Setup button callback
     ui.global::<Callbacks>().on_button_clicked(move || {
-        log::info!("Button clicked!");
+        log::info!("Get started clicked");
     });
 
     ui.run().expect("UI running");

@@ -7,6 +7,18 @@ use std::process::Command;
 
 use serde_json::Value;
 
+pub(crate) const FOUNDATION_DEVELOP_SHELL_ENV: &str = "FOUNDATION_DEVELOP_SHELL";
+
+pub(crate) fn is_development_environment_active() -> bool {
+    is_development_environment_active_with(|name| std::env::var_os(name))
+}
+
+fn is_development_environment_active_with(
+    mut read_var: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    read_var(FOUNDATION_DEVELOP_SHELL_ENV).is_some()
+}
+
 pub fn emit_cargo_messages(project_root: &Path, sdk_root: &Path, stdout: &[u8]) {
     for line in String::from_utf8_lossy(stdout).lines() {
         let Some(rendered) = rendered_compiler_message(line, project_root, sdk_root) else {
@@ -39,11 +51,7 @@ pub fn configure_host_build_environment(cmd: &mut Command) {
 pub fn ensure_development_environment(command_name: &str) -> anyhow::Result<()> {
     println!("Checking Nix environment...");
 
-    let in_nix = std::env::var("IN_NIX_SHELL").is_ok()
-        || std::env::var("NIX_BUILD_TOP").is_ok()
-        || std::env::var("FOUNDATION_SDK_ROOT").is_ok();
-
-    if in_nix {
+    if is_development_environment_active() {
         return Ok(());
     }
 
@@ -204,7 +212,19 @@ fn macos_command_output(program: &str, args: &[&str]) -> Option<String> {
 mod tests {
     use std::path::Path;
 
-    use super::filter_cargo_stderr;
+    use super::{filter_cargo_stderr, is_development_environment_active_with, FOUNDATION_DEVELOP_SHELL_ENV};
+
+    #[test]
+    fn development_environment_requires_foundation_marker() {
+        assert!(!is_development_environment_active_with(|name| {
+            assert_eq!(name, FOUNDATION_DEVELOP_SHELL_ENV);
+            None
+        }));
+        assert!(is_development_environment_active_with(|name| {
+            assert_eq!(name, FOUNDATION_DEVELOP_SHELL_ENV);
+            Some("1".into())
+        }));
+    }
 
     #[test]
     fn filters_sdk_warning_blocks() {

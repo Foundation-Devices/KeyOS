@@ -813,19 +813,8 @@ pub fn size_style_mut<'a>(variant: &'a mut VariantTheme, size_name: &str) -> &'a
 }
 
 pub fn state_style_mut<'a>(variant: &'a mut VariantTheme, state_key: &str) -> &'a mut StyleProps {
-    // Warn if state_key isn't one of the known ComponentState values — common typos
-    // like "focussed" silently create a new entry that no component ever reads.
-    if !is_known_state_key(state_key) {
-        eprintln!(
-            "Theme: state_style_mut called with unknown state key {state_key:?}. \
-             Valid keys: default, focused, loading, pressed, disabled, confirmed, visited"
-        );
-    }
+    // State names are schema-defined and may be component- or plugin-specific.
     variant.states.entry(state_key.to_string()).or_default()
-}
-
-fn is_known_state_key(key: &str) -> bool {
-    matches!(key, "default" | "focused" | "loading" | "pressed" | "disabled" | "confirmed" | "visited")
 }
 
 fn split_token_path(path: &str) -> (&str, &str) {

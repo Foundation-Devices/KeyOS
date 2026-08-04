@@ -345,6 +345,7 @@ foundation preview ui/app.slint
 
 The SDK user shell exported by the packaged flake sets:
 
+- `FOUNDATION_DEVELOP_SHELL=1` (the marker used to distinguish this shell from unrelated Nix shells)
 - `FOUNDATION_SDK_ROOT`
 - `FOUNDATION_SDK_BIN`
 

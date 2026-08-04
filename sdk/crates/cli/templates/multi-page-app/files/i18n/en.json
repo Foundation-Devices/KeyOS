@@ -1,8 +1,0 @@
-{
-  "first.heading": "{{friendly_app_name}}",
-  "first.message": "This is the first page. Click the button to navigate to the second page.",
-  "first.button": "Go to Second Page",
-  "second.heading": "Second Page",
-  "second.message": "You're on the second page! Click the button to go back to the first page.",
-  "second.button": "Go to First Page"
-}

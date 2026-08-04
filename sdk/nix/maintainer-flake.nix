@@ -148,6 +148,7 @@
           );
 
         shellHook = ''
+          export FOUNDATION_DEVELOP_SHELL=1
           export FOUNDATION_SDK_ROOT="$PWD"
           export SDK_BUILD_CONFIG="$PWD/sdk-build.toml"
           export FOUNDATION_SDK_BIN="$PWD/bin"

@@ -7,8 +7,8 @@
 // `theme` in app-config.toml and compiled to Rust by the Foundation CLI. Use
 // `foundation theme` to edit it visually.
 //
-// You normally don't edit anything here except the app-specific overrides at
-// the bottom of customize_theme().
+// The generated app theme inherits the built-in theme without overriding its
+// colors, typography, spacing, or component styles.
 
 slint_keyos_platform::settings::use_api!(
     slint_keyos_platform::settings,
@@ -21,7 +21,7 @@ use slint_keyos_platform::slint::ComponentHandle;
 foundation_themes::include_theme!(app_theme);
 
 pub fn init(ui: &crate::AppWindow) {
-    customize_theme(ui, SettingsApi::default().get_system_theme());
+    apply_system_theme(ui, SettingsApi::default().get_system_theme());
 
     let ui_weak = ui.as_weak();
     let mut updates = slint_keyos_platform::subscribe_scalar::<settings_permissions::SettingsPermissions, _>(
@@ -32,13 +32,13 @@ pub fn init(ui: &crate::AppWindow) {
             let Some(ui) = ui_weak.upgrade() else {
                 break;
             };
-            customize_theme(&ui, system_theme);
+            apply_system_theme(&ui, system_theme);
         }
     })
     .detach();
 }
 
-fn customize_theme(
+fn apply_system_theme(
     ui: &crate::AppWindow,
     system_theme: settings_permissions::settings::global::SystemTheme,
 ) {
@@ -51,8 +51,6 @@ fn customize_theme(
     // sizes, named text-role font sizes).
     foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);
 
-    // App-specific overrides go below (usually empty). For example, to make
-    // titles a bit larger than the base theme:
-    //
-    //   ui.global::<crate::Theme>().set_font_size_title(28.0);
+    // Optional app-specific runtime overrides belong here, after the inherited
+    // theme has been applied.
 }

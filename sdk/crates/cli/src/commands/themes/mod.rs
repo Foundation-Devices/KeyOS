@@ -156,10 +156,10 @@ pub(crate) fn run_compiler(
         }
     }
 
-    let status = if let Some(tool) = sdk.tool_path(&["foundation-theme-compiler"]) {
+    let output = if let Some(tool) = sdk.tool_path(&["foundation-theme-compiler"]) {
         Command::new(tool)
             .args(&args)
-            .status()
+            .output()
             .context("Could not find or run the theme compiler (foundation-theme-compiler).")?
     } else {
         let manifest =
@@ -176,12 +176,17 @@ pub(crate) fn run_compiler(
             .arg("foundation-theme-compiler")
             .arg("--")
             .args(&args)
-            .status()
+            .output()
             .context("Could not find or run the theme compiler (foundation-theme-compiler).")?
     };
 
-    if !status.success() {
-        anyhow::bail!("Theme compiler failed");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            anyhow::bail!("Theme compiler failed");
+        }
+        anyhow::bail!("Theme compiler failed:\n{detail}");
     }
     Ok(())
 }

@@ -19,6 +19,8 @@ use dialoguer::{Input, Select};
 use foundation_core::{validate_display_app_name, AppId, SdkRoot};
 use template::TemplateProcessor;
 
+use crate::cargo_support::is_development_environment_active;
+
 /// Template scaffolded when `--template` is omitted.
 const DEFAULT_TEMPLATE: &str = "default-app";
 /// The one built-in theme every app theme inherits from.
@@ -132,11 +134,17 @@ fn create_project(args: &NewArgs, sdk: &SdkRoot, parent: &Path) -> Result<()> {
         }
     }
 
-    println!("\nNext steps:");
-    println!("  cd {}", project_name);
-    println!("  foundation build");
+    println!("\n{}", next_steps(&project_name, is_development_environment_active()));
 
     Ok(())
+}
+
+fn next_steps(project_name: &str, in_nix_environment: bool) -> String {
+    let enter_environment = if in_nix_environment { "" } else { "  foundation develop\n" };
+
+    format!(
+        "Next steps:\n{enter_environment}  cd {project_name}\n\nThen test in the simulator:\n  foundation sim\n\nOr test on connected hardware:\n  foundation sideload"
+    )
 }
 
 /// Pick the template: the `--template` value, an interactive menu, or
@@ -463,11 +471,11 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use foundation_core::SdkRoot;
+    use foundation_core::{AppConfig, SdkRoot};
 
     use super::{
-        create_project, initialize_git_repo, is_git_available, GitInitStatus, NewArgs, APP_THEME_PATH,
-        DEFAULT_GIT_BRANCH,
+        create_project, initialize_git_repo, is_git_available, next_steps, GitInitStatus, NewArgs,
+        APP_THEME_PATH, DEFAULT_GIT_BRANCH,
     };
     use crate::sdk_mapping::{project_sdk_keyos_root_path, project_sdk_root_path, project_sdk_ui_root_path};
     use crate::slint_codegen::{prepare_project_for_build, project_sdk_ui_root, UI_LIBRARY_PATH_ENV};
@@ -500,6 +508,20 @@ mod tests {
         assert!(theme_rs.contains("foundation_themes::include_theme!(app_theme);"));
         assert!(theme_rs.contains("foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);"));
         assert!(!theme_rs.contains("{{selected_theme_id}}"));
+        let app_slint = fs::read_to_string(project_path.join("ui").join("app.slint")).unwrap();
+        assert!(app_slint.contains("size: ControlSize.lg;"));
+        assert!(!app_slint.contains("PrimaryAction"));
+        assert!(!app_slint.contains("ButtonVariant"));
+        assert!(!app_slint.contains("background: Theme.palette-primary;"));
+        assert!(!app_slint.contains(r#"font-family: "Montserrat";"#));
+        assert!(!app_slint.contains("font-weight: 600;"));
+        assert!(!app_slint.contains("spacing: 20px;"));
+        assert!(!app_slint.contains("border-radius: 20px;"));
+        assert!(app_slint.contains("font-family: Theme.font-primary;"));
+        assert!(app_slint.contains("spacing: Theme.spacing-xl;"));
+        assert!(app_slint.contains("border-radius: Theme.radius-default;"));
+        assert!(app_slint.contains("preferred-width: UISize.screen-width;"));
+        assert!(app_slint.contains("preferred-height: UISize.screen-height;"));
         let app_theme_path = project_path.join("resources").join("theme.json");
         assert!(app_theme_path.exists());
         let app_theme: serde_json::Value =
@@ -516,6 +538,9 @@ mod tests {
         assert!(!agents.contains("{{friendly_app_name}}"));
         assert!(project_path.join("permission_templates.toml").exists());
         assert!(project_path.join("resources").join("icon.svg").exists());
+        assert!(project_path.join("resources").join("icon-dark.svg").exists());
+        assert!(!project_path.join("i18n").exists());
+        AppConfig::load(&project_path.join("app-config.toml")).unwrap().validate_icon(&project_path).unwrap();
 
         // Supplied args flow all the way into the generated config.
         let config = fs::read_to_string(project_path.join("app-config.toml")).unwrap();
@@ -524,6 +549,70 @@ mod tests {
         assert!(config.contains(r#"description = "Demo app""#));
         assert!(config.contains(r#"version = "0.1.0""#));
         assert!(config.contains("0x00112233445566778899aabbccddeeff"));
+    }
+
+    #[test]
+    fn other_builtin_templates_use_theme_tokens() {
+        let (_sdk_dir, sdk_root) = make_sdk_root("other-template-sdk");
+        let sdk = SdkRoot::from_root(sdk_root).unwrap();
+
+        let multi_parent = make_temp_dir("multi-page-token-scaffold");
+        let mut multi_args = sample_args("multi-demo");
+        multi_args.template = Some("multi-page-app".to_string());
+        create_project(&multi_args, &sdk, multi_parent.path()).unwrap();
+        let multi_path = multi_parent.path().join("multi-demo");
+        let multi_app = fs::read_to_string(multi_path.join("ui").join("app.slint")).unwrap();
+        let main_page = fs::read_to_string(multi_path.join("ui").join("pages").join("page.slint")).unwrap();
+        let second_page =
+            fs::read_to_string(multi_path.join("ui").join("pages").join("second").join("page.slint"))
+                .unwrap();
+        assert!(multi_app.contains("preferred-width: UISize.screen-width;"));
+        assert!(multi_app.contains("preferred-height: UISize.screen-height;"));
+        assert!(main_page.contains("padding-left: Theme.spacing-xl;"));
+        assert!(main_page.contains("font-family: Theme.font-primary;"));
+        assert!(main_page.contains("border-radius: Theme.radius-default;"));
+        assert!(second_page.contains("font-size: Theme.font-size-title;"));
+        assert!(!main_page.contains("PageAction"));
+        assert!(!second_page.contains("PageAction"));
+        assert!(!main_page.contains("\"Montserrat\""));
+        assert!(!second_page.contains("\"Montserrat\""));
+        assert!(multi_path.join("resources").join("icon-dark.svg").exists());
+        assert!(!multi_path.join("i18n").exists());
+        AppConfig::load(&multi_path.join("app-config.toml")).unwrap().validate_icon(&multi_path).unwrap();
+
+        let kitchen_parent = make_temp_dir("kitchen-sink-token-scaffold");
+        let mut kitchen_args = sample_args("kitchen-demo");
+        kitchen_args.template = Some("kitchen-sink".to_string());
+        create_project(&kitchen_args, &sdk, kitchen_parent.path()).unwrap();
+        let kitchen_app =
+            fs::read_to_string(kitchen_parent.path().join("kitchen-demo").join("ui").join("app.slint"))
+                .unwrap();
+        assert!(kitchen_app.contains("preferred-width: UISize.screen-width;"));
+        assert!(kitchen_app.contains("padding-left: Theme.spacing-xl;"));
+        assert!(kitchen_app.contains(r#"Images.icon("settings", Theme.icon-size-md)"#));
+        assert!(kitchen_app.contains("border-width: Theme.border-width-sm;"));
+        assert!(kitchen_app.contains("border-radius: Theme.radius-sm;"));
+        assert!(!kitchen_app.contains("#ffffff"));
+        assert!(!kitchen_app.contains("spacing: 20px;"));
+        let kitchen_path = kitchen_parent.path().join("kitchen-demo");
+        assert!(kitchen_path.join("resources").join("icon-dark.svg").exists());
+        AppConfig::load(&kitchen_path.join("app-config.toml")).unwrap().validate_icon(&kitchen_path).unwrap();
+    }
+
+    #[test]
+    fn next_steps_enters_development_environment_when_needed() {
+        assert_eq!(
+            next_steps("demo-app", false),
+            "Next steps:\n  foundation develop\n  cd demo-app\n\nThen test in the simulator:\n  foundation sim\n\nOr test on connected hardware:\n  foundation sideload"
+        );
+    }
+
+    #[test]
+    fn next_steps_skips_development_environment_when_already_active() {
+        assert_eq!(
+            next_steps("demo-app", true),
+            "Next steps:\n  cd demo-app\n\nThen test in the simulator:\n  foundation sim\n\nOr test on connected hardware:\n  foundation sideload"
+        );
     }
 
     #[test]
@@ -766,6 +855,48 @@ mod tests {
         if !output.status.success() {
             panic!(
                 "generated multi-page app failed to compile\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    // See scaffolded_default_app_compiles_with_generated_theme_module for why
+    // this heavy integration test is ignored by default.
+    #[test]
+    #[ignore = "requires ~/.foundation/themes/rust populated and nightly cargo; run with --ignored"]
+    fn scaffolded_kitchen_sink_compiles_with_generated_theme_module() {
+        let sdk = SdkRoot::discover_from(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let project_root_dir = make_temp_dir("scaffold-kitchen-sink-compile");
+        let project_root = project_root_dir.path();
+        let home = project_root.join("home");
+
+        let mut args = sample_args("demo-app");
+        args.template = Some("kitchen-sink".to_string());
+        create_project(&args, &sdk, project_root).unwrap();
+        let project_path = project_root.join("demo-app");
+        prepare_project_for_build(&project_path, &sdk).unwrap();
+
+        let theme_rs = fs::read_to_string(project_path.join("src").join("theme.rs")).unwrap();
+        assert!(theme_rs.contains("foundation_themes::include_theme!(app_theme);"));
+        assert!(theme_rs.contains("foundation_themes::apply_theme!(ui, app_theme::theme(), scheme);"));
+
+        generate_base_themes_into_home(&sdk, &home);
+
+        let output = Command::new("cargo")
+            .arg("check")
+            .current_dir(&project_path)
+            .env("HOME", &home)
+            .env(
+                "FOUNDATION_THEMES_RUST_DIR",
+                project_path.join("target").join("foundation").join("themes").join("rust"),
+            )
+            .env(UI_LIBRARY_PATH_ENV, project_sdk_ui_root(&project_path))
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            panic!(
+                "generated kitchen-sink app failed to compile\nstdout:\n{}\nstderr:\n{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );

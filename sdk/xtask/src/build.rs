@@ -1107,11 +1107,7 @@ fn cargo_command_for_manifest(manifest_dir: &Path) -> Command {
     command
 }
 
-fn nix_shell_active() -> bool {
-    env::var_os("IN_NIX_SHELL").is_some()
-        || env::var_os("NIX_BUILD_TOP").is_some()
-        || env::var_os("FOUNDATION_SDK_ROOT").is_some()
-}
+fn nix_shell_active() -> bool { env::var_os("FOUNDATION_DEVELOP_SHELL").is_some() }
 
 fn rustup_tool_path(toolchain: &str, tool: &str) -> Option<PathBuf> {
     util::capture_command(Command::new("rustup").arg("which").arg("--toolchain").arg(toolchain).arg(tool))
@@ -2298,16 +2294,16 @@ mod tests {
     }
 
     #[test]
-    fn nix_shell_active_detects_foundation_sdk_root() {
-        let previous = env::var_os("FOUNDATION_SDK_ROOT");
-        env::set_var("FOUNDATION_SDK_ROOT", "/tmp/foundation-sdk");
+    fn nix_shell_active_detects_foundation_development_shell() {
+        let previous = env::var_os("FOUNDATION_DEVELOP_SHELL");
+        env::set_var("FOUNDATION_DEVELOP_SHELL", "1");
 
         assert!(nix_shell_active());
 
         if let Some(value) = previous {
-            env::set_var("FOUNDATION_SDK_ROOT", value);
+            env::set_var("FOUNDATION_DEVELOP_SHELL", value);
         } else {
-            env::remove_var("FOUNDATION_SDK_ROOT");
+            env::remove_var("FOUNDATION_DEVELOP_SHELL");
         }
     }
 

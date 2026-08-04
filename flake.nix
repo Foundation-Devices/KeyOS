@@ -134,6 +134,8 @@
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath sharedLibs;
 
             shellHook = ''
+              export FOUNDATION_DEVELOP_SHELL=1
+
               # darwin xcode
               unset DEVELOPER_DIR
               unset SDKROOT

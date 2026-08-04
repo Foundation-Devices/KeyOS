@@ -3,20 +3,18 @@
 
 import {
     Theme,
+    UISize,
     Images,
-    ButtonVariant,
-    ButtonState,
-    ControlSize,
 } from "@ui/theme.slint";
 import { Router } from "gen/router.slint";
 
-export { Theme, Images, ButtonVariant, ButtonState, ControlSize }
+export { Theme, Images }
 export * from "gen/exports.slint";
 
 export component AppWindow inherits Window {
     title: "{{friendly_app_name}}";
-    preferred-width: 480px;
-    preferred-height: 800px;
+    preferred-width: UISize.screen-width;
+    preferred-height: UISize.screen-height;
     background: Theme.palette-background;
 
     Router { }

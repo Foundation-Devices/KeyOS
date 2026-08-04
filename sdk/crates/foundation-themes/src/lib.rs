@@ -80,10 +80,14 @@ macro_rules! include_theme {
 /// `ButtonTheme` global (button_theme.slint), which cascades from those
 /// `color-*` + token values automatically.
 ///
+/// The expansion site must depend on `slint-keyos-platform`; the macro creates
+/// colors through `slint_keyos_platform::slint::Color` so they use the same
+/// Slint crate instance as the generated application UI.
+///
 /// ```ignore
 /// foundation_themes::include_theme!(base_theme);
 ///
-/// pub fn customize_theme(ui: &crate::AppWindow) {
+/// pub fn apply_system_theme(ui: &crate::AppWindow) {
 ///     let scheme = foundation_themes::ColorScheme::Light;
 ///     foundation_themes::apply_theme!(ui, base_theme::theme(), scheme);
 ///     // App-specific overrides (usually empty):
@@ -100,15 +104,17 @@ macro_rules! apply_theme {
         __g.set_is_dark(matches!(__scheme, $crate::ColorScheme::Dark));
 
         // ----- semantic palette -----
+        let __slint_color = |color: $crate::ThemeColor| {
+            slint_keyos_platform::slint::Color::from_argb_u8(color.a, color.r, color.g, color.b)
+        };
         let __color = |category: &str, key: &str, fr: u8, fg: u8, fb: u8| {
-            $crate::runtime::token_color(
+            __slint_color($crate::runtime::token_color(
                 &__theme,
                 __scheme,
                 category,
                 key,
                 $crate::ThemeColor::rgb(fr, fg, fb),
-            )
-            .to_slint()
+            ))
         };
         __g.set_palette_primary(__color("color", "primary", 0, 157, 185));
         __g.set_palette_primary_pressed(__color("color", "primary.dark", 0, 111, 131));
@@ -141,16 +147,13 @@ macro_rules! apply_theme {
         __g.set_color_warning(__color("color", "warning", 217, 119, 6));
         __g.set_color_info(__color("color", "info", 37, 99, 235));
         __g.set_color_white(__color("color", "white", 255, 255, 255));
-        __g.set_color_transparent(
-            $crate::runtime::token_color(
-                &__theme,
-                __scheme,
-                "color",
-                "transparent",
-                $crate::ThemeColor::rgba(0, 0, 0, 0),
-            )
-            .to_slint(),
-        );
+        __g.set_color_transparent(__slint_color($crate::runtime::token_color(
+            &__theme,
+            __scheme,
+            "color",
+            "transparent",
+            $crate::ThemeColor::rgba(0, 0, 0, 0),
+        )));
 
         // ----- button styling -----
         // Button variant/state styles + sizes are no longer pushed from here.
