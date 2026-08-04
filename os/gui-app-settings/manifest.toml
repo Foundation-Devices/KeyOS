@@ -12,6 +12,7 @@ template = ["gui-app", "fs-generic"]
     "SetAppPermissionGrant",
     "GetAppIcon",
     "GetThirdPartyCertificates",
+    "PreviewThirdPartyCertificate",
     "ImportThirdPartyCertificate",
     "RemoveThirdPartyCertificate",
     "RemoveInstalledApp",

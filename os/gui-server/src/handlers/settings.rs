@@ -7,7 +7,10 @@ use crate::registry::AppRole;
 use crate::{Gui, StartupState};
 
 const BRIGHTNESS_LEVEL_PERCENT_MIN: u8 = 5;
+#[cfg(keyos)]
 const BRIGHTNESS_LEVEL_PERCENT_MAX: u8 = 95; // SFT-5361 workaround
+#[cfg(not(keyos))]
+const BRIGHTNESS_LEVEL_PERCENT_MAX: u8 = 100;
 
 impl ScalarEventHandler<settings::global::ScreenBrightness> for Gui {
     fn handle(

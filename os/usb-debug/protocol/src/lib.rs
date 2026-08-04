@@ -69,7 +69,7 @@ pub enum LaunchAppStatus {
     AlreadyRunning = 1,
     AppIdNotFound = 2,
     SignatureRejected = 3,
-    NoTrustedPublisherCertificate = 4,
+    NoCertificate = 4,
     NotReady = 6,
     InternalError = 7,
 }
@@ -134,9 +134,13 @@ const CMD_LOAD_APP_FILE_BEGIN: u8 = 0x0c;
 const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
 const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
-const CMD_INSTALL_CERTIFICATE: u8 = 0x10;
-const CMD_GET_TRUSTED_PUBLISHER_COUNT: u8 = 0x11;
+// 0x10 was the legacy unconfirmed certificate-import command. Keep it
+// permanently rejected so an old host cannot satisfy the fingerprint prefix
+// accidentally (or by placing it in a PEM preamble).
+const CMD_INSTALL_CERTIFICATE_LEGACY: u8 = 0x10;
+const CMD_GET_ALLOWED_PUBLISHER_COUNT: u8 = 0x11;
 const CMD_LOAD_FLUX_APP_BEGIN: u8 = 0x12;
+const CMD_INSTALL_CERTIFICATE: u8 = 0x13;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
@@ -147,8 +151,10 @@ pub const LOAD_APP_CHUNK_MAX: usize = USB_DEBUG_OUT_TRANSFER_MAX - 1;
 /// bulk max packet for path setup commands: 1 command byte + 8 size bytes
 /// + filename. File bytes use the larger `LOAD_APP_CHUNK_MAX` data path.
 pub const LOAD_APP_FILE_PATH_MAX: usize = 512 - 1 - 8;
-/// Maximum PEM certificate payload accepted for trusted-publisher import.
-pub const INSTALL_CERTIFICATE_BYTES_MAX: usize = 4 * 1024;
+/// Maximum PEM certificate payload accepted for allowed-publisher import.
+pub const INSTALL_CERTIFICATE_BYTES_MAX: usize = 16 * 1024;
+/// Lowercase hexadecimal bytes in a canonical publisher fingerprint.
+pub const PUBLISHER_FINGERPRINT_HEX_LEN: usize = 64;
 
 /// Host -> device command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,9 +202,11 @@ pub enum Command {
     LoadAppEnd,
     GetProcessList,
     InstallCertificate {
+        /// Exact full fingerprint already shown to and accepted by the user.
+        expected_fingerprint: [u8; PUBLISHER_FINGERPRINT_HEX_LEN],
         certificate_pem: Vec<u8>,
     },
-    GetTrustedPublisherCount,
+    GetAllowedPublisherCount,
 }
 
 impl Command {
@@ -222,7 +230,7 @@ impl Command {
             Command::LoadAppEnd => CMD_LOAD_APP_END,
             Command::GetProcessList => CMD_GET_PROCESS_LIST,
             Command::InstallCertificate { .. } => CMD_INSTALL_CERTIFICATE,
-            Command::GetTrustedPublisherCount => CMD_GET_TRUSTED_PUBLISHER_COUNT,
+            Command::GetAllowedPublisherCount => CMD_GET_ALLOWED_PUBLISHER_COUNT,
         }
     }
 
@@ -236,7 +244,7 @@ impl Command {
             | Command::GetDeveloperMode
             | Command::LoadAppEnd
             | Command::GetProcessList
-            | Command::GetTrustedPublisherCount => {}
+            | Command::GetAllowedPublisherCount => {}
             Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps } => {
                 out.extend_from_slice(&start_x.to_le_bytes());
                 out.extend_from_slice(&start_y.to_le_bytes());
@@ -270,7 +278,8 @@ impl Command {
             Command::LoadAppChunk(data) => {
                 out.extend_from_slice(data);
             }
-            Command::InstallCertificate { certificate_pem } => {
+            Command::InstallCertificate { expected_fingerprint, certificate_pem } => {
+                out.extend_from_slice(expected_fingerprint);
                 out.extend_from_slice(certificate_pem);
             }
         }
@@ -346,19 +355,42 @@ impl Command {
             CMD_LOAD_APP_END => Ok(Command::LoadAppEnd),
             CMD_GET_PROCESS_LIST => Ok(Command::GetProcessList),
             CMD_INSTALL_CERTIFICATE => {
-                if payload.is_empty() {
-                    return Err(ProtocolError::InvalidPayloadLength { cmd, need: 1, got: 0 });
-                }
-                if payload.len() > INSTALL_CERTIFICATE_BYTES_MAX {
-                    return Err(ProtocolError::InvalidPayloadLength {
+                if payload.len() < PUBLISHER_FINGERPRINT_HEX_LEN {
+                    return Err(ProtocolError::TruncatedPayload {
                         cmd,
-                        need: INSTALL_CERTIFICATE_BYTES_MAX,
+                        need: PUBLISHER_FINGERPRINT_HEX_LEN + 1,
                         got: payload.len(),
                     });
                 }
-                Ok(Command::InstallCertificate { certificate_pem: payload.to_vec() })
+                let (expected_fingerprint, certificate_pem) = payload.split_at(PUBLISHER_FINGERPRINT_HEX_LEN);
+                if certificate_pem.is_empty() {
+                    return Err(ProtocolError::InvalidPayloadLength {
+                        cmd,
+                        need: PUBLISHER_FINGERPRINT_HEX_LEN + 1,
+                        got: payload.len(),
+                    });
+                }
+                if !expected_fingerprint.iter().all(u8::is_ascii_hexdigit)
+                    || expected_fingerprint.iter().any(u8::is_ascii_uppercase)
+                {
+                    return Err(ProtocolError::InvalidPublisherFingerprint);
+                }
+                if certificate_pem.len() > INSTALL_CERTIFICATE_BYTES_MAX {
+                    return Err(ProtocolError::InvalidPayloadLength {
+                        cmd,
+                        need: PUBLISHER_FINGERPRINT_HEX_LEN + INSTALL_CERTIFICATE_BYTES_MAX,
+                        got: payload.len(),
+                    });
+                }
+                Ok(Command::InstallCertificate {
+                    expected_fingerprint: expected_fingerprint
+                        .try_into()
+                        .expect("fingerprint slice length checked"),
+                    certificate_pem: certificate_pem.to_vec(),
+                })
             }
-            CMD_GET_TRUSTED_PUBLISHER_COUNT => Ok(Command::GetTrustedPublisherCount),
+            CMD_GET_ALLOWED_PUBLISHER_COUNT => Ok(Command::GetAllowedPublisherCount),
+            CMD_INSTALL_CERTIFICATE_LEGACY => Err(ProtocolError::UnknownCommand(cmd)),
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
@@ -436,8 +468,8 @@ pub enum Response {
     /// Reply to `Command::GetDeveloperMode`. Single-byte payload: 0x00 = off, 0x01 = on.
     /// Device-side usb-debug returns `true` because the interface itself is Developer Mode gated.
     DeveloperMode(bool),
-    /// Reply to `Command::GetTrustedPublisherCount`. Payload is little-endian `u16`.
-    TrustedPublisherCount(Vec<u8>),
+    /// Reply to `Command::GetAllowedPublisherCount`. Payload is little-endian `u16`.
+    AllowedPublisherCount(Vec<u8>),
     /// Asynchronous log frame; not a reply to a `Command`.
     Log(Vec<u8>),
 }
@@ -455,7 +487,7 @@ impl Response {
             Response::Version(d) => (HDR_RESP_OK, d.as_slice()),
             Response::LaunchAck(d) => (HDR_RESP_OK, d.as_slice()),
             Response::DeveloperMode(enabled) => (HDR_RESP_OK, dev_mode_byte(*enabled)),
-            Response::TrustedPublisherCount(d) => (HDR_RESP_OK, d.as_slice()),
+            Response::AllowedPublisherCount(d) => (HDR_RESP_OK, d.as_slice()),
             Response::Log(d) => (HDR_LOG, d.as_slice()),
         }
     }
@@ -501,6 +533,7 @@ pub enum ProtocolError {
         got: usize,
     },
     InvalidUtf8,
+    InvalidPublisherFingerprint,
     /// Returned by `UsbDebugClient::send` when the device replied with
     /// `Status::Err`.
     DeviceError(u8),
@@ -526,6 +559,9 @@ impl core::fmt::Display for ProtocolError {
                 write!(f, "command 0x{cmd:02x} payload length invalid: need {need}, got {got}")
             }
             ProtocolError::InvalidUtf8 => write!(f, "payload is not valid UTF-8"),
+            ProtocolError::InvalidPublisherFingerprint => {
+                write!(f, "publisher fingerprint is not 64 lowercase hexadecimal characters")
+            }
             ProtocolError::DeviceError(b) => write!(f, "device returned status 0x{b:02x}"),
             ProtocolError::DeviceLocked => write!(f, "device is locked"),
         }
@@ -597,9 +633,10 @@ mod tests {
         roundtrip(Command::LoadAppEnd);
         roundtrip(Command::GetProcessList);
         roundtrip(Command::InstallCertificate {
+            expected_fingerprint: *b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             certificate_pem: b"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_vec(),
         });
-        roundtrip(Command::GetTrustedPublisherCount);
+        roundtrip(Command::GetAllowedPublisherCount);
     }
 
     #[test]
@@ -611,6 +648,7 @@ mod tests {
     #[test]
     fn install_certificate_payload_is_capped() {
         let mut bytes = Vec::from([CMD_INSTALL_CERTIFICATE]);
+        bytes.extend_from_slice(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         bytes.extend(vec![b'a'; INSTALL_CERTIFICATE_BYTES_MAX]);
         assert!(matches!(Command::decode(&bytes), Ok(Command::InstallCertificate { .. })));
 
@@ -619,15 +657,41 @@ mod tests {
             Command::decode(&bytes),
             Err(ProtocolError::InvalidPayloadLength {
                 cmd: CMD_INSTALL_CERTIFICATE,
-                need: INSTALL_CERTIFICATE_BYTES_MAX,
+                need,
                 got
-            }) if got == INSTALL_CERTIFICATE_BYTES_MAX + 1
+            }) if need == PUBLISHER_FINGERPRINT_HEX_LEN + INSTALL_CERTIFICATE_BYTES_MAX
+                && got == PUBLISHER_FINGERPRINT_HEX_LEN + INSTALL_CERTIFICATE_BYTES_MAX + 1
         ));
 
         assert!(matches!(
             Command::decode(&[CMD_INSTALL_CERTIFICATE]),
-            Err(ProtocolError::InvalidPayloadLength { cmd: CMD_INSTALL_CERTIFICATE, need: 1, got: 0 })
+            Err(ProtocolError::TruncatedPayload {
+                cmd: CMD_INSTALL_CERTIFICATE,
+                need,
+                got: 0
+            }) if need == PUBLISHER_FINGERPRINT_HEX_LEN + 1
         ));
+    }
+
+    #[test]
+    fn legacy_unconfirmed_install_opcode_is_rejected_even_with_a_fingerprint_preamble() {
+        let mut bytes = Vec::from([CMD_INSTALL_CERTIFICATE_LEGACY]);
+        bytes.extend_from_slice(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        bytes.extend_from_slice(b"\n-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n");
+
+        assert!(matches!(
+            Command::decode(&bytes),
+            Err(ProtocolError::UnknownCommand(CMD_INSTALL_CERTIFICATE_LEGACY))
+        ));
+    }
+
+    #[test]
+    fn install_certificate_requires_a_lowercase_hex_fingerprint() {
+        let mut bytes = Vec::from([CMD_INSTALL_CERTIFICATE]);
+        bytes.extend_from_slice(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeF");
+        bytes.extend_from_slice(b"certificate");
+
+        assert!(matches!(Command::decode(&bytes), Err(ProtocolError::InvalidPublisherFingerprint)));
     }
 
     #[test]
@@ -697,7 +761,7 @@ mod tests {
         let result = LaunchAppResult::new(0x1234, LaunchAppStatus::AlreadyRunning);
         assert_eq!(result.encode(), vec![0x34, 0x12, 1]);
         assert_eq!(LaunchAppResult::decode(&result.encode()).unwrap(), result);
-        let failure = LaunchAppResult::new(0, LaunchAppStatus::NoTrustedPublisherCertificate);
+        let failure = LaunchAppResult::new(0, LaunchAppStatus::NoCertificate);
         assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
         assert_eq!(
             LaunchAppResult::decode(&[0x34, 0x12]).unwrap(),

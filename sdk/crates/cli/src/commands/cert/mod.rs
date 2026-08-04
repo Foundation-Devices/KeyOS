@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
@@ -16,6 +16,7 @@ use foundation_core::{
 };
 use foundation_mcp::PassportDriveMcpClient;
 use foundation_ui::Prompts;
+use publisher_fingerprint::PublisherFingerprint;
 use serde::Serialize;
 
 use crate::signing_permissions::{
@@ -41,9 +42,15 @@ pub enum CertCommands {
     )]
     Print(CertPrintArgs),
 
-    /// Install a publisher certificate on hardware
+    /// Print the canonical fingerprint of an X.509 publisher certificate
     #[command(
-        long_about = "Installs a stored publisher certificate as a trusted publisher on a connected Passport Prime over usb-debug"
+        long_about = "Prints the SHA-256 fingerprint of the compressed 33-byte secp256k1 public key in a publisher certificate"
+    )]
+    Fingerprint(CertFingerprintArgs),
+
+    /// Allow a publisher on hardware
+    #[command(
+        long_about = "Shows the publisher fingerprint and identity warning, then asks before allowing the publisher on a connected Passport Prime over usb-debug"
     )]
     Install(CertInstallArgs),
 }
@@ -73,8 +80,14 @@ pub struct CertPrintArgs {
 }
 
 #[derive(Args)]
+pub struct CertFingerprintArgs {
+    /// Path to an X.509 publisher certificate
+    pub certificate: PathBuf,
+}
+
+#[derive(Args)]
 pub struct CertInstallArgs {
-    /// Publisher identity name to install (defaults to the current app publisher when available)
+    /// Publisher identity name to allow (defaults to the current app publisher when available)
     pub name: Option<String>,
 }
 
@@ -82,6 +95,7 @@ pub fn execute(args: &CertArgs) -> Result<()> {
     match &args.command {
         CertCommands::Gen(args) => execute_gen(args),
         CertCommands::Print(args) => execute_print(args),
+        CertCommands::Fingerprint(args) => execute_fingerprint(args),
         CertCommands::Install(args) => execute_install(args),
     }
 }
@@ -182,6 +196,7 @@ pub fn execute_gen(args: &CertGenArgs) -> Result<()> {
     println!("  {STATUS_OK} {}", "Private key generated");
 
     let public_key_hex = extract_public_key(&private_key)?;
+    let fingerprint = publisher_fingerprint_from_hex(&public_key_hex)?;
     fs::write(&identity_paths.public_key, &public_key_hex)
         .with_context(|| format!("Failed to write key file: {}", identity_paths.public_key.display()))?;
     println!("  {STATUS_OK} {}", "Public key extracted");
@@ -200,6 +215,9 @@ pub fn execute_gen(args: &CertGenArgs) -> Result<()> {
     println!("    {} {}", "Certificate:", identity_paths.certificate.display());
     println!("    {} {}", "Public key (hex):", public_key_hex);
     println!("    {} {}", "Config file:", identity_paths.cosign2_config.display());
+    println!();
+    print_publisher_fingerprint(&fingerprint);
+    println!("Publish the full fingerprint on your official website or GitHub so users can verify it.");
     println!();
     println!("You can now run 'foundation build' to build and sign your app.");
 
@@ -236,21 +254,45 @@ pub fn execute_print(args: &CertPrintArgs) -> Result<()> {
     Ok(())
 }
 
+/// Execute `foundation cert fingerprint`.
+pub fn execute_fingerprint(args: &CertFingerprintArgs) -> Result<()> {
+    if !is_openssl_available() {
+        anyhow::bail!("OpenSSL not found. Please install OpenSSL to inspect publisher certificates.");
+    }
+
+    let fingerprint = certificate_fingerprint(&args.certificate)?;
+    print_publisher_fingerprint(&fingerprint);
+
+    Ok(())
+}
+
 /// Execute `foundation cert install`.
 pub fn execute_install(args: &CertInstallArgs) -> Result<()> {
     let cert_name = args.name.as_deref();
 
-    println!("Installing signing certificate...");
+    println!("Preparing publisher certificate...");
     println!();
+
+    if !is_openssl_available() {
+        anyhow::bail!("OpenSSL not found. Please install OpenSSL to inspect publisher certificates.");
+    }
 
     let identity = resolve_identity_for_print(cert_name)?;
     let certificate_len = certificate_len_for_install(&identity.certificate)?;
-    println!("  {STATUS_OK} {}", format!("Using publisher identity {}", identity.identity_name));
-    println!(
-        "  {STATUS_OK} {}",
-        format!("Using certificate {} ({certificate_len} bytes)", identity.certificate.display())
-    );
+    let fingerprint = certificate_fingerprint(&identity.certificate)?;
+    println!("  {STATUS_OK} Using certificate {} ({certificate_len} bytes)", identity.certificate.display());
     println!();
+
+    println!("WARNING: Foundation has NOT verified this publisher's identity");
+    print_publisher_fingerprint(&fingerprint);
+    println!("Apps signed by this publisher will be allowed on your Passport.");
+    println!("Verify this fingerprint against the publisher's official website or GitHub.");
+    println!();
+
+    if !confirm_allow_publisher()? {
+        println!("Publisher was not allowed.");
+        return Ok(());
+    }
 
     println!("Checking passport-drive MCP control...");
     let mut mcp = PassportDriveMcpClient::connect().map_err(|error| {
@@ -258,8 +300,9 @@ pub fn execute_install(args: &CertInstallArgs) -> Result<()> {
     })?;
     println!("passport-drive MCP control connected.");
 
-    println!("Installing certificate via usb-debug...");
-    let install_response = mcp.install_certificate(&identity.certificate).map_err(|error| {
+    println!("Allowing publisher via usb-debug...");
+    let install_response =
+        mcp.install_certificate(&identity.certificate, &fingerprint.full).map_err(|error| {
         anyhow::anyhow!(
             "Could not install {} over usb-debug. Make sure Developer Mode is enabled and no other process is using the Passport USB debug interface. Reason: {}",
             identity.certificate.display(),
@@ -267,7 +310,7 @@ pub fn execute_install(args: &CertInstallArgs) -> Result<()> {
         )
     })?;
     println!("{install_response}");
-    println!("Certificate installed successfully!");
+    println!("Publisher certificate installed and allowed successfully!");
 
     Ok(())
 }
@@ -455,6 +498,23 @@ fn prompt_overwrite() -> Result<bool> {
     Ok(input == "y" || input == "yes")
 }
 
+fn confirm_allow_publisher() -> Result<bool> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        anyhow::bail!(
+            "Allowing a publisher requires an interactive terminal so you can review and confirm its fingerprint."
+        );
+    }
+
+    print!("Allow this publisher? [y/N]: ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    Ok(input.eq_ignore_ascii_case("y") || input.eq_ignore_ascii_case("yes"))
+}
+
 fn validate_non_empty(value: &str) -> bool { !value.trim().is_empty() }
 
 fn validate_email(value: &str) -> bool {
@@ -524,8 +584,53 @@ fn generate_private_key() -> Result<Vec<u8>> {
 }
 
 fn extract_public_key(private_key_pem: &[u8]) -> Result<String> {
-    let mut openssl_ec = Command::new("openssl")
-        .args(["ec", "-pubout", "-conv_form", "compressed", "-outform", "DER"])
+    let der = extract_compressed_public_key_der(private_key_pem, false)?;
+    let public_key = compressed_public_key_from_der(&der)?;
+
+    Ok(hex::encode(public_key))
+}
+
+fn certificate_fingerprint(certificate_path: &Path) -> Result<PublisherFingerprint> {
+    let pem_output = certificate_public_key(certificate_path, "PEM")?;
+    let output = if pem_output.status.success() {
+        pem_output
+    } else {
+        let der_output = certificate_public_key(certificate_path, "DER")?;
+        if !der_output.status.success() {
+            let pem_error = String::from_utf8_lossy(&pem_output.stderr);
+            let der_error = String::from_utf8_lossy(&der_output.stderr);
+            anyhow::bail!(
+                "Failed to read publisher certificate {} as PEM ({}) or DER ({})",
+                certificate_path.display(),
+                pem_error.trim(),
+                der_error.trim()
+            );
+        }
+        der_output
+    };
+
+    let der = extract_compressed_public_key_der(&output.stdout, true)?;
+    let public_key = compressed_public_key_from_der(&der)?;
+    publisher_fingerprint(&public_key)
+}
+
+fn certificate_public_key(certificate_path: &Path, input_format: &str) -> Result<std::process::Output> {
+    Command::new("openssl")
+        .args(["x509", "-in"])
+        .arg(certificate_path)
+        .args(["-inform", input_format, "-pubkey", "-noout"])
+        .output()
+        .with_context(|| format!("Failed to read publisher certificate: {}", certificate_path.display()))
+}
+
+fn extract_compressed_public_key_der(key: &[u8], public_input: bool) -> Result<Vec<u8>> {
+    let mut command = Command::new("openssl");
+    command.arg("ec");
+    if public_input {
+        command.arg("-pubin");
+    }
+    let mut openssl_ec = command
+        .args(["-pubout", "-conv_form", "compressed", "-outform", "DER"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -536,9 +641,9 @@ fn extract_public_key(private_key_pem: &[u8]) -> Result<String> {
         // openssl can exit before reading the whole key (e.g. a bad key),
         // surfacing here as a broken pipe; ignore it so the status check below
         // reports openssl's real error instead of an opaque EPIPE.
-        if let Err(err) = stdin.write_all(private_key_pem) {
+        if let Err(err) = stdin.write_all(key) {
             if err.kind() != io::ErrorKind::BrokenPipe {
-                return Err(err).context("Failed to write private key to openssl");
+                return Err(err).context("Failed to write key to openssl");
             }
         }
     }
@@ -550,12 +655,41 @@ fn extract_public_key(private_key_pem: &[u8]) -> Result<String> {
         anyhow::bail!("{}: {}", "Failed to extract public key", stderr);
     }
 
-    let der = output.stdout;
-    if der.len() < 33 {
-        anyhow::bail!("{}: DER output too short", "Failed to extract public key");
+    Ok(output.stdout)
+}
+
+fn compressed_public_key_from_der(der: &[u8]) -> Result<[u8; 33]> {
+    // OpenSSL re-encodes the key as SubjectPublicKeyInfo. Requiring the
+    // secp256k1 named-curve OID keeps CLI fingerprints aligned with the device
+    // certificate parser instead of accepting any 256-bit EC curve.
+    const SECP256K1_OID_DER: &[u8] = &[0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a];
+    if !der.windows(SECP256K1_OID_DER.len()).any(|window| window == SECP256K1_OID_DER) {
+        anyhow::bail!("Publisher certificate public key must use secp256k1");
     }
 
-    Ok(hex::encode(&der[der.len() - 33..]))
+    let public_key = der
+        .get(der.len().saturating_sub(33)..)
+        .ok_or_else(|| anyhow::anyhow!("Failed to extract public key: DER output too short"))?;
+
+    secp256k1::PublicKey::from_slice(public_key)
+        .map(|public_key| public_key.serialize())
+        .map_err(|_| anyhow::anyhow!("Failed to extract public key: invalid secp256k1 public key"))
+}
+
+fn publisher_fingerprint_from_hex(public_key_hex: &str) -> Result<PublisherFingerprint> {
+    let public_key =
+        hex::decode(public_key_hex).context("Failed to decode the compressed publisher public key")?;
+    publisher_fingerprint(&public_key)
+}
+
+fn publisher_fingerprint(public_key: &[u8]) -> Result<PublisherFingerprint> {
+    PublisherFingerprint::from_compressed_public_key(public_key).map_err(Into::into)
+}
+
+fn print_publisher_fingerprint(fingerprint: &PublisherFingerprint) {
+    println!("Publisher fingerprint:");
+    println!("  Full:  {}", fingerprint.full);
+    println!("  Short: {}", fingerprint.short);
 }
 
 fn generate_certificate(
@@ -658,6 +792,48 @@ fn create_cosign2_config(config_path: &Path, private_key_path: &Path, public_key
 #[cfg(test)]
 mod tests {
     use crate::test_support::make_temp_dir;
+
+    #[test]
+    fn publisher_fingerprint_uses_compressed_public_key_bytes() {
+        let public_key =
+            hex::decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").unwrap();
+
+        let fingerprint = super::publisher_fingerprint(&public_key).unwrap();
+
+        assert_eq!(fingerprint.full, "0f715baf5d4c2ed329785cef29e562f73488c8a2bb9dbc5700b361d54b9b0554");
+        assert_eq!(fingerprint.short, "0f715baf…4b9b0554");
+    }
+
+    #[test]
+    fn publisher_fingerprint_rejects_non_compressed_public_keys() {
+        let error = super::publisher_fingerprint(&[0x04; 33]).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Publisher public key must be a compressed 33-byte secp256k1 public key"
+        );
+    }
+
+    #[test]
+    fn compressed_public_key_der_rejects_a_different_curve() {
+        // prime256v1 OID followed by a syntactically compressed 33-byte key.
+        let mut der = vec![0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
+        der.extend_from_slice(&[0x02; 33]);
+
+        let error = super::compressed_public_key_from_der(&der).unwrap_err();
+
+        assert_eq!(error.to_string(), "Publisher certificate public key must use secp256k1");
+    }
+
+    #[test]
+    fn compressed_public_key_der_rejects_an_off_curve_key() {
+        let mut der = vec![0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a, 0x02];
+        der.extend_from_slice(&[0xff; 32]);
+
+        let error = super::compressed_public_key_from_der(&der).unwrap_err();
+
+        assert_eq!(error.to_string(), "Failed to extract public key: invalid secp256k1 public key");
+    }
 
     #[test]
     fn invalid_print_identity_error_includes_name() {

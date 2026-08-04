@@ -21,6 +21,9 @@ export component Dialog inherits Panel {
     in property <bool> show-cancel: false;
     in property <bool> show-close-button:false;
     in property <string> warning-message;
+    // Some decisions require the warning to sit immediately before the
+    // affirmative action instead of with the explanatory copy.
+    in property <bool> warning-before-ok: false;
 
     callback on-ok;
     callback on-cancel;
@@ -29,47 +32,52 @@ export component Dialog inherits Panel {
         padding: Size.sz6;
         spacing: Size.sz8;
 
-        VerticalLayout {
-            spacing: Size.sz4;
-            if show-close-button: HorizontalLayout {
-                HorizontalLayout {
-                    alignment: end;
-                    Icon {
-                        name: "close";
-                        color: Palette.content-primary;
-                        TouchArea {
-                            clicked => {
-                                on-cancel();
+        Flickable {
+            min-height: 0px;
+            viewport-width: self.width;
+
+            VerticalLayout {
+                spacing: Size.sz4;
+                if show-close-button: HorizontalLayout {
+                    HorizontalLayout {
+                        alignment: end;
+                        Icon {
+                            name: "close";
+                            color: Palette.content-primary;
+                            TouchArea {
+                                clicked => {
+                                    on-cancel();
+                                }
                             }
                         }
                     }
                 }
-            }
-            if(icon != ""): HorizontalLayout {
-                alignment: center;
-                Icon {
-                    name: icon;
-                    color: icon-color;
-                    size: Size.sz16;
+                if(icon != ""): HorizontalLayout {
+                    alignment: center;
+                    Icon {
+                        name: icon;
+                        color: icon-color;
+                        size: Size.sz16;
+                    }
                 }
-            }
-            HeadingMd {
-                text: title;
-                color: Palette.content-primary;
-                horizontal-alignment: center;
-            }
+                HeadingMd {
+                    text: title;
+                    color: Palette.content-primary;
+                    horizontal-alignment: center;
+                }
 
-            TextSm {
-                text: message;
-                color: Palette.content-primary;
-                horizontal-alignment: center;
-            }
+                TextSm {
+                    text: message;
+                    color: Palette.content-primary;
+                    horizontal-alignment: center;
+                }
 
-            if(warning-message != ""):
-            TextSm {
-                text: warning-message;
-                color: Palette.content-notice;
-                horizontal-alignment: center;
+                if(warning-message != "" && !warning-before-ok):
+                TextSm {
+                    text: warning-message;
+                    color: Palette.content-notice;
+                    horizontal-alignment: center;
+                }
             }
         }
 
@@ -82,6 +90,12 @@ export component Dialog inherits Panel {
                 clicked => {
                     on-cancel();
                 }
+            }
+
+            if (warning-before-ok && warning-message != ""): TextSm {
+                text: warning-message;
+                color: Palette.content-notice;
+                horizontal-alignment: center;
             }
 
             if (show-ok): Button {

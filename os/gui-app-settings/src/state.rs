@@ -48,6 +48,9 @@ pub struct AppState {
     /// The last `ListApps` result, cached so the app details page and permission toggles read
     /// from it instead of re-requesting each app one by one. Refreshed by `refresh_installed_apps`.
     pub installed_apps: RefCell<Vec<app_manager::InstalledAppInfo>>,
+    /// Certificate bytes selected and validated for the publisher confirmation screen. They are
+    /// kept only until the user allows or cancels the import.
+    pub pending_allowed_publisher_certificate: RefCell<Option<Vec<u8>>>,
     pub ql_status: QlStatus,
 
     pub secp: Secp256k1<All>,
@@ -83,6 +86,7 @@ impl AppState {
             bt: BluetoothApi::default(),
             app_manager: AppManagerApi::default(),
             installed_apps: RefCell::new(Vec::new()),
+            pending_allowed_publisher_certificate: RefCell::new(None),
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             secp: Secp256k1::new(),
             last_backup: None,

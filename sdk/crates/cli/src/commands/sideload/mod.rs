@@ -76,14 +76,14 @@ pub fn execute(args: &SideloadArgs) -> Result<()> {
         return Ok(());
     }
 
-    let preflight_spinner = ui.spinner("Checking trusted publisher certificate...");
-    if let Err(error) = mcp.ensure_trusted_publisher_installed() {
+    let preflight_spinner = ui.spinner("Checking allowed publisher certificate...");
+    if let Err(error) = mcp.ensure_allowed_publisher_installed() {
         preflight_spinner.finish_clear();
         return Err(anyhow::anyhow!(
-            "Sideload preflight failed before launch. On Passport Prime, import the matching certificate in Settings > Apps > Trusted Publishers, then reconnect USB and try again. Reason: {error}"
+            "Sideload preflight failed before launch. On Passport Prime, import the matching certificate in Settings > Apps > Allowed Publishers, then reconnect USB and try again. Reason: {error}"
         ));
     }
-    preflight_spinner.finish_success("Trusted publisher certificate found");
+    preflight_spinner.finish_success("Allowed publisher certificate found");
 
     println!("Launching {} via passport-drive MCP...", config.app_name);
     let app_id_slice = config.app_id.as_bytes();
@@ -147,7 +147,7 @@ fn launch_error_message(error: &str) -> String {
     let message = error.strip_prefix("Error: ").unwrap_or(error);
     if message.contains("device returned status 0x01") {
         format!(
-            "{message}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware or helper tooling that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching trusted publisher certificate is installed in Settings > Apps > Trusted Publishers."
+            "{message}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware or helper tooling that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching allowed publisher certificate is installed in Settings > Apps > Allowed Publishers."
         )
     } else {
         message.to_string()
@@ -163,6 +163,6 @@ mod tests {
         let message = launch_error_message("Error: Failed to launch app: device returned status 0x01");
 
         assert!(message.contains("Developer Mode is reachable"));
-        assert!(message.contains("matching trusted publisher certificate"));
+        assert!(message.contains("matching allowed publisher certificate"));
     }
 }

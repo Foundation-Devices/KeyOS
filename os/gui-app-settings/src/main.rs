@@ -361,13 +361,15 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
         }
     });
 
-    refresh_trusted_publishers(state);
-    globals.on_refresh_trusted_publishers(move || {
-        refresh_trusted_publishers(state);
+    refresh_allowed_publishers(state);
+    globals.on_refresh_allowed_publishers(move || {
+        refresh_allowed_publishers(state);
     });
-    globals.on_import_trusted_publisher(move || import_trusted_publisher(state));
+    globals.on_preview_allowed_publisher(move || preview_allowed_publisher(state));
+    globals.on_allow_pending_publisher(move || allow_pending_publisher(state));
+    globals.on_clear_pending_allowed_publisher(move || clear_pending_allowed_publisher(state));
     globals
-        .on_remove_trusted_publisher(move |public_key| remove_trusted_publisher(state, public_key.as_str()));
+        .on_remove_allowed_publisher(move |public_key| remove_allowed_publisher(state, public_key.as_str()));
     globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
     globals.on_install_app(move || install_app(state.clone()));
 }
@@ -389,7 +391,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     // concatenate the dynamic apps model with static rows). `action_id`
     // disambiguates rows of the same kind; the delegate maps it to localized
     // text and behavior. `first`/`last`/`show_divider` drive the card chrome.
-    const ACTION_TRUSTED_PUBLISHERS: i32 = 0;
+    const ACTION_ALLOWED_PUBLISHERS: i32 = 0;
     const TOGGLE_DEVELOPER_MODE: i32 = 1;
     const HEADER_INSTALLED_APPS: i32 = 0;
     const HEADER_SETTINGS: i32 = 1;
@@ -430,7 +432,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     });
     rows.push(AppsListRow {
         kind: AppsListRowKind::Action,
-        action_id: ACTION_TRUSTED_PUBLISHERS,
+        action_id: ACTION_ALLOWED_PUBLISHERS,
         first: true,
         show_divider: true,
         ..Default::default()
@@ -550,35 +552,370 @@ fn app_permission_groups(
     ModelRc::from(Rc::new(VecModel::from(groups)))
 }
 
-fn refresh_trusted_publishers(state: StoredValue<AppState>) {
-    let trusted_publishers = state
+fn refresh_allowed_publishers(state: StoredValue<AppState>) {
+    let allowed_publishers = state
         .borrow()
         .app_manager
         .get_third_party_certificates()
         .into_iter()
-        .map(|cert| TrustedPublisher {
-            name: cert.name.into(),
-            company: cert.company.into(),
-            contact_email: cert.contact_email.into(),
-            support_url: cert.support_url.into(),
-            public_key: format_hex_groups(&cert.public_key, 4).into(),
-            serial_number: cert.serial_number.replace(':', ": ").into(),
-            subject: cert.subject.replace(',', ",\n").into(),
-            basic_constraints: cert.basic_constraints.into(),
-            key_usage: cert.key_usage.into(),
-            extended_key_usage: cert.extended_key_usage.into(),
-        })
+        .map(|cert| allowed_publisher(&state.borrow(), cert))
         .collect::<Vec<_>>();
 
     let ui = state.borrow().ui();
     ui.global::<AppManagementGlobal>()
-        .set_trusted_publishers(ModelRc::new(VecModel::from(trusted_publishers)));
+        .set_allowed_publishers(ModelRc::new(VecModel::from(allowed_publishers)));
 }
 
-fn format_hex_groups(value: &str, group_len: usize) -> String {
+fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateInfo) -> AllowedPublisher {
+    let claimed_name = sanitize_publisher_claim(&cert.name);
+    let claimed_organization = sanitize_publisher_claim(&cert.company);
+    let status = allowed_publisher_status_at(
+        cert.not_before_unix_seconds,
+        cert.not_after_unix_seconds,
+        SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()),
+    );
+    let status = allowed_publisher_status_label(status);
+    let date_added = format_date(state, cert.added_unix_seconds)
+        .unwrap_or_else(|| tr::lookup_id(TrId::AppsAllowedPublisherDateUnavailable).to_string());
+    let expiration_date = format_date(state, cert.not_after_unix_seconds);
+    let list_metadata = expiration_date
+        .as_deref()
+        .map(|expiration_date| {
+            let expiration = i18n::replace_placeholders(
+                tr::lookup_id(TrId::AppsAllowedPublisherExpires),
+                &[expiration_date],
+            );
+            i18n::replace_placeholders(
+                tr::lookup_id(TrId::AppsAllowedPublisherListMetadata),
+                &[status.as_str(), expiration.as_str()],
+            )
+        })
+        .unwrap_or_else(|| status.clone());
+    let expiration_date = expiration_date
+        .unwrap_or_else(|| tr::lookup_id(TrId::AppsAllowedPublisherDateUnavailable).to_string());
+
+    AllowedPublisher {
+        confirmation_claimed_name: confirmation_publisher_claim(&claimed_name).into(),
+        confirmation_claimed_organization: confirmation_publisher_claim(&claimed_organization).into(),
+        claimed_name: claimed_name.into(),
+        claimed_organization: claimed_organization.into(),
+        contact_email: sanitize_publisher_claim(&cert.contact_email).into(),
+        support_url: sanitize_publisher_claim(&cert.support_url).into(),
+        fingerprint: format_hex_groups(
+            &cert.fingerprint,
+            PUBLISHER_HEX_GROUP_LENGTH,
+            PUBLISHER_HEX_GROUPS_PER_LINE,
+        )
+        .into(),
+        short_fingerprint: cert.short_fingerprint.into(),
+        status: status.into(),
+        list_metadata: list_metadata.into(),
+        expiration_date: expiration_date.into(),
+        date_added: date_added.into(),
+        public_key: cert.public_key.clone().into(),
+        public_key_display: format_hex_groups(
+            &cert.public_key,
+            PUBLISHER_HEX_GROUP_LENGTH,
+            PUBLISHER_HEX_GROUPS_PER_LINE,
+        )
+        .into(),
+        serial_number: sanitize_publisher_claim(&cert.serial_number).replace(':', ": ").into(),
+        subject: format_distinguished_name(&cert.subject).into(),
+        basic_constraints: cert.basic_constraints.into(),
+        key_usage: cert.key_usage.into(),
+        extended_key_usage: cert.extended_key_usage.into(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AllowedPublisherStatus {
+    Active,
+    Expired,
+    NotActiveYet,
+    Inactive,
+}
+
+fn allowed_publisher_status_at(
+    not_before_unix_seconds: Option<u64>,
+    not_after_unix_seconds: Option<u64>,
+    now_unix_seconds: Option<u64>,
+) -> AllowedPublisherStatus {
+    let (Some(not_before), Some(not_after), Some(now)) =
+        (not_before_unix_seconds, not_after_unix_seconds, now_unix_seconds)
+    else {
+        return AllowedPublisherStatus::Inactive;
+    };
+    if not_before > not_after {
+        AllowedPublisherStatus::Inactive
+    } else if now < not_before {
+        AllowedPublisherStatus::NotActiveYet
+    } else if now > not_after {
+        AllowedPublisherStatus::Expired
+    } else {
+        AllowedPublisherStatus::Active
+    }
+}
+
+fn allowed_publisher_status_label(status: AllowedPublisherStatus) -> String {
+    let id = match status {
+        AllowedPublisherStatus::Active => TrId::AppsAllowedPublisherStatusActive,
+        AllowedPublisherStatus::Expired => TrId::AppsAllowedPublisherStatusExpired,
+        AllowedPublisherStatus::NotActiveYet => TrId::AppsAllowedPublisherStatusNotActiveYet,
+        AllowedPublisherStatus::Inactive => TrId::AppsAllowedPublisherStatusInactive,
+    };
+    tr::lookup_id(id).to_string()
+}
+
+const CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS: usize = 48;
+const PUBLISHER_DATE_FORMAT: &str = "%B %-d, %Y";
+const PUBLISHER_HEX_GROUP_LENGTH: usize = 4;
+const PUBLISHER_HEX_GROUPS_PER_LINE: usize = 7;
+
+/// Make a certificate's self-asserted text safe for display without silently treating it as an
+/// identity. Certificate strings are hostile input: normalize all whitespace and controls so a
+/// claim cannot inject lines or reposition the fixed warning and confirmation action.
+fn sanitize_publisher_claim(value: &str) -> String {
+    let mut sanitized = String::with_capacity(value.len());
+    let mut pending_space = false;
+
+    for ch in value.chars() {
+        if is_bidi_control(ch) || is_invisible_format_control(ch) {
+            continue;
+        }
+        if ch.is_whitespace() || ch.is_control() {
+            pending_space = !sanitized.is_empty();
+            continue;
+        }
+
+        if pending_space {
+            sanitized.push(' ');
+            pending_space = false;
+        }
+        sanitized.push(ch);
+    }
+
+    sanitized
+}
+
+/// Invisible Unicode formatting characters can make a non-empty claim render as blank or consume
+/// the confirmation screen's character limit without displaying anything. Strip the format
+/// controls relevant to inline certificate text; bidirectional controls are handled separately.
+fn is_invisible_format_control(ch: char) -> bool {
+    matches!(ch, '\u{00ad}' | '\u{200b}'..='\u{200d}' | '\u{2060}'..='\u{2064}' | '\u{feff}')
+}
+
+/// Unicode bidirectional overrides and isolates can reorder a claim around its fixed UI label.
+/// Strip the complete `Bidi_Control` set rather than allowing certificate text to affect layout.
+fn is_bidi_control(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Bound the unverified claim shown on the non-scrollable decision screen. The full sanitized
+/// value remains available on the detail screen.
+fn confirmation_publisher_claim(sanitized: &str) -> String {
+    let mut chars = sanitized.chars();
+    let prefix = chars.by_ref().take(CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}…", prefix.trim_end())
+    } else {
+        sanitized.to_string()
+    }
+}
+
+/// Format an RFC 4514 distinguished name one RDN per line. Escaped commas belong to an
+/// attribute value and must not be mistaken for RDN separators.
+fn format_distinguished_name(value: &str) -> String {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut escaped = false;
+
+    for (index, ch) in value.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == ',' {
+            parts.push(format_distinguished_name_part(&value[start..index]));
+            start = index + ch.len_utf8();
+        }
+    }
+    parts.push(format_distinguished_name_part(&value[start..]));
+    parts.retain(|part| !part.is_empty());
+    parts.join("\n")
+}
+
+fn format_distinguished_name_part(value: &str) -> String {
+    let input = value.as_bytes();
+    let mut decoded = Vec::with_capacity(input.len());
+    let mut index = 0;
+
+    while index < input.len() {
+        if input[index] != b'\\' {
+            decoded.push(input[index]);
+            index += 1;
+            continue;
+        }
+
+        if let (Some(high), Some(low)) = (
+            input.get(index + 1).and_then(|byte| hex_nibble(*byte)),
+            input.get(index + 2).and_then(|byte| hex_nibble(*byte)),
+        ) {
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else if let Some(escaped) = input.get(index + 1) {
+            decoded.push(*escaped);
+            index += 2;
+        } else {
+            decoded.push(b'\\');
+            index += 1;
+        }
+    }
+
+    sanitize_publisher_claim(String::from_utf8_lossy(&decoded).as_ref())
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod publisher_claim_tests {
+    use super::{
+        allowed_publisher_status_at, confirmation_publisher_claim, format_distinguished_name,
+        format_hex_groups, sanitize_publisher_claim, AllowedPublisherStatus,
+        CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS, PUBLISHER_DATE_FORMAT, PUBLISHER_HEX_GROUPS_PER_LINE,
+        PUBLISHER_HEX_GROUP_LENGTH,
+    };
+
+    #[test]
+    fn sanitizes_newlines_controls_bidi_and_repeated_whitespace() {
+        let claim =
+            " \nAcme\r\n\tCorp\u{0000}\u{0007} \u{2028}LLC\u{202e}evil\u{202c}\u{2066} text\u{2069}\u{061c}\u{200f}  ";
+
+        assert_eq!(sanitize_publisher_claim(claim), "Acme Corp LLCevil text");
+    }
+
+    #[test]
+    fn strips_invisible_format_controls_from_publisher_claims() {
+        let blank_claim = "\u{00ad}\u{200b}\u{200c}\u{200d}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{feff}";
+        assert_eq!(sanitize_publisher_claim(blank_claim), "");
+
+        let padded_claim = format!("{}Foundation Devices", "\u{200b}".repeat(48));
+        let sanitized = sanitize_publisher_claim(&padded_claim);
+        assert_eq!(confirmation_publisher_claim(&sanitized), "Foundation Devices");
+    }
+
+    #[test]
+    fn confirmation_claim_is_unicode_safe_and_bounded() {
+        let exactly_at_limit = "é".repeat(CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS);
+        assert_eq!(confirmation_publisher_claim(&exactly_at_limit), exactly_at_limit);
+
+        let long_claim = format!("{}終", "é".repeat(CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS));
+        let bounded = confirmation_publisher_claim(&long_claim);
+        assert_eq!(bounded, format!("{}…", "é".repeat(CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS)));
+        assert_eq!(bounded.chars().count(), CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS + 1);
+    }
+
+    #[test]
+    fn distinguished_name_preserves_escaped_commas_inside_values() {
+        let subject = r"EMAIL=hello@foundation.xyz,O=Foundation Devices\, Inc.,CN=Foundation Devices\, Inc.";
+
+        assert_eq!(
+            format_distinguished_name(subject),
+            "EMAIL=hello@foundation.xyz\nO=Foundation Devices, Inc.\nCN=Foundation Devices, Inc."
+        );
+    }
+
+    #[test]
+    fn distinguished_name_decodes_hex_escapes_and_sanitizes_controls() {
+        let subject = r"CN=Jos\c3\a9,O=Example\\,OU=Line\0aBreak";
+
+        assert_eq!(format_distinguished_name(subject), "CN=José\nO=Example\\\nOU=Line Break");
+    }
+
+    #[test]
+    fn publisher_status_distinguishes_each_non_authorizing_state() {
+        assert_eq!(
+            allowed_publisher_status_at(Some(100), Some(200), Some(100)),
+            AllowedPublisherStatus::Active
+        );
+        assert_eq!(
+            allowed_publisher_status_at(Some(100), Some(200), Some(200)),
+            AllowedPublisherStatus::Active
+        );
+        assert_eq!(
+            allowed_publisher_status_at(Some(100), Some(200), Some(99)),
+            AllowedPublisherStatus::NotActiveYet
+        );
+        assert_eq!(
+            allowed_publisher_status_at(Some(100), Some(200), Some(201)),
+            AllowedPublisherStatus::Expired
+        );
+        assert_eq!(
+            allowed_publisher_status_at(Some(200), Some(100), Some(150)),
+            AllowedPublisherStatus::Inactive
+        );
+        assert_eq!(allowed_publisher_status_at(None, Some(200), Some(150)), AllowedPublisherStatus::Inactive);
+        assert_eq!(allowed_publisher_status_at(Some(100), Some(200), None), AllowedPublisherStatus::Inactive);
+    }
+
+    #[test]
+    fn publisher_hex_values_use_seven_groups_per_line() {
+        let fingerprint = "0123456789abcdef".repeat(4);
+        assert_eq!(
+            format_hex_groups(&fingerprint, PUBLISHER_HEX_GROUP_LENGTH, PUBLISHER_HEX_GROUPS_PER_LINE,),
+            "0123 4567 89ab cdef 0123 4567 89ab\n\
+             cdef 0123 4567 89ab cdef 0123 4567\n\
+             89ab cdef"
+        );
+
+        let public_key = format!("02{fingerprint}");
+        assert_eq!(
+            format_hex_groups(&public_key, PUBLISHER_HEX_GROUP_LENGTH, PUBLISHER_HEX_GROUPS_PER_LINE,),
+            "0201 2345 6789 abcd ef01 2345 6789\n\
+             abcd ef01 2345 6789 abcd ef01 2345\n\
+             6789 abcd ef"
+        );
+    }
+
+    #[test]
+    fn publisher_dates_use_long_month_format_without_day_padding() {
+        let two_digit_day = jiff::civil::Date::new(2026, 7, 28).unwrap();
+        let one_digit_day = jiff::civil::Date::new(2036, 5, 5).unwrap();
+
+        assert_eq!(
+            jiff::fmt::strtime::format(PUBLISHER_DATE_FORMAT, two_digit_day).unwrap(),
+            "July 28, 2026"
+        );
+        assert_eq!(jiff::fmt::strtime::format(PUBLISHER_DATE_FORMAT, one_digit_day).unwrap(), "May 5, 2036");
+    }
+}
+
+fn format_date(state: &AppState, unix_seconds: Option<u64>) -> Option<String> {
+    unix_seconds
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .and_then(|seconds| jiff::Timestamp::from_second(seconds).ok())
+        .and_then(|timestamp| {
+            let timezone = state.settings.get_time_zone();
+            jiff::fmt::strtime::format(PUBLISHER_DATE_FORMAT, &timestamp.to_zoned(timezone.timezone())).ok()
+        })
+        .filter(|date| !date.is_empty())
+}
+
+fn format_hex_groups(value: &str, group_len: usize, groups_per_line: usize) -> String {
     let mut formatted = String::with_capacity(value.len() + (value.len() / group_len));
     for (index, ch) in value.chars().enumerate() {
-        if index > 0 && index % group_len == 0 {
+        if index > 0 && index % (group_len * groups_per_line) == 0 {
+            formatted.push('\n');
+        } else if index > 0 && index % group_len == 0 {
             formatted.push(' ');
         }
         formatted.push(ch);
@@ -586,24 +923,9 @@ fn format_hex_groups(value: &str, group_len: usize) -> String {
     formatted
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_hex_groups;
+fn preview_allowed_publisher(state: StoredValue<AppState>) -> AllowedPublisherPreviewResult {
+    clear_pending_allowed_publisher(state);
 
-    #[test]
-    fn public_key_groups_wrap_without_embedded_newlines() {
-        let public_key = "024092324dcf345bffa773d40b164ed250079c3877231b46b6c4f9ccb22b465083";
-
-        let formatted = format_hex_groups(public_key, 4);
-
-        assert_eq!(
-            formatted,
-            "0240 9232 4dcf 345b ffa7 73d4 0b16 4ed2 5007 9c38 7723 1b46 b6c4 f9cc b22b 4650 83"
-        );
-    }
-}
-
-fn import_trusted_publisher(state: StoredValue<AppState>) -> TrustedPublisherImportResult {
     let certificate = {
         let state = state.borrow();
         read_third_party_certificate(&state)
@@ -611,30 +933,77 @@ fn import_trusted_publisher(state: StoredValue<AppState>) -> TrustedPublisherImp
 
     match certificate {
         Ok(Some(certificate_pem)) => {
-            let result = { state.borrow().app_manager.import_third_party_certificate(certificate_pem) };
+            let result =
+                { state.borrow().app_manager.preview_third_party_certificate(certificate_pem.clone()) };
             match result {
-                Ok(app_manager::ImportThirdPartyCertificateResult::Imported(_)) => {
-                    refresh_trusted_publishers(state);
-                    TrustedPublisherImportResult::Installed
+                Ok(app_manager::PreviewThirdPartyCertificateResult::Valid(cert)) => {
+                    let publisher = allowed_publisher(&state.borrow(), cert);
+                    *state.borrow().pending_allowed_publisher_certificate.borrow_mut() =
+                        Some(certificate_pem);
+                    state
+                        .borrow()
+                        .ui()
+                        .global::<AppManagementGlobal>()
+                        .set_pending_allowed_publisher(publisher);
+                    AllowedPublisherPreviewResult::Ready
                 }
-                Ok(app_manager::ImportThirdPartyCertificateResult::Invalid) => {
-                    TrustedPublisherImportResult::Failed
+                Ok(app_manager::PreviewThirdPartyCertificateResult::Invalid) => {
+                    AllowedPublisherPreviewResult::Failed
                 }
                 Err(e) => {
-                    log::error!("failed to import third-party certificate: {e:?}");
-                    TrustedPublisherImportResult::Failed
+                    log::error!("failed to preview third-party certificate: {e:?}");
+                    AllowedPublisherPreviewResult::Failed
                 }
             }
         }
-        Ok(None) => TrustedPublisherImportResult::Canceled,
+        Ok(None) => AllowedPublisherPreviewResult::Canceled,
         Err(e) => {
             log::error!("failed to read third-party certificate: {e:?}");
-            TrustedPublisherImportResult::Failed
+            AllowedPublisherPreviewResult::Failed
         }
     }
 }
 
-const MAX_CERTIFICATE_BYTES: u64 = 4 * 1024;
+fn allow_pending_publisher(state: StoredValue<AppState>) -> AllowedPublisherImportResult {
+    let certificate_pem = state.borrow().pending_allowed_publisher_certificate.borrow_mut().take();
+    let Some(certificate_pem) = certificate_pem else {
+        log::error!("publisher confirmation had no pending certificate");
+        return AllowedPublisherImportResult::SaveFailed;
+    };
+
+    let result = { state.borrow().app_manager.import_third_party_certificate(certificate_pem) };
+    match result {
+        Ok(app_manager::ImportThirdPartyCertificateResult::Imported(_)) => {
+            clear_pending_allowed_publisher(state);
+            refresh_allowed_publishers(state);
+            AllowedPublisherImportResult::Installed
+        }
+        Ok(app_manager::ImportThirdPartyCertificateResult::Invalid) => {
+            clear_pending_allowed_publisher(state);
+            AllowedPublisherImportResult::Invalid
+        }
+        Ok(app_manager::ImportThirdPartyCertificateResult::InternalError) => {
+            clear_pending_allowed_publisher(state);
+            AllowedPublisherImportResult::SaveFailed
+        }
+        Err(e) => {
+            log::error!("failed to allow third-party publisher: {e:?}");
+            clear_pending_allowed_publisher(state);
+            AllowedPublisherImportResult::SaveFailed
+        }
+    }
+}
+
+fn clear_pending_allowed_publisher(state: StoredValue<AppState>) {
+    state.borrow().pending_allowed_publisher_certificate.borrow_mut().take();
+    state
+        .borrow()
+        .ui()
+        .global::<AppManagementGlobal>()
+        .set_pending_allowed_publisher(AllowedPublisher::default());
+}
+
+const MAX_CERTIFICATE_BYTES: u64 = 16 * 1024;
 
 fn read_third_party_certificate(state: &AppState) -> anyhow::Result<Option<Vec<u8>>> {
     let options = SelectFileOptions::default()
@@ -671,21 +1040,21 @@ fn read_third_party_certificate(state: &AppState) -> anyhow::Result<Option<Vec<u
     Ok(Some(certificate_pem))
 }
 
-fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> TrustedPublisherRemovalResult {
+fn remove_allowed_publisher(state: StoredValue<AppState>, public_key: &str) -> AllowedPublisherRemovalResult {
     let locale = state.borrow().settings.get_locale();
     let result = { state.borrow().app_manager.remove_third_party_certificate(public_key, locale.lang()) };
     match result {
         Ok(app_manager::RemoveThirdPartyCertificateResult::Removed)
         | Ok(app_manager::RemoveThirdPartyCertificateResult::NotFound) => {
-            refresh_trusted_publishers(state);
-            TrustedPublisherRemovalResult {
+            refresh_allowed_publishers(state);
+            AllowedPublisherRemovalResult {
                 success: true,
                 title: SharedString::default(),
                 text: SharedString::default(),
             }
         }
         Ok(app_manager::RemoveThirdPartyCertificateResult::AppRequiresKey(app_name)) => {
-            TrustedPublisherRemovalResult {
+            AllowedPublisherRemovalResult {
                 success: false,
                 title: tr::lookup_id(TrId::AppsModalRemoveXFirstThenRetryHeader).into(),
                 text: i18n::replace_placeholders(
@@ -695,17 +1064,17 @@ fn remove_trusted_publisher(state: StoredValue<AppState>, public_key: &str) -> T
                 .into(),
             }
         }
-        Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => TrustedPublisherRemovalResult {
+        Ok(app_manager::RemoveThirdPartyCertificateResult::InternalError) => AllowedPublisherRemovalResult {
             success: false,
-            title: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into(),
-            text: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedContent).into(),
+            title: tr::lookup_id(TrId::AppsModalUnableToRemoveAllowedPublisherHeader).into(),
+            text: tr::lookup_id(TrId::AppsModalAllowedPublisherRemoveFailedContent).into(),
         },
         Err(e) => {
             log::error!("failed to remove third-party certificate: {e:?}");
-            TrustedPublisherRemovalResult {
+            AllowedPublisherRemovalResult {
                 success: false,
-                title: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedHeader).into(),
-                text: tr::lookup_id(TrId::AppsModalTrustedPublisherRemoveFailedContent).into(),
+                title: tr::lookup_id(TrId::AppsModalUnableToRemoveAllowedPublisherHeader).into(),
+                text: tr::lookup_id(TrId::AppsModalAllowedPublisherRemoveFailedContent).into(),
             }
         }
     }

@@ -55,12 +55,21 @@ export struct AppsListRow {
     show_divider: bool,
 }
 
-export struct TrustedPublisher {
-    name: string,
-    company: string,
+export struct AllowedPublisher {
+    claimed_name: string,
+    claimed_organization: string,
+    confirmation_claimed_name: string,
+    confirmation_claimed_organization: string,
     contact_email: string,
     support_url: string,
+    fingerprint: string,
+    short_fingerprint: string,
+    status: string,
+    list_metadata: string,
+    expiration_date: string,
+    date_added: string,
     public_key: string,
+    public_key_display: string,
     serial_number: string,
     subject: string,
     basic_constraints: string,
@@ -68,13 +77,13 @@ export struct TrustedPublisher {
     extended_key_usage: string,
 }
 
-export enum TrustedPublisherImportResult {
+export enum AllowedPublisherPreviewResult {
     canceled,
-    installed,
+    ready,
     failed,
 }
 
-export struct TrustedPublisherRemovalResult {
+export struct AllowedPublisherRemovalResult {
     success: bool,
     title: string,
     text: string,
@@ -88,6 +97,12 @@ export struct InstallAppResult {
     success: bool,
     title: string,
     text: string,
+}
+
+export enum AllowedPublisherImportResult {
+    installed,
+    invalid,
+    save-failed,
 }
 
 export global AppManagementGlobal {
@@ -109,8 +124,11 @@ export global AppManagementGlobal {
     /// argument is true and the app ships one.
     pure callback app-icon(string, bool) -> image;
 
-    in property <[TrustedPublisher]> trusted-publishers: [];
-    callback refresh-trusted-publishers();
-    callback import-trusted-publisher() -> TrustedPublisherImportResult;
-    callback remove-trusted-publisher(string) -> TrustedPublisherRemovalResult;
+    in property <[AllowedPublisher]> allowed-publishers: [];
+    in property <AllowedPublisher> pending-allowed-publisher;
+    callback refresh-allowed-publishers();
+    callback preview-allowed-publisher() -> AllowedPublisherPreviewResult;
+    callback allow-pending-publisher() -> AllowedPublisherImportResult;
+    callback clear-pending-allowed-publisher();
+    callback remove-allowed-publisher(string) -> AllowedPublisherRemovalResult;
 }

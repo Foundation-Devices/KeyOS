@@ -17,6 +17,19 @@ while IFS= read -r line; do
         *'"name":"get_developer_mode"'*)
           printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"enabled"}]}}\n' "$id"
           ;;
+        *'"name":"get_allowed_publisher_count"'*)
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"1"}]}}\n' "$id"
+          ;;
+        *'"name":"install_certificate"'*)
+          case "$line" in
+            *'"expected_fingerprint":"'*)
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"ok"}]}}\n' "$id"
+              ;;
+            *)
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"isError":true,"content":[{"type":"text","text":"expected_fingerprint is required"}]}}\n' "$id"
+              ;;
+          esac
+          ;;
         *)
           printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"ok"}]}}\n' "$id"
           ;;

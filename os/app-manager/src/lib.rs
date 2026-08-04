@@ -26,7 +26,8 @@ use std::collections::{HashMap, HashSet};
 use app_manager::{
     AppEvent, GetPermissionRequestInfo, GetThirdPartyCertificates, ImportThirdPartyCertificate,
     ImportThirdPartyCertificateResult, InstallAppArchive, InstallAppArchiveResult, InstallError, LaunchError,
-    PermissionGrantDecision, PermissionRequestInfoResult, RemoveInstalledApp, RemoveInstalledAppResult,
+    PermissionGrantDecision, PermissionRequestInfoResult, PreviewThirdPartyCertificate,
+    PreviewThirdPartyCertificateResult, RemoveInstalledApp, RemoveInstalledAppResult,
     RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, SetAppPermissionGrant,
     SetAppPermissionGrantResult, ThirdPartyCertificateInfo,
 };
@@ -37,7 +38,7 @@ use app_manager::{
 use fs::adapter::FsAdapter;
 use permission_grants::PermissionGrantStore;
 use system_messages::{ChildCrashed, Disconnected};
-use third_party_certs::ThirdPartyCertificateStore;
+use third_party_certs::{ImportThirdPartyCertificateError, ThirdPartyCertificateStore};
 
 crypto::use_api!();
 fs::use_api!();
@@ -93,7 +94,7 @@ impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<app_manager::AppQrMatchRules> {
-        self.app_registry.qr_match_rules(&msg.app_ids, &self.third_party_cert_store.trusted_publishers())
+        self.app_registry.qr_match_rules(&msg.app_ids, &self.third_party_cert_store.allowed_publishers())
     }
 }
 
@@ -106,7 +107,7 @@ impl BlockingArchiveHandler<ListApps> for AppManagerServer {
     ) -> Vec<InstalledAppInfo> {
         self.app_registry.list_apps(
             &msg.locale,
-            &self.third_party_cert_store.trusted_publishers(),
+            &self.third_party_cert_store.allowed_publishers(),
             &msg.filter,
             &self.permission_grants,
         )
@@ -156,6 +157,20 @@ impl BlockingArchiveHandler<GetThirdPartyCertificates> for AppManagerServer {
     }
 }
 
+impl BlockingArchiveHandler<PreviewThirdPartyCertificate> for AppManagerServer {
+    fn handle(
+        &mut self,
+        msg: PreviewThirdPartyCertificate,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> PreviewThirdPartyCertificateResult {
+        match self.third_party_cert_store.preview(&msg.certificate_pem) {
+            Ok(cert) => PreviewThirdPartyCertificateResult::Valid(cert),
+            Err(()) => PreviewThirdPartyCertificateResult::Invalid,
+        }
+    }
+}
+
 impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
     fn handle(
         &mut self,
@@ -165,10 +180,13 @@ impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
     ) -> ImportThirdPartyCertificateResult {
         match self.third_party_cert_store.import(&msg.certificate_pem) {
             Ok(cert) => {
-                self.notify_trusted_publishers_changed();
+                self.notify_allowed_publishers_changed();
                 ImportThirdPartyCertificateResult::Imported(cert)
             }
-            Err(()) => ImportThirdPartyCertificateResult::Invalid,
+            Err(ImportThirdPartyCertificateError::Invalid) => ImportThirdPartyCertificateResult::Invalid,
+            Err(ImportThirdPartyCertificateError::Storage) => {
+                ImportThirdPartyCertificateResult::InternalError
+            }
         }
     }
 }
@@ -180,10 +198,10 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> RemoveThirdPartyCertificateResult {
-        // Only block removal while the certificate is still trusted. An expired cert can
+        // Only block removal while the certificate is still allowed. An expired cert can
         // no longer launch the app that was signed with it, so the user must be able to
         // delete the stale entry even though an installed app still references that key.
-        if self.third_party_cert_store.is_trusted(&msg.public_key) {
+        if self.third_party_cert_store.is_allowed(&msg.public_key) {
             if let Some(app_name) =
                 self.app_registry.app_name_requiring_third_party_key(&msg.public_key, &msg.locale)
             {
@@ -193,7 +211,7 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
 
         match self.third_party_cert_store.remove(&msg.public_key) {
             Ok(true) => {
-                self.notify_trusted_publishers_changed();
+                self.notify_allowed_publishers_changed();
                 RemoveThirdPartyCertificateResult::Removed
             }
             Ok(false) => RemoveThirdPartyCertificateResult::NotFound,
@@ -549,11 +567,11 @@ impl AppManagerServer {
         // it from the image, the simulator from the staged host binary.
         let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
 
-        // Trust is dynamic: a sideloaded app launches only while its signer matches a
+        // Allowance is dynamic: a sideloaded app launches only while its signer matches a
         // currently-valid publisher cert, so importing or removing a cert takes effect
         // without a rescan. Built-in and hosted apps are always launchable.
-        if !self.app_registry.is_launchable(app_id, &self.third_party_cert_store.trusted_publishers()) {
-            return Err(LaunchError::NoTrustedPublisherCertificate);
+        if !self.app_registry.is_launchable(app_id, &self.third_party_cert_store.allowed_publishers()) {
+            return Err(LaunchError::NoCertificate);
         }
 
         self.register_app_resources(app_id)?;
@@ -599,8 +617,8 @@ impl AppManagerServer {
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 
-    fn notify_trusted_publishers_changed(&mut self) {
-        let event = AppEvent::TrustedPublishersChanged;
+    fn notify_allowed_publishers_changed(&mut self) {
+        let event = AppEvent::AllowedPublishersChanged;
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 

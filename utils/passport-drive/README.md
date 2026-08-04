@@ -209,7 +209,15 @@ passport-drive mcp --http 172.17.0.1:8000  # reachable from containers on the br
 ```
 
 Anything that can route to the bind address can drive the device, which includes
-flashing firmware and installing trusted publisher certificates.
+flashing firmware and installing allowed publisher certificates.
+
+Call `install_certificate` without `expected_fingerprint` to preview the exact warning and the
+certificate's full/short publisher fingerprint without changing the device. After the user compares
+the full fingerprint with the publisher's official website or GitHub and explicitly chooses to
+allow it, repeat the call with that full fingerprint. The tool re-parses the same bytes and refuses
+to install a missing or mismatched fingerprint. It also binds the expected fingerprint into the
+usb-debug command, where firmware previews and compares the certificate before import. Foundation
+does not verify publisher identity in v1.
 
 `--jail <PATH>` confines file access to that directory. Every path the server
 opens is resolved first, symlinks included, and refused when the result lands

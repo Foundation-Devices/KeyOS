@@ -58,7 +58,7 @@ component AppSummaryCard inherits Rectangle {
             }
 
             if icon-frame.app-icon.width <= 0: Icon {
-                name: "shield";
+                name: "grid-view";
                 size: Size.sz13;
                 color: Palette.content-primary;
             }
@@ -300,7 +300,7 @@ export component AppDetailsPage inherits BasePage {
 
                 MenuSectionLayout {
                     InfoRow {
-                        label: TR2.lookup(TrId.AppsPublisher);
+                        label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
                         value: AppManagementGlobal.selected-app.publisher;
                     }
 

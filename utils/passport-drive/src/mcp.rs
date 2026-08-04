@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64::Engine;
+use const_oid::ObjectIdentifier;
 use hidapi::HidDevice;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
@@ -31,6 +32,10 @@ use tokio::net::TcpListener;
 use usb_debug_protocol::{
     Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient, INSTALL_CERTIFICATE_BYTES_MAX,
 };
+use x509_cert::{
+    der::{Decode, DecodePem},
+    Certificate,
+};
 
 use crate::{launch_app_failure_message, launch_app_transport_error_message, LOG_TERMINATOR};
 
@@ -38,6 +43,8 @@ const MAX_LOG_LINES: usize = 2000;
 const TAP_HOLD_MS: u16 = 50;
 const APDU_TIMEOUT_MS: i32 = 10_000;
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
+const ID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+const SECP256K1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.10");
 
 const INSTRUCTIONS: &str = "\
 Drives a Passport Prime over USB. Call connect first; most tools fail without it.
@@ -45,7 +52,11 @@ Drives a Passport Prime over USB. Call connect first; most tools fail without it
 The server may be configured to confine file access to a base directory, usually the workspace root.
 Where it is, a path that resolves outside that directory is rejected, symlinks followed. Where it is
 not, any path the server process can read works. Relative paths resolve against that base directory
-where one is set, so a path relative to it is always safe to pass.";
+where one is set, so a path relative to it is always safe to pass.
+
+Publisher certificates use a two-step decision flow: call install_certificate without
+expected_fingerprint to receive the unverified-identity warning and actual fingerprint, then call
+again with that exact full fingerprint only after the user explicitly chooses to allow it.";
 
 /// One process drives one physical device, so the state is process-wide.
 static STATE: LazyLock<Mutex<McpState>> = LazyLock::new(|| Mutex::new(McpState::new()));
@@ -209,9 +220,13 @@ struct LoadAppParams {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct InstallCertificateParams {
-    /// Local PEM certificate file to install as a trusted publisher. Must resolve inside the
+    /// Local PEM certificate file to install as an allowed publisher. Must resolve inside the
     /// server's base directory when access is confined.
     certificate_path: String,
+    /// Full lowercase publisher fingerprint the user reviewed and explicitly chose to allow.
+    /// Omit it to preview the actual full/short fingerprint and identity warning without
+    /// installing anything.
+    expected_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -568,11 +583,13 @@ impl PassportServer {
         )))
     }
 
-    /// Send a local publisher certificate over usb-debug and install it as a trusted publisher.
+    /// Send a local publisher certificate over usb-debug and install it as an allowed publisher.
     #[tool]
     fn install_certificate(
         &self,
-        Parameters(InstallCertificateParams { certificate_path }): Parameters<InstallCertificateParams>,
+        Parameters(InstallCertificateParams { certificate_path, expected_fingerprint }): Parameters<
+            InstallCertificateParams,
+        >,
     ) -> Result<CallToolResult, String> {
         let path = PathBuf::from(certificate_path);
         crate::check_jail(&path).map_err(|e| format!("{e:#}"))?;
@@ -589,13 +606,38 @@ impl PassportServer {
         }
         let certificate_pem =
             fs::read(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+        let fingerprint = publisher_certificate_fingerprint(&certificate_pem)?;
 
+        if expected_fingerprint.as_deref() != Some(fingerprint.full.as_str()) {
+            return Err(format!(
+                "Foundation has NOT verified this publisher's identity.\n\
+                 Publisher fingerprint:\n\
+                 Full:  {}\n\
+                 Short: {}\n\
+                 Apps signed by this publisher will be allowed on your Passport.\n\
+                 Verify this fingerprint against the publisher's official website or GitHub.\n\
+                 After the user explicitly chooses to allow it, retry with expected_fingerprint=\"{}\".",
+                fingerprint.full, fingerprint.short, fingerprint.full
+            ));
+        }
+
+        let expected_fingerprint: [u8; usb_debug_protocol::PUBLISHER_FINGERPRINT_HEX_LEN] =
+            fingerprint.full.as_bytes().try_into().map_err(|_| {
+                "internal error: canonical publisher fingerprint has the wrong length".to_string()
+            })?;
         state()
             .require_device()?
-            .send(Command::InstallCertificate { certificate_pem }, Duration::from_secs(10))
+            .send(
+                Command::InstallCertificate { expected_fingerprint, certificate_pem },
+                Duration::from_secs(10),
+            )
             .map_err(|e| format!("install_certificate failed: {e}"))?;
 
-        Ok(text_result(&format!("Installed {} as a trusted publisher certificate.", path.display())))
+        Ok(text_result(&format!(
+            "Installed {} as an allowed publisher certificate with fingerprint {}.",
+            path.display(),
+            fingerprint.full
+        )))
     }
 
     /// List SAM-BA bootloader devices (SAMA5D2, VID:PID 03eb:6124). Device must be in SAM-BA mode.
@@ -878,15 +920,15 @@ impl PassportServer {
         }
     }
 
-    /// Return the number of currently trusted publisher certificates installed on the device.
+    /// Return the number of currently allowed publisher certificates installed on the device.
     #[tool]
-    fn get_trusted_publisher_count(&self) -> Result<CallToolResult, String> {
+    fn get_allowed_publisher_count(&self) -> Result<CallToolResult, String> {
         let payload = state()
             .require_device()?
-            .send(Command::GetTrustedPublisherCount, Duration::from_secs(5))
-            .map_err(|e| format!("get_trusted_publisher_count request failed: {e}"))?;
+            .send(Command::GetAllowedPublisherCount, Duration::from_secs(5))
+            .map_err(|e| format!("get_allowed_publisher_count request failed: {e}"))?;
         let bytes: [u8; 2] = payload.as_slice().try_into().map_err(|_| {
-            format!("get_trusted_publisher_count: expected 2 payload bytes, got {}", payload.len())
+            format!("get_allowed_publisher_count: expected 2 payload bytes, got {}", payload.len())
         })?;
         Ok(text_result(&u16::from_le_bytes(bytes).to_string()))
     }
@@ -918,6 +960,38 @@ fn open_flash_applet<'a>(
         .map_err(|e| format!("Flash re-init failed: {e}"))
 }
 
+fn publisher_certificate_fingerprint(
+    certificate_bytes: &[u8],
+) -> Result<publisher_fingerprint::PublisherFingerprint, String> {
+    let certificate =
+        Certificate::from_pem(certificate_bytes).or_else(|_| Certificate::from_der(certificate_bytes));
+    let certificate = certificate.map_err(|_| "invalid X.509 publisher certificate".to_string())?;
+    let subject_public_key_info = &certificate.tbs_certificate.subject_public_key_info;
+
+    if subject_public_key_info.algorithm.oid != ID_EC_PUBLIC_KEY {
+        return Err("publisher certificate does not contain an EC public key".to_string());
+    }
+    let Some(curve_oid) = subject_public_key_info.algorithm.parameters.as_ref().and_then(|parameters| {
+        ObjectIdentifier::try_from(x509_cert::der::asn1::AnyRef::from(parameters)).ok()
+    }) else {
+        return Err("publisher certificate is missing its EC curve".to_string());
+    };
+    if curve_oid != SECP256K1 {
+        return Err("publisher certificate public key must use secp256k1".to_string());
+    }
+
+    let public_key = subject_public_key_info
+        .subject_public_key
+        .as_bytes()
+        .ok_or_else(|| "publisher certificate has an invalid public key bit string".to_string())?;
+    let compressed_public_key = secp256k1::PublicKey::from_slice(public_key)
+        .map_err(|_| "publisher certificate has an invalid secp256k1 public key".to_string())?
+        .serialize();
+
+    publisher_fingerprint::PublisherFingerprint::from_compressed_public_key(&compressed_public_key)
+        .map_err(|error| error.to_string())
+}
+
 fn format_rapdu(rapdu: &[u8]) -> String {
     let hex: String = rapdu.iter().map(|b| format!("{b:02x}")).collect();
     let sw = match rapdu {
@@ -925,6 +999,22 @@ fn format_rapdu(rapdu: &[u8]) -> String {
         _ => "(no SW)".to_string(),
     };
     format!("RAPDU ({} bytes, SW={}): {}", rapdu.len(), sw, hex)
+}
+
+#[cfg(test)]
+mod publisher_certificate_tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_matches_device_parser_fixture() {
+        let certificate =
+            include_bytes!("../../../os/app-manager/testdata/third-party-cert-with-unknown-extension.pem");
+
+        let fingerprint = publisher_certificate_fingerprint(certificate).unwrap();
+
+        assert_eq!(fingerprint.full, "e71fa12f4331c92985e92e7e55b85dd55e75ba22bc192db4e91f202a3f3b9452");
+        assert_eq!(fingerprint.short, "e71fa12f…3f3b9452");
+    }
 }
 
 // MCP server entry point

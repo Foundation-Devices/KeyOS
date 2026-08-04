@@ -88,6 +88,8 @@ semver = { workspace = true }
 app-archive = { path = "../../../app-archive", features = ["pack"] }
 cosign2 = { path = "../../../imports/cosign2/cosign2" }
 hex = "0.4"
+publisher-fingerprint = { path = "../../../utils/publisher-fingerprint" }
+secp256k1 = "0.29"
 sha2 = "0.10"
 include_dir = "0.7"
 tempfile = "3"

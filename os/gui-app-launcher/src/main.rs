@@ -1455,7 +1455,7 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             refresh_launcher_apps(state);
         }
 
-        app_manager::AppEvent::TrustedPublishersChanged => refresh_launcher_apps(state),
+        app_manager::AppEvent::AllowedPublishersChanged => refresh_launcher_apps(state),
     }
 }
 

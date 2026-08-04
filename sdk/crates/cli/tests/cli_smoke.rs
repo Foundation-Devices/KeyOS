@@ -47,7 +47,7 @@ fn built_in_commands_expose_help() {
         );
     }
 
-    for subcommand in ["gen", "print", "install"] {
+    for subcommand in ["gen", "print", "fingerprint", "install"] {
         let output =
             Command::new(foundation_bin()).arg("cert").arg(subcommand).arg("--help").output().unwrap();
         assert!(output.status.success(), "help failed for cert {subcommand}: {}", stderr(&output));
@@ -114,6 +114,10 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
         .output()
         .unwrap();
     assert!(gen_cert.status.success(), "cert gen failed: {}", stderr(&gen_cert));
+    assert!(
+        stdout(&gen_cert).contains("Full:  0f715baf5d4c2ed329785cef29e562f73488c8a2bb9dbc5700b361d54b9b0554")
+    );
+    assert!(stdout(&gen_cert).contains("Short: 0f715baf…4b9b0554"));
     let signing_root = env.home().join(".foundation").join("signing").join("Smoke Publisher");
     assert!(signing_root.join("private.pem").exists());
     assert!(signing_root.join("public.pub").exists());
@@ -124,17 +128,34 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(print_cert.status.success(), "cert print failed: {}", stderr(&print_cert));
     assert!(stdout(&print_cert).contains("Certificate contents"));
 
+    let fingerprint_cert = env
+        .command()
+        .arg("cert")
+        .arg("fingerprint")
+        .arg(signing_root.join("Smoke Publisher.crt"))
+        .output()
+        .unwrap();
+    assert!(fingerprint_cert.status.success(), "cert fingerprint failed: {}", stderr(&fingerprint_cert));
+    assert!(stdout(&fingerprint_cert)
+        .contains("Full:  0f715baf5d4c2ed329785cef29e562f73488c8a2bb9dbc5700b361d54b9b0554"));
+    assert!(stdout(&fingerprint_cert).contains("Short: 0f715baf…4b9b0554"));
+
     let install_cert = env.command().arg("cert").arg("install").arg("Smoke Publisher").output().unwrap();
-    assert!(install_cert.status.success(), "cert install failed: {}", stderr(&install_cert));
-    assert!(stdout(&install_cert).contains("Certificate installed successfully"));
-    let passport_drive_log = env.read_log("passport-drive.log");
+    assert!(!install_cert.status.success(), "non-interactive cert install unexpectedly succeeded");
     assert!(
-        passport_drive_log.contains("\"name\":\"install_certificate\""),
-        "missing install_certificate call: {passport_drive_log}"
+        stdout(&install_cert).contains("Foundation has NOT verified this publisher's identity"),
+        "missing publisher warning: {}",
+        stdout(&install_cert)
     );
     assert!(
-        passport_drive_log.contains("Smoke Publisher.crt"),
-        "install_certificate did not receive generated certificate: {passport_drive_log}"
+        stderr(&install_cert).contains("requires an interactive terminal"),
+        "missing interactive confirmation error: {}",
+        stderr(&install_cert)
+    );
+    let passport_drive_log = env.read_log("passport-drive.log");
+    assert!(
+        !passport_drive_log.contains("\"name\":\"install_certificate\""),
+        "non-interactive install reached passport-drive: {passport_drive_log}"
     );
 
     let preview =

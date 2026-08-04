@@ -1,6 +1,6 @@
 {
   "permission.appManagement.appMetadata": "App metadata",
-  "permission.appManagement.main": "Apps and publisher trust",
+  "permission.appManagement.main": "Apps and allowed publishers",
   "permission.cryptography.hardwareHashing": "Hardware hashing",
   "permission.cryptography.main": "Cryptography",
   "permission.cryptography.primitives": "Cryptographic primitives",

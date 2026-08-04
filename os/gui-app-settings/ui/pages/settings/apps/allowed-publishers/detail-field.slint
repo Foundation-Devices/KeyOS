@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { TextMd, TextSm } from "@ui/widgets.slint";
+import { Font, Palette, Size } from "@ui/theme.slint";
+
+export component AllowedPublisherDetailField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <length> field-width;
+    in property <bool> fixed-width: false;
+
+    width: field-width;
+    spacing: Size.sz1;
+
+    TextSm {
+        width: parent.width;
+        text: root.label;
+        color: Palette.content-tertiary;
+        wrap: word-wrap;
+    }
+
+    TextMd {
+        width: parent.width;
+        text: root.value;
+        color: Palette.content-primary;
+        font-family: root.fixed-width ? "Source Code Pro" : Font.text-md.family;
+        font-size: root.fixed-width ? Font.text-sm.size : Font.text-md.size;
+        wrap: word-wrap;
+    }
+}

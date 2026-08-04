@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use rusb::{DeviceHandle, GlobalContext};
@@ -35,6 +35,7 @@ pub struct UsbDebugClient {
     log_rx: Receiver<Vec<u8>>,
     resp_rx: Receiver<RawResponse>,
     reader_enabled: Arc<AtomicBool>,
+    transport_poisoned: AtomicBool,
     reader_thread: Option<JoinHandle<()>>,
 }
 
@@ -107,26 +108,76 @@ impl UsbDebugClient {
         let reader_thread =
             std::thread::spawn(move || reader_thread(reader_handle, ep_in, log_tx, resp_tx, reader_gate));
 
-        Ok(Self { handle, ep_out, log_rx, resp_rx, reader_enabled, reader_thread: Some(reader_thread) })
+        Ok(Self {
+            handle,
+            ep_out,
+            log_rx,
+            resp_rx,
+            reader_enabled,
+            transport_poisoned: AtomicBool::new(false),
+            reader_thread: Some(reader_thread),
+        })
     }
 
     /// Encode `cmd`, send it on the OUT endpoint, and wait up to `timeout` for
     /// the matching `[STATUS][PAYLOAD]` response frame. Validates the status
     /// byte and returns just the payload on success.
     pub fn send(&self, cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
+        if self.transport_poisoned.load(Ordering::Acquire) {
+            anyhow::bail!("USB debug transport needs to be disconnected and reopened");
+        }
+
         let mut out_buf = Vec::with_capacity(64);
         cmd.encode_into(&mut out_buf);
         let cmd_byte = cmd.cmd_byte();
+        let deadline = Instant::now() + timeout;
 
-        self.handle.write_bulk(self.ep_out, &out_buf, timeout).context("bulk OUT write")?;
+        if let Err(error) = write_bulk_all(&out_buf, deadline, |remaining, write_timeout| {
+            self.handle.write_bulk(self.ep_out, remaining, write_timeout).context("bulk OUT write")
+        }) {
+            self.transport_poisoned.store(true, Ordering::Release);
+            return Err(error.context("USB command frame may be incomplete; disconnect and reconnect"));
+        }
         if needs_out_zlp(out_buf.len()) {
-            self.handle.write_bulk(self.ep_out, &[], timeout).context("bulk OUT ZLP write")?;
+            let write_timeout = match time_left(deadline, "bulk OUT ZLP write") {
+                Ok(timeout) => timeout,
+                Err(error) => {
+                    self.transport_poisoned.store(true, Ordering::Release);
+                    return Err(error.context("disconnect and reconnect"));
+                }
+            };
+            let written = match self.handle.write_bulk(self.ep_out, &[], write_timeout) {
+                Ok(written) => written,
+                Err(error) => {
+                    self.transport_poisoned.store(true, Ordering::Release);
+                    return Err(anyhow::Error::new(error)
+                        .context("bulk OUT ZLP write failed; disconnect and reconnect"));
+                }
+            };
+            if written != 0 {
+                self.transport_poisoned.store(true, Ordering::Release);
+                anyhow::bail!(
+                    "bulk OUT ZLP write unexpectedly reported {written} bytes; disconnect and reconnect"
+                );
+            }
         }
 
-        let resp = self
-            .resp_rx
-            .recv_timeout(timeout)
-            .map_err(|_| anyhow::anyhow!("Timeout waiting for response to cmd 0x{cmd_byte:02x}"))?;
+        let response_timeout = match time_left(deadline, "USB response") {
+            Ok(timeout) => timeout,
+            Err(error) => {
+                self.transport_poisoned.store(true, Ordering::Release);
+                return Err(error.context("disconnect and reconnect"));
+            }
+        };
+        let resp = match self.resp_rx.recv_timeout(response_timeout) {
+            Ok(response) => response,
+            Err(_) => {
+                self.transport_poisoned.store(true, Ordering::Release);
+                anyhow::bail!(
+                    "Timeout waiting for response to cmd 0x{cmd_byte:02x}; disconnect and reconnect"
+                );
+            }
+        };
 
         match Status::from_byte(resp.status) {
             Ok(Status::Ok) => Ok(resp.payload),
@@ -145,6 +196,43 @@ impl UsbDebugClient {
 }
 
 fn needs_out_zlp(len: usize) -> bool { len > 0 && len % USB_DEBUG_BULK_MAX_PACKET_LEN == 0 }
+
+fn write_bulk_all(
+    bytes: &[u8],
+    deadline: Instant,
+    mut write: impl FnMut(&[u8], Duration) -> Result<usize>,
+) -> Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        let write_timeout = time_left(deadline, "bulk OUT write")?;
+        let count = write(&bytes[written..], write_timeout)?;
+        if count == 0 {
+            anyhow::bail!("bulk OUT write made no progress after {written} of {} bytes", bytes.len());
+        }
+        if count > bytes.len() - written {
+            anyhow::bail!(
+                "bulk OUT write reported {count} bytes for a {}-byte remainder",
+                bytes.len() - written
+            );
+        }
+        if count < bytes.len() - written && count % USB_DEBUG_BULK_MAX_PACKET_LEN != 0 {
+            anyhow::bail!(
+                "bulk OUT short write ended the frame after {} of {} bytes",
+                written + count,
+                bytes.len()
+            );
+        }
+        written += count;
+    }
+    Ok(())
+}
+
+fn time_left(deadline: Instant, operation: &str) -> Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| anyhow::anyhow!("{operation} timed out"))
+}
 
 impl Drop for UsbDebugClient {
     fn drop(&mut self) {
@@ -226,6 +314,41 @@ mod tests {
         out.push(frame_type as u8);
         out.extend_from_slice(payload);
         out
+    }
+
+    #[test]
+    fn bulk_write_retries_partial_progress_until_complete() {
+        let bytes = vec![0u8; (USB_DEBUG_BULK_MAX_PACKET_LEN * 2) + 76];
+        let mut limits = [USB_DEBUG_BULK_MAX_PACKET_LEN, USB_DEBUG_BULK_MAX_PACKET_LEN, 76].into_iter();
+        let mut remainders = Vec::new();
+
+        write_bulk_all(&bytes, Instant::now() + Duration::from_secs(1), |remaining, _| {
+            remainders.push(remaining.len());
+            Ok(limits.next().unwrap().min(remaining.len()))
+        })
+        .unwrap();
+
+        assert_eq!(
+            remainders,
+            [(USB_DEBUG_BULK_MAX_PACKET_LEN * 2) + 76, USB_DEBUG_BULK_MAX_PACKET_LEN + 76, 76,]
+        );
+    }
+
+    #[test]
+    fn bulk_write_rejects_a_partial_short_packet() {
+        let bytes = vec![0u8; USB_DEBUG_BULK_MAX_PACKET_LEN + 1];
+        let error =
+            write_bulk_all(&bytes, Instant::now() + Duration::from_secs(1), |_, _| Ok(7)).unwrap_err();
+
+        assert!(error.to_string().contains("short write ended the frame"));
+    }
+
+    #[test]
+    fn bulk_write_rejects_zero_progress() {
+        let error = write_bulk_all(b"certificate", Instant::now() + Duration::from_secs(1), |_, _| Ok(0))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("made no progress"));
     }
 
     #[test]

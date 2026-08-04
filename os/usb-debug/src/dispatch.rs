@@ -14,7 +14,10 @@ use fs::{Error as FsError, Location, OpenFlags};
 use gui_server_api::msg::{LaunchFailureReason, RunAppResponse};
 use gui_server_api::touch::{Touch, TouchKind as GuiTouchKind};
 use gui_server_api::Key;
-use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, Payload, ProtocolError, Response};
+use usb_debug_protocol::{
+    Command, LaunchAppResult, LaunchAppStatus, Payload, ProtocolError, Response,
+    PUBLISHER_FINGERPRINT_HEX_LEN,
+};
 
 app_manager::use_api!();
 fs::use_api!();
@@ -23,7 +26,7 @@ power_manager::use_api!();
 security::use_api!();
 settings::use_api!();
 
-use app_manager::ImportThirdPartyCertificateResult;
+use app_manager::{ImportThirdPartyCertificateResult, PreviewThirdPartyCertificateResult};
 
 const POWER_BUTTON_SHORT_PRESS_MS: u64 = 200;
 const POWER_BUTTON_LONG_PRESS_MS: u64 = 3000;
@@ -159,9 +162,7 @@ impl DebugProtocol {
                     log::warn!("debug: launch_app rejected: {reason:?}");
                     let status = match reason {
                         LaunchFailureReason::SignatureRejected => LaunchAppStatus::SignatureRejected,
-                        LaunchFailureReason::NoTrustedPublisherCertificate => {
-                            LaunchAppStatus::NoTrustedPublisherCertificate
-                        }
+                        LaunchFailureReason::NoCertificate => LaunchAppStatus::NoCertificate,
                         LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
                     };
                     Response::LaunchAck(LaunchAppResult::new(0, status).encode())
@@ -207,8 +208,10 @@ impl DebugProtocol {
             Command::LoadAppChunk(data) => self.load_app_chunk(&data),
             Command::LoadAppEnd => self.load_app_end(),
             Command::GetProcessList => self.get_process_list(),
-            Command::InstallCertificate { certificate_pem } => self.install_certificate(certificate_pem),
-            Command::GetTrustedPublisherCount => self.get_trusted_publisher_count(),
+            Command::InstallCertificate { expected_fingerprint, certificate_pem } => {
+                self.install_certificate(expected_fingerprint, certificate_pem)
+            }
+            Command::GetAllowedPublisherCount => self.get_allowed_publisher_count(),
             Command::KernelCmd { cmd_byte } => {
                 let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
                     Ok(buf) => xous::DropDeallocate::new(buf),
@@ -288,7 +291,11 @@ impl DebugProtocol {
         Response::KernelOutput(payload_from_mapped(buf, len))
     }
 
-    fn install_certificate(&mut self, certificate_pem: Vec<u8>) -> Response {
+    fn install_certificate(
+        &mut self,
+        expected_fingerprint: [u8; PUBLISHER_FINGERPRINT_HEX_LEN],
+        certificate_pem: Vec<u8>,
+    ) -> Response {
         match self.gui.is_locked() {
             Ok(false) => {}
             Ok(true) => {
@@ -305,13 +312,38 @@ impl DebugProtocol {
             log::warn!("debug: install_certificate rejected: Developer Mode is disabled");
             return Response::Err;
         }
+        let expected_fingerprint =
+            std::str::from_utf8(&expected_fingerprint).expect("protocol validates fingerprint ASCII");
+        match self.app_manager.preview_third_party_certificate(certificate_pem.clone()) {
+            Ok(PreviewThirdPartyCertificateResult::Valid(cert))
+                if cert.fingerprint == expected_fingerprint => {}
+            Ok(PreviewThirdPartyCertificateResult::Valid(_)) => {
+                log::warn!("debug: install_certificate rejected: expected fingerprint does not match");
+                return Response::Err;
+            }
+            Ok(PreviewThirdPartyCertificateResult::Invalid) => {
+                log::warn!("debug: install_certificate rejected: invalid certificate");
+                return Response::Err;
+            }
+            Err(e) => {
+                log::error!("debug: install_certificate preview request failed: {e:?}");
+                return Response::Err;
+            }
+        }
         match self.app_manager.import_third_party_certificate(certificate_pem) {
             Ok(ImportThirdPartyCertificateResult::Imported(cert)) => {
-                log::info!("debug: installed trusted publisher certificate {}", cert.name);
+                log::info!(
+                    "debug: installed allowed publisher certificate with fingerprint {}",
+                    cert.fingerprint
+                );
                 Response::Ack
             }
             Ok(ImportThirdPartyCertificateResult::Invalid) => {
                 log::warn!("debug: install_certificate rejected: invalid certificate");
+                Response::Err
+            }
+            Ok(ImportThirdPartyCertificateResult::InternalError) => {
+                log::error!("debug: install_certificate failed to persist certificate");
                 Response::Err
             }
             Err(e) => {
@@ -321,7 +353,7 @@ impl DebugProtocol {
         }
     }
 
-    fn get_trusted_publisher_count(&mut self) -> Response {
+    fn get_allowed_publisher_count(&mut self) -> Response {
         let count = self
             .app_manager
             .get_third_party_certificates()
@@ -330,8 +362,8 @@ impl DebugProtocol {
             .count();
         let count = u16::try_from(count).unwrap_or(u16::MAX);
 
-        log::debug!("debug: trusted publisher count -> {count}");
-        Response::TrustedPublisherCount(count.to_le_bytes().to_vec())
+        log::debug!("debug: allowed publisher count -> {count}");
+        Response::AllowedPublisherCount(count.to_le_bytes().to_vec())
     }
 
     fn close_app(&mut self, pid: u16) -> Response {
@@ -698,7 +730,7 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::LoadAppEnd
             | Command::GetProcessList
             | Command::InstallCertificate { .. }
-            | Command::GetTrustedPublisherCount
+            | Command::GetAllowedPublisherCount
     )
 }
 

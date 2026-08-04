@@ -655,9 +655,10 @@ impl Builder {
 
     /// Build one app crate into a signed, sideloadable bundle: a directory named by the app id
     /// holding `app.elf`, `manifest.json` (with `fileHashes`), and `icon[-dark].bin` for the icons
-    /// the crate ships. Signs with the developer key from `cosign2_config`, or the repo `cosign2.toml` (which
-    /// is not a trusted publisher) when none is given; a hosted build is left unsigned. Whether the
-    /// app is a Flux child is decided by the device directory it lands in, not by anything here.
+    /// the crate ships. Signs with the developer key from `cosign2_config`, or the repo
+    /// `cosign2.toml` (which is not an allowed publisher) when none is given; a hosted build is left
+    /// unsigned. Whether the app is a Flux child is decided by the device directory it lands in, not by
+    /// anything here.
     pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> BundledApp {
         let app_bin = self.build_local_crate(app_name);
         let app_id_hex = hex::encode(load_manifest(app_name).app_id);
@@ -672,8 +673,8 @@ impl Builder {
         if self.target.is_some() {
             let cosign2_config = cosign2_config.unwrap_or_else(|| {
                 println!(
-                    "[!] No --cosign2 key given: signing with the repo cosign2.toml, which is not a \
-                     trusted publisher. The bundle uploads but will not launch until a matching \
+                    "[!] No --cosign2 key given: signing with the repo cosign2.toml, which is not an \
+                     allowed publisher. The bundle uploads but will not launch until a matching \
                      publisher certificate is installed on the device."
                 );
                 project_root().join("cosign2.toml")

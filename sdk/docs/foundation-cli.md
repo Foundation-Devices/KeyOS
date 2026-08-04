@@ -38,6 +38,8 @@ Use the canonical English command names in generated commands and docs.
 | `foundation logs [--timeout SECONDS]` | Open the Passport USB log viewer for connected hardware. | Anywhere. | `foundation-keyos-log-viewer` bundled or on `PATH`; Passport connected over USB. | Launches the log viewer and attempts USB discovery/reconnect. | Viewer missing, no device found, USB permission or reconnect timeout issues. |
 | `foundation cert gen [name] [--publisher-name NAME] [--contact-email EMAIL] [--support-url URL]` | Create a publisher signing identity for app builds. | App project when using app publisher defaults, otherwise anywhere. | OpenSSL available; explicit user intent to create signing material. | Writes private key, public key, certificate, and `cosign2.toml` under `~/.foundation/signing/<name>`. | Missing required publisher metadata, invalid identity name, OpenSSL failure, accidental duplicate identity. |
 | `foundation cert print [name]` | Inspect a stored publisher certificate. | App project for default identity lookup, otherwise anywhere. | OpenSSL available; certificate exists. | Prints decoded certificate details. | Identity not found, certificate missing, OpenSSL failure. |
+| `foundation cert fingerprint <cert>` | Print the stable identity users should compare before allowing a publisher. | Anywhere. | OpenSSL available; PEM or DER X.509 certificate exists and contains a secp256k1 public key. | Prints the full and short canonical publisher fingerprint; does not modify the certificate. | Certificate missing or malformed, unsupported public key or curve, OpenSSL failure. |
+| `foundation cert install [name]` | Review a stored publisher certificate and allow it on connected hardware. | App project for default identity lookup, otherwise anywhere. | OpenSSL available; certificate exists; Passport unlocked and connected by USB with Developer Mode enabled; interactive user confirmation. | Shows the unverified-identity warning and full/short fingerprint before the prompt, then installs the certificate only after the user chooses Allow; declining makes no changes. | Non-interactive session, identity not found, fingerprint extraction failure, USB debug unavailable, Developer Mode disabled. |
 | `foundation plugin search <query>` | Search the configured Foundation plugin index. | Anywhere. | `FOUNDATION_PLUGIN_INDEX` set or `~/.foundation/plugin-index.toml` present. | Prints matching plugin entries. | Plugin index missing or no matches. |
 | `foundation plugin install <plugin>` | Install a Foundation CLI plugin from the index or `owner/repo`. | Anywhere. | Network access; matching GitHub release asset for the current platform. | Downloads executable to `~/.foundation/plugins` and updates plugin cache. | Invalid plugin spec, release/asset not found, download failure. |
 | `foundation plugin uninstall <plugin>` | Remove an installed plugin. | Anywhere. | Plugin installed under `~/.foundation/plugins`. | Deletes `foundation-<plugin>` and removes its cache entry. | Plugin not installed or file removal failure. |
@@ -72,6 +74,43 @@ Fonts in `resources/fonts/` are registered before the Slint app starts. Use the 
 SDK shared fonts, icons, and images are searched automatically after local app resources. App projects should not create
 symlinks from `resources/fonts`, `resources/icons`, or `resources/images` back to the SDK.
 
+## Allowed Publishers and Fingerprints
+
+In KeyOS v1, the user **allows** a publisher; Foundation does not verify that publisher's identity. Allowing a
+publisher means that apps signed by its key may run on that user's Passport. The certificate's publisher name,
+organization, email address, and support URL are self-asserted claims, not proof of who controls the key.
+
+Before `foundation cert install` asks the user to allow a publisher, it displays:
+
+> Foundation has NOT verified this publisher's identity
+
+This warning means that neither Foundation nor the device has confirmed the claimed identity. Compare the displayed
+fingerprint with a value the publisher provides through a separate, official channel before choosing Allow. The
+fingerprint is the publisher's key identity; a matching claimed name is not sufficient.
+
+The canonical publisher fingerprint is the SHA-256 digest of the compressed 33-byte secp256k1 public key, rendered
+as 64 lowercase hexadecimal characters. The short display form is the first four bytes and last four bytes of that
+digest, rendered as `xxxxxxxx…xxxxxxxx`. The short form is for recognition only; compare the full fingerprint when
+making the allow decision.
+
+`foundation cert gen` prints both forms after creating the key and certificate.
+`foundation cert fingerprint <cert>` prints them again later. Publishers should place the full fingerprint on their
+official website and/or official GitHub repository so users can verify it out-of-band.
+
+After an allow decision, the CLI passes the reviewed full fingerprint to passport-drive.
+Passport-drive re-parses the bytes it will send, and firmware previews the same certificate again;
+both layers require the fingerprint to match before import.
+
+Publishers are also encouraged to publish this DNS TXT record:
+
+```text
+_keyos-publisher.<domain> TXT "v=1; k=secp256k1; fp=<hex>"
+```
+
+Replace `<domain>` with the publisher's official domain and `<hex>` with the full 64-character lowercase
+fingerprint. This is a publication convention only in v1: KeyOS and Foundation do not retrieve or verify the record.
+It is intended as a stable home for a future attestation service.
+
 ## AI Skills and Slash Workflows
 
 The SDK ships Codex and Claude skill files under `.agents/skills/` and `.claude/skills/` in the SDK bundle.
@@ -92,6 +131,10 @@ before writing.
 `foundation cert gen` creates long-lived signing material in the user's home directory. Treat this as a user
 identity operation, not a routine build step. If a build fails because no signing identity exists, explain the
 required setup instead of generating one silently.
+
+`foundation cert install` is an identity-allow operation and requires an interactive confirmation. Do not bypass or
+automate the warning. The user must compare the full fingerprint against the publisher's official website or GitHub
+before allowing it.
 
 `foundation build` signs app artifacts and may prompt for an identity. In non-interactive agent runs, prefer setting
 `signing-identity` or `cosign2-config` in `app-config.toml` only when the user has identified the intended publisher.

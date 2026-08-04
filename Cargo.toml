@@ -184,6 +184,7 @@ members = [
     "xous/xous-rs",
     "xtask",
     "utils/passport-drive",
+    "utils/publisher-fingerprint",
 ]
 
 [workspace.dependencies]
@@ -215,6 +216,7 @@ localizer-codegen = { path = "utils/localizer-codegen" }
 log-server = { package = "xous-api-log", path = "xous/api/log" }
 nfc = { path = "api/nfc" }
 power-manager = { path = "api/power-manager" }
+publisher-fingerprint = { path = "utils/publisher-fingerprint" }
 ql-utils = { path = "utils/ql-utils" }
 quantum-link = { path = "api/quantum-link" }
 rand = "0.8"
@@ -279,7 +281,7 @@ num-traits = "0.2.18"
 oneshot = { version = "0.1" }
 paste = { version = "1" }
 postcard = { version = "1.0.8", features = ["use-std"] }
-rkyv = { version = "0.8.16", default-features = false, features = [
+rkyv = { version = "0.8.17", default-features = false, features = [
     "std",
     "bytecheck",
 ] }

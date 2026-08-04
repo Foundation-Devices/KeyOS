@@ -76,10 +76,10 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
             "app ID was not found after scanning installed apps; the uploaded bundle may have been skipped",
         ),
         LaunchAppStatus::SignatureRejected => Some(
-            "app signature or bundle hashes were rejected; rebuild and reload the app, and if the signing identity changed, import the matching trusted publisher certificate first",
+            "app signature or bundle hashes were rejected; rebuild and reload the app, and if the signing identity changed, allow the matching publisher certificate first",
         ),
-        LaunchAppStatus::NoTrustedPublisherCertificate => Some(
-            "no matching trusted publisher certificate is installed; import the matching certificate in Settings > Apps > Trusted Publishers",
+        LaunchAppStatus::NoCertificate => Some(
+            "no matching allowed publisher certificate is installed; import the matching certificate in Settings > Apps > Allowed Publishers",
         ),
         LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
         LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
@@ -89,7 +89,7 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
 pub(crate) fn launch_app_transport_error_message(error: &str) -> String {
     if error.contains("device returned status 0x01") {
         format!(
-            "{error}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching trusted publisher certificate is installed in Settings > Apps > Trusted Publishers."
+            "{error}. The upload completed, so Developer Mode is reachable; this is a generic launch rejection from firmware that did not report a detailed reason. For sideloaded apps, the most likely cause is that no matching allowed publisher certificate is installed in Settings > Apps > Allowed Publishers."
         )
     } else {
         error.to_string()
@@ -105,9 +105,9 @@ mod tests {
     #[test]
     fn launch_app_failure_message_reports_missing_matching_certificate() {
         assert_eq!(
-            launch_app_failure_message(LaunchAppStatus::NoTrustedPublisherCertificate),
+            launch_app_failure_message(LaunchAppStatus::NoCertificate),
             Some(
-                "no matching trusted publisher certificate is installed; import the matching certificate in Settings > Apps > Trusted Publishers"
+                "no matching allowed publisher certificate is installed; import the matching certificate in Settings > Apps > Allowed Publishers"
             )
         );
     }
@@ -125,7 +125,7 @@ mod tests {
         let message = launch_app_transport_error_message("device returned status 0x01");
 
         assert!(message.contains("generic launch rejection"));
-        assert!(message.contains("matching trusted publisher certificate"));
+        assert!(message.contains("matching allowed publisher certificate"));
     }
 }
 

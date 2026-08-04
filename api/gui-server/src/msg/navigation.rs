@@ -28,10 +28,10 @@ pub struct NavigateTo {
 /// instead of just printing a generic "launch failed" message.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum LaunchFailureReason {
-    /// App is signed by a key not in the trusted set.
+    /// App is signed by a key not in the allowed set.
     SignatureRejected,
-    /// No matching trusted publisher certificate is installed, so this third-party app cannot be trusted.
-    NoTrustedPublisherCertificate,
+    /// No matching allowed-publisher certificate is installed, so this third-party app cannot launch.
+    NoCertificate,
     /// Anything else: app-manager-internal failure, IPC failure, etc.
     Internal,
 }

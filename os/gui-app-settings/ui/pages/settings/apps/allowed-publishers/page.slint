@@ -1,0 +1,393 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import {
+    BasePage,
+    Button,
+    ButtonSection,
+    ContentSection,
+    ErrorModal,
+    HLine,
+    Icon,
+    MenuSection,
+    MenuSectionLayout,
+    NavHeader,
+    PageBody,
+    ScrollFadeMask,
+    TextMd,
+    TextSm,
+} from "@ui/widgets.slint";
+import { Palette, Size } from "@ui/theme.slint";
+
+import { Navigate } from "../../../../gen/navigate.slint";
+import { TR2, TrId } from "../../../../gen/tr.slint";
+import {
+    AllowedPublisher,
+    AllowedPublisherImportResult,
+    AllowedPublisherPreviewResult,
+    AppManagementGlobal,
+} from "../../../../globals/app-management-global.slint";
+import { SettingsNavHeader } from "../../../../widgets/nav-header.slint";
+import { AllowedPublisherDetailField } from "detail-field.slint";
+import { AllowedPublishersProps } from "props.slint";
+
+component AllowedPublisherConfirmation inherits Rectangle {
+    in property <AllowedPublisher> publisher;
+
+    callback canceled();
+    callback confirmed();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        NavHeader {
+            title: TR2.lookup(TrId.AppsAllowPublisher);
+
+            clicked => {
+                root.canceled();
+            }
+        }
+
+        Flickable {
+            min-height: 0px;
+            vertical-stretch: 1;
+            viewport-width: self.width;
+
+            VerticalLayout {
+                width: parent.width;
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-top: Size.sz4;
+                padding-bottom: Size.sz6;
+                spacing: Size.sz5;
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width - (Size.sz6 * 2);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
+                    value: root.publisher.fingerprint;
+                    fixed-width: true;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width - (Size.sz6 * 2);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedName);
+                    value: root.publisher.confirmation_claimed_name;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width - (Size.sz6 * 2);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedOrganization);
+                    value: root.publisher.confirmation_claimed_organization;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width - (Size.sz6 * 2);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherExpirationDate);
+                    value: root.publisher.expiration_date;
+                }
+
+                TextSm {
+                    width: parent.width - (Size.sz6 * 2);
+                    text: TR2.lookup(TrId.AppsAllowedPublisherImportGrant);
+                    color: Palette.content-primary;
+                    horizontal-alignment: left;
+                    wrap: word-wrap;
+                }
+
+                TextSm {
+                    width: parent.width - (Size.sz6 * 2);
+                    text: TR2.lookup(TrId.AppsAllowedPublisherImportGuidance);
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: left;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        ButtonSection {
+            TextSm {
+                width: parent.width;
+                text: TR2.lookup(TrId.AppsAllowedPublisherNotVerifiedWarning);
+                color: Palette.content-notice;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
+            Button {
+                label: TR2.lookup(TrId.AppsAllowPublisher);
+                clicked => {
+                    root.confirmed();
+                }
+            }
+        }
+    }
+}
+
+component AllowedPublisherRow inherits Rectangle {
+    in property <AllowedPublisher> publisher;
+
+    callback clicked();
+
+    property <duration> select-anim-duration: 100ms;
+    animate background { duration: select-anim-duration; }
+
+    height: 84px;
+
+    in property <bool> first;
+    in property <bool> last;
+    border-top-left-radius: first ? Size.sz6 : 0;
+    border-top-right-radius: first ? Size.sz6 : 0;
+    border-bottom-left-radius: last ? Size.sz6 : 0;
+    border-bottom-right-radius: last ? Size.sz6 : 0;
+
+    TouchArea {
+        clicked => {
+            root.background = Palette.background-pressed;
+            select-timer.running = true;
+        }
+    }
+
+    select-timer := Timer {
+        interval: root.select-anim-duration;
+        running: false;
+
+        triggered() => {
+            select-timer.running = false;
+            root.background = Palette.transparent;
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        width: parent.width;
+        padding-left: Size.sz4;
+        padding-right: Size.sz4;
+        padding-top: Size.sz4;
+        padding-bottom: Size.sz4;
+        spacing: Size.sz4;
+
+        VerticalLayout {
+            alignment: center;
+            width: root.width - (Size.sz4 * 2) - chevron-column.width - parent.spacing;
+
+            TextMd {
+                width: parent.width;
+                text: root.publisher.claimed_name == "" ? root.publisher.short_fingerprint : root.publisher.claimed_name;
+                color: Palette.content-primary;
+                horizontal-alignment: left;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+
+            TextSm {
+                width: parent.width;
+                text: root.publisher.list_metadata;
+                color: Palette.content-tertiary;
+                horizontal-alignment: left;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+        }
+
+        chevron-column := Rectangle {
+            width: Size.sz6;
+            background: Palette.transparent;
+
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                name: "chevron-right";
+                color: Palette.content-tertiary;
+            }
+        }
+    }
+}
+
+export component AllowedPublishersPage inherits BasePage {
+    in property <AllowedPublishersProps> props;
+
+    private property <bool> invalid-certificate-visible: false;
+    private property <bool> save-failed-visible: false;
+    private property <bool> allow-confirm-visible: false;
+    private property <AllowedPublisherPreviewResult> preview-result: AllowedPublisherPreviewResult.canceled;
+    private property <AllowedPublisherImportResult> import-result: AllowedPublisherImportResult.invalid;
+    private property <length> menu-shadow-gutter: Size.sz6;
+    property <bool> at-top: flickable.viewport-y == 0;
+    property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height - root.menu-shadow-gutter;
+
+    init => {
+        AppManagementGlobal.refresh-allowed-publishers();
+    }
+
+    header := SettingsNavHeader {
+        y: 0px;
+        title: TR2.lookup(TrId.AppsAllowedPublishers);
+        visible: !root.allow-confirm-visible;
+    }
+
+    page-body := PageBody {
+        y: header.height + Size.sz2;
+        width: parent.width;
+        height: parent.height - self.y;
+        alignment: stretch;
+        spacing: Size.sz10;
+        visible: !root.allow-confirm-visible;
+
+        content-section := ContentSection {
+            vertical-stretch: 1;
+            alignment: stretch;
+            spacing: Size.sz10;
+
+            TextMd {
+                text: TR2.lookup(TrId.AppsAllowedPublishersIntro);
+                color: Palette.content-secondary;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+
+            flickable := Flickable {
+                x: -Size.sz6;
+                width: parent.width + Size.sz6 * 2;
+                vertical-stretch: 1;
+                viewport-width: self.width;
+
+                VerticalLayout {
+                    width: parent.width;
+                    alignment: start;
+                    padding-left: Size.sz6;
+                    padding-right: Size.sz6;
+                    padding-bottom: root.menu-shadow-gutter;
+
+                    MenuSection {
+                        title: TR2.lookup(TrId.AppsAllowedPublisherCertificates);
+
+                        MenuSectionLayout {
+                            if AppManagementGlobal.allowed-publishers.length == 0: Rectangle {
+                                height: Size.sz16;
+
+                                TextMd {
+                                    x: Size.sz4;
+                                    y: (parent.height - self.preferred-height) / 2;
+                                    width: parent.width - (Size.sz4 * 2);
+                                    text: TR2.lookup(TrId.AppsNoAllowedPublishers);
+                                    color: Palette.content-primary;
+                                }
+                            }
+
+                            for publisher[index] in AppManagementGlobal.allowed-publishers: VerticalLayout {
+                                AllowedPublisherRow {
+                                    publisher: publisher;
+                                    first: index == 0;
+                                    last: index == AppManagementGlobal.allowed-publishers.length - 1;
+
+                                    clicked => {
+                                        Navigate.allowed-publisher-details({
+                                            claimed-name: publisher.claimed_name,
+                                            claimed-organization: publisher.claimed_organization,
+                                            contact-email: publisher.contact_email,
+                                            support-url: publisher.support_url,
+                                            fingerprint: publisher.fingerprint,
+                                            status: publisher.status,
+                                            expiration-date: publisher.expiration_date,
+                                            date-added: publisher.date_added,
+                                            public-key: publisher.public_key,
+                                            public-key-display: publisher.public_key_display,
+                                            serial-number: publisher.serial_number,
+                                            subject: publisher.subject,
+                                            basic-constraints: publisher.basic_constraints,
+                                            key-usage: publisher.key_usage,
+                                            extended-key-usage: publisher.extended_key_usage,
+                                        }, { });
+                                    }
+                                }
+
+                                if index < AppManagementGlobal.allowed-publishers.length - 1: HLine { }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ButtonSection {
+            vertical-stretch: 0;
+
+            Button {
+                label: TR2.lookup(TrId.AppsAllowNewPublisher);
+                clicked => {
+                    root.preview-result = AppManagementGlobal.preview-allowed-publisher();
+                    if root.preview-result == AllowedPublisherPreviewResult.failed {
+                        root.invalid-certificate-visible = true;
+                    }
+                    if root.preview-result == AllowedPublisherPreviewResult.ready {
+                        root.allow-confirm-visible = true;
+                    }
+                }
+            }
+        }
+    }
+
+    ScrollFadeMask {
+        x: page-body.x + content-section.x;
+        y: page-body.y + content-section.y + flickable.y;
+        width: content-section.width;
+        height: flickable.height;
+        at-top: root.at-top;
+        at-bottom: root.at-bottom;
+        visible: !root.allow-confirm-visible;
+    }
+
+    if invalid-certificate-visible: ErrorModal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsModalInvalidAllowedPublisherCertificateHeader);
+        text: TR2.lookup(TrId.AppsModalInvalidAllowedPublisherCertificateContent);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.invalid-certificate-visible = false;
+        }
+    }
+
+    if save-failed-visible: ErrorModal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        icon: "alert";
+        title: TR2.lookup(TrId.AppsModalUnableToAllowPublisherHeader);
+        text: TR2.lookup(TrId.AppsModalUnableToAllowPublisherContent);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.save-failed-visible = false;
+        }
+    }
+
+    if allow-confirm-visible: Rectangle {
+        AllowedPublisherConfirmation {
+            width: parent.width;
+            height: parent.height;
+            publisher: AppManagementGlobal.pending-allowed-publisher;
+
+            canceled => {
+                root.allow-confirm-visible = false;
+                AppManagementGlobal.clear-pending-allowed-publisher();
+            }
+
+            confirmed => {
+                root.import-result = AppManagementGlobal.allow-pending-publisher();
+                root.allow-confirm-visible = false;
+                if root.import-result == AllowedPublisherImportResult.invalid {
+                    root.invalid-certificate-visible = true;
+                }
+                if root.import-result == AllowedPublisherImportResult.save-failed {
+                    root.save-failed-visible = true;
+                }
+            }
+        }
+    }
+}

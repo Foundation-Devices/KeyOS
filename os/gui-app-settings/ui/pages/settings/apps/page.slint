@@ -96,7 +96,7 @@ component AppListCard inherits Rectangle {
             }
 
             if icon-column.app-icon.width <= 0: Icon {
-                name: "shield";
+                name: "grid-view";
                 size: Size.sz13;
                 color: Palette.content-primary;
             }
@@ -213,6 +213,8 @@ export component AppsPage inherits BasePage {
                 width: parent.width - Size.sz6 * 2;
                 height: parent.height;
                 background: Palette.background-primary;
+                border-width: Size.sz0_25;
+                border-color: Palette.border-tertiary;
                 border-top-left-radius: row.first ? Size.sz6 : 0px;
                 border-top-right-radius: row.first ? Size.sz6 : 0px;
                 border-bottom-left-radius: row.last ? Size.sz6 : 0px;
@@ -241,10 +243,10 @@ export component AppsPage inherits BasePage {
                     height: row-delegate.content-height;
                     first: row.first;
                     last: row.last;
-                    label: TR2.lookup(TrId.AppsTrustedPublishers);
+                    label: TR2.lookup(TrId.AppsAllowedPublishers);
                     clicked => {
                         if row.action_id == 0 {
-                            Navigate.trusted-publishers({ });
+                            Navigate.allowed-publishers({ });
                         }
                     }
                 }

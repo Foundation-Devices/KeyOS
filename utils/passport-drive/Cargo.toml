@@ -11,12 +11,14 @@ anyhow = "1"
 app-manifest = { path = "../../os/app-manifest" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+const-oid = { version = "0.9", features = ["db"] }
 cosign2 = { path = "../../imports/cosign2/cosign2" }
 hex = "0.4"
 hidapi = "2"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["service", "tokio"] }
 png = "0.17"
+publisher-fingerprint = { workspace = true }
 rmcp = { version = "2.2.0", default-features = false, features = [
     "server",
     "macros",
@@ -25,7 +27,9 @@ rmcp = { version = "2.2.0", default-features = false, features = [
 ] }
 rusb = "0.9"
 sambuca = { path = "../sambuca" }
+secp256k1 = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["net", "rt"] }
 usb-debug-protocol = { workspace = true, features = ["client"] }
+x509-cert = "0.2"

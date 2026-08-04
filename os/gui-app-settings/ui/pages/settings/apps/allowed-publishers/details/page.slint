@@ -8,45 +8,20 @@ import {
     ConfirmationModal,
     ErrorModal,
     ScrollFadeMask,
-    TextMd,
-    TextSm,
 } from "@ui/widgets.slint";
 import { Importance, Palette, Size } from "@ui/theme.slint";
 
+import { AllowedPublisherDetailField } from "../detail-field.slint";
 import { Navigate } from "../../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../../gen/tr.slint";
 import {
     AppManagementGlobal,
 } from "../../../../../globals/app-management-global.slint";
 import { SettingsNavHeader } from "../../../../../widgets/nav-header.slint";
-import { TrustedPublisherDetailsProps } from "props.slint";
+import { AllowedPublisherDetailsProps } from "props.slint";
 
-component DetailField inherits VerticalLayout {
-    in property <string> label;
-    in property <string> value;
-    in property <length> field-width;
-
-    width: field-width;
-    spacing: Size.sz1;
-
-    label-text := TextSm {
-        width: parent.width;
-        text: root.label;
-        color: Palette.content-tertiary;
-        wrap: no-wrap;
-        overflow: elide;
-    }
-
-    value-text := TextMd {
-        width: parent.width;
-        text: root.value;
-        color: Palette.content-primary;
-        wrap: word-wrap;
-    }
-}
-
-export component TrustedPublisherDetailsPage inherits BasePage {
-    in property <TrustedPublisherDetailsProps> props;
+export component AllowedPublisherDetailsPage inherits BasePage {
+    in property <AllowedPublisherDetailsProps> props;
 
     private property <bool> remove-confirm-visible: false;
     private property <string> remove-error-title: "";
@@ -58,7 +33,7 @@ export component TrustedPublisherDetailsPage inherits BasePage {
 
     header := SettingsNavHeader {
         y: 0px;
-        title: TR2.lookup(TrId.AppsTrustedPublisherDetails);
+        title: TR2.lookup(TrId.AppsAllowedPublisherDetails);
     }
 
     flickable := Flickable {
@@ -78,69 +53,96 @@ export component TrustedPublisherDetailsPage inherits BasePage {
                 width: parent.width;
                 spacing: Size.sz5;
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherName);
-                    value: props.name;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
+                    value: props.fingerprint;
+                    fixed-width: true;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherCompany);
-                    value: props.company;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherStatus);
+                    value: props.status;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherContactEmail);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherExpirationDate);
+                    value: props.expiration_date;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherDateAdded);
+                    value: props.date_added;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedName);
+                    value: props.claimed_name;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedOrganization);
+                    value: props.claimed_organization;
+                }
+
+                AllowedPublisherDetailField {
+                    field-width: parent.width;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedContactEmail);
                     value: props.contact_email;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherSupportUrl);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSupportUrl);
                     value: props.support_url;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherPublicKey);
-                    value: props.public_key;
+                    label: TR2.lookup(TrId.AppsAllowedPublisherPublicKey);
+                    value: props.public_key_display;
+                    fixed-width: true;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherSerialNumber);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSerialNumber);
                     value: props.serial_number;
+                    fixed-width: true;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherSubject);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSubject);
                     value: props.subject;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherBasicConstraints);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherBasicConstraints);
                     value: props.basic_constraints;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherKeyUsage);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherKeyUsage);
                     value: props.key_usage;
                 }
 
-                DetailField {
+                AllowedPublisherDetailField {
                     field-width: parent.width;
-                    label: TR2.lookup(TrId.AppsTrustedPublisherExtendedKeyUsage);
+                    label: TR2.lookup(TrId.AppsAllowedPublisherExtendedKeyUsage);
                     value: props.extended_key_usage;
                 }
             }
 
             Button {
-                label: TR2.lookup(TrId.AppsRemoveTrustedPublisher);
+                label: TR2.lookup(TrId.AppsRemovePublisher);
                 importance: Importance.negative;
                 clicked => {
                     root.remove-confirm-visible = true;
@@ -164,10 +166,10 @@ export component TrustedPublisherDetailsPage inherits BasePage {
         button-section-padding: 0px;
         icon: "alert";
         icon-color: Palette.content-notice;
-        title: TR2.lookup(TrId.AppsRemoveTrustedPublisher);
-        text: TR2.lookup(TrId.AppsRemoveTrustedPublisherConfirm);
+        title: TR2.lookup(TrId.AppsRemovePublisher);
+        text: TR2.lookup(TrId.AppsRemovePublisherConfirm);
         cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
-        confirm-button-label: TR2.lookup(TrId.AppsRemoveTrustedPublisherConfirmButton);
+        confirm-button-label: TR2.lookup(TrId.AppsRemovePublisherConfirmButton);
         critical: true;
 
         cancel-clicked => {
@@ -176,7 +178,7 @@ export component TrustedPublisherDetailsPage inherits BasePage {
 
         confirm-clicked => {
             root.remove-confirm-visible = false;
-            let result = AppManagementGlobal.remove-trusted-publisher(props.public_key);
+            let result = AppManagementGlobal.remove-allowed-publisher(props.public_key);
             if result.success {
                 Navigate.backward();
             } else {
@@ -191,6 +193,7 @@ export component TrustedPublisherDetailsPage inherits BasePage {
         modal-border-width: 0px;
         modal-level: 4;
         button-section-padding: 0px;
+        icon: "alert";
         title: root.remove-error-title;
         text: root.remove-error-message;
         confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);

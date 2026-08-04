@@ -44,7 +44,17 @@ impl LoadDefault for settings::global::SystemTheme {
 }
 
 impl LoadDefault for settings::global::ScreenBrightness {
-    fn load_default() -> Self { Self(70) }
+    fn load_default() -> Self {
+        #[cfg(keyos)]
+        {
+            Self(70)
+        }
+
+        #[cfg(not(keyos))]
+        {
+            Self(100)
+        }
+    }
 }
 
 impl LoadDefault for settings::global::OnboardingStatus {

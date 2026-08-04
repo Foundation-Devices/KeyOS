@@ -308,7 +308,7 @@ impl AppRegistry {
     pub(crate) fn list_apps(
         &mut self,
         locale: &str,
-        trusted_publishers: &[ThirdPartyCertificateInfo],
+        allowed_publishers: &[ThirdPartyCertificateInfo],
         filter: &app_manager::AppFilter,
         permission_grants: &PermissionGrantStore,
     ) -> Vec<InstalledAppInfo> {
@@ -328,7 +328,7 @@ impl AppRegistry {
             let size_bytes = app_info.binary_size();
             let app_info = &self.installed_apps[&id];
             let name = app_info.localized_name(locale);
-            let (publisher, can_launch) = app_info.publisher_and_launchable(trusted_publishers);
+            let (publisher, can_launch) = app_info.publisher_and_launchable(allowed_publishers);
             let (basic_permissions, approvable_permissions) =
                 app_info.permission_groups(permission_grants, locale);
             apps.push(InstalledAppInfo {
@@ -748,9 +748,9 @@ impl AppInfo {
         effective
     }
 
-    /// The publisher name to show and whether the app may launch. A sideloaded app is launchable
+    /// The publisher fingerprint to show and whether the app may launch. A sideloaded app is launchable
     /// only while its signer matches one of the currently-valid `publishers`; neither built-in nor
-    /// hosted apps carry a publisher name. The simulator signs nothing, so it launches everything.
+    /// hosted apps carry a publisher fingerprint. The simulator signs nothing, so it launches everything.
     fn publisher_and_launchable(&self, publishers: &[ThirdPartyCertificateInfo]) -> (String, bool) {
         #[cfg(all(not(keyos), not(test)))]
         {
@@ -766,7 +766,7 @@ impl AppInfo {
                 .iter()
                 .find(|p| crate::third_party_certs::decode_public_key_hex(&p.public_key) == Some(signer))
             {
-                Some(publisher) => (publisher.name.clone(), true),
+                Some(publisher) => (publisher.short_fingerprint.clone(), true),
                 None => (String::new(), false),
             }
         }
@@ -895,7 +895,7 @@ fn file_size(path: &str) -> anyhow::Result<u64> {
 /// Verify a bundle manifest and return its header-stripped JSON together with the developer key
 /// that signed a sideloaded one (`None` for a built-in app). A built-in manifest must carry a
 /// valid official signature; production requires it trusted. A sideloaded manifest only needs a
-/// valid developer signature here, since whether its key is trusted is decided at launch and
+/// valid developer signature here, since whether its key is allowed is decided at launch and
 /// listing time against the cert store.
 #[cfg(keyos)]
 fn check_manifest_signature(
@@ -1122,6 +1122,9 @@ mod tests {
             contact_email: String::new(),
             support_url: String::new(),
             public_key: public_key_hex.to_string(),
+            fingerprint: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            short_fingerprint: "00000000…00000000".to_string(),
+            added_unix_seconds: None,
             not_before_unix_seconds: None,
             not_after_unix_seconds: None,
             serial_number: String::new(),
@@ -1138,12 +1141,15 @@ mod tests {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
         app.third_party_signer = Some(signer_bytes());
 
-        // No matching publisher: not launchable and no publisher name to show.
+        // No matching publisher: not launchable and no publisher fingerprint to show.
         assert_eq!(app.publisher_and_launchable(&[]), (String::new(), false));
 
-        // A publisher whose key matches the stored signer makes it launchable under that name.
+        // A publisher whose key matches the stored signer makes it launchable under its fingerprint.
         let publishers = vec![publisher_cert(SIGNER_HEX, "Acme")];
-        assert_eq!(app.publisher_and_launchable(&publishers), ("Acme".to_string(), true));
+        assert_eq!(
+            app.publisher_and_launchable(&publishers),
+            (publishers[0].short_fingerprint.clone(), true)
+        );
     }
 
     #[test]
@@ -1291,7 +1297,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_apps_include_manifest_description_and_version_without_trusting_publisher() {
+    fn installed_apps_include_manifest_description_and_version_without_allowed_publisher() {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
@@ -1374,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    fn built_in_app_launches_without_a_publisher_name() {
+    fn built_in_app_launches_without_a_publisher_fingerprint() {
         let mut app = built_in_app_info(
             "0x426974636f696e2057616c6c65740000",
             "Bitcoin Wallet",

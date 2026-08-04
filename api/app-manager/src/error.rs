@@ -22,8 +22,8 @@ pub enum AppManagerError {
     #[error("Internal Error")]
     InternalError = 2,
 
-    #[error("No Matching Trusted Publisher Certificate")]
-    NoTrustedPublisherCertificate = 3,
+    #[error("No Certificate")]
+    NoCertificate = 3,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -38,7 +38,7 @@ pub enum LaunchError {
     UnknownAppId,
     Verification(VerificationError),
     NameRegistration,
-    NoTrustedPublisherCertificate,
+    NoCertificate,
     OutOfMemory,
     InternalError,
 }
@@ -61,7 +61,7 @@ impl From<LaunchError> for AppManagerError {
         match value {
             LaunchError::UnknownAppId => AppManagerError::UnknownAppId,
             LaunchError::Verification(_) => AppManagerError::VerificationFailed,
-            LaunchError::NoTrustedPublisherCertificate => AppManagerError::NoTrustedPublisherCertificate,
+            LaunchError::NoCertificate => AppManagerError::NoCertificate,
             _ => AppManagerError::InternalError,
         }
     }

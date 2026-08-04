@@ -138,6 +138,16 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.send_blocking_archive(GetThirdPartyCertificates)
     }
 
+    pub fn preview_third_party_certificate(
+        &self,
+        certificate_pem: Vec<u8>,
+    ) -> Result<PreviewThirdPartyCertificateResult, xous::Error>
+    where
+        P: MessageAllowed<PreviewThirdPartyCertificate>,
+    {
+        self.0.try_send_blocking_archive(PreviewThirdPartyCertificate { certificate_pem })
+    }
+
     pub fn import_third_party_certificate(
         &self,
         certificate_pem: Vec<u8>,

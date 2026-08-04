@@ -234,9 +234,11 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
 
         let sdk = SdkRoot::discover_from(&nested).unwrap();
+        let canonical_root = fs::canonicalize(&root).unwrap();
+        let canonical_repo_root = canonical_root.parent().unwrap();
         assert_eq!(sdk.layout(), SdkLayout::Repo);
-        assert_eq!(sdk.root(), root.as_path());
-        assert_eq!(sdk.keyos_root(), repo_root);
+        assert_eq!(sdk.root(), canonical_root);
+        assert_eq!(sdk.keyos_root(), canonical_repo_root);
         assert_eq!(sdk.ui_library_path(), sdk.keyos_root().join("ui2").join("components").join("ui"));
         assert_eq!(sdk.ui_shared_resources_path(), sdk.keyos_root().join("ui2").join("resources"));
     }
@@ -253,10 +255,11 @@ mod tests {
         fs::write(&nested, "").unwrap();
 
         let sdk = SdkRoot::discover_from(&nested).unwrap();
+        let canonical_root = fs::canonicalize(root).unwrap();
         assert_eq!(sdk.layout(), SdkLayout::Bundle);
-        assert_eq!(sdk.root(), root);
-        assert_eq!(sdk.keyos_root(), root.join("lib").join("keyos"));
-        assert_eq!(sdk.ui_library_path(), root.join("ui").join("ui"));
-        assert_eq!(sdk.ui_shared_resources_path(), root.join("resources"));
+        assert_eq!(sdk.root(), canonical_root);
+        assert_eq!(sdk.keyos_root(), canonical_root.join("lib").join("keyos"));
+        assert_eq!(sdk.ui_library_path(), canonical_root.join("ui").join("ui"));
+        assert_eq!(sdk.ui_shared_resources_path(), canonical_root.join("resources"));
     }
 }

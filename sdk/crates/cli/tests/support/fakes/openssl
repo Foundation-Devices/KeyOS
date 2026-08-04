@@ -3,7 +3,11 @@
 # SPDX-License-Identifier: MIT
 if [ "$1" = "version" ]; then echo 'OpenSSL fake'; exit 0; fi
 if [ "$1" = "ecparam" ]; then printf 'PRIVATE-KEY'; exit 0; fi
-if [ "$1" = "ec" ]; then printf 'FAKEDER'; printf '\x02'; printf '12345678901234567890123456789012'; exit 0; fi
+if [ "$1" = "ec" ]; then
+  printf '\060\066\060\020\006\007\052\206\110\316\075\002\001\006\005\053\201\004\000\012\003\042\000'
+  printf '\002\171\276\146\176\371\334\273\254\125\240\142\225\316\207\013\007\002\233\374\333\055\316\050\331\131\362\201\133\026\370\027\230'
+  exit 0
+fi
 if [ "$1" = "req" ]; then out=''; while [ $# -gt 0 ]; do if [ "$1" = "-out" ]; then out="$2"; shift 2; else shift; fi; done; printf 'CERTIFICATE' > "$out"; exit 0; fi
 if [ "$1" = "x509" ]; then in=''; while [ $# -gt 0 ]; do if [ "$1" = "-in" ]; then in="$2"; shift 2; else shift; fi; done; printf 'Certificate contents for %s\n' "$in"; exit 0; fi
 exit 1

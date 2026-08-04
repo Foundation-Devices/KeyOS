@@ -66,7 +66,7 @@ pub enum AppEvent {
         removed: Vec<AppId>,
     },
 
-    TrustedPublishersChanged,
+    AllowedPublishersChanged,
 }
 
 #[derive(Debug, server::Message)]
@@ -100,6 +100,7 @@ pub struct InstalledAppPermissionGroup {
 pub struct InstalledAppInfo {
     pub app_id: String,
     pub name: String,
+    /// Short fingerprint of the allowed third-party publisher; empty for built-in apps.
     pub publisher: String,
     pub can_launch: bool,
     pub can_remove: bool,
@@ -156,7 +157,17 @@ pub struct ThirdPartyCertificateInfo {
     pub company: String,
     pub contact_email: String,
     pub support_url: String,
+    /// Compressed secp256k1 public key encoded as lowercase hexadecimal.
     pub public_key: String,
+    /// SHA-256 of the compressed 33-byte public key, encoded as 64 lowercase hex characters.
+    #[serde(default)]
+    pub fingerprint: String,
+    /// The first and last four fingerprint bytes separated by an ellipsis.
+    #[serde(default)]
+    pub short_fingerprint: String,
+    /// When the user first added this certificate. Legacy entries may not have this metadata.
+    #[serde(default)]
+    pub added_unix_seconds: Option<u64>,
     #[serde(default)]
     pub not_before_unix_seconds: Option<u64>,
     #[serde(default)]
@@ -185,9 +196,16 @@ impl ThirdPartyCertificateInfo {
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum PreviewThirdPartyCertificateResult {
+    Valid(ThirdPartyCertificateInfo),
+    Invalid,
+}
+
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ImportThirdPartyCertificateResult {
     Imported(ThirdPartyCertificateInfo),
     Invalid,
+    InternalError,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -321,6 +339,12 @@ pub struct GetPermissionRequestInfo {
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Vec<ThirdPartyCertificateInfo>)]
 pub struct GetThirdPartyCertificates;
+
+#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(PreviewThirdPartyCertificateResult)]
+pub struct PreviewThirdPartyCertificate {
+    pub certificate_pem: Vec<u8>,
+}
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(ImportThirdPartyCertificateResult)]

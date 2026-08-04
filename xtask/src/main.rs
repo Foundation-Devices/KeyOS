@@ -216,7 +216,7 @@ enum Commands {
         out: Option<PathBuf>,
         /// Developer signing key's cosign2.toml (e.g. from the SDK `foundation cert gen`, whose
         /// publisher certificate is installed on the device). Defaults to the repo key, which is
-        /// not a trusted publisher (the bundle uploads but will not launch).
+        /// not an allowed publisher (the bundle uploads but will not launch).
         #[arg(long = "cosign2", value_name = "COSIGN2_TOML")]
         cosign2: Option<PathBuf>,
         /// Build for the simulator (hosted) instead of hardware; leaves the bundle unsigned.

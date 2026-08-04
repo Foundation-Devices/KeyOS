@@ -2,7 +2,7 @@
   "permission": {
     "appManagement": {
       "appMetadata": "App metadata",
-      "main": "Apps and publisher trust"
+      "main": "Apps and allowed publishers"
     },
     "cryptography": {
       "hardwareHashing": "Hardware hashing",
@@ -1354,10 +1354,40 @@
       "description": "Description",
       "detailsTitle": "App Details",
       "developerMode": "Developer Mode",
+      "allowNewPublisher": "Add Publisher",
+      "allowPublisher": "Allow this publisher",
+      "allowedPublisherBasicConstraints": "Certificate basic constraints",
+      "allowedPublisherCertificates": "Publishers",
+      "allowedPublisherClaimedContactEmail": "Claimed contact email (not verified)",
+      "allowedPublisherClaimedName": "Claimed name (not verified)",
+      "allowedPublisherClaimedOrganization": "Claimed organization (not verified)",
+      "allowedPublisherClaimedSerialNumber": "Certificate serial number",
+      "allowedPublisherClaimedSubject": "Claimed subject (not verified)",
+      "allowedPublisherClaimedSupportUrl": "Claimed support URL (not verified)",
+      "allowedPublisherDateAdded": "Date added",
+      "allowedPublisherDateUnavailable": "Date unavailable",
+      "allowedPublisherDetails": "Allowed Publisher",
+      "allowedPublisherExpirationDate": "Expiration date",
+      "allowedPublisherExtendedKeyUsage": "Certificate extended key usage",
+      "allowedPublisherExpires": "Expires {0}",
+      "allowedPublisherFingerprint": "Publisher fingerprint",
+      "allowedPublisherImportGrant": "Apps signed by this publisher can be installed and run on your Passport.",
+      "allowedPublisherImportGuidance": "Verify this fingerprint against the publisher's official website or GitHub.",
+      "allowedPublisherKeyUsage": "Certificate key usage",
+      "allowedPublisherListMetadata": "{0} · {1}",
+      "allowedPublisherNotVerifiedWarning": "Foundation has NOT verified this publisher's identity.",
+      "allowedPublisherPublicKey": "Signing public key",
+      "allowedPublisherStatus": "Status",
+      "allowedPublisherStatusActive": "Active",
+      "allowedPublisherStatusExpired": "Expired",
+      "allowedPublisherStatusInactive": "Inactive",
+      "allowedPublisherStatusNotActiveYet": "Not active yet",
+      "allowedPublishers": "Allowed Publishers",
+      "allowedPublishersIntro": "Add an app publisher by importing their certificate. Verify each fingerprint before allowing it.",
       "installApp": "Install App",
-      "installTrustedPublisherCertificate": "Install Certificate",
       "installedApps": "Installed Apps",
       "mcpControl": "MCP Control",
+      "noAllowedPublishers": "No Allowed Publishers",
       "noInstalledApps": "No installed apps",
       "publisher": "Publisher",
       "removeApp": "Remove App",
@@ -1368,32 +1398,13 @@
       },
       "removeAppFailed": "Unable to remove this app.",
       "removeAppRunning": "Close this app before removing it.",
-      "removeTrustedPublisher": "Remove Trusted Publisher",
-      "removeTrustedPublisherCertificate": "Remove Trusted Publisher",
-      "removeTrustedPublisherConfirm": "Are you sure you want to remove this Trusted Publisher?",
-      "removeTrustedPublisherConfirmButton": "Remove",
+      "removePublisher": "Remove Publisher",
+      "removePublisherConfirm": "Are you sure you want to remove this publisher?",
+      "removePublisherConfirmButton": "Remove",
       "requestedPermissions": "Requested Permissions",
       "sectionSettings": "Settings",
       "size": "Size",
       "title": "Apps",
-      "trustedPublisherBasicConstraints": "Basic Constraints",
-      "trustedPublisherCertificateInstalled": {
-        "content": "Trusted Publisher certificate successfully installed.",
-        "header": "Trusted Publisher certificate installed."
-      },
-      "trustedPublisherCertificates": "Certificates",
-      "trustedPublisherCompany": "Company",
-      "trustedPublisherContactEmail": "Contact Email",
-      "trustedPublisherDetails": "Trusted Publisher",
-      "trustedPublisherExtendedKeyUsage": "Extended Key Usage",
-      "trustedPublisherKeyUsage": "Key Usage",
-      "trustedPublisherName": "Name",
-      "trustedPublisherPublicKey": "Public Key",
-      "trustedPublisherSerialNumber": "Serial Number",
-      "trustedPublisherSubject": "Subject",
-      "trustedPublisherSupportUrl": "Support URL",
-      "trustedPublishers": "Trusted Publishers",
-      "trustedPublishersIntro": "Install public key certificates for Trusted Publishers.",
       "unableToRemoveApp": "Unable to remove App",
       "usbLogging": "USB Logging",
       "version": "Version"
@@ -1426,23 +1437,23 @@
       "content": "Install failed. Passport is unable to verify the app signature. Contact the app publisher.",
       "header": "Invalid Signature"
     },
-    "appsModalInvalidTrustedPublisherCertificate": {
-      "content": "Contact the company producing the certificate.",
-      "header": "Invalid Trusted Publisher certificate."
+    "appsModalAllowedPublisherRemoveFailed": {
+      "content": "Unable to remove this publisher. Try again. If the problem continues, restart Passport."
     },
-    "appsModalNoTrustedPublishers": {
-      "header": "No Trusted Publishers"
+    "appsModalInvalidAllowedPublisherCertificate": {
+      "content": "Contact the company producing the certificate.",
+      "header": "Invalid publisher certificate."
     },
     "appsModalRemoveXFirstThenRetry": {
       "content": "{0} is installed and depends on this certificate. Remove the app first, then try again.",
-      "header": "Unable to remove Trusted Publisher"
+      "header": "Unable to remove publisher"
     },
-    "appsModalTrustedPublisherRemoveFailed": {
-      "content": "Unable to remove this Trusted Publisher. Try again. If the problem continues, restart Passport.",
-      "header": "Unable to remove Trusted Publisher"
+    "appsModalUnableToAllowPublisher": {
+      "content": "The publisher certificate could not be saved. Check available storage and try again.",
+      "header": "Unable to allow publisher"
     },
-    "appsModalUnableToRemoveTrustedPublisher": {
-      "header": "Unable to remove Trusted Publisher"
+    "appsModalUnableToRemoveAllowedPublisher": {
+      "header": "Unable to remove publisher"
     },
     "autoShutdown": {
       "never": "Never",

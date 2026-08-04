@@ -517,6 +517,10 @@ Signature:
 foundation cert gen [name] [--publisher-name NAME] [--contact-email EMAIL] [--support-url URL]
 
 foundation cert print [name]
+
+foundation cert fingerprint <cert>
+
+foundation cert install [name]
 ```
 
 Behavior:
@@ -539,6 +543,24 @@ Behavior:
   - a compressed public key hex file
   - a self-signed X.509 code-signing certificate
   - matching `cosign2` configuration
+- `gen` prints the canonical publisher fingerprint in full and short forms
+- The canonical fingerprint is `SHA256(compressed 33-byte secp256k1 public key)`, rendered as 64
+  lowercase hexadecimal characters
+- The short form is the first four fingerprint bytes, an ellipsis, and the last four bytes:
+  `xxxxxxxx…xxxxxxxx`
+- `fingerprint` extracts the secp256k1 public key from the certificate path and prints the same full
+  and short forms; certificates using another key type or curve are rejected
+- `install` displays the full and short fingerprint and warns
+  `Foundation has NOT verified this publisher's identity` before the allow decision
+- `install` states that apps signed by the publisher will be allowed and tells the user to compare
+  the fingerprint against the publisher's official website or GitHub
+- `install` requires an explicit interactive `Allow this publisher?` confirmation, defaulting to
+  no; non-interactive sessions fail before contacting passport-drive
+- After confirmation, `install` passes passport-drive the exact full fingerprint that was shown.
+  Passport-drive re-parses the same bytes and refuses to install if that fingerprint is absent or
+  different, closing the file-replacement window between review and installation. The usb-debug
+  command also carries that expected fingerprint; firmware previews the certificate and requires
+  an exact match before importing it.
 
 ### `doctor`
 

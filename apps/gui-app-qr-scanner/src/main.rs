@@ -311,7 +311,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                         .retain(|entry| !installed.contains(&entry.id) && !removed.contains(&entry.id));
                     state.match_rules.extend(replacements);
                 }
-                app_manager::AppEvent::TrustedPublishersChanged => {
+                app_manager::AppEvent::AllowedPublishersChanged => {
                     let rules = async_archive::<app_manager_permissions::AppManagerPermissions, _>(
                         app_manager::messages::GetQrMatchRules { app_ids: Vec::new() },
                     )
