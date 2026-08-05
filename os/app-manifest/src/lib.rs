@@ -268,6 +268,23 @@ mod tests {
     }
 
     #[test]
+    fn qr_match_rules_ignore_unknown_fields() {
+        for field in ["regex-pattern", "regexPattern"] {
+            let manifest = try_from_bytes(
+                v0_json(&format!(
+                    r#","qrMatchRules":[{{"id":"rule","subRules":{{"qr":{{"QR":{{"{field}":"^test$"}}}}}}}}]"#
+                ))
+                .as_bytes(),
+            )
+            .unwrap();
+            assert!(matches!(
+                manifest.qr_match_rules[0].sub_rules["qr"],
+                QrMatchSubRule::QR { regex_pattern: None, .. }
+            ));
+        }
+    }
+
+    #[test]
     fn try_from_bytes_invalid_app_id_fails() {
         let json = format!(r#"{{"appName":{{"en":"Test"}},"appId":"{}"}}"#, "0xnope");
         assert!(try_from_bytes(json.as_bytes()).is_err());

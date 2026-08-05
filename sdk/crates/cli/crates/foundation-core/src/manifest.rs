@@ -27,7 +27,7 @@ pub fn app_manifest_from_config(config: &AppConfig, permissions: PermissionEntri
         permissions: permissions_to_sets(permissions),
         memory: Vec::new(),
         syscall: Vec::new(),
-        qr_match_rules: Vec::new(),
+        qr_match_rules: config.qr_match_rules.iter().cloned().map(Into::into).collect(),
         file_hashes: BTreeMap::new(),
     }
 }
@@ -44,11 +44,13 @@ mod tests {
     use app_manifest::Locale;
 
     use super::app_manifest_from_config;
-    use crate::config::{AppConfig, AppId, PermissionEntries, PermissionsConfig, PublisherConfig};
+    use crate::config::{
+        AppConfig, AppId, PermissionEntries, PermissionsConfig, PublisherConfig, QrMatchRuleConfig,
+        QrMatchSubRuleConfig,
+    };
 
-    #[test]
-    fn manifest_from_config_lowercases_app_id_and_falls_back_to_friendly_name() {
-        let config = AppConfig {
+    fn demo_config(app_id: &str) -> AppConfig {
+        AppConfig {
             app_name: "demo-app".to_string(),
             friendly_app_name: "Demo Friendly".to_string(),
             launcher_app_name: None,
@@ -56,13 +58,19 @@ mod tests {
             publisher: PublisherConfig { name: "Demo Corp".to_string(), ..Default::default() },
             icon: PathBuf::from("resources/icon.svg"),
             theme: None,
-            app_id: AppId::from_hex("0xAABBCCDDEEFF00112233445566778899").unwrap(),
+            app_id: AppId::from_hex(app_id).unwrap(),
             permissions: PermissionsConfig::default(),
             version: semver::Version::parse("0.1.0").unwrap(),
             min_keyos_version: semver::Version::parse("1.0.0").unwrap(),
             signing_identity: None,
             cosign2_config: None,
-        };
+            qr_match_rules: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn manifest_from_config_lowercases_app_id_and_falls_back_to_friendly_name() {
+        let config = demo_config("0xAABBCCDDEEFF00112233445566778899");
         let permissions: PermissionEntries =
             BTreeMap::from([("os/settings".to_string(), vec!["GetDeviceName".to_string()])]);
 
@@ -82,6 +90,43 @@ mod tests {
         assert_eq!(
             manifest.permissions,
             BTreeMap::from([("os/settings".to_string(), BTreeSet::from(["GetDeviceName".to_string()]))])
+        );
+    }
+
+    #[test]
+    fn manifest_from_config_converts_qr_match_rules() {
+        let mut config = demo_config("0x00112233445566778899aabbccddeeff");
+        config.qr_match_rules.push(QrMatchRuleConfig {
+            id: "otpauth".to_string(),
+            priority: app_manifest::QrPriority::new(5).unwrap(),
+            id_localizations: BTreeMap::from([("en".to_string(), "OTP Auth".to_string())]),
+            sub_rules: BTreeMap::from([(
+                "qr".to_string(),
+                QrMatchSubRuleConfig::QR {
+                    min_len: None,
+                    max_len: None,
+                    regex_pattern: Some("^otpauth://".to_string()),
+                },
+            )]),
+        });
+
+        let manifest = app_manifest_from_config(&config, PermissionEntries::default());
+
+        assert_eq!(
+            manifest.qr_match_rules,
+            vec![app_manifest::QrMatchRule {
+                id: "otpauth".to_string(),
+                priority: app_manifest::QrPriority::new(5).unwrap(),
+                id_localizations: BTreeMap::from([(Locale("en".to_string()), "OTP Auth".to_string())]),
+                sub_rules: BTreeMap::from([(
+                    "qr".to_string(),
+                    app_manifest::QrMatchSubRule::QR {
+                        min_len: None,
+                        max_len: None,
+                        regex_pattern: Some("^otpauth://".to_string()),
+                    },
+                )]),
+            }]
         );
     }
 }

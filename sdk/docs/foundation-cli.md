@@ -47,7 +47,7 @@ Use the canonical English command names in generated commands and docs.
 
 ## Project Files Agents Should Know
 
-- `app-config.toml`: app metadata, app ID, icon path, theme path, version, permissions, and optional signing identity. The `icon` file is converted into the bundled `icon.bin` placed next to `app.elf`. A `<stem>-dark.(svg|png)` sibling of the icon (e.g. `resources/icon-dark.svg`) is converted into `icon-dark.bin` beside it and used in dark theme; without one, the light icon serves both themes. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
+- `app-config.toml`: app metadata, app ID, icon path, theme path, version, permissions, optional QR match rules, and optional signing identity. The `icon` file is converted into the bundled `icon.bin` placed next to `app.elf`. A `<stem>-dark.(svg|png)` sibling of the icon (e.g. `resources/icon-dark.svg`) is converted into `icon-dark.bin` beside it and used in dark theme; without one, the light icon serves both themes. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
 - `permission_templates.toml`: named permission bundles expanded by `app-config.toml`.
 - `.foundation-sdk/current`: generated SDK dependency mapping used by template `Cargo.toml` path dependencies. It is ignored and refreshed by `foundation new`, `build`, `sim`, and `preview`.
 - `ui/app.slint`: default UI entrypoint for `foundation preview`.
@@ -57,6 +57,41 @@ Use the canonical English command names in generated commands and docs.
 - `images/` and `fonts/`: legacy app-owned asset directories. Hardware and simulator builds still stage them for compatibility, but new apps should prefer `resources/images` and `resources/fonts`.
 - `target/keyos/<app-name>/`: hardware build output from `foundation build`, including `app.elf`, `manifest.json`, `icon.bin` (and `icon-dark.bin` when the app ships a dark icon), and app-local `resources`.
 - `target/keyos/<app-name>.app`: the same bundle packed by `foundation pack` into one file, for installing on a device from a USB drive or the airlock.
+
+## QR Match Rules
+
+Apps can register QR match rules for the Launcher QR scanner tile in `app-config.toml`.
+When the Launcher scan result matches one app, KeyOS opens that app directly. When several apps match,
+KeyOS asks the user which app should handle the QR data.
+
+Apps launched from a QR match also need permission to read the handoff payload. Declaring any rule
+grants the app the `os/gui-server` `GetPendingNavRequest` permission, so the app config does not have
+to request it.
+
+Use `[[qr-match-rules]]` entries. Like every other key in `app-config.toml`, the rule fields are
+kebab-case; the CLI converts them into the camelCase manifest form when it generates `manifest.json`.
+
+```toml
+[[qr-match-rules]]
+id = "otpauth"
+priority = 5
+id-localizations = { en = "OTP Auth" }
+sub-rules = { qr = { QR = { regex-pattern = "^otpauth://" } } }
+
+[[qr-match-rules]]
+id = "crypto-psbt"
+id-localizations = { en = "PSBT" }
+sub-rules = { ur = { UR = { ur-type = "psbt" } } }
+```
+
+`id` is the stable rule identifier reported to your app with the scan result. `id-localizations` is the
+user-facing label shown when the Launcher needs a choice. `priority` is optional and defaults to `3`;
+valid values are `1` through `5`, with higher values sorted first.
+
+Each entry in `sub-rules` is keyed by a name you choose and tagged `QR` or `UR`. QR sub-rules match raw
+QR payloads: use `min-len`, `max-len`, and `regex-pattern` to narrow the match. UR sub-rules match UR 2.0
+payloads by `ur-type`. Unknown fields are rejected, so a misspelling fails the build instead of shipping
+a rule that never matches.
 
 ## App Assets
 

@@ -6,6 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use app_manifest::{Locale, QrPriority};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 pub const APP_CONFIG_FILE: &str = "app-config.toml";
@@ -14,6 +16,8 @@ pub const DISPLAY_APP_NAME_ALLOWED_CHARS: &str = "A-Z, a-z, 0-9, spaces, and hyp
 pub const APP_ICON_SIZE_PX: u32 = 110;
 /// The formats an app icon may be authored in, matching what `validate_icon_file` measures.
 const ICON_EXTENSIONS: [&str; 6] = ["svg", "png", "webp", "jpg", "jpeg", "bmp"];
+const GUI_SERVER_PERMISSION: &str = "os/gui-server";
+const GET_PENDING_NAV_REQUEST: &str = "GetPendingNavRequest";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -62,6 +66,70 @@ pub struct AppConfig {
     /// Optional path to cosign2.toml
     #[serde(default)]
     pub cosign2_config: Option<String>,
+
+    /// QR match rules used by the Launcher QR scanner tile.
+    #[serde(default)]
+    pub qr_match_rules: Vec<QrMatchRuleConfig>,
+}
+
+/// A QR match rule as authored in `app-config.toml`, converted into the manifest rule by
+/// `app_manifest_from_config`. The SDK owns this spelling, so it is kebab-case like the rest of the
+/// config and rejects unknown fields; the manifest schema can do neither, because it is camelCase
+/// and has to stay forward compatible for the device.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct QrMatchRuleConfig {
+    pub id: String,
+
+    #[serde(default)]
+    pub priority: QrPriority,
+
+    #[serde(default)]
+    pub id_localizations: BTreeMap<String, String>,
+
+    pub sub_rules: BTreeMap<String, QrMatchSubRuleConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all_fields = "kebab-case", deny_unknown_fields)]
+pub enum QrMatchSubRuleConfig {
+    QR {
+        #[serde(default)]
+        min_len: Option<usize>,
+        #[serde(default)]
+        max_len: Option<usize>,
+        #[serde(default)]
+        regex_pattern: Option<String>,
+    },
+    UR {
+        ur_type: String,
+    },
+}
+
+impl From<QrMatchRuleConfig> for app_manifest::QrMatchRule {
+    fn from(rule: QrMatchRuleConfig) -> Self {
+        Self {
+            id: rule.id,
+            priority: rule.priority,
+            id_localizations: rule
+                .id_localizations
+                .into_iter()
+                .map(|(locale, name)| (Locale(locale), name))
+                .collect(),
+            sub_rules: rule.sub_rules.into_iter().map(|(id, sub_rule)| (id, sub_rule.into())).collect(),
+        }
+    }
+}
+
+impl From<QrMatchSubRuleConfig> for app_manifest::QrMatchSubRule {
+    fn from(sub_rule: QrMatchSubRuleConfig) -> Self {
+        match sub_rule {
+            QrMatchSubRuleConfig::QR { min_len, max_len, regex_pattern } => {
+                Self::QR { min_len, max_len, regex_pattern }
+            }
+            QrMatchSubRuleConfig::UR { ur_type } => Self::UR { ur_type },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -206,7 +274,7 @@ impl AppConfig {
     pub fn validate(&self, project_root: &Path) -> Result<(), ConfigError> {
         self.validate_app_names()?;
         self.validate_icon(project_root)?;
-
+        self.validate_qr_match_rules()?;
         let _ = self.resolved_permissions(project_root)?;
         Ok(())
     }
@@ -235,6 +303,50 @@ impl AppConfig {
         if let Some(name) = &self.launcher_app_name {
             validate_display_app_name("launcher-app-name", name)?;
         }
+        Ok(())
+    }
+
+    fn validate_qr_match_rules(&self) -> Result<(), ConfigError> {
+        for rule in &self.qr_match_rules {
+            let invalid = |sub_rule_id: Option<&String>, reason: String| ConfigError::InvalidQrMatchRule {
+                rule_id: rule.id.clone(),
+                sub_rule_id: sub_rule_id.cloned(),
+                reason,
+            };
+
+            if rule.sub_rules.is_empty() {
+                return Err(invalid(None, "must contain at least one sub-rule".to_string()));
+            }
+
+            for (sub_rule_id, sub_rule) in &rule.sub_rules {
+                match sub_rule {
+                    QrMatchSubRuleConfig::QR { min_len, max_len, regex_pattern } => {
+                        if let (Some(min_len), Some(max_len)) = (min_len, max_len) {
+                            if min_len > max_len {
+                                return Err(invalid(
+                                    Some(sub_rule_id),
+                                    format!(
+                                        "min-len {min_len} must be less than or equal to max-len {max_len}"
+                                    ),
+                                ));
+                            }
+                        }
+
+                        if let Some(pattern) = regex_pattern {
+                            Regex::new(pattern).map_err(|source| {
+                                invalid(Some(sub_rule_id), format!("invalid regex-pattern: {source}"))
+                            })?;
+                        }
+                    }
+                    QrMatchSubRuleConfig::UR { ur_type } => {
+                        if ur_type.trim().is_empty() {
+                            return Err(invalid(Some(sub_rule_id), "ur-type must not be empty".to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -288,8 +400,21 @@ impl AppConfig {
     }
 
     /// Expand permission templates and merge them with explicit permission entries.
+    ///
+    /// Declaring `qr-match-rules` is itself the request for the QR handoff, so the gui-server
+    /// permission it needs is added here instead of being boilerplate the app author must repeat.
     pub fn resolved_permissions(&self, project_root: &Path) -> Result<PermissionEntries, ConfigError> {
-        self.permissions.resolve(project_root)
+        let mut permissions = self.permissions.resolve(project_root)?;
+
+        if !self.qr_match_rules.is_empty() {
+            let messages = permissions.entry(GUI_SERVER_PERMISSION.to_string()).or_default();
+            if !messages.iter().any(|message| message == GET_PENDING_NAV_REQUEST) {
+                messages.push(GET_PENDING_NAV_REQUEST.to_string());
+                messages.sort();
+            }
+        }
+
+        Ok(permissions)
     }
 }
 
@@ -497,18 +622,23 @@ pub enum ConfigError {
     #[error("Invalid {field} '{name}': {reason}")]
     InvalidAppName { field: &'static str, name: String, reason: &'static str },
 
+    #[error("Invalid qr-match-rules entry '{rule_id}'{sub_rule}: {reason}", sub_rule = sub_rule_id.as_ref().map(|id| format!(", sub-rule '{id}'")).unwrap_or_default())]
+    InvalidQrMatchRule { rule_id: String, sub_rule_id: Option<String>, reason: String },
+
     #[error("'{field}' in {path} is generated by the build; remove it")]
     AutomatedField { field: &'static str, path: PathBuf },
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
 
     use super::{
         validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError, ConfigError,
-        IconDimensions, PermissionsConfig, PublisherConfig, APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
+        IconDimensions, PermissionsConfig, PublisherConfig, QrMatchRuleConfig, QrMatchSubRuleConfig,
+        QrPriority, APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
     };
 
     #[test]
@@ -540,21 +670,9 @@ mod tests {
 
     #[test]
     fn loads_app_config_and_expands_permission_templates() {
-        let root_dir = tempfile::tempdir().unwrap();
-        let root = root_dir.path();
-        fs::create_dir_all(root.join("resources")).unwrap();
-        write_valid_icon(root);
-        fs::write(
-            root.join(APP_CONFIG_FILE),
+        let root_dir = write_project(
             r#"
-            app-name = "demo-app"
-            friendly-app-name = "Demo App"
             launcher-app-name = "Demo"
-            description = "Demo description"
-            icon = "resources/icon.svg"
-            app-id = "0x00112233445566778899aabbccddeeff"
-            version = "0.1.0"
-            min-keyos-version = "1.0.0"
             cosign2-config = "~/.foundation/signing/demo-app/cosign2.toml"
 
             [publisher]
@@ -566,17 +684,13 @@ mod tests {
             template = ["gui-app"]
             "os/settings" = ["GetDeviceName"]
             "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join(PERMISSION_TEMPLATES_FILE),
             r#"
             [gui-app]
             "os/gui-server" = ["RegisterAppMessage", "RequestRedraw"]
             "os/settings" = ["GetLocale"]
             "#,
-        )
-        .unwrap();
+        );
+        let root = root_dir.path();
 
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         config.validate(root).unwrap();
@@ -590,6 +704,131 @@ mod tests {
         assert_eq!(config.publisher.name_value(), Some("Demo Corp"));
         assert_eq!(config.publisher.contact_email_value(), Some("support@example.com"));
         assert_eq!(config.publisher.support_url_value(), Some("https://example.com/support"));
+    }
+
+    #[test]
+    fn loads_qr_match_rules_from_app_config() {
+        let root_dir = write_project(
+            r#"
+            [permissions]
+            template = ["gui-app"]
+
+            [[qr-match-rules]]
+            id = "otpauth"
+            priority = 5
+            id-localizations = { en = "OTP Auth" }
+            sub-rules = { qr = { QR = { regex-pattern = "^otpauth://" } } }
+            "#,
+            GUI_APP_TEMPLATE,
+        );
+        let root = root_dir.path();
+
+        let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
+
+        assert_eq!(config.qr_match_rules.len(), 1);
+        let rule = &config.qr_match_rules[0];
+        assert_eq!(rule.id, "otpauth");
+        assert_eq!(rule.priority.get(), 5);
+        assert_eq!(rule.id_localizations["en"], "OTP Auth");
+        assert_eq!(
+            rule.sub_rules["qr"],
+            QrMatchSubRuleConfig::QR {
+                min_len: None,
+                max_len: None,
+                regex_pattern: Some("^otpauth://".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn loads_qr_match_rule_that_matches_all_raw_qrs() {
+        let root_dir = write_project(ANY_QR_RULE_CONFIG, GUI_APP_TEMPLATE);
+        let root = root_dir.path();
+
+        let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
+        config.validate(root).unwrap();
+
+        assert_eq!(
+            config.qr_match_rules[0].sub_rules["qr"],
+            QrMatchSubRuleConfig::QR { min_len: None, max_len: None, regex_pattern: None }
+        );
+    }
+
+    #[test]
+    fn qr_match_rules_add_the_gui_server_handoff_permission() {
+        let root_dir = write_project(ANY_QR_RULE_CONFIG, GUI_APP_TEMPLATE);
+        let root = root_dir.path();
+
+        let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
+        config.validate(root).unwrap();
+
+        let permissions = config.resolved_permissions(root).unwrap();
+        assert_eq!(
+            permissions["os/gui-server"],
+            vec!["GetPendingNavRequest", "RegisterAppMessage", "RequestRedraw"]
+        );
+    }
+
+    #[test]
+    fn permissions_are_untouched_without_qr_match_rules() {
+        let root_dir = write_project(
+            r#"
+            [permissions]
+            template = ["gui-app"]
+            "#,
+            GUI_APP_TEMPLATE,
+        );
+        let root = root_dir.path();
+
+        let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
+        let permissions = config.resolved_permissions(root).unwrap();
+
+        assert_eq!(permissions["os/gui-server"], vec!["RegisterAppMessage", "RequestRedraw"]);
+    }
+
+    #[test]
+    fn load_rejects_misspelled_qr_regex_fields() {
+        for misspelled_field in ["regex_pattern", "regexPattern"] {
+            let root_dir = write_project(
+                &format!(
+                    r#"
+                    [[qr-match-rules]]
+                    id = "bad-spelling"
+                    id-localizations = {{ en = "Bad Spelling" }}
+                    sub-rules = {{ qr = {{ QR = {{ {misspelled_field} = "^otpauth://" }} }} }}
+                    "#
+                ),
+                GUI_APP_TEMPLATE,
+            );
+            let root = root_dir.path();
+
+            let error = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap_err();
+            assert!(
+                matches!(error, ConfigError::ParseError { .. }),
+                "unexpected error for {misspelled_field}: {error}"
+            );
+            assert!(
+                error.to_string().contains(misspelled_field),
+                "error does not name the unknown field {misspelled_field}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_rejects_manifest_casing_in_qr_match_rules() {
+        let root_dir = write_project(
+            r#"
+            [[qr-match-rules]]
+            id = "camel"
+            idLocalizations = { en = "Camel" }
+            subRules = { qr = { QR = { regex-pattern = "^otpauth://" } } }
+            "#,
+            GUI_APP_TEMPLATE,
+        );
+        let root = root_dir.path();
+
+        let error = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap_err();
+        assert!(error.to_string().contains("idLocalizations"), "{error}");
     }
 
     #[test]
@@ -665,28 +904,96 @@ mod tests {
     }
 
     #[test]
-    fn validate_fails_when_permission_template_is_missing() {
+    fn validate_rejects_qr_match_rule_with_invalid_regex() {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
         fs::create_dir_all(root.join("resources")).unwrap();
         write_valid_icon(root);
-        fs::write(
-            root.join(APP_CONFIG_FILE),
-            r#"
-            app-name = "demo-app"
-            friendly-app-name = "Demo App"
-            description = "Demo description"
-            icon = "resources/icon.svg"
-            app-id = "0x00112233445566778899aabbccddeeff"
-            version = "0.1.0"
-            min-keyos-version = "1.0.0"
 
+        let mut config = test_config("demo-app");
+        config.qr_match_rules = vec![QrMatchRuleConfig {
+            id: "bad-regex".to_string(),
+            priority: QrPriority::default(),
+            id_localizations: BTreeMap::new(),
+            sub_rules: BTreeMap::from([(
+                "qr".to_string(),
+                QrMatchSubRuleConfig::QR {
+                    min_len: None,
+                    max_len: None,
+                    regex_pattern: Some("[invalid".to_string()),
+                },
+            )]),
+        }];
+
+        let error = config.validate(root).unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::InvalidQrMatchRule { ref rule_id, ref sub_rule_id, .. }
+                if rule_id == "bad-regex" && sub_rule_id.as_deref() == Some("qr")
+        ));
+        assert!(error.to_string().contains("invalid regex-pattern"));
+    }
+
+    #[test]
+    fn validate_rejects_qr_match_rule_with_no_sub_rules() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(root);
+
+        let mut config = test_config("demo-app");
+        config.qr_match_rules = vec![QrMatchRuleConfig {
+            id: "empty".to_string(),
+            priority: QrPriority::default(),
+            id_localizations: BTreeMap::new(),
+            sub_rules: BTreeMap::new(),
+        }];
+
+        let error = config.validate(root).unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::InvalidQrMatchRule { ref rule_id, sub_rule_id: None, .. } if rule_id == "empty"
+        ));
+        assert!(error.to_string().contains("must contain at least one sub-rule"));
+    }
+
+    #[test]
+    fn validate_rejects_qr_match_rule_with_inverted_length_bounds() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(root);
+
+        let mut config = test_config("demo-app");
+        config.qr_match_rules = vec![QrMatchRuleConfig {
+            id: "bad-len".to_string(),
+            priority: QrPriority::default(),
+            id_localizations: BTreeMap::new(),
+            sub_rules: BTreeMap::from([(
+                "qr".to_string(),
+                QrMatchSubRuleConfig::QR { min_len: Some(10), max_len: Some(5), regex_pattern: None },
+            )]),
+        }];
+
+        let error = config.validate(root).unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::InvalidQrMatchRule { ref rule_id, ref sub_rule_id, .. }
+                if rule_id == "bad-len" && sub_rule_id.as_deref() == Some("qr")
+        ));
+        assert!(error.to_string().contains("min-len 10"));
+    }
+
+    #[test]
+    fn validate_fails_when_permission_template_is_missing() {
+        let root_dir = write_project(
+            r#"
             [permissions]
             template = ["missing"]
             "#,
-        )
-        .unwrap();
-        fs::write(root.join(PERMISSION_TEMPLATES_FILE), "").unwrap();
+            "",
+        );
+        let root = root_dir.path();
 
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         let error = config.validate(&root).unwrap_err();
@@ -746,6 +1053,49 @@ mod tests {
         assert_eq!(dimensions, IconDimensions { width: 110, height: 110 });
     }
 
+    /// A project on disk with a valid icon, the mandatory app-config keys, and `extra_config`
+    /// appended. `extra_config` must therefore start with any remaining top-level keys, before its
+    /// first table.
+    fn write_project(extra_config: &str, templates: &str) -> tempfile::TempDir {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        fs::create_dir_all(root.join("resources")).unwrap();
+        write_valid_icon(root);
+        fs::write(
+            root.join(APP_CONFIG_FILE),
+            format!(
+                r#"
+                app-name = "demo-app"
+                friendly-app-name = "Demo App"
+                description = "Demo description"
+                icon = "resources/icon.svg"
+                app-id = "0x00112233445566778899aabbccddeeff"
+                version = "0.1.0"
+                min-keyos-version = "1.0.0"
+                {extra_config}
+                "#
+            ),
+        )
+        .unwrap();
+        fs::write(root.join(PERMISSION_TEMPLATES_FILE), templates).unwrap();
+        root_dir
+    }
+
+    const GUI_APP_TEMPLATE: &str = r#"
+        [gui-app]
+        "os/gui-server" = ["RegisterAppMessage", "RequestRedraw"]
+        "#;
+
+    const ANY_QR_RULE_CONFIG: &str = r#"
+        [permissions]
+        template = ["gui-app"]
+
+        [[qr-match-rules]]
+        id = "any-qr"
+        id-localizations = { en = "Any QR" }
+        sub-rules = { qr = { QR = {} } }
+        "#;
+
     fn test_config(app_name: &str) -> AppConfig {
         AppConfig {
             app_name: app_name.to_string(),
@@ -761,6 +1111,7 @@ mod tests {
             min_keyos_version: semver::Version::new(1, 0, 0),
             signing_identity: None,
             cosign2_config: None,
+            qr_match_rules: Vec::new(),
         }
     }
 

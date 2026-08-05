@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 semver = { workspace = true }
 dirs = { workspace = true }
 imagesize = "0.13"
+regex = { workspace = true }
 usvg = { version = "0.45.1", default-features = false }
 
 [dev-dependencies]

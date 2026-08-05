@@ -55,7 +55,7 @@ pub struct ApiManifestV0 {
     pub servers: BTreeMap<String, BTreeMap<String, Message>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QrMatchRuleV0 {
     pub id: String,
@@ -115,7 +115,7 @@ impl From<QrPriorityV0> for u8 {
     fn from(value: QrPriorityV0) -> Self { value.get() }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QrMatchSubRuleV0 {
     QR {
         min_len: Option<usize>,

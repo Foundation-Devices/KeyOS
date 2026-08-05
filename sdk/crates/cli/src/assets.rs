@@ -420,6 +420,7 @@ mod tests {
             min_keyos_version: Version::parse("1.0.0").unwrap(),
             signing_identity: None,
             cosign2_config: None,
+            qr_match_rules: Vec::new(),
         }
     }
 
