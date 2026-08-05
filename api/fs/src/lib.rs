@@ -35,6 +35,8 @@ use messages::*;
 
 // Enough space for the typical FAT32 cluster read (64 sectors of 512)
 pub const FILE_BUFFER_SIZE: usize = 64 * 512;
+// The server rejects any single async read, write or copy longer than this.
+pub const MAX_ASYNC_LEN: usize = 1024 * 1024;
 pub const BLOCK_SIZE: u64 = 512;
 pub const SYSTEM_STATE_ROOT: &str = "state";
 
@@ -526,7 +528,7 @@ impl<P: CheckedPermissions + MessageAllowed<CloseFile>> File<P> {
         P: MessageAllowed<AsyncCopyBlock>,
     {
         to.seek(std::io::SeekFrom::Start(0))?;
-        while self.copy_block_to(to, 0x10000)? > 0 {}
+        while self.copy_block_to(to, MAX_ASYNC_LEN)? > 0 {}
         to.truncate()?;
         Ok(())
     }

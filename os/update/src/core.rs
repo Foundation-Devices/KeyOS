@@ -104,7 +104,7 @@ where
 
             let mut remaining = entry.len as usize;
             while remaining > 0 {
-                let block_size = remaining.min(1024 * 1024);
+                let block_size = remaining.min(fs::MAX_ASYNC_LEN);
                 let written = src.copy_block_to(&mut dst, block_size).whence()?;
                 // copy_block_to returns 0 at EOF; stop, or else an over-long entry.len loops forever.
                 if written == 0 {

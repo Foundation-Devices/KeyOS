@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use fs::adapter::FsAdapter;
-use fs::{Error, OpenFlags, FILE_BUFFER_SIZE};
+use fs::{Error, OpenFlags, MAX_ASYNC_LEN};
 use slint_keyos_platform::async_scalar;
 use whence::WhenceExt;
 
@@ -194,7 +194,7 @@ async fn copy_file(
 
     let mut remaining = metadata.size as usize;
     while remaining > 0 {
-        let req = src.async_copy_block_to(&mut dst, FILE_BUFFER_SIZE);
+        let req = src.async_copy_block_to(&mut dst, MAX_ASYNC_LEN);
         let written = async_scalar::<FileSystemPermissions, _>(req).await.whence()?;
         if written == 0 {
             break;

@@ -644,14 +644,13 @@ impl RecoveryWorkerServer {
         // Skip the header
         src_file.seek(SeekFrom::Start(offset as u64))?;
 
-        const CHUNK_SIZE: usize = 32 * 1024;
         let mut bytes_copied = 0;
 
         progress_fn(0.0);
 
         while bytes_copied < size {
             let bytes_remaining = size - bytes_copied;
-            let chunk_size = bytes_remaining.min(CHUNK_SIZE);
+            let chunk_size = bytes_remaining.min(fs::MAX_ASYNC_LEN);
 
             let written = src_file.copy_block_to(&mut dst_file, chunk_size)?;
             if written == 0 {

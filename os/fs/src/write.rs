@@ -30,6 +30,9 @@ impl server::BlockingArchiveHandler<AsyncWrite> for Server {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<usize, Error> {
+        if msg.buffer.len() > fs::MAX_ASYNC_LEN {
+            return Err(Error::InvalidBufferLength);
+        }
         self.write_file(msg.handle, &msg.buffer, sender)
     }
 }

@@ -126,6 +126,10 @@ impl BlockingScalarHandler<AsyncCopyBlock> for Server {
         if msg.to == msg.from {
             return Err(Error::FileAlreadyExists);
         }
+        // Check before rounding, or else next_multiple_of overflows near usize::MAX.
+        if msg.len > fs::MAX_ASYNC_LEN {
+            return Err(Error::InvalidBufferLength);
+        }
         let aligned_len = core::cmp::max(msg.len.next_multiple_of(0x1000), 0x1000);
         let mut buffer = DropDeallocate::new(xous::map_memory(None, None, aligned_len, MemoryFlags::W)?);
 

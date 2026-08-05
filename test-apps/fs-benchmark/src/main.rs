@@ -135,7 +135,7 @@ fn main() {
                 .open_file(COPY2_FILE_NAME, location, OpenFlags { read: false, write: true, create: true })
                 .unwrap();
 
-            while from.copy_block_to(&mut to, 64 * 1024).unwrap() != 0 {}
+            while from.copy_block_to(&mut to, fs::MAX_ASYNC_LEN).unwrap() != 0 {}
         }
         let elapsed = read_start.elapsed().as_secs_f32();
 

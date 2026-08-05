@@ -30,6 +30,9 @@ impl server::BlockingArchiveHandler<AsyncRead> for Server {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Result<Vec<u8>, Error> {
+        if msg.read_len > fs::MAX_ASYNC_LEN {
+            return Err(Error::InvalidBufferLength);
+        }
         let mut result = vec![0; msg.read_len];
         let len = self.read_file(msg.handle, &mut result, sender)?;
         result.truncate(len);
