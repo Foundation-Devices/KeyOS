@@ -17,6 +17,7 @@ hex = "0.4"
 hidapi = "2"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["service", "tokio"] }
+jiff = { workspace = true }
 png = "0.17"
 publisher-fingerprint = { workspace = true }
 rmcp = { version = "2.2.0", default-features = false, features = [

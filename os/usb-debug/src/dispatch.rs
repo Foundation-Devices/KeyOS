@@ -8,7 +8,7 @@
 
 use std::io::Write;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fs::{Error as FsError, Location, OpenFlags};
 use gui_server_api::msg::{LaunchFailureReason, RunAppResponse};
@@ -27,9 +27,11 @@ security::use_api!();
 settings::use_api!();
 
 use app_manager::{ImportThirdPartyCertificateResult, PreviewThirdPartyCertificateResult};
+use xous_ticktimer::TicktimerPrivileged;
 
 const POWER_BUTTON_SHORT_PRESS_MS: u64 = 200;
 const POWER_BUTTON_LONG_PRESS_MS: u64 = 3000;
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// Persistent debug protocol handler. Holds connections that are reused
 /// across commands, rather than creating one per request.
@@ -39,6 +41,7 @@ pub struct DebugProtocol {
     security: Security,
     settings: SettingsApi,
     fs: FileSystem,
+    ticktimer: TicktimerPrivileged,
     upload: Option<UploadSession>,
     /// Set by the `RebootSamba` arm; `process` honors it once the Ack has
     /// been queued for the USB writer.
@@ -66,6 +69,7 @@ impl DebugProtocol {
             security: Security::default(),
             settings: SettingsApi::default(),
             fs: FileSystem::default(),
+            ticktimer: TicktimerPrivileged::default(),
             upload: None,
             reboot_after_answering: false,
         }
@@ -212,6 +216,8 @@ impl DebugProtocol {
                 self.install_certificate(expected_fingerprint, certificate_pem)
             }
             Command::GetAllowedPublisherCount => self.get_allowed_publisher_count(),
+            Command::GetSystemTime => self.get_system_time(),
+            Command::SetSystemTime { unix_seconds } => self.set_system_time(unix_seconds),
             Command::KernelCmd { cmd_byte } => {
                 let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
                     Ok(buf) => xous::DropDeallocate::new(buf),
@@ -364,6 +370,52 @@ impl DebugProtocol {
 
         log::debug!("debug: allowed publisher count -> {count}");
         Response::AllowedPublisherCount(count.to_le_bytes().to_vec())
+    }
+
+    /// Readable while locked and in production builds: the clock is not a secret, and it is the
+    /// first thing to check when a certificate or a signed app is rejected.
+    fn get_system_time(&mut self) -> Response {
+        let Ok(elapsed) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+            log::error!("debug: get_system_time: the clock reads before the Unix epoch");
+            return Response::Err;
+        };
+        let unix_seconds = elapsed.as_secs();
+
+        log::debug!("debug: system time -> {unix_seconds} (unix seconds, UTC)");
+        Response::SystemTime(unix_seconds.to_le_bytes().to_vec())
+    }
+
+    /// Moving the clock moves what every certificate validity window is judged against, so this
+    /// takes the same gate as importing one: Developer Mode, and not while locked.
+    fn set_system_time(&mut self, unix_seconds: u64) -> Response {
+        match self.gui.is_locked() {
+            Ok(false) => {}
+            Ok(true) => {
+                log::warn!("debug: set_system_time rejected: device is locked");
+                return Response::Locked;
+            }
+            Err(e) => {
+                log::error!("debug: set_system_time lock-state check failed: {e:?}");
+                return Response::Err;
+            }
+        }
+
+        if !self.developer_mode_enabled() {
+            log::warn!("debug: set_system_time rejected: Developer Mode is disabled");
+            return Response::Err;
+        }
+
+        // The RTC stores a 32 bit Unix timestamp and the ticktimer reads a pending value of zero as
+        // "nothing to set", so seconds outside this range would be acknowledged here and then
+        // wrapped or dropped instead of reaching the clock.
+        if unix_seconds == 0 || unix_seconds > u64::from(u32::MAX) {
+            log::warn!("debug: set_system_time rejected: {unix_seconds} is outside the RTC range");
+            return Response::Err;
+        }
+
+        self.ticktimer.set_system_time(unix_seconds * NANOS_PER_SECOND);
+        log::info!("debug: system time set to {unix_seconds} (unix seconds, UTC)");
+        Response::Ack
     }
 
     fn close_app(&mut self, pid: u16) -> Response {
@@ -731,6 +783,9 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::GetProcessList
             | Command::InstallCertificate { .. }
             | Command::GetAllowedPublisherCount
+            // Reading the clock is a diagnostic; moving it changes what every certificate validity
+            // window is judged against, so SetSystemTime stays out of production firmware.
+            | Command::GetSystemTime
     )
 }
 

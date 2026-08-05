@@ -141,6 +141,8 @@ const CMD_INSTALL_CERTIFICATE_LEGACY: u8 = 0x10;
 const CMD_GET_ALLOWED_PUBLISHER_COUNT: u8 = 0x11;
 const CMD_LOAD_FLUX_APP_BEGIN: u8 = 0x12;
 const CMD_INSTALL_CERTIFICATE: u8 = 0x13;
+const CMD_GET_SYSTEM_TIME: u8 = 0x14;
+const CMD_SET_SYSTEM_TIME: u8 = 0x15;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
@@ -207,6 +209,13 @@ pub enum Command {
         certificate_pem: Vec<u8>,
     },
     GetAllowedPublisherCount,
+    /// Read the device wall clock. Certificate validity and anything else time-dependent is judged
+    /// against it, so it is the first thing to check when a certificate is rejected.
+    GetSystemTime,
+    SetSystemTime {
+        /// Seconds since the Unix epoch, UTC. Settings renders the local time zone on top of this.
+        unix_seconds: u64,
+    },
 }
 
 impl Command {
@@ -231,6 +240,8 @@ impl Command {
             Command::GetProcessList => CMD_GET_PROCESS_LIST,
             Command::InstallCertificate { .. } => CMD_INSTALL_CERTIFICATE,
             Command::GetAllowedPublisherCount => CMD_GET_ALLOWED_PUBLISHER_COUNT,
+            Command::GetSystemTime => CMD_GET_SYSTEM_TIME,
+            Command::SetSystemTime { .. } => CMD_SET_SYSTEM_TIME,
         }
     }
 
@@ -244,7 +255,11 @@ impl Command {
             | Command::GetDeveloperMode
             | Command::LoadAppEnd
             | Command::GetProcessList
-            | Command::GetAllowedPublisherCount => {}
+            | Command::GetAllowedPublisherCount
+            | Command::GetSystemTime => {}
+            Command::SetSystemTime { unix_seconds } => {
+                out.extend_from_slice(&unix_seconds.to_le_bytes());
+            }
             Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps } => {
                 out.extend_from_slice(&start_x.to_le_bytes());
                 out.extend_from_slice(&start_y.to_le_bytes());
@@ -390,6 +405,11 @@ impl Command {
                 })
             }
             CMD_GET_ALLOWED_PUBLISHER_COUNT => Ok(Command::GetAllowedPublisherCount),
+            CMD_GET_SYSTEM_TIME => Ok(Command::GetSystemTime),
+            CMD_SET_SYSTEM_TIME => {
+                let bytes: &[u8; 8] = exact_payload(cmd, payload)?;
+                Ok(Command::SetSystemTime { unix_seconds: u64::from_le_bytes(*bytes) })
+            }
             CMD_INSTALL_CERTIFICATE_LEGACY => Err(ProtocolError::UnknownCommand(cmd)),
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
@@ -470,6 +490,9 @@ pub enum Response {
     DeveloperMode(bool),
     /// Reply to `Command::GetAllowedPublisherCount`. Payload is little-endian `u16`.
     AllowedPublisherCount(Vec<u8>),
+    /// Reply to `Command::GetSystemTime`. Payload is little-endian `u64`: seconds since the Unix
+    /// epoch, UTC.
+    SystemTime(Vec<u8>),
     /// Asynchronous log frame; not a reply to a `Command`.
     Log(Vec<u8>),
 }
@@ -488,6 +511,7 @@ impl Response {
             Response::LaunchAck(d) => (HDR_RESP_OK, d.as_slice()),
             Response::DeveloperMode(enabled) => (HDR_RESP_OK, dev_mode_byte(*enabled)),
             Response::AllowedPublisherCount(d) => (HDR_RESP_OK, d.as_slice()),
+            Response::SystemTime(d) => (HDR_RESP_OK, d.as_slice()),
             Response::Log(d) => (HDR_LOG, d.as_slice()),
         }
     }
@@ -637,6 +661,19 @@ mod tests {
             certificate_pem: b"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_vec(),
         });
         roundtrip(Command::GetAllowedPublisherCount);
+        roundtrip(Command::GetSystemTime);
+        roundtrip(Command::SetSystemTime { unix_seconds: 1_754_400_600 });
+    }
+
+    #[test]
+    fn set_system_time_rejects_a_payload_that_is_not_eight_bytes() {
+        let mut short = vec![CMD_SET_SYSTEM_TIME];
+        short.extend_from_slice(&[0u8; 7]);
+        assert!(Command::decode(&short).is_err());
+
+        let mut long = vec![CMD_SET_SYSTEM_TIME];
+        long.extend_from_slice(&[0u8; 9]);
+        assert!(Command::decode(&long).is_err());
     }
 
     #[test]

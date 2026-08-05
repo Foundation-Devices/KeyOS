@@ -28,6 +28,7 @@ usb-debug-protocol = { workspace = true }
 utralib = { workspace = true }
 uuid = "1.10"
 xous = { workspace = true }
+xous-ticktimer = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

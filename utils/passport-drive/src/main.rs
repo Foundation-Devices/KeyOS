@@ -121,6 +121,28 @@ mod tests {
     }
 
     #[test]
+    fn system_time_is_rendered_as_utc_so_a_local_offset_is_not_read_as_a_fault() {
+        assert_eq!(format_utc(1_754_400_600).unwrap(), "2025-08-05T13:30:00Z UTC");
+    }
+
+    #[test]
+    fn timestamps_round_trip_through_rfc_3339() {
+        assert_eq!(parse_timestamp("2025-08-05T13:30:00Z").unwrap(), 1_754_400_600);
+        // Same instant, written in another offset.
+        assert_eq!(parse_timestamp("2025-08-05T15:30:00+02:00").unwrap(), 1_754_400_600);
+
+        assert!(parse_timestamp("yesterday").is_err());
+        assert!(parse_timestamp("1969-01-01T00:00:00Z").is_err());
+    }
+
+    #[test]
+    fn system_time_payload_must_be_exactly_eight_bytes() {
+        assert_eq!(decode_system_time(&1_754_400_600u64.to_le_bytes()).unwrap(), 1_754_400_600);
+        assert!(decode_system_time(&[0u8; 7]).is_err());
+        assert!(decode_system_time(&[0u8; 9]).is_err());
+    }
+
+    #[test]
     fn launch_app_transport_error_explains_legacy_generic_status() {
         let message = launch_app_transport_error_message("device returned status 0x01");
 
@@ -235,6 +257,17 @@ enum CliCommand {
     GetVersion,
     /// Print the compact kernel process list
     GetProcessList,
+    /// Print the device clock in UTC. Check this when a publisher certificate or a sideloaded app
+    /// is rejected: validity windows are judged against it.
+    #[command(name = "get_time", alias = "get-time")]
+    GetTime,
+    /// Set the device clock. Requires Developer Mode and an unlocked device.
+    #[command(name = "set_time", alias = "set-time")]
+    SetTime {
+        /// RFC 3339 timestamp (e.g. 2026-08-05T12:00:00Z), or "now" for this computer's clock
+        #[arg(default_value = "now")]
+        timestamp: String,
+    },
     /// Upload an app bundle into keyos/sideloaded-apps/<app-id> over usb-debug
     #[command(name = "load_app", alias = "load-app")]
     LoadApp {
@@ -390,6 +423,46 @@ fn do_get_process_list(client: &UsbDebugClient) -> Result<()> {
     let payload = client.send(Command::GetProcessList, Duration::from_secs(5))?;
     print!("{}", String::from_utf8_lossy(&payload));
     Ok(())
+}
+
+fn do_get_time(client: &UsbDebugClient) -> Result<()> {
+    let payload = client.send(Command::GetSystemTime, Duration::from_secs(5))?;
+    let unix_seconds = decode_system_time(&payload)?;
+    println!("{} (unix {unix_seconds})", format_utc(unix_seconds)?);
+    Ok(())
+}
+
+fn do_set_time(client: &UsbDebugClient, timestamp: &str) -> Result<()> {
+    let unix_seconds = parse_timestamp(timestamp)?;
+    client.send(Command::SetSystemTime { unix_seconds }, Duration::from_secs(5))?;
+    println!("device clock set to {} (unix {unix_seconds})", format_utc(unix_seconds)?);
+    Ok(())
+}
+
+fn decode_system_time(payload: &[u8]) -> Result<u64> {
+    let bytes: [u8; 8] =
+        payload.try_into().map_err(|_| anyhow::anyhow!("expected 8 payload bytes, got {}", payload.len()))?;
+    Ok(u64::from_le_bytes(bytes))
+}
+
+/// The device clock is UTC; Settings renders the local time zone on top of it, so anything shown
+/// to a human says so rather than leaving an offset to be read as a fault.
+fn format_utc(unix_seconds: u64) -> Result<String> {
+    let seconds = i64::try_from(unix_seconds).context("timestamp does not fit in an i64")?;
+    let timestamp = jiff::Timestamp::from_second(seconds)
+        .map_err(|e| anyhow::anyhow!("{unix_seconds} is not a representable timestamp: {e}"))?;
+    Ok(format!("{timestamp:?} UTC"))
+}
+
+fn parse_timestamp(timestamp: &str) -> Result<u64> {
+    let parsed = if timestamp == "now" {
+        jiff::Timestamp::now()
+    } else {
+        timestamp
+            .parse::<jiff::Timestamp>()
+            .map_err(|e| anyhow::anyhow!("{timestamp:?} is not an RFC 3339 timestamp: {e}"))?
+    };
+    u64::try_from(parsed.as_second()).context("timestamps before the Unix epoch cannot be set")
 }
 
 fn do_power(client: &UsbDebugClient, long: bool) -> Result<()> {
@@ -756,6 +829,8 @@ fn main() -> Result<()> {
         }
         CliCommand::GetVersion => do_get_version(&client)?,
         CliCommand::GetProcessList => do_get_process_list(&client)?,
+        CliCommand::GetTime => do_get_time(&client)?,
+        CliCommand::SetTime { timestamp } => do_set_time(&client, &timestamp)?,
         CliCommand::LoadApp { app_path, flux } => {
             let kind = if flux { load_app::SideloadKind::Flux } else { load_app::SideloadKind::Standard };
             eprintln!("Uploading app from {}...", app_path.display());

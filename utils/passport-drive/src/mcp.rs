@@ -37,7 +37,10 @@ use x509_cert::{
     Certificate,
 };
 
-use crate::{launch_app_failure_message, launch_app_transport_error_message, LOG_TERMINATOR};
+use crate::{
+    decode_system_time, format_utc, launch_app_failure_message, launch_app_transport_error_message,
+    parse_timestamp, LOG_TERMINATOR,
+};
 
 const MAX_LOG_LINES: usize = 2000;
 const TAP_HOLD_MS: u16 = 50;
@@ -206,6 +209,12 @@ struct LaunchAppParams {
 struct CloseAppParams {
     /// Process ID to close
     pid: u16,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SetSystemTimeParams {
+    /// RFC 3339 timestamp (e.g. 2026-08-05T12:00:00Z), or "now" for this computer's clock
+    timestamp: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -918,6 +927,44 @@ impl PassportServer {
             Some(other) => Err(format!("get_developer_mode: unexpected payload byte 0x{other:02x}")),
             None => Err("get_developer_mode: empty payload".to_string()),
         }
+    }
+
+    /// Read the device clock, in UTC. Check this FIRST whenever a publisher certificate is refused
+    /// or a sideloaded app will not launch: certificate validity is judged against this clock, and
+    /// a Passport that lost backup power reads 2024-01-01, which rejects every valid certificate.
+    /// Settings shows the local time zone on top of this UTC value.
+    #[tool]
+    fn get_system_time(&self) -> Result<CallToolResult, String> {
+        let payload = state()
+            .require_device()?
+            .send(Command::GetSystemTime, Duration::from_secs(5))
+            .map_err(|e| format!("get_system_time request failed: {e}"))?;
+        let unix_seconds = decode_system_time(&payload).map_err(|e| format!("get_system_time: {e:#}"))?;
+        let formatted = format_utc(unix_seconds).map_err(|e| format!("get_system_time: {e:#}"))?;
+        Ok(text_result(&format!("{formatted} (unix {unix_seconds})")))
+    }
+
+    /// Set the device clock. Requires Developer Mode and an unlocked device, and is unavailable on
+    /// production firmware. Pass an RFC 3339 timestamp, or "now" for this computer's clock.
+    ///
+    /// The device applies the new time on its next RTC tick, so allow a second before reading it
+    /// back with get_system_time; an immediate read still returns the old value.
+    ///
+    /// A paired Envoy re-syncs the clock on its next message, accepting any forward jump and any
+    /// change over 10 minutes, so a clock deliberately set backwards for testing may not stay put.
+    #[tool]
+    fn set_system_time(
+        &self,
+        Parameters(params): Parameters<SetSystemTimeParams>,
+    ) -> Result<CallToolResult, String> {
+        let unix_seconds =
+            parse_timestamp(&params.timestamp).map_err(|e| format!("set_system_time: {e:#}"))?;
+        state()
+            .require_device()?
+            .send(Command::SetSystemTime { unix_seconds }, Duration::from_secs(5))
+            .map_err(|e| format!("set_system_time request failed: {e}"))?;
+        let formatted = format_utc(unix_seconds).map_err(|e| format!("set_system_time: {e:#}"))?;
+        Ok(text_result(&format!("device clock set to {formatted} (unix {unix_seconds})")))
     }
 
     /// Return the number of currently allowed publisher certificates installed on the device.

@@ -10011,6 +10011,7 @@ dependencies = [
  "hidapi",
  "hyper",
  "hyper-util",
+ "jiff",
  "png 0.17.13",
  "publisher-fingerprint",
  "rmcp",
@@ -14646,6 +14647,7 @@ dependencies = [
  "uuid",
  "xous",
  "xous-api-log",
+ "xous-api-ticktimer",
 ]
 
 [[package]]

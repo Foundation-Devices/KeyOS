@@ -39,6 +39,7 @@ template = ["fs-generic"]
     "GetDeveloperMode",
     "SubscribeDeveloperMode",
 ]
+"os/ticktimer" = ["SetSystemTime"]
 "os/app-manager" = [
     "ImportThirdPartyCertificate",
     "PreviewThirdPartyCertificate",
