@@ -175,33 +175,6 @@ fn main() {
                 }
             }
         }
-        log::info!("fs small mapping tests: {location:?}");
-        for size in [5, 512, 0x1000, 0x1001, 0x4000] {
-            let path = format!("mapped_{size}.bin");
-            let mut file =
-                fs.open_file(&path, location, OpenFlags { read: true, write: true, create: true }).unwrap();
-            file.write_all(&aligned_test_data[0..size]).unwrap();
-            file.truncate().unwrap();
-            drop(file);
-            let mapping = fs.map_file(location, &path).unwrap();
-            assert_eq!(mapping.as_slice::<u8>(), &aligned_test_data[0..size]);
-        }
-
-        log::info!("fs big mapping test (write): {location:?}");
-        // Getting mappings for the same file should not exhaust physical memory
-        let mut file = fs
-            .open_file("mapped.bin", location, OpenFlags { read: true, write: true, create: true })
-            .unwrap();
-        for _ in 0..512 {
-            file.write_all(&aligned_test_data[0..1024]).unwrap();
-        }
-        file.truncate().unwrap();
-        drop(file);
-        log::info!("fs big mapping test (map): {location:?}");
-        for _ in 0..256 {
-            let mapping = fs.map_file(location, "mapped.bin").unwrap();
-            assert_eq!(mapping.len(), 512 * 1024);
-        }
     }
 
     log::info!("fs tests passed");

@@ -95,9 +95,9 @@ impl Server {
 
     fn mount_airlock_inner(&self, disk: DynamicDisk) -> std::io::Result<Mount> {
         let mount = Mount::new(disk)?;
-        let user_cluster_size = self.fs_user_cluster_size().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "fs_user not mounted")
-        })?;
+        let user_cluster_size = self
+            .fs_user_cluster_size()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "fs_user not mounted"))?;
         if user_cluster_size != mount.fs().cluster_size() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -118,7 +118,10 @@ impl Server {
             .checked_mul(user_cluster_size as u64)
             .and_then(|data_bytes| data_offset.checked_add(data_bytes))
             .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "Airlock FATFS cluster geometry overflows")
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Airlock FATFS cluster geometry overflows",
+                )
             })?;
         if required > AIRLOCK_SIZE {
             return Err(std::io::Error::new(
@@ -211,9 +214,7 @@ impl Server {
         Ok(trimmed)
     }
 
-    fn fs_user_cluster_size(&self) -> Option<u32> {
-        self.fs_user.as_ref().map(|m| m.fs().cluster_size())
-    }
+    fn fs_user_cluster_size(&self) -> Option<u32> { self.fs_user.as_ref().map(|m| m.fs().cluster_size()) }
 
     fn new_airlock_disk(&self) -> Result<DynamicDisk, Error> {
         let fs_user = self.fs_user.as_ref().ok_or(Error::NoMedia)?.static_fs_unchecked();

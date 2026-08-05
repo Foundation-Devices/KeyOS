@@ -277,10 +277,10 @@ where
     P: server::MessageAllowed<fs::messages::ReadFile>,
     P: fs::MapFilePermissions,
 {
-    if location == fs::Location::AppResources {
-        read_archive_from_location::<T, P>(fs, location, path)
-    } else {
+    if location.is_mappable() {
         map_archive_from_location::<T, P>(fs, location, path)
+    } else {
+        read_archive_from_location::<T, P>(fs, location, path)
     }
 }
 

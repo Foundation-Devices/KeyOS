@@ -87,7 +87,7 @@ fn main() {
 #[derive(server::Server)]
 #[name = "os/fs"]
 pub struct Server {
-    mapped_files: HashMap<String, MappedFile>,
+    mapped_files: HashMap<(Location, String), MappedFile>,
     app_resources: HashMap<xous::AppId, String>,
     #[cfg(feature = "recovery-os")]
     fs_boot: Option<Mount>,
@@ -105,9 +105,7 @@ pub struct Server {
 }
 
 impl std::fmt::Debug for Server {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Server").finish()
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("Server").finish() }
 }
 
 struct MappedFile {
@@ -208,10 +206,11 @@ fn app_resources_path(app_id: xous::AppId, root: AppResourcesRoot, app_dir: &str
 mod tests {
     use std::collections::HashMap;
 
-    use super::{app_resources_path, app_resources_root};
-    use fs::Error;
     use fs::messages::AppResourcesRoot;
+    use fs::Error;
     use xous::AppId;
+
+    use super::{app_resources_path, app_resources_root};
 
     const APP_ID: AppId = AppId([
         0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
@@ -243,10 +242,7 @@ mod tests {
 
     #[test]
     fn app_resources_root_returns_file_not_found_when_unregistered() {
-        assert!(matches!(
-            app_resources_root(&HashMap::new(), APP_ID),
-            Err(Error::FileNotFound)
-        ));
+        assert!(matches!(app_resources_root(&HashMap::new(), APP_ID), Err(Error::FileNotFound)));
     }
 
     #[test]
@@ -321,11 +317,8 @@ impl Server {
                 state_dir.create_dir(&app_id)?;
             }
             Location::AppData => {
-                let app_dir = self
-                    .mount(Location::AppData)
-                    .ok_or(Error::NoMedia)?
-                    .root_dir()
-                    .create_dir("appdata")?;
+                let app_dir =
+                    self.mount(Location::AppData).ok_or(Error::NoMedia)?.root_dir().create_dir("appdata")?;
                 let app_id = xous::get_app_id(pid)?.ok_or(Error::InternalError)?.to_string();
                 app_dir.create_dir(&app_id)?;
             }

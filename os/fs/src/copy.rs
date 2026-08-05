@@ -144,10 +144,8 @@ impl BlockingScalarHandler<AsyncCopyBlock> for Server {
             }
             let mut offset = 0;
             loop {
-                let read_size = open
-                    .file
-                    .read(&mut buffer.as_slice_mut()[offset..msg.len])
-                    .map_err(|_| Error::Io)?;
+                let read_size =
+                    open.file.read(&mut buffer.as_slice_mut()[offset..msg.len]).map_err(|_| Error::Io)?;
                 offset += read_size;
                 if read_size == 0 || offset >= msg.len {
                     break;

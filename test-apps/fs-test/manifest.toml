@@ -7,7 +7,6 @@ en = "fs and airlock test client"
 [permissions]
 template = ["fs-generic"]
 "os/fs" = [
-    "MapFileMessage",
     "GetUserReadAccess",
     "GetUserWriteAccess",
     "GetSystemReadAccess",

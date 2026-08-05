@@ -54,7 +54,7 @@ impl ScalarEventHandler<MassStorageEvent> for Server {
     }
 }
 
-#[cfg(all(keyos, not(feature="recovery-os")))]
+#[cfg(all(keyos, not(feature = "recovery-os")))]
 impl BlockingScalarHandler<FormatUsb> for Server {
     fn handle(
         &mut self,
@@ -107,7 +107,7 @@ impl BlockingScalarHandler<FormatUsb> for Server {
     }
 }
 
-#[cfg(any(not(keyos), feature="recovery-os"))]
+#[cfg(any(not(keyos), feature = "recovery-os"))]
 impl BlockingScalarHandler<FormatUsb> for Server {
     fn handle(
         &mut self,

@@ -20,8 +20,7 @@ impl server::BlockingArchiveHandler<TruncateFile> for Server {
             return Err(Error::InvalidOperation);
         }
         let new_len = open.file.stream_position()?;
-        let current_size =
-            open.file.entry().and_then(|e| e.size()).ok_or(Error::InvalidOperation)? as u64;
+        let current_size = open.file.entry().and_then(|e| e.size()).ok_or(Error::InvalidOperation)? as u64;
         let file_id = open.file_id();
         if new_len < current_size && mount.has_other_handle(file_id, sender, msg.0) {
             return Err(Error::FileInUse);

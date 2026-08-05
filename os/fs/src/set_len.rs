@@ -20,8 +20,7 @@ impl server::BlockingArchiveHandler<SetLen> for Server {
             return Err(Error::InvalidOperation);
         }
 
-        let current_size =
-            open.file.entry().and_then(|e| e.size()).ok_or(Error::InvalidOperation)? as u64;
+        let current_size = open.file.entry().and_then(|e| e.size()).ok_or(Error::InvalidOperation)? as u64;
         let file_id = open.file_id();
 
         if msg.len < current_size && mount.has_other_handle(file_id, sender, msg.handle) {

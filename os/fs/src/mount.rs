@@ -96,10 +96,7 @@ impl Mount {
 
     /// True if any registered handle holds the file `file_id` open for writing.
     fn has_writer(&self, file_id: u64) -> bool {
-        self.files
-            .values()
-            .flat_map(|m| m.values())
-            .any(|o| o.file_id() == file_id && o.flags.write)
+        self.files.values().flat_map(|m| m.values()).any(|o| o.file_id() == file_id && o.flags.write)
     }
 
     /// Whether a handle other than `(except_pid, except)` is open on the file
@@ -117,14 +114,8 @@ impl Mount {
 
     /// Open a directory iterator at `path` and register it. An empty `path` iterates
     /// the filesystem root. Returns the freshly allocated handle.
-    pub fn open_dir(
-        &mut self,
-        pid: xous::PID,
-        location: Location,
-        path: String,
-    ) -> Result<DirHandle, Error> {
-        let dir =
-            if path.is_empty() { self.fs.root_dir() } else { self.fs.root_dir().open_dir(&path)? };
+    pub fn open_dir(&mut self, pid: xous::PID, location: Location, path: String) -> Result<DirHandle, Error> {
+        let dir = if path.is_empty() { self.fs.root_dir() } else { self.fs.root_dir().open_dir(&path)? };
         let entry_positions = self.fs.root_dir().resolve_entry_positions(&path)?;
         let handle = self.alloc_dir_handle(pid, location)?;
         self.dirs.entry(pid).or_default().insert(handle, OpenDir { iter: dir.iter(), entry_positions });
@@ -290,8 +281,7 @@ impl Drop for Mount {
         let _ = std::mem::take(&mut self.dirs);
         // SAFETY: self.fs was produced by Box::leak in Mount::new and, per the module docs,
         // no `'static` reference to it has escaped this module.
-        let boxed =
-            unsafe { Box::from_raw((self.fs as *const _) as *mut fatfs::FileSystem<DynamicDisk>) };
+        let boxed = unsafe { Box::from_raw((self.fs as *const _) as *mut fatfs::FileSystem<DynamicDisk>) };
         boxed.unmount().ok();
     }
 }
@@ -315,9 +305,7 @@ pub struct OpenFile {
 
 impl OpenFile {
     /// The file's own directory-entry position, its on-disk identity.
-    pub fn file_id(&self) -> u64 {
-        *self.entry_positions.last().unwrap()
-    }
+    pub fn file_id(&self) -> u64 { *self.entry_positions.last().unwrap() }
 }
 
 impl Drop for OpenFile {

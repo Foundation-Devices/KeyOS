@@ -31,9 +31,7 @@ impl Server {
     }
 }
 
-pub fn recursively_remove_contents<D: fatfs::ReadWriteSeek>(
-    dir: &fatfs::Dir<'_, D>,
-) -> std::io::Result<()> {
+pub fn recursively_remove_contents<D: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, D>) -> std::io::Result<()> {
     for entry in dir.iter() {
         let entry = entry?;
         let name = entry.file_name();

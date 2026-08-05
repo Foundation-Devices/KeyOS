@@ -257,6 +257,9 @@ impl<P: CheckedPermissions> FileSystem<P> {
         P: MapFilePermissions,
     {
         self.ensure_read_access(location)?;
+        if !location.is_mappable() {
+            return Err(Error::AccessDenied);
+        }
 
         #[cfg(keyos)]
         {
@@ -805,6 +808,24 @@ pub enum Location {
     /// `<system-volume>/keyos/apps/<app-name>/resources/` for built-in apps, or
     /// `<system-volume>/keyos/sideloaded-apps/<app-id>/resources/` for sideloaded apps.
     AppResources,
+}
+
+impl Location {
+    /// Whether [`FileSystem::map_file`] accepts this location.
+    pub fn is_mappable(self) -> bool {
+        match self {
+            Location::CommonAssets => true,
+            Location::Boot
+            | Location::System
+            | Location::SystemAppData
+            | Location::EncryptedRoot
+            | Location::AppData
+            | Location::AppResources
+            | Location::User
+            | Location::Airlock
+            | Location::Usb => false,
+        }
+    }
 }
 
 impl server::AsScalar<1> for Location {
