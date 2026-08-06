@@ -1,15 +1,16 @@
 {
-  "common.changePin.1FailedAttempt": "1 failed attempt",
-  "common.changePin.XFailedAttempts": "{0} failed attempts",
-  "common.changePin.xFailedAttemptsFactoryWarning1Remaining": "{0} failed attempts\n\nPassport will erase its Master Key after 1 more attempt",
-  "common.changePin.xFailedAttemptsFactoryWarningXRemaining": "{0} failed attempts\n\nPassport will erase its Master Key after {1} more attempts",
-  "common.changePin.xFailedAttemptsXRemaining": "{0} failed attempts\n\nYou have {1} attempts remaining",
+  "common.changePin.1FailedAttempt": "1 intento fallido",
+  "common.changePin.XFailedAttempts": "{0} intentos fallidos",
+  "common.changePin.xFailedAttemptsFactoryWarning1Remaining": "{0} intentos fallidos\n\nPassport borrará su Clave maestra tras 1 intento más",
+  "common.changePin.xFailedAttemptsFactoryWarningXRemaining": "{0} intentos fallidos\n\nPassport borrará su Clave maestra tras {1} intentos más",
+  "common.changePin.xFailedAttemptsXRemaining": "{0} intentos fallidos\n\nTe quedan {1} intentos",
   "common.keyboard.add": "Add",
   "common.keyboard.done": "Done",
   "common.keyboard.next": "Next",
   "common.keyboard.unlock": "Unlock",
+  "main.enterCurrentPin": "Enter current PIN",
   "main.enterPassword": "Enter Password",
-  "main.enterPin": "Enter PIN",
-  "main.securityWords": "Your Security Words",
-  "main.swipeup": "Swipe up to unlock"
+  "main.enterPin": "Introduce el PIN",
+  "main.securityWords": "Tus palabras de seguridad",
+  "main.swipeup": "Desliza arriba y desbloquea"
 }

@@ -1,8 +1,8 @@
 {
-  "common.button.confirm": "Confirm",
-  "disabled.content": "The camera is disabled.",
-  "disabled.enableCamera": "Enable Camera",
+  "common.button.confirm": "Confirmar",
+  "disabled.content": "La cámara está desactivada.",
+  "disabled.enableCamera": "Activar la cámara",
   "qrModalUnknown.content": "The information in the scanned QR code is not compatible with Passport Prime.\n\nPlease try again or contact support.",
   "qrModalUnknown.title": "Incompatible QR Code",
-  "scan.title": "Scan QR"
+  "scan.title": "Escanear QR"
 }

@@ -8,6 +8,7 @@
   "common.keyboard.done": "Done",
   "common.keyboard.next": "Next",
   "common.keyboard.unlock": "Unlock",
+  "main.enterCurrentPin": "Enter current PIN",
   "main.enterPassword": "Enter Password",
   "main.enterPin": "Enter PIN",
   "main.securityWords": "Your Security Words",

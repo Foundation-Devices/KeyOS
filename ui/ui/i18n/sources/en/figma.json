@@ -1,80 +1,5 @@
 {
-  "permission": {
-    "appManagement": {
-      "appMetadata": "App metadata",
-      "main": "Apps and allowed publishers"
-    },
-    "cryptography": {
-      "hardwareHashing": "Hardware hashing",
-      "main": "Cryptography",
-      "primitives": "Cryptographic primitives",
-      "secretSharing": "Secret sharing"
-    },
-    "deviceConnectivity": {
-      "bluetoothStatus": "Bluetooth status",
-      "main": "Bluetooth, NFC, and USB",
-      "nfcStatus": "NFC status",
-      "usbDeviceStatus": "USB device status",
-      "usbHostStatus": "USB host status"
-    },
-    "deviceSecrets": {
-      "appScopedSeed": "App-scoped seed",
-      "deviceIdentityStatus": "Device identity status",
-      "main": "Device secrets and identity"
-    },
-    "fileSystem": {
-      "airlockFiles": "Airlock files",
-      "main": "File system",
-      "modifyFiles": "Modify files",
-      "readFiles": "Read files",
-      "usbFiles": "USB files",
-      "userFiles": "User files"
-    },
-    "interfaceAndNavigation": {
-      "controlCenterAppearance": "Control Center appearance",
-      "main": "Interface and navigation",
-      "navigation": "Navigation",
-      "onScreenKeyboard": "On-screen keyboard",
-      "screenDrawing": "Screen drawing",
-      "systemDialogs": "System dialogs"
-    },
-    "networkAndPairing": {
-      "main": "Network sync and pairing",
-      "statusAndRates": "Network status and rates",
-      "walletSync": "Wallet sync"
-    },
-    "peripherals": {
-      "cameraStatus": "Camera status",
-      "cameraUse": "Camera use",
-      "hapticAndLed": "Haptics and LED",
-      "main": "Peripherals",
-      "sensors": "Sensors"
-    },
-    "powerAndFirmware": {
-      "batteryStatus": "Battery status",
-      "main": "Power and firmware"
-    },
-    "prompt": {
-      "allowAlways": "Allow Always",
-      "header": "Permission Request",
-      "neverAllow": "Never Allow",
-      "notNow": "Not Now",
-      "subheader": "{0} wants permission: {1}\nAllow this permission?"
-    },
-    "settings": {
-      "appearanceAndTime": "Appearance and time",
-      "deviceConfiguration": "Device configuration",
-      "main": "Settings"
-    }
-  },
-  "2": {
-    "4%": "2.4%"
-  },
-  "Label": "BlueWallet",
-  "Registration": "Registration",
-  "Time": "15",
-  "Value": "m/48’/0’/0’/2’",
-  "_": "Confirm",
+  "_": "Cancel",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -177,6 +102,9 @@
       "reorder": "Reorder",
       "search": "Search"
     },
+    "nameUsedModal2Fa": {
+      "content": "Another 2FA code is already using this name. "
+    },
     "openedCard": {
       "account": "Account",
       "edit": "Edit",
@@ -261,7 +189,7 @@
       "delete": "Delete",
       "dismiss": "Dismiss",
       "done": "Done",
-      "dontShowAgain": "Don't show again",
+      "dontShowAgain": "Don’t show again",
       "erasing": "Erasing...",
       "finish": "Finish",
       "getStarted": "Get Started",
@@ -338,6 +266,11 @@
       "septemberFull": "September",
       "septemberShort": "Sep"
     },
+    "nameUsedModal": {
+      "content": "Choose a new name to restore it from the archive.",
+      "fromArchive": "(from archive)",
+      "title": "Name already in use"
+    },
     "recoverRestoreCardKeycard": {
       "readingKeycard": "Reading Keycard"
     },
@@ -355,30 +288,30 @@
       "header": "Visit by scanning with your phone camera "
     },
     "time": {
-      "dayFull": "day",
+      "dayFull": "Day",
       "dayMed": "day",
       "dayShort": "d",
-      "daysFull": "days",
+      "daysFull": "Days",
       "daysMed": "days",
-      "hourFull": "hour",
+      "hourFull": "Hour",
       "hourMed": "hr",
       "hourShort": "h",
-      "hoursFull": "hours",
+      "hoursFull": "Hours",
       "hoursMed": "hrs",
-      "minuteFull": "minute",
+      "minuteFull": "Minute",
       "minuteMed": "min",
       "minuteShort": "m",
-      "minutesFull": "minutes",
+      "minutesFull": "Minutes",
       "minutesMed": "mins",
-      "secondFull": "second",
+      "secondFull": "Second",
       "secondMed": "sec",
       "secondShort": "s",
-      "secondsFull": "seconds",
+      "secondsFull": "Seconds",
       "secondsMed": "secs",
-      "weekFull": "week",
+      "weekFull": "Week",
       "weekMed": "wk",
       "weekShort": "w",
-      "weeksFull": "weeks",
+      "weeksFull": "Weeks",
       "weeksMed": "wks"
     },
     "toast": {
@@ -446,13 +379,10 @@
       "wednesdayShort": "Wed"
     }
   },
-  "component": {
-    "message": {
-      "content": "Apps are coming soon.",
-      "header": "Developers Welcome"
-    }
-  },
   "controlcenter": {
+    "brightness": {
+      "auto": "Auto"
+    },
     "button": {
       "bluetooth": "Bluetooth",
       "camera": "Camera",
@@ -554,6 +484,7 @@
       "pasteHere": "Copy Here",
       "pastingData": "Copying Data",
       "rename": "Rename",
+      "selectAll": "Select All",
       "showFiles": "Show hidden files",
       "unlock": "Unlock"
     },
@@ -655,6 +586,7 @@
       "2FaCodes": "2FA",
       "appsAreComing": "Apps are coming soon.",
       "bitcoin": "Bitcoin",
+      "currencyUSD": "USD",
       "developers": "Developers",
       "developersWelcome": "Developers Welcome",
       "disconnected": "Disconnected",
@@ -668,21 +600,12 @@
       "seedVault": "Vault",
       "settings": "Settings",
       "updateAppliedDescription": "Passport has been updated successfully.",
-      "updateAppliedHeader": "Update complete",
+      "updateAppliedHeader": "Passport Successfully Updated",
       "updateResumeDescription": "Please keep Passport powered on.",
-      "updateResumeHeader": "Update in progress",
+      "updateResumeHeader": "Update in Progress",
       "wallet": "Wallet",
       "welcome": "Welcome!",
       "xAgo": "{0} ago"
-    },
-    "mainDevs": {
-      "content1": "For the first time ever, KeyOS enables expanding Passport Prime’s functionality with third-party apps.",
-      "content2": "Apps on KeyOS can be anything – add cold storage to your mobile wallet, integrate with your password manager, bring your logo and UI for the best user experience.\r",
-      "content3": "The Developer SDK is coming later in 2026. Please share with your favorite apps and services!",
-      "header": "Developers Welcome",
-      "subheader": "Missing something? Build it!",
-      "url": "https://foundation.xyz/dev",
-      "visitForInfo": "Learn more at:"
     },
     "mainTemp": {
       "temporarySeed": "Temporary Seed"
@@ -737,8 +660,8 @@
       "content": "This app seed was derived from your Master Key, and can be re-created at any time.\n\nTo keep an external backup, view the seed words in the app settings before continuing."
     },
     "removeSeed": {
-      "confirmBackup": "Yes, I have a backup",
-      "content": "Removing your seed will delete it from this device. Make sure you have a backup of your seed words before continuing.",
+      "confirmBackup": "I have my backup ready",
+      "content": "You are about to remove the Legacy Mode app seed from this device. Make sure you have a backup before continuing.",
       "header": "Are you sure?",
       "title": "Remove Seed"
     },
@@ -755,6 +678,7 @@
   },
   "lock": {
     "main": {
+      "enterCurrentPin": "Enter current PIN",
       "enterPassword": "Enter Password",
       "enterPin": "Enter PIN",
       "securityWords": "Your Security Words",
@@ -790,7 +714,7 @@
       "chooseWord": "Tap on the correct word",
       "correct": "Correct",
       "incorrectRestart": "Incorrect selection. Please retry.",
-      "subheader": "#5",
+      "subheader": "Tap on word",
       "tapOnWord": "Tap on Word",
       "title": "Verify Seed Words"
     },
@@ -819,6 +743,9 @@
       "masterKeyGenerated": "Master Key Generated",
       "masterKeySaved": "Master Key Saved",
       "savingMasterKey": "Saving Master Key"
+    },
+    "enterPassword": {
+      "content": "Enter any combination of characters"
     },
     "enterPin": {
       "content": "Enter at least 6 digits",
@@ -879,7 +806,7 @@
       "termsOfUse": "Terms of Use"
     },
     "masterKeyDeleted": {
-      "content": "To ensure your security, Passport has erased its Master Key. Your data is still preserved in an encrypted state. \n\nRestore access by providing the Master Key, or erase all data from this device.",
+      "content": "To ensure your security, Passport has erased its Master Key. Your data is still preserved in an encrypted state. \nRestore access by providing the Master Key, or erase all data from this device.",
       "eraseDevice": "Erase Device",
       "header": "Master Key Erased",
       "provideMasterKey": "Provide Master Key"
@@ -923,7 +850,7 @@
       "header": "PIN Set Successfully"
     },
     "recoverEncryptedBackupDetected": {
-      "content": "Passport found an encrypted settings and data backup stored on the Foundation server.\n\nDo you want to restore it? ",
+      "content": "Passport found an encrypted settings and data backup stored on the Foundation server.\nDo you want to restore it? ",
       "header": "Encrypted Backup Detected"
     },
     "recoverFileBackupCode": {
@@ -968,8 +895,7 @@
     "recoverRestoreCardKeycard": {
       "noEnvoyBackup": "No Envoy Backup Found",
       "tapAKeycard": "Hold a Keycard to Passport",
-      "tapAnotherKeycard": "Hold another Keycard to Passport",
-      "writingToKeycard": "Saving to Keycard"
+      "tapAnotherKeycard": "Hold another Keycard to Passport"
     },
     "recoverRestoreCardModalEmptyKeycard": {
       "content": "This Keycard has no data stored. Please try a different one.",
@@ -1095,6 +1021,74 @@
     },
     "verifyPinMismatch": {
       "content": "Incorrect PIN.\nPlease try again."
+    }
+  },
+  "permission": {
+    "appManagement": {
+      "appMetadata": "App metadata",
+      "main": "Apps and allowed publishers"
+    },
+    "cryptography": {
+      "hardwareHashing": "Hardware hashing",
+      "main": "Cryptography",
+      "primitives": "Cryptographic primitives",
+      "secretSharing": "Secret sharing"
+    },
+    "deviceConnectivity": {
+      "bluetoothStatus": "Bluetooth status",
+      "main": "Bluetooth, NFC, and USB",
+      "nfcStatus": "NFC status",
+      "usbDeviceStatus": "USB device status",
+      "usbHostStatus": "USB host status"
+    },
+    "deviceSecrets": {
+      "appScopedSeed": "App-scoped seed",
+      "deviceIdentityStatus": "Device identity status",
+      "main": "Device secrets and identity"
+    },
+    "fileSystem": {
+      "airlockFiles": "Airlock files",
+      "main": "File system",
+      "modifyFiles": "Modify files",
+      "readFiles": "Read files",
+      "usbFiles": "USB files",
+      "userFiles": "User files"
+    },
+    "interfaceAndNavigation": {
+      "controlCenterAppearance": "Control Center appearance",
+      "main": "Interface and navigation",
+      "navigation": "Navigation",
+      "onScreenKeyboard": "On-screen keyboard",
+      "screenDrawing": "Screen drawing",
+      "systemDialogs": "System dialogs"
+    },
+    "networkAndPairing": {
+      "main": "Network sync and pairing",
+      "statusAndRates": "Network status and rates",
+      "walletSync": "Wallet sync"
+    },
+    "peripherals": {
+      "cameraStatus": "Camera status",
+      "cameraUse": "Camera use",
+      "hapticAndLed": "Haptics and LED",
+      "main": "Peripherals",
+      "sensors": "Sensors"
+    },
+    "powerAndFirmware": {
+      "batteryStatus": "Battery status",
+      "main": "Power and firmware"
+    },
+    "prompt": {
+      "allowAlways": "Always Allow",
+      "header": "Allow Access?",
+      "neverAllow": "Never Allow",
+      "notNow": "Not Now",
+      "subheader": "{0} wants to access {1}"
+    },
+    "settings": {
+      "appearanceAndTime": "Appearance and time",
+      "deviceConfiguration": "Device configuration",
+      "main": "Settings"
     }
   },
   "recovery": {
@@ -1281,6 +1275,9 @@
       "reorder": "Reorder",
       "search": "Search"
     },
+    "nameUsedModalKey": {
+      "content": "Another Key is already using this name. "
+    },
     "new": {
       "header": "Create your first Security Key",
       "newSecurityKey": "New Security Key",
@@ -1299,19 +1296,6 @@
     "registrationUSBSuccessful": {
       "header": "Registration Submitted",
       "subheader": "Please confirm successful registration on the connected platform."
-    }
-  },
-  "seedvault": {
-    "accounts": {
-      "title": "Vault"
-    },
-    "seedDeleteModal": {
-      "content2": "Beware, this can’t be undone and you should have a backup."
-    }
-  },
-  "settinga": {
-    "backupManualMain": {
-      "subheader": "Create a {0} out of {1} Backup with Keycards or save the seed words by writing them down. "
     }
   },
   "settings": {
@@ -1349,28 +1333,24 @@
       "viewLogs": "View Logs"
     },
     "apps": {
-      "appId": "App ID",
-      "automaticallyGranted": "Automatically Granted",
-      "description": "Description",
-      "detailsTitle": "App Details",
-      "developerMode": "Developer Mode",
       "allowNewPublisher": "Add Publisher",
-      "allowPublisher": "Allow this publisher",
+      "allowPublisher": "Allow this Publisher",
+      "allowedPublisherAddedByYou": "Added by you · {0}",
       "allowedPublisherBasicConstraints": "Certificate basic constraints",
-      "allowedPublisherCertificates": "Publishers",
+      "allowedPublisherCertificates": "Certificates",
       "allowedPublisherClaimedContactEmail": "Claimed contact email (not verified)",
-      "allowedPublisherClaimedName": "Claimed name (not verified)",
-      "allowedPublisherClaimedOrganization": "Claimed organization (not verified)",
+      "allowedPublisherClaimedName": "Name",
+      "allowedPublisherClaimedOrganization": "Organization",
       "allowedPublisherClaimedSerialNumber": "Certificate serial number",
       "allowedPublisherClaimedSubject": "Claimed subject (not verified)",
       "allowedPublisherClaimedSupportUrl": "Claimed support URL (not verified)",
-      "allowedPublisherDateAdded": "Date added",
+      "allowedPublisherDateAdded": "Date Added",
       "allowedPublisherDateUnavailable": "Date unavailable",
       "allowedPublisherDetails": "Allowed Publisher",
-      "allowedPublisherExpirationDate": "Expiration date",
-      "allowedPublisherExtendedKeyUsage": "Certificate extended key usage",
+      "allowedPublisherExpirationDate": "Expiration Date",
       "allowedPublisherExpires": "Expires {0}",
-      "allowedPublisherFingerprint": "Publisher fingerprint",
+      "allowedPublisherExtendedKeyUsage": "Certificate extended key usage",
+      "allowedPublisherFingerprint": "Publisher Fingerprint",
       "allowedPublisherImportGrant": "Apps signed by this publisher can be installed and run on your Passport.",
       "allowedPublisherImportGuidance": "Verify this fingerprint against the publisher's official website or GitHub.",
       "allowedPublisherKeyUsage": "Certificate key usage",
@@ -1384,11 +1364,22 @@
       "allowedPublisherStatusNotActiveYet": "Not active yet",
       "allowedPublishers": "Allowed Publishers",
       "allowedPublishersIntro": "Add an app publisher by importing their certificate. Verify each fingerprint before allowing it.",
+      "appId": "App ID",
+      "automaticallyGranted": "Automatically Granted",
+      "certificate": "Certificate",
+      "claimedInformation": "Claimed Information",
+      "description": "Description",
+      "details": "Details",
+      "detailsTitle": "App Details",
+      "developerMode": "Developer Mode",
+      "general": "General",
       "installApp": "Install App",
       "installedApps": "Installed Apps",
       "mcpControl": "MCP Control",
       "noAllowedPublishers": "No Allowed Publishers",
       "noInstalledApps": "No installed apps",
+      "notVerified": "(not verified)",
+      "openApp": "Open App",
       "publisher": "Publisher",
       "removeApp": "Remove App",
       "removeAppDialog": {
@@ -1399,7 +1390,7 @@
       "removeAppFailed": "Unable to remove this app.",
       "removeAppRunning": "Close this app before removing it.",
       "removePublisher": "Remove Publisher",
-      "removePublisherConfirm": "Are you sure you want to remove this publisher?",
+      "removePublisherConfirm": "Are you sure you want to remove this Publisher?",
       "removePublisherConfirmButton": "Remove",
       "requestedPermissions": "Requested Permissions",
       "sectionSettings": "Settings",
@@ -1408,6 +1399,9 @@
       "unableToRemoveApp": "Unable to remove App",
       "usbLogging": "USB Logging",
       "version": "Version"
+    },
+    "appsModalAllowedPublisherRemoveFailed": {
+      "content": "Unable to remove this Publisher. Try again. If the problem continues, restart Passport."
     },
     "appsModalInstallAppIDExists": {
       "content": "This app has an ID that matches an existing KeyOS app. Contact the app publisher.",
@@ -1433,27 +1427,36 @@
       "content": "{0} is installed.",
       "header": "App Installed"
     },
+    "appsModalInvalidAllowedPublisherCertificate": {
+      "content": "Please contact the company producing the certificate.",
+      "header": "Invalid Publisher Certificate"
+    },
     "appsModalInvalidSignature": {
       "content": "Install failed. Passport is unable to verify the app signature. Contact the app publisher.",
       "header": "Invalid Signature"
     },
-    "appsModalAllowedPublisherRemoveFailed": {
-      "content": "Unable to remove this publisher. Try again. If the problem continues, restart Passport."
-    },
-    "appsModalInvalidAllowedPublisherCertificate": {
-      "content": "Contact the company producing the certificate.",
-      "header": "Invalid publisher certificate."
+    "appsModalRemoveApp": {
+      "content": "Are you sure you want to remove {0}?",
+      "header": "Remove App"
     },
     "appsModalRemoveXFirstThenRetry": {
       "content": "{0} is installed and depends on this certificate. Remove the app first, then try again.",
-      "header": "Unable to remove publisher"
+      "header": "Unable to remove Publisher"
     },
     "appsModalUnableToAllowPublisher": {
       "content": "The publisher certificate could not be saved. Check available storage and try again.",
-      "header": "Unable to allow publisher"
+      "header": "Unable to allow Publisher"
     },
     "appsModalUnableToRemoveAllowedPublisher": {
-      "header": "Unable to remove publisher"
+      "header": "Unable to remove\n Publisher"
+    },
+    "appsUnableToRemoveApp": {
+      "closeThisApp": "Close this app before removing it.",
+      "header": "Unable to remove App",
+      "thisApp": "Unable to remove this app."
+    },
+    "autoLock": {
+      "never": "Never"
     },
     "autoShutdown": {
       "never": "Never",
@@ -1497,6 +1500,7 @@
     "backupManualMain": {
       "header": "Create Backup",
       "manualSeedBackup": "Manual Seed Backup",
+      "subheader": "Create a {0} out of {1} Backup with Keycards or save the seed words by writing them down. ",
       "xOfYKeycardBackup": "{0} of {1} Keycard Backup"
     },
     "backupManualMainModal": {
@@ -1541,6 +1545,7 @@
       "current": "Current",
       "currentCapacity": "Current Capacity",
       "electricalStatus": "Electrical Status",
+      "minReserve": "Minimum Battery Reserve",
       "remainingCapacity": "Remaining Capacity",
       "stateOfCharge": "State of Charge",
       "title": "Battery",
@@ -1639,8 +1644,10 @@
     "eraseDeviceBackup": {
       "createBackup": "Create External Backup",
       "header": "Final Device Backup",
+      "removeKeyCloud": "Remove Master Key part from Apple or Google account",
       "removeSettingsData": "Remove Settings & Data Backup \nfrom the Foundation server",
-      "subheader": "Without a recent backup, erasing this device could result in loss of funds or critical app data."
+      "subheader": "Without a recent backup, erasing this device could result in loss of funds or critical app data.",
+      "subheader2": "We recommend saving a recent encrypted Settings & Data Backup on an external drive."
     },
     "eraseDeviceCreatingMagicBackup": {
       "connectedToEnvoy": "Connected to Envoy",
@@ -1690,6 +1697,7 @@
     "magicVerifyBackupError": {
       "header": "Verification Failed",
       "keycardDifferentBackup": "Keycard from different Backup",
+      "keycardDuplicatePart": "Duplicate Keycard part",
       "keycardEmpty": "Keycard is empty",
       "noConnectionToEnvoy": "No Connection to Envoy",
       "noEnvoyBackupFound": "No Envoy Backup found",
@@ -1708,7 +1716,6 @@
     },
     "mainNoEnvoy": {
       "NotPaired": "Not paired",
-      "connect": "Connect",
       "envoyNotConnected": "Envoy not connected",
       "pair": "Pair to Envoy"
     },
@@ -1720,6 +1727,15 @@
     "noConnection": {
       "lastCommunication": "Last Communication",
       "message": "Make sure Bluetooth is enabled on Passport and your phone, and both devices are nearby."
+    },
+    "noConnectionDone": {
+      "phone": "Paired to:"
+    },
+    "pairMissing": {
+      "header": "Scan QR Code",
+      "subheader": "Scan with your phone's camera or on Envoy",
+      "subheaderQL": "Scan to establish QuantumLink connection",
+      "title": "Pair to Envoy"
     },
     "recoverRestoreCardKeycard": {
       "tapAKeycard": "Hold a Keycard to Passport",
@@ -1742,6 +1758,7 @@
     },
     "security": {
       "changePIN": "Change PIN",
+      "scramblePIN": "Randomize PIN Entry",
       "securityWords": "Show Security Words",
       "title": "Security"
     },
@@ -1759,10 +1776,11 @@
     "settings": {
       "about": "About",
       "advancedMenu": "Advanced",
-      "autoShutdown": "Auto Lock",
+      "autoLock": "Auto Lock",
       "battery": "Battery",
+      "dateAndTime": "Date & Time",
       "deviceName": "Device Name",
-      "screenBrigthness": "Display",
+      "screenBrightness": "Display",
       "security": "Security",
       "title": "Settings"
     },
@@ -1784,7 +1802,6 @@
       "x": "X"
     },
     "termsOfUse": {
-      "LastUpdated": "Last updated: {0}",
       "title": "Terms of use"
     },
     "update": {
@@ -1818,8 +1835,8 @@
       "title": "Verify Backup File"
     },
     "verifyKeycards": {
-      "content": "To verify a Keycard backup, begin by holding any card to the back of Passport.",
-      "header": "Hold a Keycard"
+      "periodicReminder": "Remind me every",
+      "reminderContent": "Get a reminder to verify your Keycard backup on a regular schedule. To turn reminders off, you'll need to complete a verification first."
     },
     "verifyKeycardsOneCard": {
       "header": "1 of 1 Keycard Verified",
@@ -1885,6 +1902,7 @@
     },
     "accounts": {
       "newItem": "New Item",
+      "searchFillerText": "Search...",
       "title": "Vault"
     },
     "accountsEmpty": {
@@ -1932,6 +1950,7 @@
       "accountFillerText": "Enter associated Username",
       "advancedOptions": "Advanced Options",
       "content": "Each new item is uniquely generated from your Master Key, and can always be recovered from it.",
+      "details": "Details",
       "fingeprint": "Fingerprint",
       "fingerprint": "Fingerprint",
       "generatedFromMasterKey": "Generated from Master Key",
@@ -2013,6 +2032,15 @@
       "importSeedWords": "Import Seed Words",
       "subheader": "Add an existing seed or password for secure storage inside your Vault."
     },
+    "nameUsedModalNostr": {
+      "content": "Another Nostr Key is already using this name. "
+    },
+    "nameUsedModalPassword": {
+      "content": "Another Password is already using this name. "
+    },
+    "nameUsedModalSeed": {
+      "content": "Another Seed is already using this name. "
+    },
     "passwordDeleteModal": {
       "content1": "Are you sure you want to delete the password for “{0}”?",
       "header": "Delete Password"
@@ -2042,9 +2070,6 @@
       "fillerText": "Enter current password",
       "header": "Enter current Password"
     }
-  },
-  "version": {
-    "keyos": "KeyOS"
   },
   "wallet": {
     "PassphraseModal": {
@@ -2200,6 +2225,7 @@
       "xOfY": "{0} of {1}"
     },
     "detailsMultisigMenu": {
+      "archiveAccount": "Archive Account",
       "exportConfig": "Export Config"
     },
     "detailsSinglesig": {
@@ -2228,6 +2254,7 @@
     "enterPassphrase": {
       "content": "Type with care. All passphrases are valid. Ensure you back up your passphrase.",
       "fillerText": "Enter passphrase...",
+      "passphraseLength": "Characters used",
       "title": "Enter Passphrase"
     },
     "exploreAddresses": {
@@ -2347,6 +2374,7 @@
     "settingsDisplayAmount": {
       "auto": "Auto",
       "btc": "BTC",
+      "header": "Amount Display",
       "sats": "Sats"
     },
     "settingsPolicy": {
@@ -2372,7 +2400,6 @@
       "fee": "Fee",
       "feePercentage": "Fee is {0}% of total amount",
       "selfSend": "Self-Send",
-      "subheader": "Confirm the transaction details are correct before signing.",
       "subheaderThreeLines": "Confirm the transaction details are correct before signing from",
       "subheaderTwoLines": "Confirm the transaction details are correct before signing from “{0}”.",
       "suspicious": "Suspicious",
@@ -2381,8 +2408,10 @@
     },
     "signingTransactionMenu": {
       "mainnet": "Network Mainnet",
+      "regtest": "Network Regtest",
       "signet": "Network Signet",
-      "testnet": "Network Testnet"
+      "testnet": "Network Testnet",
+      "testnet4": "Network Testnet4"
     },
     "signingTransactionModalSelectNetwork": {
       "content": "To sign with Testnet or Signet, select the desired network from the top right menu.",
@@ -2414,7 +2443,7 @@
       "title": "Temporary Seed"
     },
     "tempSeedImport": {
-      "content": "Select the seed you want to import.",
+      "content": "Select the seed you want to load.",
       "loadSeed": "Import Seed",
       "title": "Select Seed"
     },
