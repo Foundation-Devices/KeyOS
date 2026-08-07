@@ -65,7 +65,7 @@
     {
       "name": "settings",
       "path": "os/gui-app-settings",
-      "include": ["common", "keycardBackup"]
+      "include": ["common", "keycardBackup", "onboarding.enterPassword.content"]
     },
     {
       "name": "switcher",

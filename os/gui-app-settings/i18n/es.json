@@ -490,6 +490,7 @@
   "noConnection.lastCommunication": "Last Communication",
   "noConnection.message": "Make sure Bluetooth is enabled on Passport and your phone, and both devices are nearby.",
   "noConnectionDone.phone": "Paired to:",
+  "onboarding.enterPassword.content": "Enter any combination of characters",
   "pairMissing.header": "Scan QR Code",
   "pairMissing.subheader": "Scan with your phone's camera or on Envoy",
   "pairMissing.subheaderQL": "Scan to establish QuantumLink connection",

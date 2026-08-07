@@ -177,7 +177,7 @@ component ChangePassword inherits Rectangle {
             }
 
             if !root.verification-failed && !root.is-confirming && root.password-length < root.minimum-length: TextSm {
-                text: TR2.lookup(TrId.ChangePinNewSixDigitsRequired);
+                text: TR2.lookup(TrId.OnboardingEnterPasswordContent);
                 horizontal-alignment: center;
                 color: Palette.content-tertiary;
             }

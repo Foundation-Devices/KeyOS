@@ -167,6 +167,12 @@ component SetPassword inherits Rectangle {
                 color: Palette.content-lightcopper-brand;
             }
 
+            if !root.verification-failed && !root.is-confirming && root.password-length < root.minimum-length: TextSm {
+                text: TR2.lookup(TrId.EnterPasswordContent);
+                horizontal-alignment: center;
+                color: Palette.content-tertiary;
+            }
+
             VerticalLayout {
                 alignment: start;
                 padding-top: Size.sz3;
