@@ -105,7 +105,7 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     let file_hashes = bundle_file_hashes(&output_dir)?;
     let hashed_files = file_hashes.keys().cloned().collect();
     let manifest_path = output_dir.join("manifest.json");
-    generate_manifest(config, project_root, &manifest_path, file_hashes)?;
+    generate_manifest(config, project_root, &sdk, &manifest_path, file_hashes)?;
 
     // Sign app.elf and the manifest. fileHashes was taken from the unsigned elf, so signing the
     // elf doesn't invalidate it and the two signatures are independent.
@@ -314,10 +314,12 @@ fn strip_binary(input: &Path, output: &Path) -> Result<()> {
 fn generate_manifest(
     config: &AppConfig,
     project_root: &Path,
+    sdk: &SdkRoot,
     output: &Path,
     file_hashes: BTreeMap<String, String>,
 ) -> Result<()> {
-    let mut manifest = app_manifest_from_config(config, config.resolved_permissions(project_root)?);
+    let permissions = config.resolved_permissions(project_root, Some(&sdk.keyos_root().join("api")))?;
+    let mut manifest = app_manifest_from_config(config, permissions);
     manifest.file_hashes = file_hashes;
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(output, json)?;

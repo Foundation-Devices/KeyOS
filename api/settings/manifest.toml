@@ -4,6 +4,8 @@ manifestVersion = "0"
 # render consistently with the system (theme, accent, locale, time). Third-party readable.
 # `settings.device-configuration`: the rest (onboarding, security words, radios,
 # developer mode, calibration). Foundation-only reads.
+# Airlock/USB state reads use `device-connectivity.usb-device-status`: third-party
+# readable, so apps can show why Airlock is unavailable.
 LookupTimeZone = { id = 5, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
 ListTimeZone = { id = 6, type = "blockingArchive", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
 FlushAll = { id = 7, type = "scalar" }
@@ -42,9 +44,9 @@ SubscribeTimeZone = { id = 49, type = "archiveEvent", permissionGroup = "setting
 GetDebugTouch = { id = 50, type = "blockingScalar", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
 SetDebugTouch = { id = 51, type = "scalar", approval = "autoAllow" }
 SubscribeDebugTouch = { id = 52, type = "scalarEvent", permissionGroup = "settings.ui-essentials", approval = "autoAllow" }
-GetAirlockMode = { id = 53, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetAirlockMode = { id = 53, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 SetAirlockMode = { id = 54, type = "scalar", approval = "autoAllow" }
-SubscribeAirlockMode = { id = 55, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SubscribeAirlockMode = { id = 55, type = "scalarEvent", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 GetTouchOffset = { id = 56, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
 SetTouchOffset = { id = 57, type = "scalar", approval = "autoAllow" }
 SubscribeTouchOffset = { id = 58, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
@@ -60,9 +62,9 @@ SubscribeBluetoothEnabled = { id = 67, type = "scalarEvent", permissionGroup = "
 GetCameraEnabled = { id = 68, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
 SetCameraEnabled = { id = 69, type = "scalar", approval = "autoAllow" }
 SubscribeCameraEnabled = { id = 70, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
-GetUsbEnabled = { id = 71, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+GetUsbEnabled = { id = 71, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 SetUsbEnabled = { id = 72, type = "scalar", approval = "autoAllow" }
-SubscribeUsbEnabled = { id = 73, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+SubscribeUsbEnabled = { id = 73, type = "scalarEvent", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 GetDeveloperMode = { id = 74, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
 SetDeveloperMode = { id = 75, type = "scalar", approval = "autoAllow" }
 SubscribeDeveloperMode = { id = 76, type = "scalarEvent", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }

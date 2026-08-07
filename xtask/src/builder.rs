@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     env,
     fs::{self, File},
     io::Write,
@@ -13,7 +13,10 @@ use std::{
 };
 
 use anyhow::Context;
-use app_manifest::Manifest;
+use app_manifest::{ApprovalBehavior, Manifest, RequiredSignature};
+
+/// How a server message may be granted: its required signature and approval behaviour.
+type MessagePolicy = (RequiredSignature, ApprovalBehavior);
 use cargo_metadata::semver::Version;
 
 use crate::utils::{Cosign2, GIT_TIMESTAMP};
@@ -660,8 +663,35 @@ impl Builder {
     /// unsigned. Whether the app is a Flux child is decided by the device directory it lands in, not by
     /// anything here.
     pub fn build_app(&self, app_name: &str, out: &Path, cosign2_config: Option<PathBuf>) -> BundledApp {
+        let mut manifest = load_manifest(app_name);
+        // A standalone bundle is built outside an image build, so the message lookup is rebuilt
+        // from the canonical service and app set of the image the bundle targets.
+        let service_crates: &[&[&str]] = if matches!(self.profile, Profile::Hosted) {
+            &[
+                crate::MANDATORY_SYSTEM_SERVICES_HOSTED,
+                crate::SYSTEM_SERVICES_HOSTED,
+                crate::DEFAULT_SERVICES_HOSTED,
+            ]
+        } else {
+            &[crate::MANDATORY_SYSTEM_SERVICES_HW, crate::DEFAULT_SERVICES_NORMAL]
+        };
+        let mut message_names = HashMap::new();
+        for crate_name in service_crates.iter().copied().flatten().chain(crate::DEFAULT_APPS_NORMAL) {
+            for (server_name, messages) in load_manifest(crate_name).servers {
+                for (message_name, message) in messages {
+                    message_names.insert(
+                        (server_name.clone(), message_name),
+                        (message.required_signature(), message.approval),
+                    );
+                }
+            }
+        }
+        if !validate_manifest_permissions(&mut manifest, &message_names, false, RequiredSignature::ThirdParty)
+        {
+            panic!("There were errors in the manifest files");
+        }
         let app_bin = self.build_local_crate(app_name);
-        let app_id_hex = hex::encode(load_manifest(app_name).app_id);
+        let app_id_hex = hex::encode(manifest.app_id);
         let bundle_dir = out.join(&app_id_hex);
         fs::remove_dir_all(&bundle_dir).ok();
         // A standalone bundle carries its icons inside as `icon.bin` and `icon-dark.bin`, where the
@@ -746,15 +776,21 @@ impl Builder {
     fn update_nameserver_system_manifests(&self) {
         let is_recovery = self.features.contains(&String::from("recovery-os"));
         let mut manifests = Vec::new();
-        let mut message_names = HashSet::<(String, String)>::new();
+        let mut message_names = HashMap::<(String, String), MessagePolicy>::new();
         let mut manifest_error = false;
         for service in &self.services {
             let CrateSpec::Local(service) = service else { continue };
             let manifest = load_manifest(&service);
             let app_name = manifest.app_name_en();
             for (server_name, messages) in manifest.servers.iter() {
-                for message_name in messages.keys() {
-                    if !message_names.insert((server_name.clone(), message_name.clone())) {
+                for (message_name, message) in messages {
+                    if message_names
+                        .insert(
+                            (server_name.clone(), message_name.clone()),
+                            (message.required_signature(), message.approval),
+                        )
+                        .is_some()
+                    {
                         println!(
                             "[!] Manifest error in {app_name} (0x{}): duplicate message {}:{}",
                             hex::encode(manifest.app_id),
@@ -768,38 +804,13 @@ impl Builder {
             manifests.push(manifest);
         }
         for manifest in &mut manifests {
-            let app_name = manifest.app_name_en();
-
-            for (server_name, messages) in manifest.permissions.iter_mut() {
-                if server_name == "template" {
-                    println!(
-                        "[!] Manifest error in {app_name} (0x{}): template(s) {messages:?} do not exist.",
-                        hex::encode(manifest.app_id),
-                    );
-                    manifest_error = true;
-                    continue;
-                }
-                // We need to remove unknown messages from the manifest, or else nameserver will panic on
-                // start.
-                messages.retain(|message_name| {
-                    if !message_names.contains(&(server_name.clone(), message_name.clone())) {
-                        if is_recovery {
-                            println!(
-                                "Manifest warning in {app_name} (0x{}): message {}:{} does not exist. Removing.",
-                                hex::encode(manifest.app_id), server_name, message_name
-                            );
-                        } else {
-                            println!(
-                                "[!] Manifest error in {app_name} (0x{}): message {}:{} does not exist.",
-                                hex::encode(manifest.app_id), server_name, message_name
-                            );
-                            manifest_error = true;
-                        }
-                        false
-                    } else {
-                        true
-                    }
-                })
+            if !validate_manifest_permissions(
+                manifest,
+                &message_names,
+                is_recovery,
+                RequiredSignature::Foundation,
+            ) {
+                manifest_error = true;
             }
         }
         if manifest_error {
@@ -1096,6 +1107,63 @@ pub fn crate_version(crate_name: &str) -> Version { get_package_metadata(crate_n
 
 pub fn get_package_declared_features(crate_name: &str) -> Vec<String> {
     get_package_metadata(crate_name).features.keys().map(|k| k.clone()).collect()
+}
+
+/// Validate a manifest's `[permissions]` against the servers' declared messages: unresolved
+/// templates, messages that do not exist (removed with a warning on recovery images, which build
+/// a subset of the services), and, for a `ThirdParty` manifest, messages the device never grants
+/// to a sideloaded app (Foundation-only ones and ones whose approval is not user-grantable), so
+/// the first use would panic with AccessDenied. Returns false when the manifest had errors.
+fn validate_manifest_permissions(
+    manifest: &mut Manifest,
+    message_names: &HashMap<(String, String), MessagePolicy>,
+    is_recovery: bool,
+    app_signature: RequiredSignature,
+) -> bool {
+    let app_name = manifest.app_name_en();
+    let app_id = hex::encode(manifest.app_id);
+    let mut ok = true;
+    for (server_name, messages) in manifest.permissions.iter_mut() {
+        if server_name == "template" {
+            println!("[!] Manifest error in {app_name} (0x{app_id}): template(s) {messages:?} do not exist.");
+            ok = false;
+            continue;
+        }
+        // Unknown messages must not reach the nameserver manifest, or it panics on start.
+        messages.retain(|message_name| {
+            match message_names.get(&(server_name.clone(), message_name.clone())) {
+                None if is_recovery => {
+                    println!(
+                        "Manifest warning in {app_name} (0x{app_id}): message {server_name}:{message_name} does not exist. Removing."
+                    );
+                    return false;
+                }
+                None => {
+                    println!(
+                        "[!] Manifest error in {app_name} (0x{app_id}): message {server_name}:{message_name} does not exist."
+                    );
+                    ok = false;
+                }
+                Some((RequiredSignature::Foundation, _)) if app_signature == RequiredSignature::ThirdParty => {
+                    println!(
+                        "[!] Manifest error in {app_name} (0x{app_id}): message {server_name}:{message_name} is Foundation-only and never granted to a sideloaded app (using it panics with AccessDenied)."
+                    );
+                    ok = false;
+                }
+                Some((_, ApprovalBehavior::NotUserGrantable))
+                    if app_signature == RequiredSignature::ThirdParty =>
+                {
+                    println!(
+                        "[!] Manifest error in {app_name} (0x{app_id}): message {server_name}:{message_name} is never user-grantable, so the device never grants it to a sideloaded app (using it panics with AccessDenied)."
+                    );
+                    ok = false;
+                }
+                Some(_) => {}
+            }
+            true
+        });
+    }
+    ok
 }
 
 pub fn load_manifest(crate_name: &str) -> Manifest {

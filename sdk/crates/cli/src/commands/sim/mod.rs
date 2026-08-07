@@ -68,7 +68,8 @@ pub fn execute() -> Result<()> {
     // sideloaded under sideloaded-apps); app-manager execs the dev app.elf here.
     let app_elf_root = simulator_app_elf_root(&sdk);
     println!("Copying application to KeyOS SDK...");
-    let dest_dir = copy_to_sdk(config, project_root, &app_elf_root.join("sideloaded-apps"), sideloaded_dir)?;
+    let dest_dir =
+        copy_to_sdk(config, project_root, &sdk, &app_elf_root.join("sideloaded-apps"), sideloaded_dir)?;
 
     // The dev app is read through fs like on device, so its manifest, icon, and
     // resources go into the simulator's system image (the app.elf does not; it is
@@ -117,7 +118,13 @@ fn build_for_simulator(
 /// Copy the built app to `<apps_dir>/<dest_name>/app.elf` (plus a manifest for
 /// reference). The dir is named by the bare hex app id so the host-launch path
 /// resolves it; the binary is still the cargo package output.
-fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path, dest_name: &str) -> Result<PathBuf> {
+fn copy_to_sdk(
+    config: &AppConfig,
+    project_root: &Path,
+    sdk: &SdkRoot,
+    apps_dir: &Path,
+    dest_name: &str,
+) -> Result<PathBuf> {
     let profile = "debug"; // Simulator always uses debug for faster iteration
     let binary_path = project_root.join("target").join(profile).join(&config.app_name);
 
@@ -132,7 +139,7 @@ fn copy_to_sdk(config: &AppConfig, project_root: &Path, apps_dir: &Path, dest_na
     fs::copy(&binary_path, &dest_binary)
         .with_context(|| format!("Failed to copy binary to {}", dest_binary.display()))?;
 
-    let manifest_json = generate_manifest_json(config, project_root)?;
+    let manifest_json = generate_manifest_json(config, project_root, sdk)?;
     fs::write(dest_dir.join("manifest.json"), manifest_json)?;
 
     // Stage the icons next to app.elf so the simulator's app-manager serves them
@@ -158,7 +165,7 @@ fn inject_sideloaded_app(
     }
     fs::create_dir_all(&bundle_dir)?;
     stage_hardware_assets(config, project_root, &bundle_dir)?;
-    fs::write(bundle_dir.join("manifest.json"), generate_manifest_json(config, project_root)?)?;
+    fs::write(bundle_dir.join("manifest.json"), generate_manifest_json(config, project_root, sdk)?)?;
 
     let kernel_dir = simulator_kernel_dir(sdk);
     ensure_simulator_images(sdk, &kernel_dir)?;
@@ -753,7 +760,8 @@ mod tests {
 }
 
 /// Generate manifest.json content
-fn generate_manifest_json(config: &AppConfig, project_root: &Path) -> Result<String> {
-    let manifest = app_manifest_from_config(config, config.resolved_permissions(project_root)?);
+fn generate_manifest_json(config: &AppConfig, project_root: &Path, sdk: &SdkRoot) -> Result<String> {
+    let permissions = config.resolved_permissions(project_root, Some(&sdk.keyos_root().join("api")))?;
+    let manifest = app_manifest_from_config(config, permissions);
     Ok(serde_json::to_string_pretty(&manifest)?)
 }

@@ -439,6 +439,24 @@ impl TestEnv {
         link(fake_bin, &bundle.join("bin"));
         fs::write(bundle.join("flake.nix"), "{}").unwrap();
         fs::write(bundle.join("lib").join("keyos").join("Cargo.toml"), "[workspace]\n").unwrap();
+        let api_settings = bundle.join("lib").join("keyos").join("api").join("settings");
+        fs::create_dir_all(&api_settings).unwrap();
+        fs::write(
+            api_settings.join("manifest.toml"),
+            "[servers.\"os/settings\"]\nGetDeviceName = { id = 32, type = \"blockingArchive\", \
+             permissionGroup = \"settings.ui-essentials\", approval = \"autoAllow\" }\n",
+        )
+        .unwrap();
+        let api_gui_server = bundle.join("lib").join("keyos").join("api").join("gui-server");
+        fs::create_dir_all(&api_gui_server).unwrap();
+        fs::write(
+            api_gui_server.join("manifest.toml"),
+            "[servers.\"os/gui-server\"]\nRegisterAppMessage = { id = 0, type = \"blockingArchive\", \
+             permissionGroup = \"ui-and-input.app-surface\", approval = \"autoAllow\" }\n\
+             RequestRedraw = { id = 23, type = \"scalar\", \
+             permissionGroup = \"ui-and-input.app-surface\", approval = \"autoAllow\" }\n",
+        )
+        .unwrap();
         fs::write(themes_dir.join("base_theme.json"), r#"{"id":"base_theme","name":"Base Theme"}"#).unwrap();
         fs::write(bundle.join("ui").join("ui").join("placeholder.slint"), "// ui\n").unwrap();
         fs::write(bundle.join("ui").join("ui").join("theme.slint"), "// theme\n").unwrap();

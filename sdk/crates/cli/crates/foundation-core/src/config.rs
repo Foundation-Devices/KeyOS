@@ -275,7 +275,7 @@ impl AppConfig {
         self.validate_app_names()?;
         self.validate_icon(project_root)?;
         self.validate_qr_match_rules()?;
-        let _ = self.resolved_permissions(project_root)?;
+        let _ = self.resolved_permissions(project_root, None)?;
         Ok(())
     }
 
@@ -399,11 +399,18 @@ impl AppConfig {
         app_names
     }
 
-    /// Expand permission templates and merge them with explicit permission entries.
+    /// Expand permission templates and merge them with explicit permission entries, then
+    /// validate the result against the server manifests in `server_manifests` when given
+    /// (callers without an SDK root, like project discovery, pass `None` and get template
+    /// resolution only).
     ///
     /// Declaring `qr-match-rules` is itself the request for the QR handoff, so the gui-server
     /// permission it needs is added here instead of being boilerplate the app author must repeat.
-    pub fn resolved_permissions(&self, project_root: &Path) -> Result<PermissionEntries, ConfigError> {
+    pub fn resolved_permissions(
+        &self,
+        project_root: &Path,
+        server_manifests: Option<&Path>,
+    ) -> Result<PermissionEntries, ConfigError> {
         let mut permissions = self.permissions.resolve(project_root)?;
 
         if !self.qr_match_rules.is_empty() {
@@ -414,8 +421,82 @@ impl AppConfig {
             }
         }
 
+        if let Some(server_manifests) = server_manifests {
+            check_foundation_only(&permissions, server_manifests)?;
+        }
+
         Ok(permissions)
     }
+}
+
+/// Reject permissions the device cannot honour: messages no shipped server manifest declares
+/// (unknown here means unusable on-device too, since the SDK ships the api crates apps can talk
+/// to), Foundation-only messages, which the device never grants to a third-party-signed app, so
+/// the first use would panic with AccessDenied, and messages whose `approval` makes them
+/// ungrantable regardless of signature. A message without a `permissionGroup` or an explicit
+/// `requiredSignature` is Foundation-only; a message without an `approval` of `autoAllow` or
+/// `grantOnFirstUse` is never user-grantable.
+fn check_foundation_only(
+    permissions: &PermissionEntries,
+    server_manifests: &Path,
+) -> Result<(), ConfigError> {
+    #[derive(Deserialize)]
+    struct ServerManifest {
+        #[serde(default)]
+        servers: BTreeMap<String, BTreeMap<String, MessagePolicy>>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MessagePolicy {
+        permission_group: Option<String>,
+        required_signature: Option<String>,
+        approval: Option<String>,
+    }
+
+    let read_error =
+        |source| ConfigError::ServerManifestReadError { path: server_manifests.to_path_buf(), source };
+    let mut servers = BTreeMap::<String, BTreeMap<String, MessagePolicy>>::new();
+    for entry in std::fs::read_dir(server_manifests).map_err(read_error)? {
+        let manifest_path = entry.map_err(read_error)?.path().join("manifest.toml");
+        let Ok(content) = std::fs::read_to_string(&manifest_path) else { continue };
+        let manifest: ServerManifest = toml::from_str(&content)
+            .map_err(|source| ConfigError::ServerManifestParseError { path: manifest_path, source })?;
+        for (server_name, messages) in manifest.servers {
+            servers.entry(server_name).or_default().extend(messages);
+        }
+    }
+
+    let mut unknown = Vec::new();
+    let mut foundation_only = Vec::new();
+    let mut not_grantable = Vec::new();
+    for (server_name, declared) in permissions {
+        for message_name in declared {
+            let Some(policy) = servers.get(server_name).and_then(|messages| messages.get(message_name))
+            else {
+                unknown.push(format!("{server_name}:{message_name}"));
+                continue;
+            };
+            let foundation = match policy.required_signature.as_deref() {
+                Some(signature) => signature == "foundation",
+                None => policy.permission_group.is_none(),
+            };
+            if foundation {
+                foundation_only.push(format!("{server_name}:{message_name}"));
+            } else if !matches!(policy.approval.as_deref(), Some("autoAllow" | "grantOnFirstUse")) {
+                not_grantable.push(format!("{server_name}:{message_name}"));
+            }
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(ConfigError::UnknownPermissions { messages: unknown.join(", ") });
+    }
+    if !foundation_only.is_empty() {
+        return Err(ConfigError::FoundationOnlyPermissions { messages: foundation_only.join(", ") });
+    }
+    if !not_grantable.is_empty() {
+        return Err(ConfigError::NotGrantablePermissions { messages: not_grantable.join(", ") });
+    }
+    Ok(())
 }
 
 pub type PermissionEntries = BTreeMap<String, Vec<String>>;
@@ -619,6 +700,21 @@ pub enum ConfigError {
     #[error("Permission template '{name}' not found in {path}")]
     UnknownPermissionTemplate { name: String, path: PathBuf },
 
+    #[error("Failed to read server manifests {path}: {source}")]
+    ServerManifestReadError { path: PathBuf, source: std::io::Error },
+
+    #[error("Failed to parse server manifest {path}: {source}")]
+    ServerManifestParseError { path: PathBuf, source: toml::de::Error },
+
+    #[error("app-config.toml declares Foundation-only messages, which a third-party app is never granted (using one panics with AccessDenied on the device): {messages}")]
+    FoundationOnlyPermissions { messages: String },
+
+    #[error("app-config.toml declares messages that no server manifest shipped with the SDK declares (check the server and message names): {messages}")]
+    UnknownPermissions { messages: String },
+
+    #[error("app-config.toml declares messages that are never user-grantable (their approval is neither autoAllow nor grantOnFirstUse, so the device never grants them to a third-party app): {messages}")]
+    NotGrantablePermissions { messages: String },
+
     #[error("Invalid {field} '{name}': {reason}")]
     InvalidAppName { field: &'static str, name: String, reason: &'static str },
 
@@ -636,9 +732,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError, ConfigError,
-        IconDimensions, PermissionsConfig, PublisherConfig, QrMatchRuleConfig, QrMatchSubRuleConfig,
-        QrPriority, APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
+        check_foundation_only, validate_display_app_name, validate_icon_file, AppConfig, AppId, AppIdError,
+        ConfigError, IconDimensions, PermissionEntries, PermissionsConfig, PublisherConfig,
+        QrMatchRuleConfig, QrMatchSubRuleConfig, QrPriority, APP_CONFIG_FILE, PERMISSION_TEMPLATES_FILE,
     };
 
     #[test]
@@ -695,7 +791,7 @@ mod tests {
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         config.validate(root).unwrap();
 
-        let permissions = config.resolved_permissions(root).unwrap();
+        let permissions = config.resolved_permissions(root, None).unwrap();
         assert_eq!(permissions["os/gui-server"], vec!["RegisterAppMessage", "RequestRedraw"]);
         assert_eq!(permissions["os/settings"], vec!["GetDeviceName", "GetLocale"]);
         assert_eq!(config.launcher_name(), "Demo");
@@ -755,6 +851,56 @@ mod tests {
     }
 
     #[test]
+    fn foundation_only_and_unknown_permissions_are_rejected() {
+        let manifests_dir = tempfile::tempdir().unwrap();
+        let settings = manifests_dir.path().join("settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(
+            settings.join("manifest.toml"),
+            r#"
+[servers."os/settings"]
+GetAirlockMode = { id = 53, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
+GetDeveloperMode = { id = 74, type = "blockingScalar", permissionGroup = "settings.device-configuration", requiredSignature = "foundation", approval = "autoAllow" }
+FlushAll = { id = 7, type = "scalar" }
+GetDiagnostics = { id = 90, type = "blockingArchive", permissionGroup = "settings.device-configuration", requiredSignature = "thirdParty" }
+"#,
+        )
+        .unwrap();
+
+        let allowed =
+            PermissionEntries::from([("os/settings".to_string(), vec!["GetAirlockMode".to_string()])]);
+        check_foundation_only(&allowed, manifests_dir.path()).unwrap();
+
+        let denied = PermissionEntries::from([(
+            "os/settings".to_string(),
+            vec!["FlushAll".to_string(), "GetAirlockMode".to_string(), "GetDeveloperMode".to_string()],
+        )]);
+        let error = check_foundation_only(&denied, manifests_dir.path()).unwrap_err();
+        assert_eq!(
+            error.to_string().rsplit_once(": ").unwrap().1,
+            "os/settings:FlushAll, os/settings:GetDeveloperMode"
+        );
+
+        let unknown = PermissionEntries::from([(
+            "os/settings".to_string(),
+            vec!["GetAirlockMode".to_string(), "NoSuchMessage".to_string()],
+        )]);
+        let error = check_foundation_only(&unknown, manifests_dir.path()).unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::UnknownPermissions { messages } if messages == "os/settings:NoSuchMessage"),
+            "{error}"
+        );
+
+        let not_grantable =
+            PermissionEntries::from([("os/settings".to_string(), vec!["GetDiagnostics".to_string()])]);
+        let error = check_foundation_only(&not_grantable, manifests_dir.path()).unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::NotGrantablePermissions { messages } if messages == "os/settings:GetDiagnostics"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn qr_match_rules_add_the_gui_server_handoff_permission() {
         let root_dir = write_project(ANY_QR_RULE_CONFIG, GUI_APP_TEMPLATE);
         let root = root_dir.path();
@@ -762,7 +908,7 @@ mod tests {
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
         config.validate(root).unwrap();
 
-        let permissions = config.resolved_permissions(root).unwrap();
+        let permissions = config.resolved_permissions(root, None).unwrap();
         assert_eq!(
             permissions["os/gui-server"],
             vec!["GetPendingNavRequest", "RegisterAppMessage", "RequestRedraw"]
@@ -781,7 +927,7 @@ mod tests {
         let root = root_dir.path();
 
         let config = AppConfig::load(&root.join(APP_CONFIG_FILE)).unwrap();
-        let permissions = config.resolved_permissions(root).unwrap();
+        let permissions = config.resolved_permissions(root, None).unwrap();
 
         assert_eq!(permissions["os/gui-server"], vec!["RegisterAppMessage", "RequestRedraw"]);
     }

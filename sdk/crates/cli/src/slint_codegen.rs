@@ -23,7 +23,7 @@ fn prepare_project_for_build_with_theme_dir(
     themes_dir: Option<&Path>,
 ) -> Result<()> {
     ensure_project_sdk_mapping(project_root, sdk)?;
-    ensure_compile_manifest(project_root)?;
+    ensure_compile_manifest(project_root, Some(sdk))?;
     ensure_project_ui_mapping(project_root, sdk)?;
     maybe_generate_slint_artifacts(project_root, Some(sdk), CodegenMode::MissingOnly, themes_dir)
 }
@@ -46,7 +46,7 @@ fn prepare_slint_file_for_view_from(
 }
 
 fn prepare_project_for_view(project_root: &Path, sdk: Option<&SdkRoot>) -> Result<()> {
-    ensure_compile_manifest(&project_root)?;
+    ensure_compile_manifest(&project_root, sdk)?;
 
     if let Some(sdk) = sdk {
         ensure_project_sdk_mapping(&project_root, sdk)?;
@@ -58,7 +58,7 @@ fn prepare_project_for_view(project_root: &Path, sdk: Option<&SdkRoot>) -> Resul
     maybe_generate_slint_artifacts(&project_root, sdk, CodegenMode::AlwaysCheck, None)
 }
 
-fn ensure_compile_manifest(project_root: &Path) -> Result<()> {
+fn ensure_compile_manifest(project_root: &Path, sdk: Option<&SdkRoot>) -> Result<()> {
     let config_path = project_root.join(APP_CONFIG_FILE);
     if !config_path.exists() {
         return Ok(());
@@ -67,7 +67,7 @@ fn ensure_compile_manifest(project_root: &Path) -> Result<()> {
     let config =
         AppConfig::load(&config_path).with_context(|| format!("Failed to read {}", config_path.display()))?;
     let permissions = config
-        .resolved_permissions(project_root)
+        .resolved_permissions(project_root, sdk.map(|sdk| sdk.keyos_root().join("api")).as_deref())
         .with_context(|| format!("Failed to resolve permissions for {}", project_root.display()))?;
     let manifest = app_manifest_from_config(&config, permissions);
     let rendered =
@@ -590,6 +590,16 @@ mod tests {
         let themes_dir = root.join("crates").join("foundation-themes").join("themes");
         fs::create_dir_all(&themes_dir).unwrap();
         fs::write(themes_dir.join("base_theme.json"), r#"{"id":"base_theme","name":"Base Theme"}"#).unwrap();
+        let api_gui_server = repo_root.join("api").join("gui-server");
+        fs::create_dir_all(&api_gui_server).unwrap();
+        fs::write(
+            api_gui_server.join("manifest.toml"),
+            "[servers.\"os/gui-server\"]\nRegisterAppMessage = { id = 0, type = \"blockingArchive\", \
+             permissionGroup = \"ui-and-input.app-surface\", approval = \"autoAllow\" }\n\
+             RequestRedraw = { id = 23, type = \"scalar\", \
+             permissionGroup = \"ui-and-input.app-surface\", approval = \"autoAllow\" }\n",
+        )
+        .unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("components").join("ui")).unwrap();
         fs::create_dir_all(repo_root.join("ui2").join("resources").join("icons")).unwrap();
         fs::write(repo_root.join("ui2").join("components").join("ui").join("theme.slint"), "theme\n")
