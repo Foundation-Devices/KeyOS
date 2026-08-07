@@ -23,7 +23,7 @@ mod tags;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.3.0";
+const KEYOS_VERSION: &str = "1.3.1";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";

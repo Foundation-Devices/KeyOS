@@ -1,318 +1,40 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette, Size, Importance } from "@ui/theme.slint";
-import { BasePage, AppHeader, IconButton, ScrollBody, Button, TextSm } from "@ui/widgets.slint";
-import { Input } from "@ui/widgets/input.slint";
+import { BasePage } from "@ui/widgets.slint";
+import { SeedEntry } from "@ui/pages.slint";
 import { Callbacks as CB } from "../../callbacks.slint";
 import { Navigate } from "../../gen/navigate.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 import { InputSeedProps } from "./props.slint";
 
-global SeedState {
-    in-out property <[string]> words;
-    in-out property <bool> is-seed-valid;
-
-    out property <bool> is-24-words: words.length == 24;
-
-    public function seed-to-24-word() {
-        words = [
-            words[0],
-            words[1],
-            words[2],
-            words[3],
-            words[4],
-            words[5],
-            words[6],
-            words[7],
-            words[8],
-            words[9],
-            words[10],
-            words[11],
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            ""
-        ];
-    }
-
-    public function set-word(index: int, word: string) {
-        words[index] = word;
-        is-seed-valid = CB.validate-full-seed(words)
-    }
-}
-
-component SeedWordInput inherits VerticalLayout {
-    in property <int> index;
-    out property <bool> is-last: index == SeedState.words.length - 1;
-    out property <bool> valid: input.text != "" && CB.validate-seed-word(input.text);
-    callback focus-next();
-
-    alignment: start;
-    visible: index < SeedState.words.length;
-
-    forward-focus: input;
-
-    input := Input {
-        show-clear-btn: false;
-        text: SeedState.words[index];
-        prefix: "\{index + 1}.";
-        has-error: self.text != "" && !valid;
-        height: root.visible ? Size.sz14 : 0px;
-        accept-button-text: is-last ? TR2.lookup(TrId.CommonKeyboardDone) : TR2.lookup(TrId.CommonKeyboardNext);
-        accept-button-enabled: valid;
-
-        edited(new-text) => {
-            SeedState.set-word(index, new-text);
-        }
-        accepted(text) => {
-            if (valid) {
-                focus-next();
-            }
-        }
-    }
-
-    Rectangle {
-        height: root.visible && !root.is-last ? Size.sz4 : 0px;
-    }
-}
-
 export component InputSeedPage inherits BasePage {
     in property <InputSeedProps> props;
 
-    init => {
-        SeedState.words = ["", "", "", "", "", "", "", "", "", "", "", ""];
-        SeedState.is-seed-valid = false;
+    entry := SeedEntry {
+        strings: {
+            title: TR2.lookup(TrId.ManualImportImportSeedWords),
+            expand: TR2.lookup(TrId.CommonRecoverWordsExpandTo24Word),
+            error: TR2.lookup(TrId.CommonRecoverWordsIncorrectTryAgain),
+            submit: TR2.lookup(TrId.CommonButtonContinue),
+        };
+        placeholder-for(_i) => {
+            return "";
+        }
+        submit(words) => {
+            CB.set-pending-imported-seed(
+                CB.words-to-entropy(words),
+                CB.get-seed-fingerprint(words),
+            );
+            Navigate.save-seed({ });
+        }
+        back => {
+            CB.clear-pending-import();
+            Navigate.backward();
+        }
     }
 
-    VerticalLayout {
-        AppHeader {
-            title: TR2.lookup(TrId.ManualImportImportSeedWords);
-
-            IconButton {
-                icon: "chevron-left";
-                size: Size.sz8;
-                importance: Importance.normal;
-                clicked => {
-                    CB.clear-pending-import();
-                    Navigate.backward();
-                }
-            }
-        }
-
-        flickable := ScrollBody {
-            p-x: Size.sz4;
-            p-y: Size.sz4;
-
-            VerticalLayout {
-                spacing: Size.sz4;
-
-                VerticalLayout {
-                    input1 := SeedWordInput {
-                        index: 0;
-                        focus-next => {
-                            input2.focus();
-                        }
-                    }
-
-                    input2 := SeedWordInput {
-                        index: 1;
-                        focus-next => {
-                            input3.focus();
-                        }
-                    }
-
-                    input3 := SeedWordInput {
-                        index: 2;
-                        focus-next => {
-                            input4.focus();
-                        }
-                    }
-
-                    input4 := SeedWordInput {
-                        index: 3;
-                        focus-next => {
-                            input5.focus();
-                        }
-                    }
-
-                    input5 := SeedWordInput {
-                        index: 4;
-                        focus-next => {
-                            input6.focus();
-                        }
-                    }
-
-                    input6 := SeedWordInput {
-                        index: 5;
-                        focus-next => {
-                            input7.focus();
-                        }
-                    }
-
-                    input7 := SeedWordInput {
-                        index: 6;
-                        focus-next => {
-                            input8.focus();
-                        }
-                    }
-
-                    input8 := SeedWordInput {
-                        index: 7;
-                        focus-next => {
-                            input9.focus();
-                        }
-                    }
-
-                    input9 := SeedWordInput {
-                        index: 8;
-                        focus-next => {
-                            input10.focus();
-                        }
-                    }
-
-                    input10 := SeedWordInput {
-                        index: 9;
-                        focus-next => {
-                            input11.focus();
-                        }
-                    }
-
-                    input11 := SeedWordInput {
-                        index: 10;
-                        focus-next => {
-                            input12.focus();
-                        }
-                    }
-
-                    input12 := SeedWordInput {
-                        index: 11;
-                        focus-next => {
-                            input13.focus();
-                        }
-                    }
-
-                    input13 := SeedWordInput {
-                        index: 12;
-                        focus-next => {
-                            input14.focus();
-                        }
-                    }
-
-                    input14 := SeedWordInput {
-                        index: 13;
-                        focus-next => {
-                            input15.focus();
-                        }
-                    }
-
-                    input15 := SeedWordInput {
-                        index: 14;
-                        focus-next => {
-                            input16.focus();
-                        }
-                    }
-
-                    input16 := SeedWordInput {
-                        index: 15;
-                        focus-next => {
-                            input17.focus();
-                        }
-                    }
-
-                    input17 := SeedWordInput {
-                        index: 16;
-                        focus-next => {
-                            input18.focus();
-                        }
-                    }
-
-                    input18 := SeedWordInput {
-                        index: 17;
-                        focus-next => {
-                            input19.focus();
-                        }
-                    }
-
-                    input19 := SeedWordInput {
-                        index: 18;
-                        focus-next => {
-                            input20.focus();
-                        }
-                    }
-
-                    input20 := SeedWordInput {
-                        index: 19;
-                        focus-next => {
-                            input21.focus();
-                        }
-                    }
-
-                    input21 := SeedWordInput {
-                        index: 20;
-                        focus-next => {
-                            input22.focus();
-                        }
-                    }
-
-                    input22 := SeedWordInput {
-                        index: 21;
-                        focus-next => {
-                            input23.focus();
-                        }
-                    }
-
-                    input23 := SeedWordInput {
-                        index: 22;
-                        focus-next => {
-                            input24.focus();
-                        }
-                    }
-
-                    input24 := SeedWordInput {
-                        index: 23;
-                    }
-                }
-
-                Button {
-                    label: TR2.lookup(TrId.CommonRecoverWordsExpandTo24Word);
-                    importance: secondary;
-                    visible: !SeedState.is-24-words;
-                    clicked => {
-                        SeedState.seed-to-24-word();
-                    }
-                }
-
-                if (!SeedState.is-seed-valid): TextSm {
-                    text: TR2.lookup(TrId.CommonRecoverWordsIncorrectTryAgain);
-                    color: Palette.content-lightcopper-brand;
-                    horizontal-alignment: center;
-                }
-
-                Button {
-                    label: TR2.lookup(TrId.CommonButtonContinue);
-                    enabled: SeedState.is-seed-valid;
-                    clicked => {
-                        CB.set-pending-imported-seed(
-                            CB.words-to-entropy(SeedState.words),
-                            CB.get-seed-fingerprint(SeedState.words),
-                        );
-                        Navigate.save-seed({ });
-                    }
-                }
-
-                Rectangle {
-                    height: 300px;
-                }
-            }
-        }
+    init => {
+        entry.reset();
     }
 }

@@ -17,6 +17,7 @@ btp = { workspace = true }
 chrono = "0.4.41"
 foundation-api = { workspace = true }
 fs = { workspace = true }
+getrandom = { workspace = true }
 gstp = "0.11.0"
 log = { workspace = true }
 log-server = { workspace = true }

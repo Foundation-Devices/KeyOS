@@ -682,7 +682,7 @@ dependencies = [
 [[package]]
 name = "backup-shard"
 version = "0.3.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.9.0#a0615c64c778d615f83344d4e73600f4cdfe3f03"
 dependencies = [
  "dcbor",
  "rkyv",
@@ -1040,7 +1040,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43d193de1f7487df1914d3a568b772458861d33f9c54249612cc2893d6915054"
 dependencies = [
- "bitcoin_hashes 0.13.0",
+ "bitcoin_hashes 0.12.0",
  "serde",
  "unicode-normalization",
 ]
@@ -1434,7 +1434,7 @@ dependencies = [
 [[package]]
 name = "btp"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.9.0#a0615c64c778d615f83344d4e73600f4cdfe3f03"
 dependencies = [
  "bytemuck",
  "consts 2.0.0 (git+https://github.com/Foundation-Devices/prime-ble-firmware.git)",
@@ -2095,7 +2095,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2104,7 +2104,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2522,9 +2522,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -3805,7 +3805,7 @@ dependencies = [
 [[package]]
 name = "foundation-api"
 version = "2.0.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.9.0#a0615c64c778d615f83344d4e73600f4cdfe3f03"
 dependencies = [
  "bc-components",
  "bc-envelope",
@@ -4627,8 +4627,8 @@ dependencies = [
  "power-manager",
  "ql-utils",
  "quantum-link",
- "rand 0.8.5",
  "security",
+ "seed-quiz",
  "serde",
  "server",
  "slint-keyos-platform",
@@ -4768,6 +4768,7 @@ dependencies = [
  "nostr",
  "ordered-table",
  "security",
+ "seed-quiz",
  "serde",
  "serde_json",
  "server",
@@ -6386,7 +6387,7 @@ dependencies = [
 
 [[package]]
 name = "keyos-kernel"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "app-manifest",
  "armv7",
@@ -6530,7 +6531,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if 1.0.0",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -7677,9 +7678,9 @@ dependencies = [
 
 [[package]]
 name = "nostr"
-version = "0.44.2"
+version = "0.44.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aa5e3b6a278ed061835fe1ee293b71641e6bf8b401cfe4e1834bbf4ef0a34e1"
+checksum = "c7d3d987ea7078dc36947cde532637c472a229426702e4331dd7667325378bd9"
 dependencies = [
  "base64 0.22.1",
  "bech32 0.11.0",
@@ -9152,7 +9153,7 @@ dependencies = [
 [[package]]
 name = "quantum-link-macros"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.7.0#4aca6373b4766d73824b1ec9fc40aade4f81f5a9"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.9.0#a0615c64c778d615f83344d4e73600f4cdfe3f03"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9171,6 +9172,7 @@ dependencies = [
  "chrono",
  "foundation-api",
  "fs",
+ "getrandom 0.2.10",
  "gstp",
  "log 0.4.27",
  "power-manager",
@@ -9209,9 +9211,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.34.0"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f24d770aeca0eacb81ac29dfbc55ebcc09312fdd1f8bbecdc7e4a84e000e3b4"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
 ]
@@ -10189,7 +10191,7 @@ version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d24b59d129cdadea20aea4fb2352fa053712e5d713eee47d700cd4b2bc002f10"
 dependencies = [
- "bitcoin_hashes 0.13.0",
+ "bitcoin_hashes 0.12.0",
  "secp256k1-sys 0.9.2",
 ]
 
@@ -10199,7 +10201,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.14.0",
+ "bitcoin_hashes 0.12.0",
  "rand 0.8.5",
  "secp256k1-sys 0.10.1",
  "serde",
@@ -10324,6 +10326,14 @@ dependencies = [
  "xous-api-names",
  "xous-ipc",
  "zeroize",
+]
+
+[[package]]
+name = "seed-quiz"
+version = "0.1.0"
+dependencies = [
+ "bip39",
+ "getrandom 0.2.10",
 ]
 
 [[package]]
@@ -10982,7 +10992,7 @@ dependencies = [
  "wayland-cursor 0.31.5",
  "wayland-protocols 0.32.3",
  "wayland-protocols-wlr",
- "wayland-scanner 0.31.4",
+ "wayland-scanner 0.31.11",
  "xkeysym",
 ]
 
@@ -12749,7 +12759,7 @@ dependencies = [
  "bitflags 2.6.0",
  "rustix",
  "wayland-backend 0.3.6",
- "wayland-scanner 0.31.4",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]
@@ -12818,7 +12828,7 @@ dependencies = [
  "bitflags 2.6.0",
  "wayland-backend 0.3.6",
  "wayland-client 0.31.5",
- "wayland-scanner 0.31.4",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]
@@ -12831,7 +12841,7 @@ dependencies = [
  "wayland-backend 0.3.6",
  "wayland-client 0.31.5",
  "wayland-protocols 0.32.3",
- "wayland-scanner 0.31.4",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]
@@ -12844,7 +12854,7 @@ dependencies = [
  "wayland-backend 0.3.6",
  "wayland-client 0.31.5",
  "wayland-protocols 0.32.3",
- "wayland-scanner 0.31.4",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]
@@ -12871,12 +12881,12 @@ dependencies = [
 
 [[package]]
 name = "wayland-scanner"
-version = "0.31.4"
+version = "0.31.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7b56f89937f1cf2ee1f1259cf2936a17a1f45d8f0aa1019fae6d470d304cfa6"
+checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
 dependencies = [
  "proc-macro2",
- "quick-xml 0.34.0",
+ "quick-xml 0.41.0",
  "quote",
 ]
 
@@ -13008,7 +13018,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

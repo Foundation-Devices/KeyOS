@@ -68,11 +68,11 @@ lint:
     cargo fmt --all --check
     just toml-fmt --check
     cargo check --target armv7a-unknown-xous-elf --package atsama5d27
-    cargo check --target armv7a-none-eabi --manifest-path imports/at91bootstrap-ffi/Cargo.toml
+    cargo check --target armv7a-none-eabi --manifest-path boot/keyos-boot/Cargo.toml
     just check-workspace
     cargo xtask build --hosted --dont-sign
     cargo xtask build --dont-sign
-    cargo xtask build --recovery
+    cargo xtask build --is-recovery
     cargo xtask build sys-benchmark
     cargo audit
 

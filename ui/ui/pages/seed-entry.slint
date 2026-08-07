@@ -1,0 +1,712 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ModalTextLine, Palette, Size } from "../theme.slint";
+import { TR } from "../i18n/i18n.slint";
+import { NavHeader } from "../widgets/app-header.slint";
+import { ConfirmationModal } from "../widgets/base-page.slint";
+import { Button } from "../widgets/button.slint";
+import { TextSm } from "../widgets/txt.slint";
+import { Input } from "../widgets/input.slint";
+
+/// Static strings for the seed-entry screen. The per-word placeholder is a
+/// callback because it is formatted with the word number, and the two apps key
+/// all of these under different catalog paths.
+export struct SeedEntryStrings {
+    title: string,
+    expand: string,
+    error: string,
+    submit: string,
+}
+
+export struct SeedStatus {
+    prefix-valid: bool,
+    seed-valid: bool,
+}
+
+/// BIP-39 validators for seed entry. Apps must bind these with
+/// `seed_quiz::init_seed_callbacks!`; unbound, every word reads as invalid.
+export global SeedCallbacks {
+    pure callback validate-seed-word(word: string) -> bool;
+    pure callback validate-seed(words: [string]) -> SeedStatus;
+    callback suggest-last-word(words: [string]) -> string;
+}
+
+component SeedWordInput inherits VerticalLayout {
+    in property <int> index;
+    in property <int> total;
+    in property <string> initial-word;
+    in property <string> placeholder;
+    in property <string> action-label;
+    in property <string> action-icon;
+    callback edited(word: string);
+    callback action-clicked();
+    callback focus-next();
+    // Fires with `index` when this input gains focus, so the host can scroll it
+    // above the on-screen keyboard.
+    callback focused(index: int);
+
+    out property <bool> is-last: index == total - 1;
+    out property <bool> valid: input.text != "" && SeedCallbacks.validate-seed-word(input.text);
+
+    alignment: start;
+    visible: index < total;
+    forward-focus: input;
+
+    public function set-text(word: string) {
+        input.text = word;
+    }
+
+    input := Input {
+        show-clear-btn: false;
+        text: initial-word;
+        prefix: "\{index + 1}.";
+        placeholder: placeholder;
+        has-error: self.text != "" && !valid;
+        height: root.visible ? Size.sz14 : 0px;
+        accept-button-text: root.is-last ? TR.lookup("common.keyboard.done") : TR.lookup("common.keyboard.next");
+        // The keyboard's accept key only advances a valid word, so leaving it
+        // enabled on an empty or half-typed one offers a press that does nothing.
+        accept-button-enabled: root.valid;
+        action-label: root.is-last ? root.action-label : "";
+        action-icon: root.is-last ? root.action-icon : "";
+
+        action-clicked => {
+            root.action-clicked();
+        }
+
+        changed has-focus => {
+            if (self.has-focus) {
+                root.focused(root.index);
+            }
+        }
+        edited(new-text) => {
+            root.edited(new-text);
+        }
+        accepted(text) => {
+            if (valid) {
+                focus-next();
+            }
+        }
+    }
+
+    Rectangle {
+        height: root.visible && !root.is-last ? Size.sz4 : 0px;
+    }
+}
+
+/// Seed-word entry: a 12- or 24-word mnemonic input grid with per-word
+/// validation, an expand-to-24 button, an error line, and a submit button.
+/// Shared by Vault, onboarding restore, and Legacy Enter Seed flows. The host
+/// supplies the strings and the per-word placeholder, and handles submit;
+/// validation comes from `SeedCallbacks` and word state lives in the component.
+export component SeedEntry inherits Rectangle {
+    in property <SeedEntryStrings> strings;
+    pure callback placeholder-for(index: int) -> string;
+    callback submit(words: [string]);
+    callback back();
+
+    property <[string]> words: ["", "", "", "", "", "", "", "", "", "", "", ""];
+    property <SeedStatus> status;
+    property <bool> last-word-generated: false;
+    property <bool> last-word-empty: words[words.length - 1] == "";
+    out property <bool> is-24-words: words.length == 24;
+    private property <bool> generate-modal-open: false;
+    private property <string> pending-last-word;
+    // TODO: localization
+    private property <string> generate-label: "Generate";
+    private property <string> regenerate-label: "Regenerate";
+
+    /// Clear back to an empty 12-word entry. Call when the screen is shown.
+    public function reset() {
+        words = ["", "", "", "", "", "", "", "", "", "", "", ""];
+        words-replaced();
+    }
+
+    function set-last-word-text(word: string) {
+        if (is-24-words) {
+            i24.set-text(word);
+        } else {
+            i12.set-text(word);
+        }
+    }
+
+    function set-word(index: int, word: string) {
+        words[index] = word;
+        if (index == words.length - 1) {
+            last-word-generated = false;
+        } else if (last-word-generated) {
+            // A generated completion belongs to its prefix, so any prefix edit
+            // invalidates it. Preserve a final word the user entered manually.
+            words[words.length - 1] = "";
+            last-word-generated = false;
+            set-last-word-text("");
+        }
+        status = SeedCallbacks.validate-seed(words);
+    }
+
+    function apply-generated-last-word(word: string) {
+        if (word == "") {
+            return;
+        }
+        words[words.length - 1] = word;
+        last-word-generated = true;
+        set-last-word-text(word);
+        status = SeedCallbacks.validate-seed(words);
+    }
+
+    function trigger-last-word-action() {
+        if (last-word-generated) {
+            apply-generated-last-word(SeedCallbacks.suggest-last-word(words));
+        } else {
+            generate-modal-open = true;
+        }
+    }
+
+    function cancel-final-word-generation() {
+        pending-last-word = "";
+        generate-modal-open = false;
+    }
+
+    // Guarded read for the inputs: the extra fields (13-24) exist before
+    // seed-to-24 grows the array, so indexing straight into `words` would read
+    // out of bounds in 12-word mode. Return "" past the end instead.
+    pure function word-at(index: int) -> string {
+        return index < words.length ? words[index] : "";
+    }
+
+    // Reactivity on `words` is per-row, so anything derived from the array as a
+    // whole is recomputed at each whole-model replacement.
+    function words-replaced() {
+        last-word-generated = false;
+        generate-modal-open = false;
+        pending-last-word = "";
+        status = SeedCallbacks.validate-seed(words);
+    }
+
+    // Grow a 12-word entry to 24, preserving the first 12. Whole-array assign is
+    // tracked, so the extra inputs appear and validity recomputes.
+    function seed-to-24() {
+        words = [
+            words[0],
+            words[1],
+            words[2],
+            words[3],
+            words[4],
+            words[5],
+            words[6],
+            words[7],
+            words[8],
+            words[9],
+            words[10],
+            words[11],
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+        ];
+        words-replaced();
+    }
+
+    // Scroll the word at `index` up only if it would sit behind the on-screen
+    // keyboard (396px). Visible area = page height − NavHeader (sz16) − keyboard;
+    // place the item just above the keyboard with a small gap (sz2).
+    function maybe-scroll-to(index: int) {
+        if (Size.sz6 + index * (Size.sz14 + Size.sz4) + Size.sz14 > -flickable.viewport-y + root.height - Size.sz16 - 396px) {
+            flickable.viewport-y = -(Size.sz6 + index * (Size.sz14 + Size.sz4) + Size.sz14 - (root.height - Size.sz16 - 396px) + Size.sz2);
+        }
+    }
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        alignment: stretch;
+
+        NavHeader {
+            title: strings.title;
+            clicked => {
+                back();
+            }
+        }
+
+        flickable := Flickable {
+            animate viewport-y {
+                duration: 150ms;
+                easing: ease-in-out;
+            }
+
+            VerticalLayout {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-top: Size.sz6;
+                padding-bottom: Size.sz6;
+                spacing: Size.sz4;
+
+                VerticalLayout {
+                    i1 := SeedWordInput {
+                        index: 0;
+                        total: words.length;
+                        initial-word: words[0];
+                        placeholder: placeholder-for(0);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(0, w);
+                        }
+                        focus-next => {
+                            i2.focus();
+                        }
+                    }
+
+                    i2 := SeedWordInput {
+                        index: 1;
+                        total: words.length;
+                        initial-word: words[1];
+                        placeholder: placeholder-for(1);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(1, w);
+                        }
+                        focus-next => {
+                            i3.focus();
+                        }
+                    }
+
+                    i3 := SeedWordInput {
+                        index: 2;
+                        total: words.length;
+                        initial-word: words[2];
+                        placeholder: placeholder-for(2);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(2, w);
+                        }
+                        focus-next => {
+                            i4.focus();
+                        }
+                    }
+
+                    i4 := SeedWordInput {
+                        index: 3;
+                        total: words.length;
+                        initial-word: words[3];
+                        placeholder: placeholder-for(3);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(3, w);
+                        }
+                        focus-next => {
+                            i5.focus();
+                        }
+                    }
+
+                    i5 := SeedWordInput {
+                        index: 4;
+                        total: words.length;
+                        initial-word: words[4];
+                        placeholder: placeholder-for(4);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(4, w);
+                        }
+                        focus-next => {
+                            i6.focus();
+                        }
+                    }
+
+                    i6 := SeedWordInput {
+                        index: 5;
+                        total: words.length;
+                        initial-word: words[5];
+                        placeholder: placeholder-for(5);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(5, w);
+                        }
+                        focus-next => {
+                            i7.focus();
+                        }
+                    }
+
+                    i7 := SeedWordInput {
+                        index: 6;
+                        total: words.length;
+                        initial-word: words[6];
+                        placeholder: placeholder-for(6);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(6, w);
+                        }
+                        focus-next => {
+                            i8.focus();
+                        }
+                    }
+
+                    i8 := SeedWordInput {
+                        index: 7;
+                        total: words.length;
+                        initial-word: words[7];
+                        placeholder: placeholder-for(7);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(7, w);
+                        }
+                        focus-next => {
+                            i9.focus();
+                        }
+                    }
+
+                    i9 := SeedWordInput {
+                        index: 8;
+                        total: words.length;
+                        initial-word: words[8];
+                        placeholder: placeholder-for(8);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(8, w);
+                        }
+                        focus-next => {
+                            i10.focus();
+                        }
+                    }
+
+                    i10 := SeedWordInput {
+                        index: 9;
+                        total: words.length;
+                        initial-word: words[9];
+                        placeholder: placeholder-for(9);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(9, w);
+                        }
+                        focus-next => {
+                            i11.focus();
+                        }
+                    }
+
+                    i11 := SeedWordInput {
+                        index: 10;
+                        total: words.length;
+                        initial-word: words[10];
+                        placeholder: placeholder-for(10);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(10, w);
+                        }
+                        focus-next => {
+                            i12.focus();
+                        }
+                    }
+
+                    i12 := SeedWordInput {
+                        index: 11;
+                        total: words.length;
+                        initial-word: words[11];
+                        placeholder: placeholder-for(11);
+                        action-label: status.prefix-valid ? (last-word-generated ? regenerate-label : (last-word-empty ? generate-label : "")) : "";
+                        action-icon: status.prefix-valid && last-word-generated ? "reload" : "";
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(11, w);
+                        }
+                        action-clicked => {
+                            trigger-last-word-action();
+                        }
+                        focus-next => {
+                            if (is-24-words) {
+                                i13.focus();
+                            }
+                        }
+                    }
+
+                    i13 := SeedWordInput {
+                        index: 12;
+                        total: words.length;
+                        initial-word: word-at(12);
+                        placeholder: placeholder-for(12);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(12, w);
+                        }
+                        focus-next => {
+                            i14.focus();
+                        }
+                    }
+
+                    i14 := SeedWordInput {
+                        index: 13;
+                        total: words.length;
+                        initial-word: word-at(13);
+                        placeholder: placeholder-for(13);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(13, w);
+                        }
+                        focus-next => {
+                            i15.focus();
+                        }
+                    }
+
+                    i15 := SeedWordInput {
+                        index: 14;
+                        total: words.length;
+                        initial-word: word-at(14);
+                        placeholder: placeholder-for(14);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(14, w);
+                        }
+                        focus-next => {
+                            i16.focus();
+                        }
+                    }
+
+                    i16 := SeedWordInput {
+                        index: 15;
+                        total: words.length;
+                        initial-word: word-at(15);
+                        placeholder: placeholder-for(15);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(15, w);
+                        }
+                        focus-next => {
+                            i17.focus();
+                        }
+                    }
+
+                    i17 := SeedWordInput {
+                        index: 16;
+                        total: words.length;
+                        initial-word: word-at(16);
+                        placeholder: placeholder-for(16);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(16, w);
+                        }
+                        focus-next => {
+                            i18.focus();
+                        }
+                    }
+
+                    i18 := SeedWordInput {
+                        index: 17;
+                        total: words.length;
+                        initial-word: word-at(17);
+                        placeholder: placeholder-for(17);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(17, w);
+                        }
+                        focus-next => {
+                            i19.focus();
+                        }
+                    }
+
+                    i19 := SeedWordInput {
+                        index: 18;
+                        total: words.length;
+                        initial-word: word-at(18);
+                        placeholder: placeholder-for(18);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(18, w);
+                        }
+                        focus-next => {
+                            i20.focus();
+                        }
+                    }
+
+                    i20 := SeedWordInput {
+                        index: 19;
+                        total: words.length;
+                        initial-word: word-at(19);
+                        placeholder: placeholder-for(19);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(19, w);
+                        }
+                        focus-next => {
+                            i21.focus();
+                        }
+                    }
+
+                    i21 := SeedWordInput {
+                        index: 20;
+                        total: words.length;
+                        initial-word: word-at(20);
+                        placeholder: placeholder-for(20);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(20, w);
+                        }
+                        focus-next => {
+                            i22.focus();
+                        }
+                    }
+
+                    i22 := SeedWordInput {
+                        index: 21;
+                        total: words.length;
+                        initial-word: word-at(21);
+                        placeholder: placeholder-for(21);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(21, w);
+                        }
+                        focus-next => {
+                            i23.focus();
+                        }
+                    }
+
+                    i23 := SeedWordInput {
+                        index: 22;
+                        total: words.length;
+                        initial-word: word-at(22);
+                        placeholder: placeholder-for(22);
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(22, w);
+                        }
+                        focus-next => {
+                            i24.focus();
+                        }
+                    }
+
+                    i24 := SeedWordInput {
+                        index: 23;
+                        total: words.length;
+                        initial-word: word-at(23);
+                        placeholder: placeholder-for(23);
+                        action-label: status.prefix-valid ? (last-word-generated ? regenerate-label : (last-word-empty ? generate-label : "")) : "";
+                        action-icon: status.prefix-valid && last-word-generated ? "reload" : "";
+                        focused(idx) => {
+                            maybe-scroll-to(idx);
+                        }
+                        edited(w) => {
+                            set-word(23, w);
+                        }
+                        action-clicked => {
+                            trigger-last-word-action();
+                        }
+                    }
+                }
+
+                Button {
+                    label: strings.expand;
+                    importance: secondary;
+                    visible: !is-24-words;
+                    clicked => {
+                        seed-to-24();
+                    }
+                }
+
+                // Validate the full seed only after every prefix word is valid and
+                // the final field is filled.
+                if (status.prefix-valid && !status.seed-valid && !last-word-empty): TextSm {
+                    text: strings.error;
+                    color: Palette.content-lightcopper-brand;
+                    horizontal-alignment: center;
+                }
+
+                Button {
+                    label: strings.submit;
+                    importance: primary;
+                    enabled: status.seed-valid;
+                    clicked => {
+                        submit(words);
+                    }
+                }
+
+                // Bottom padding so the last word isn't hidden behind the keyboard.
+                Rectangle {
+                    height: 396px;
+                }
+            }
+        }
+    }
+
+    if generate-modal-open: ConfirmationModal {
+        private property <bool> showing-result: root.pending-last-word != "";
+        private property <[ModalTextLine]> result-lines: [
+            { text: "Your final word is" },
+            { text: root.pending-last-word, color: Palette.content-link },
+            { text: "Import this seed?" },
+        ];
+        private property <[ModalTextLine]> explainer-lines: [
+            { text: "Passport will generate a random final word to complete your seed" },
+        ];
+
+        // TODO: localization
+        title: "Generate Final Word";
+        lines: showing-result ? result-lines : explainer-lines;
+        cancel-button-label: showing-result ? "No" : "Cancel";
+        confirm-button-label: showing-result ? "Yes" : root.generate-label;
+
+        cancel-clicked => {
+            root.cancel-final-word-generation();
+        }
+        confirm-clicked => {
+            if (showing-result) {
+                // Apply before cancelling, which clears the pending word.
+                root.apply-generated-last-word(root.pending-last-word);
+                root.cancel-final-word-generation();
+            } else {
+                root.pending-last-word = SeedCallbacks.suggest-last-word(root.words);
+            }
+        }
+    }
+}

@@ -34,7 +34,14 @@
     {
       "name": "onboarding",
       "path": "os/gui-app-onboarding",
-      "include": ["common.button", "common.update", "keycardBackup", "common.recoverRestoreCardKeycard", "common.recoverWords"]
+      "include": [
+        "common.button",
+        "common.keyboard",
+        "common.update",
+        "keycardBackup",
+        "common.recoverRestoreCardKeycard",
+        "common.recoverWords"
+      ]
     },
     {
       "name": "recovery",

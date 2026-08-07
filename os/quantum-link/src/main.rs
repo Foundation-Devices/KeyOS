@@ -30,7 +30,7 @@ use foundation_api::{
     passport::PassportColor,
     quantum_link::{ARIDCache, QlError, QuantumLink, ReplayCheck, EXPIRATION_DURATION},
     scv::{ChallengeResponseResult, SecurityCheck},
-    status::{DeviceNameUpdate, DeviceStatus, EnvoyStatus, TimezoneRequest},
+    status::{DeviceNameUpdate, DeviceStatus, EnvoyStatus, Heartbeat, TimezoneRequest},
 };
 use gstp::{SealedEvent, SealedEventBehavior};
 use log::debug;
@@ -85,7 +85,6 @@ pub struct QuantumLinkServer {
     settings: SettingsApi,
 
     tick_timer: TicktimerPrivileged,
-    last_time_seconds: u32,
     should_set_system_time: bool,
 
     bt_sender: mpsc::Sender<BtSend>,
@@ -156,7 +155,6 @@ impl QuantumLinkServer {
             settings: SettingsApi::default(),
 
             tick_timer,
-            last_time_seconds: 0,
             should_set_system_time: true,
 
             bt_sender,
@@ -190,19 +188,33 @@ impl QuantumLinkServer {
         let unsealed = self.unseal_envoy_message(&envelope).context("unseal envelope")?;
         let message = &unsealed.message.message;
         let sender = &unsealed.sender;
-        let timestamp = unsealed.message.timestamp;
 
-        if let QuantumLinkMessage::PairingRequest(p) = message {
-            return self.handle_pairing_request(p, sender, timestamp);
+        if let QuantumLinkMessage::PairingRequest(request) = message {
+            return self.handle_pairing_request(request, sender, unsealed.message.timestamp);
         }
-
-        self.check_replay(&unsealed).context("replay check")?;
 
         if !self.is_paired(sender) {
             anyhow::bail!("Not paired with this sender. Need to send a pairing request first.");
         }
 
-        self.sync_system_time(timestamp);
+        match (message, self.heartbeat_state.time_sync) {
+            (
+                QuantumLinkMessage::Heartbeat(Heartbeat {
+                    request_id: Some(response_id),
+                    timestamp_ms: Some(timestamp_ms),
+                }),
+                Some(request_id),
+            ) => {
+                if *response_id == request_id {
+                    self.heartbeat_state.time_sync = None;
+                    self.sync_system_time(*timestamp_ms)?;
+                } else {
+                    log::warn!("heartbeat time sync request ID mismatch");
+                }
+            }
+            _ => {}
+        }
+        self.check_replay(&unsealed).context("replay check")?;
 
         log_message("received message", &message);
         self.dispatch_ql_message(unsealed.message.message);
@@ -214,15 +226,13 @@ impl QuantumLinkServer {
         &mut self,
         request: &PairingRequest,
         sender: &XIDDocument,
-        timestamp: u32,
+        timestamp_seconds: u32,
     ) -> anyhow::Result<()> {
         if self.state.guard().paired_device.is_some() {
             anyhow::bail!("Already paired. Pairing request ignored.");
         }
 
         log::info!("received pairing request");
-        log::info!("clearing last envoy timestamp seconds, previous={}s", self.last_time_seconds);
-        self.last_time_seconds = 0;
 
         let event = PairingEvent::RequestReceived;
         self.message_subscribers.pairing_event.send_nowait(&event);
@@ -234,8 +244,7 @@ impl QuantumLinkServer {
                 anyhow::bail!("pairing request XID did not match envelope sender");
             }
 
-            self.sync_system_time(timestamp);
-
+            self.sync_system_time(u64::from(timestamp_seconds) * 1_000)?;
             self.state.guard().paired_device =
                 Some(PairedDevice { xid: xid_document, name: request.device_name.clone() });
 
@@ -297,18 +306,12 @@ impl QuantumLinkServer {
         }
     }
 
-    fn sync_system_time(&mut self, time_seconds: u32) {
-        if self.should_set_system_time
-            // prevent time shifting backwards
-            // until envoy deprecates "send message from file" pattern
-            && (time_seconds > self.last_time_seconds
-                // if large time difference then overwrite
-                || time_seconds.abs_diff(self.last_time_seconds) > 60 * 10)
-        {
-            let time_nanos = time_seconds as u64 * 1_000_000_000;
-            self.tick_timer.set_system_time(time_nanos);
-            self.last_time_seconds = time_seconds;
+    fn sync_system_time(&self, timestamp_ms: u64) -> anyhow::Result<()> {
+        let timestamp_ns = timestamp_ms.checked_mul(1_000_000).context("system time overflow")?;
+        if self.should_set_system_time {
+            self.tick_timer.set_system_time(timestamp_ns);
         }
+        Ok(())
     }
 
     fn send(&mut self, msg: QuantumLinkMessage, outcome: SendOutcome) -> Result<(), SendMessageError> {

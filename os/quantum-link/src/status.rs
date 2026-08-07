@@ -14,10 +14,12 @@ const MAX_MISSED_HEARTBEATS: u32 = 5;
 pub struct HeartbeatState {
     pub live: bool,
     pub request: RequestState,
+    pub time_sync: Option<[u8; 16]>,
 }
 
 impl HeartbeatState {
-    pub const DEAD: HeartbeatState = HeartbeatState { live: false, request: RequestState::Idle };
+    pub const DEAD: HeartbeatState =
+        HeartbeatState { live: false, request: RequestState::Idle, time_sync: None };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,12 +87,18 @@ impl QuantumLinkServer {
                     return;
                 }
                 log::debug!("sending heartbeat from idle state");
+                let mut request_id = [0; 16];
+                getrandom::getrandom(&mut request_id).unwrap();
                 let res = self.send(
-                    QuantumLinkMessage::Heartbeat(foundation_api::status::Heartbeat {}),
+                    QuantumLinkMessage::Heartbeat(foundation_api::status::Heartbeat {
+                        request_id: Some(request_id),
+                        timestamp_ms: None,
+                    }),
                     SendOutcome::NotifyHeartbeat,
                 );
                 match res {
                     Ok(_) => {
+                        self.heartbeat_state.time_sync = Some(request_id);
                         self.set_heartbeat_state(|h| h.request = RequestState::PendingSend);
                     }
                     Err(e) => {
@@ -107,6 +115,7 @@ impl QuantumLinkServer {
             }
             RequestState::WaitingForResponse => {
                 log::debug!("heartbeat timeout");
+                self.heartbeat_state.time_sync = None;
                 self.heartbeat_failure();
                 self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
             }
@@ -140,8 +149,10 @@ impl QuantumLinkServer {
     }
 
     pub fn heartbeat_success(&mut self) {
+        self.heartbeat_state.time_sync = None;
         self.missed_heartbeats = 0;
-        self.set_heartbeat_state(|h| *h = HeartbeatState { live: true, request: RequestState::Idle });
+        self.heartbeat_state.live = true;
+        self.set_heartbeat_state(|h| h.request = RequestState::Idle);
         self.reschedule_heartbeat(HEARTBEAT_INTERVAL);
     }
 
