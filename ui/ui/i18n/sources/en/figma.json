@@ -1,5 +1,5 @@
 {
-  "_": "Cancel",
+  "_": "i already got my SW",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -1621,6 +1621,12 @@
       "textFiller": "Name your Passport",
       "title": "Device Name"
     },
+    "disableMagicBackup": {
+      "content": "If Magic Backup with two Keycards and one Apple/Google Cloud is currently the only backup, you need to save your seed words and disable Magic Backups to be able to proceed. ",
+      "header": "Proceed with Seed Words",
+      "showSeedWords": "Show Seed Words",
+      "title": "Disable Magic Backup"
+    },
     "display": {
       "appearance": "Appearance",
       "automaticBrightness": "Automatic Brightness",
@@ -1780,7 +1786,7 @@
       "battery": "Battery",
       "dateAndTime": "Date & Time",
       "deviceName": "Device Name",
-      "screenBrightness": "Display",
+      "display": "Display",
       "security": "Security",
       "title": "Settings"
     },
