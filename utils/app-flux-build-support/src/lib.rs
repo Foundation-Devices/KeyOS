@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    env, fs,
+    fs,
     io::ErrorKind,
     path::{Path, PathBuf},
     process::Command,
@@ -97,6 +97,27 @@ libapp: $(LIB_DEPENDENCIES)
 	$(L)$(GCCPATH)arm-none-eabi-ar rcs $(BIN_DIR)/libapp.a $(OBJECT_FILES)
 "#;
 
+/// A git tag pinned to the commit OID it must peel to. The commit is what gets
+/// checked out and read, so a moved tag can't change the sources; the tag names
+/// the version in error messages.
+#[derive(Clone, Copy)]
+pub struct GitPin {
+    pub tag: &'static str,
+    pub commit: &'static str,
+}
+
+impl GitPin {
+    /// The `tag@commit` form recorded in clone markers.
+    fn marker(&self) -> String { format!("{}@{}", self.tag, self.commit) }
+}
+
+/// Where a Flux app's upstream sources come from: the repo name and its pin.
+#[derive(Clone, Copy)]
+pub struct LedgerAppSource {
+    pub name: &'static str,
+    pub pin: GitPin,
+}
+
 #[derive(Clone, Copy)]
 pub struct LedgerSdkOptions {
     pub patch_sdk: fn(&Path),
@@ -147,50 +168,49 @@ pub struct LedgerGlyphOptions<'a> {
     pub chain_icon_stub_dir: Option<&'a str>,
 }
 
-/// Marker recording which git ref a clone under `out_dir` was made from, kept
-/// beside the checkout (not inside it) so patching or `git clean` can't drop it.
+/// Marker recording which pin (`tag@commit`) a clone under `out_dir` was made
+/// from, kept beside the checkout (not inside it) so patching or `git clean`
+/// can't drop it.
 fn clone_ref_marker(out_dir: &str, name: &str) -> PathBuf {
     Path::new(out_dir).join(format!("{name}.git-ref"))
 }
 
-/// Whether the clone of `name` under `out_dir` was made from `git_ref`.
-fn clone_matches_ref(out_dir: &str, name: &str, git_ref: &str) -> bool {
-    fs::read_to_string(clone_ref_marker(out_dir, name)).map(|s| s.trim() == git_ref).unwrap_or(false)
+/// Whether the clone of `name` under `out_dir` was made from `pin`.
+fn clone_matches_ref(out_dir: &str, name: &str, pin: &str) -> bool {
+    fs::read_to_string(clone_ref_marker(out_dir, name)).map(|s| s.trim() == pin).unwrap_or(false)
 }
 
-/// Record the git ref a fresh clone of `name` was made from.
-fn record_clone_ref(out_dir: &str, name: &str, git_ref: &str) {
-    let _ = fs::write(clone_ref_marker(out_dir, name), git_ref);
+/// Record the pin a fresh clone of `name` was made from.
+fn record_clone_ref(out_dir: &str, name: &str, pin: &str) {
+    let _ = fs::write(clone_ref_marker(out_dir, name), pin);
 }
 
+/// Clone the app at its pinned tag; the build fails when the tag no longer
+/// points at the pinned commit.
 pub fn prepare_ledger_app(
     out_dir: &str,
-    app_name: &str,
-    app_git_ref: &str,
-    local_path_env_var: &str,
+    source: &LedgerAppSource,
     hosted: bool,
     options: LedgerAppOptions<'_>,
 ) -> PathBuf {
-    let app_path = Path::new(out_dir).join(app_name);
-    // Re-clone when the pinned ref changed since the last build. Otherwise the
-    // stale checkout is reused and the app is built at the old version even though
-    // the pinned ref names the new one, so the reported version (read from the
+    let app_path = Path::new(out_dir).join(source.name);
+    let pin = source.pin.marker();
+    // Re-clone when the pin changed since the last build. Otherwise the stale
+    // checkout is reused and the app is built at the old version even though
+    // the pin names the new one, so the reported version (read from the
     // rebuilt source below) and the compiled Settings page would disagree.
-    if app_path.exists() && !clone_matches_ref(out_dir, app_name, app_git_ref) {
+    if app_path.exists() && !clone_matches_ref(out_dir, source.name, &pin) {
+        // Drop the marker first: a crash between clone and re-record must not
+        // leave the old marker validating an unverified tree.
+        let _ = fs::remove_file(clone_ref_marker(out_dir, source.name));
         let _ = fs::remove_dir_all(&app_path);
     }
     if !app_path.exists() {
-        // Use the local mirror only when it actually has the pinned ref; a stale
-        // mirror misses newly pinned tags. Filter once here so the app clone and
-        // the submodule copy share one validated source: a rejected mirror must
-        // not seed submodules from a stale tree while the app comes from upstream.
-        let local_app_path =
-            find_local_ledger_repo(local_path_env_var, app_name).filter(|p| local_has_ref(p, app_git_ref));
-        clone_ledger_app(&app_path, app_name, app_git_ref, local_app_path.as_deref());
+        clone_ledger_app(&app_path, source);
         if matches!(options.submodules, LedgerAppSubmodules::Init) {
-            prepare_ledger_app_submodules(&app_path, local_app_path.as_deref());
+            prepare_ledger_app_submodules(&app_path);
         }
-        record_clone_ref(out_dir, app_name, app_git_ref);
+        record_clone_ref(out_dir, source.name, &pin);
     }
 
     clean_ledger_app_build_dir(&app_path);
@@ -346,7 +366,7 @@ pub fn generate_ledger_glyphs(
 /// one self-consistent version. When the engine sources are missing, replace all
 /// of `lib_nbgl/src` and `lib_nbgl/include` with this ref's, which ships both the
 /// engine and matching glue/headers.
-const NBGL_ENGINE_GIT_REF: &str = "v25.11.5";
+const NBGL_ENGINE: GitPin = GitPin { tag: "v25.11.5", commit: "6861f627dd3006aecf2d20d6d3e3435ecf0237e5" };
 
 /// A sentinel engine source: present in the pre-v26 tree, absent from v26.
 const NBGL_ENGINE_SENTINEL: &str = "lib_nbgl/src/nbgl_obj.c";
@@ -379,49 +399,8 @@ fn reset_nbgl_tree(sdk_path: &Path) {
     }
 }
 
-/// Recursively list `lib_nbgl/src` (or `/include`) at `NBGL_ENGINE_GIT_REF`,
-/// returning paths relative to that subdir (e.g. `fonts/nbgl_font_...inc`).
-fn nbgl_dir_files_at_ref(sdk_path: &Path, subdir: &str) -> Vec<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(sdk_path)
-        .args(["ls-tree", "-r", "--name-only"])
-        .arg(format!("{NBGL_ENGINE_GIT_REF}:lib_nbgl/{subdir}"))
-        .output()
-        .unwrap_or_else(|e| panic!("Failed to list lib_nbgl/{subdir} at {NBGL_ENGINE_GIT_REF}: {e}"));
-    if !out.status.success() {
-        panic!(
-            "Failed to list lib_nbgl/{subdir} at {NBGL_ENGINE_GIT_REF}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
-}
-
-/// Restore one file from `NBGL_ENGINE_GIT_REF` into the working tree.
-fn restore_file_at_ref(sdk_path: &Path, rel_path: &str) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(sdk_path)
-        .arg("show")
-        .arg(format!("{NBGL_ENGINE_GIT_REF}:{rel_path}"))
-        .output()
-        .unwrap_or_else(|e| panic!("Failed to read {rel_path} at {NBGL_ENGINE_GIT_REF}: {e}"));
-    if !out.status.success() {
-        panic!(
-            "Failed to restore {rel_path} from {NBGL_ENGINE_GIT_REF}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    let dst = sdk_path.join(rel_path);
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|e| panic!("Failed to create {}: {e}", parent.display()));
-    }
-    fs::write(&dst, &out.stdout).unwrap_or_else(|e| panic!("Failed to write {}: {e}", dst.display()));
-}
-
 /// When the NBGL engine sources are absent (SDK v26+), replace the whole
-/// `lib_nbgl/src` and `lib_nbgl/include` with `NBGL_ENGINE_GIT_REF`'s, so the
+/// `lib_nbgl/src` and `lib_nbgl/include` with `NBGL_ENGINE`'s, so the
 /// linked NBGL subsystem is self-consistent (engine, glue, and the `nbgl_obj_s`
 /// layout all match). No-op for SDK trees that still ship the engine.
 /// Returns true when the swap was performed (the SDK is v26+ and shipped no
@@ -432,32 +411,50 @@ fn restore_nbgl_engine_sources(sdk_path: &Path) -> bool {
     if sdk_path.join(NBGL_ENGINE_SENTINEL).exists() {
         return false;
     }
-    for subdir in ["src", "include"] {
-        let dir = sdk_path.join("lib_nbgl").join(subdir);
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("Failed to create {}: {e}", dir.display()));
-        for name in nbgl_dir_files_at_ref(sdk_path, subdir) {
-            restore_file_at_ref(sdk_path, &format!("lib_nbgl/{subdir}/{name}"));
-        }
+    // restore is no-overlay by default: tracked files under the pathspecs that
+    // are absent from --source are removed too, so this yields the exact tree.
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(sdk_path)
+        .arg("restore")
+        .arg(format!("--source={}", NBGL_ENGINE.commit))
+        .args(["--", "lib_nbgl/src", "lib_nbgl/include"])
+        .output()
+        .unwrap_or_else(|e| {
+            panic!("Failed to restore lib_nbgl from {} ({}): {e}", NBGL_ENGINE.tag, NBGL_ENGINE.commit)
+        });
+    if !out.status.success() {
+        panic!(
+            "Failed to restore lib_nbgl from {} ({}): {}",
+            NBGL_ENGINE.tag,
+            NBGL_ENGINE.commit,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     true
 }
 
+/// Clone the SDK at its pinned tag; the build fails when the tag no longer
+/// points at the pinned commit.
 pub fn prepare_ledger_sdk(
     out_dir: &str,
-    sdk_git_ref: &str,
+    sdk_pin: &GitPin,
     hosted: bool,
     options: LedgerSdkOptions,
 ) -> PathBuf {
     let sdk_path = Path::new(out_dir).join(LEDGER_SECURE_SDK_NAME);
-    // Re-clone when the pinned SDK ref changed, so a version bump doesn't build
-    // the app against the previously cloned SDK.
-    if sdk_path.exists() && !clone_matches_ref(out_dir, LEDGER_SECURE_SDK_NAME, sdk_git_ref) {
+    let pin = sdk_pin.marker();
+    // Re-clone when the SDK pin changed, so a version bump doesn't build the
+    // app against the previously cloned SDK.
+    if sdk_path.exists() && !clone_matches_ref(out_dir, LEDGER_SECURE_SDK_NAME, &pin) {
+        // Drop the marker first: a crash between clone and re-record must not
+        // leave the old marker validating an unverified tree.
+        let _ = fs::remove_file(clone_ref_marker(out_dir, LEDGER_SECURE_SDK_NAME));
         let _ = fs::remove_dir_all(&sdk_path);
     }
     if !sdk_path.exists() {
-        clone_ledger_sdk(&sdk_path, sdk_git_ref);
-        record_clone_ref(out_dir, LEDGER_SECURE_SDK_NAME, sdk_git_ref);
+        clone_ledger_sdk(&sdk_path, sdk_pin);
+        record_clone_ref(out_dir, LEDGER_SECURE_SDK_NAME, &pin);
     }
 
     let nbgl_restored = restore_nbgl_engine_sources(&sdk_path);
@@ -488,7 +485,10 @@ pub fn prepare_ledger_sdk(
 
 pub fn base_hosted_source_dirs(sdk_path: &Path, app_path: &Path) -> Vec<PathBuf> {
     vec![
+        sdk_path.join("lib_lists"),
         sdk_path.join("lib_nbgl/src"),
+        sdk_path.join("lib_pki"),
+        sdk_path.join("lib_tlv"),
         sdk_path.join("lib_ux_nbgl"),
         sdk_path.join("lib_standard_app"),
         sdk_path.join("qrcode/src"),
@@ -671,6 +671,9 @@ pub fn apply_common_hosted_includes(build: &mut cc::Build, sdk_path: &Path, app_
         .include(sdk_path.join("lib_ux_nbgl"))
         .include(sdk_path.join("lib_cxng/include"))
         .include(sdk_path.join("lib_cxng/src"))
+        .include(sdk_path.join("lib_lists"))
+        .include(sdk_path.join("lib_pki"))
+        .include(sdk_path.join("lib_tlv"))
         .include(sdk_path.join("io/include"))
         .include(sdk_path.join("io_legacy/include"))
         .include(sdk_path.join("protocol/include"))
@@ -934,38 +937,39 @@ fn common_arm_include_dirs(sdk_path: &Path, app_path: &Path) -> Vec<PathBuf> {
     ]
 }
 
-fn clone_ledger_sdk(sdk_path: &Path, sdk_git_ref: &str) {
-    // Use the local mirror only when it has both the pinned SDK ref and the NBGL
-    // engine ref. Missing the SDK ref fails the checkout below; missing the NBGL
-    // ref (e.g. a shallow/single-tag mirror with v26 but not v25.11.5) later
-    // panics restore_nbgl_engine_sources on its `git ls-tree NBGL_ENGINE_GIT_REF`.
-    // If either is absent, fall back to the upstream clone, which has both.
-    let local_sdk_path = find_local_ledger_repo("LEDGER_SDK_PATH", LEDGER_SECURE_SDK_NAME)
-        .filter(|p| local_has_ref(p, sdk_git_ref) && local_has_ref(p, NBGL_ENGINE_GIT_REF));
-
-    let mut clone_cmd = Command::new("git");
-    clone_cmd.arg("clone");
-    if let Some(local_path) = local_sdk_path {
-        clone_cmd.arg("--local").arg("--no-hardlinks").arg(local_path);
-    } else {
-        clone_cmd.arg(format!("https://github.com/LedgerHQ/{LEDGER_SECURE_SDK_NAME}.git"));
-    }
-    clone_cmd.arg(sdk_path);
-    let clone_out = clone_cmd.output().unwrap_or_else(|e| panic!("Failed to clone Ledger SDK: {e}"));
+fn clone_ledger_sdk(sdk_path: &Path, sdk_pin: &GitPin) {
+    // Full clone: besides the pinned tag it also needs the NBGL engine commit,
+    // which is not necessarily reachable from that tag.
+    let clone_out = Command::new("git")
+        .arg("clone")
+        .arg(format!("https://github.com/LedgerHQ/{LEDGER_SECURE_SDK_NAME}.git"))
+        .arg(sdk_path)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to clone Ledger SDK: {e}"));
     if !clone_out.status.success() {
         panic!("Failed to clone Ledger SDK: {}", String::from_utf8_lossy(&clone_out.stderr));
     }
 
-    let checkout_out = Command::new("git")
+    // A tag is only trusted while it still points at the commit pinned in the
+    // build script; failing here keeps a tag moved upstream from silently
+    // changing which sources get compiled and signed.
+    if rev_parse(sdk_path, sdk_pin.tag).as_deref() != Some(sdk_pin.commit) {
+        panic!(
+            "{LEDGER_SECURE_SDK_NAME}: {} no longer points at pinned commit {} (tag moved upstream?)",
+            sdk_pin.tag, sdk_pin.commit
+        );
+    }
+    let out = Command::new("git")
         .arg("checkout")
-        .arg(sdk_git_ref)
+        .arg(sdk_pin.commit)
         .current_dir(sdk_path)
         .output()
-        .unwrap_or_else(|e| panic!("Failed to checkout Ledger SDK ref {sdk_git_ref}: {e}"));
-    if !checkout_out.status.success() {
+        .unwrap_or_else(|e| panic!("Failed to checkout SDK pinned commit {}: {e}", sdk_pin.commit));
+    if !out.status.success() {
         panic!(
-            "Failed to checkout Ledger SDK ref {sdk_git_ref}: {}",
-            String::from_utf8_lossy(&checkout_out.stderr)
+            "Failed to checkout SDK pinned commit {}: {}",
+            sdk_pin.commit,
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }
@@ -1071,50 +1075,44 @@ fn push_glyph_stub(header: &mut String, symbol: &str) {
     ));
 }
 
-fn find_local_ledger_repo(local_path_env_var: &str, repo_name: &str) -> Option<PathBuf> {
-    env::var(local_path_env_var).ok().map(PathBuf::from).filter(|p| p.exists()).or_else(|| {
-        env::var("HOME")
-            .ok()
-            .map(|home| Path::new(&home).join("Prime/Ledger").join(repo_name))
-            .filter(|p| p.exists())
-    })
-}
-
-/// Whether a local git repo has `git_ref` available so a `--local` clone can
-/// check it out. A stale local mirror misses newly pinned tags; the caller then
-/// clones from upstream instead of failing.
-fn local_has_ref(repo: &Path, git_ref: &str) -> bool {
-    Command::new("git")
+/// `rev` peeled to a commit OID in `repo`, or None when it doesn't resolve
+/// (e.g. a stale local mirror missing a newly pinned tag).
+fn rev_parse(repo: &Path, rev: &str) -> Option<String> {
+    let out = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(["rev-parse", "--verify", "--quiet"])
-        .arg(format!("{git_ref}^{{commit}}"))
+        .arg(format!("{rev}^{{commit}}"))
         .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
-fn clone_ledger_app(app_path: &Path, app_name: &str, app_git_ref: &str, local_app_path: Option<&Path>) {
-    // Precondition: `local_app_path`, if set, is a mirror already known to hold
-    // the pinned ref; the caller drops stale mirrors so this clone and the
-    // submodule copy share one validated source.
-    let mut clone_cmd = Command::new("git");
-    clone_cmd.arg("clone").arg("--branch").arg(app_git_ref).arg("--single-branch");
-    if let Some(local_path) = local_app_path {
-        clone_cmd.arg("--local").arg("--no-hardlinks").arg(local_path);
-    } else {
-        clone_cmd.arg(format!("https://github.com/LedgerHQ/{app_name}.git"));
-    }
-    clone_cmd.arg(app_path);
-
-    let clone_out =
-        clone_cmd.output().unwrap_or_else(|e| panic!("Failed to clone Ledger app {app_name}: {e}"));
+fn clone_ledger_app(app_path: &Path, source: &LedgerAppSource) {
+    let clone_out = Command::new("git")
+        .arg("clone")
+        .arg("--branch")
+        .arg(source.pin.tag)
+        .arg("--single-branch")
+        .arg(format!("https://github.com/LedgerHQ/{}.git", source.name))
+        .arg(app_path)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to clone Ledger app {}: {e}", source.name));
     if !clone_out.status.success() {
-        panic!("Failed to clone Ledger app {app_name}: {}", String::from_utf8_lossy(&clone_out.stderr));
+        panic!("Failed to clone Ledger app {}: {}", source.name, String::from_utf8_lossy(&clone_out.stderr));
+    }
+
+    // `--branch` prefers a branch over a same-named tag, so verify the commit
+    // that was actually checked out rather than what the tag resolves to.
+    if rev_parse(app_path, "HEAD").as_deref() != Some(source.pin.commit) {
+        panic!(
+            "{}: cloning {} did not check out pinned commit {} (tag moved or shadowed upstream?)",
+            source.name, source.pin.tag, source.pin.commit
+        );
     }
 }
 
-fn prepare_ledger_app_submodules(app_path: &Path, local_app_path: Option<&Path>) {
+fn prepare_ledger_app_submodules(app_path: &Path) {
     let gitmodules_path = app_path.join(".gitmodules");
     if !gitmodules_path.exists() {
         return;
@@ -1122,57 +1120,16 @@ fn prepare_ledger_app_submodules(app_path: &Path, local_app_path: Option<&Path>)
 
     let content = fs::read_to_string(&gitmodules_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", gitmodules_path.display()));
-    let content = content.replace("git@github.com:", "https://github.com/");
-    fs::write(&gitmodules_path, &content)
+    fs::write(&gitmodules_path, content.replace("git@github.com:", "https://github.com/"))
         .unwrap_or_else(|e| panic!("Failed to write {}: {e}", gitmodules_path.display()));
 
-    if let Some(local_app_path) = local_app_path {
-        copy_submodules_from_local(app_path, local_app_path, &content);
-        return;
-    }
-
     let submodule_out = Command::new("git")
-        .arg("submodule")
-        .arg("update")
-        .arg("--init")
+        .args(["submodule", "update", "--init"])
         .current_dir(app_path)
         .output()
         .unwrap_or_else(|e| panic!("Failed to init Ledger app submodules: {e}"));
     if !submodule_out.status.success() {
         panic!("Failed to init Ledger app submodules: {}", String::from_utf8_lossy(&submodule_out.stderr));
-    }
-}
-
-fn copy_submodules_from_local(app_path: &Path, local_app_path: &Path, gitmodules_content: &str) {
-    for line in gitmodules_content.lines() {
-        let line = line.trim();
-        if let Some(path) = line.strip_prefix("path = ") {
-            let src = local_app_path.join(path);
-            if !src.exists() {
-                continue;
-            }
-
-            let dest = app_path.join(path);
-            let dest_empty = dest.read_dir().ok().map(|mut d| d.next().is_none()).unwrap_or(true);
-            if dest.exists() && !dest_empty {
-                continue;
-            }
-
-            let _ = Command::new("rm").arg("-rf").arg(&dest).output();
-            let copy_out = Command::new("cp")
-                .arg("-a")
-                .arg(&src)
-                .arg(&dest)
-                .output()
-                .unwrap_or_else(|e| panic!("Failed to copy Ledger app submodule {}: {e}", src.display()));
-            if !copy_out.status.success() {
-                panic!(
-                    "Failed to copy Ledger app submodule {}: {}",
-                    src.display(),
-                    String::from_utf8_lossy(&copy_out.stderr)
-                );
-            }
-        }
     }
 }
 

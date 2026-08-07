@@ -9,24 +9,26 @@ use std::{
 use app_flux_build_support::{
     append_generated_glyphs_c, apply_common_hosted_includes, apply_hosted_base_flag_defines,
     apply_hosted_flag_defines, apply_hosted_io_value_defines, apply_hosted_value_defines, ar_add,
-    base_arm_cflags, base_hosted_cc_build, base_hosted_skip_paths, base_hosted_source_dirs, collect_c_files,
-    compile_nbgl_arm_objects, emit_app_link_directives, generate_flux_app_module, generate_ledger_glyphs,
-    libapp_path, prepare_ledger_app, prepare_ledger_sdk, replace_in_file, run_make_libapp,
-    strip_libapp_objects, ArmToolchain, LedgerAppOptions, LedgerAppSubmodules, LedgerGlyphOptions,
-    LedgerSdkOptions, BASE_HOSTED_SKIP_FILES, BASE_STRIP_OBJS,
+    base_arm_cflags, base_hosted_cc_build, base_hosted_skip_paths, base_hosted_source_dirs, collect_c_dirs,
+    collect_c_files, compile_nbgl_arm_objects, emit_app_link_directives, generate_flux_app_module,
+    generate_ledger_glyphs, libapp_path, prepare_ledger_app, prepare_ledger_sdk, replace_in_file,
+    run_make_libapp, strip_libapp_objects, ArmToolchain, GitPin, LedgerAppOptions, LedgerAppSource,
+    LedgerAppSubmodules, LedgerGlyphOptions, LedgerSdkOptions, BASE_HOSTED_SKIP_FILES, BASE_STRIP_OBJS,
 };
 
-const APP_NAME: &str = "app-ethereum";
 const APP_ICON: &str = "icons/flex_app_chain_1.gif";
-const APP_GIT_TAG: &str = "flex_1.6.1_1.22.1_sdk_v26.1.6";
+const APP_SOURCE: LedgerAppSource = LedgerAppSource {
+    name: "app-ethereum",
+    pin: GitPin { tag: "flex_1.6.1_1.22.1_sdk_v26.1.6", commit: "dfa392a6408560edda1fa2d1664b5d3b644557ac" },
+};
 
-const SDK_GIT_TAG: &str = "v26.1.6";
+const SDK_PIN: GitPin = GitPin { tag: "v26.1.6", commit: "6905e0757bd7054ceb70eb0e93a7e46a841ec153" };
 
 /// Clone and patch the SDK. Returns the SDK path.
 fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
     prepare_ledger_sdk(
         out_dir,
-        SDK_GIT_TAG,
+        &SDK_PIN,
         hosted,
         LedgerSdkOptions {
             ensure_nbgl_font_data: true,
@@ -40,9 +42,7 @@ fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
 fn prepare_app(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
     prepare_ledger_app(
         out_dir,
-        APP_NAME,
-        APP_GIT_TAG,
-        "LEDGER_APP_ETHEREUM_PATH",
+        &APP_SOURCE,
         hosted,
         LedgerAppOptions {
             patch_app,
@@ -124,13 +124,10 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
     apply_hosted_value_defines(&mut build, value_defines);
 
     apply_common_hosted_includes(&mut build, &sdk_path, &app_path);
-    build.include(app_path.join("src/nbgl")).include(app_path.join("ethereum-plugin-sdk/src"));
-    if let Ok(entries) = fs::read_dir(&features_dir) {
-        for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                build.include(entry.path());
-            }
-        }
+    build.include(app_path.join("ethereum-plugin-sdk/src"));
+    // Upstream's `APP_SOURCE_PATH += src` puts every source dir on the include path.
+    for dir in collect_c_dirs(&app_path.join("src")) {
+        build.include(dir);
     }
 
     build.compile("app");

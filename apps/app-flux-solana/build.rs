@@ -12,21 +12,23 @@ use app_flux_build_support::{
     base_arm_cflags, base_hosted_cc_build, base_hosted_skip_paths, base_hosted_source_dirs, collect_c_dirs,
     collect_c_files, collect_icon_files, compile_nbgl_arm_objects, emit_app_link_directives,
     generate_flux_app_module, generate_ledger_glyphs, libapp_path, prepare_ledger_app, prepare_ledger_sdk,
-    replace_in_file, run_make_libapp, strip_libapp_objects, ArmToolchain, LedgerAppOptions,
-    LedgerGlyphOptions, LedgerSdkOptions, BASE_HOSTED_SKIP_FILES, BASE_STRIP_OBJS,
+    replace_in_file, run_make_libapp, strip_libapp_objects, ArmToolchain, GitPin, LedgerAppOptions,
+    LedgerAppSource, LedgerGlyphOptions, LedgerSdkOptions, BASE_HOSTED_SKIP_FILES, BASE_STRIP_OBJS,
 };
 
-const APP_NAME: &str = "app-solana";
 const APP_ICON: &str = "icons/icon_solana_40px.gif";
-const APP_GIT_TAG: &str = "flex_1.6.1_1.16.0_sdk_v26.4.0";
+const APP_SOURCE: LedgerAppSource = LedgerAppSource {
+    name: "app-solana",
+    pin: GitPin { tag: "flex_1.6.1_1.16.0_sdk_v26.4.0", commit: "f36225a6cc4615d64df1533cfc40f49b28ef659d" },
+};
 
-const SDK_GIT_TAG: &str = "v26.4.0";
+const SDK_PIN: GitPin = GitPin { tag: "v26.4.0", commit: "0be079ad4f6d2c35540b9c5a4fa486c592bf6999" };
 
 /// Clone and patch the SDK. Returns the SDK path.
 fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
     prepare_ledger_sdk(
         out_dir,
-        SDK_GIT_TAG,
+        &SDK_PIN,
         hosted,
         LedgerSdkOptions {
             ensure_nbgl_font_data: true,
@@ -40,9 +42,7 @@ fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
 fn prepare_app(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
     prepare_ledger_app(
         out_dir,
-        APP_NAME,
-        APP_GIT_TAG,
-        "LEDGER_APP_SOLANA_PATH",
+        &APP_SOURCE,
         hosted,
         LedgerAppOptions { patch_app, hosted_inline_asm_paths: &["src/main.c"], ..Default::default() },
     )
