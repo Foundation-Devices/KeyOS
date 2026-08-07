@@ -8,14 +8,14 @@ edition = "2021"
 
 [features]
 default = []
-## Build the host-side `UsbDebugClient` transport (depends on rusb + anyhow).
-client = ["dep:rusb", "dep:anyhow"]
+## Build the host-side `UsbDebugClient` transport (depends on rusb).
+client = ["dep:rusb"]
 
 [dependencies]
-anyhow = { workspace = true, optional = true }
 num-derive = { workspace = true }
 num-traits = { workspace = true }
 rusb = { version = "0.9", optional = true }
+thiserror = { workspace = true }
 
 [target.'cfg(keyos)'.dependencies]
 xous = { workspace = true }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Host-side `rusb` transport. Gated behind the `client` feature so device
-//! builds of this crate don't pull in `rusb`/`anyhow`.
+//! builds of this crate don't pull in `rusb`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -10,10 +10,58 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
 use rusb::{DeviceHandle, GlobalContext};
+use thiserror::Error;
 
 use crate::{Command, FrameType, ProtocolError, RawResponse, Status, USB_DEBUG_BULK_MAX_PACKET_LEN};
+
+/// Why opening the debug interface failed.
+#[derive(Debug, Error)]
+pub enum OpenError {
+    #[error("no USB device found with VID:PID {vid:04x}:{pid:04x}")]
+    NotFound { vid: u16, pid: u16 },
+    #[error("reading USB config descriptor: {0}")]
+    ConfigDescriptor(#[source] rusb::Error),
+    #[error("no vendor debug interface (class 0xFF) with both bulk endpoints")]
+    NoDebugInterface,
+    #[error("claiming debug interface: {0}")]
+    ClaimInterface(#[source] rusb::Error),
+}
+
+/// Why a command exchange broke down. The device may still be part-way through reading a frame, so
+/// a connection that reports this cannot be reused.
+#[derive(Debug, Error)]
+pub enum OutOfSync {
+    #[error("bulk OUT write: {0}")]
+    Write(#[source] rusb::Error),
+    #[error("bulk OUT write made no progress after {written} of {total} bytes")]
+    NoProgress { written: usize, total: usize },
+    #[error("bulk OUT short write ended the frame after {written} of {total} bytes")]
+    ShortWrite { written: usize, total: usize },
+    #[error("bulk OUT write reported {count} bytes for a {remaining}-byte remainder")]
+    OverRun { count: usize, remaining: usize },
+    #[error("{0} timed out")]
+    TimedOut(&'static str),
+    #[error("no response to cmd 0x{cmd:02x}")]
+    NoResponse { cmd: u8 },
+}
+
+/// A failed `UsbDebugClient` command.
+#[derive(Debug, Error)]
+pub enum TransportError {
+    #[error(transparent)]
+    Open(#[from] OpenError),
+    #[error(transparent)]
+    OutOfSync(#[from] OutOfSync),
+    /// The device answered and refused. The transport stays usable.
+    #[error("device returned status 0x{0:02x}")]
+    Device(u8),
+    /// Refused because the lock screen is active. The transport stays usable.
+    #[error("device is locked")]
+    Locked,
+    #[error(transparent)]
+    Response(#[from] ProtocolError),
+}
 
 /// Passport Prime VID:PID in normal mode.
 pub const PASSPORT_VID: u16 = 0x1307;
@@ -35,14 +83,13 @@ pub struct UsbDebugClient {
     log_rx: Receiver<Vec<u8>>,
     resp_rx: Receiver<RawResponse>,
     reader_enabled: Arc<AtomicBool>,
-    transport_poisoned: AtomicBool,
     reader_thread: Option<JoinHandle<()>>,
 }
 
 impl UsbDebugClient {
     /// Try `PASSPORT_VID:PID`, then fall back to `LEGACY_VID:PID`. If both fail,
     /// returns the error from the primary attempt (legacy is the rarer case).
-    pub fn open() -> Result<Self> {
+    pub fn open() -> Result<Self, OpenError> {
         match Self::open_with_vid_pid(PASSPORT_VID, PASSPORT_PID) {
             Ok(client) => Ok(client),
             Err(primary_err) => Self::open_with_vid_pid(LEGACY_VID, LEGACY_PID).map_err(|_| primary_err),
@@ -50,15 +97,14 @@ impl UsbDebugClient {
     }
 
     /// Open a specific VID:PID with no fallback.
-    pub fn open_with_vid_pid(vid: u16, pid: u16) -> Result<Self> {
+    pub fn open_with_vid_pid(vid: u16, pid: u16) -> Result<Self, OpenError> {
         // `mut` is required on some rusb versions (`detach_kernel_driver` takes &mut self)
         // and optional on others; keep it and silence the unused-mut warning.
         #[allow(unused_mut)]
-        let mut handle = rusb::open_device_with_vid_pid(vid, pid)
-            .ok_or_else(|| anyhow::anyhow!("No USB device found with VID:PID {vid:04x}:{pid:04x}"))?;
+        let mut handle = rusb::open_device_with_vid_pid(vid, pid).ok_or(OpenError::NotFound { vid, pid })?;
 
         let device = handle.device();
-        let config = device.active_config_descriptor().context("reading USB config descriptor")?;
+        let config = device.active_config_descriptor().map_err(OpenError::ConfigDescriptor)?;
 
         // Find the vendor-specific interface (class 0xFF) with bulk IN and OUT endpoints.
         let mut debug_iface = None;
@@ -88,15 +134,17 @@ impl UsbDebugClient {
             }
         }
 
-        let debug_iface = debug_iface.context("Vendor debug interface (class 0xFF) not found")?;
-        let ep_out = ep_out.context("Debug bulk OUT endpoint not found")?;
-        let ep_in = ep_in.context("Debug bulk IN endpoint not found")?;
+        // The scan only names an interface once both endpoints are in hand, so these cannot be None.
+        let (debug_iface, ep_out, ep_in) = match (debug_iface, ep_out, ep_in) {
+            (Some(iface), Some(out), Some(in_)) => (iface, out, in_),
+            _ => return Err(OpenError::NoDebugInterface),
+        };
 
         // Detach any kernel driver from the debug interface before claiming.
         // Some Linux setups report `kernel_driver_active()` unreliably across
         // the Legacy HID identity transition, so detach on a best-effort basis.
         let _ = handle.detach_kernel_driver(debug_iface);
-        handle.claim_interface(debug_iface).context("claiming debug interface")?;
+        handle.claim_interface(debug_iface).map_err(OpenError::ClaimInterface)?;
 
         let handle = Arc::new(handle);
         let (log_tx, log_rx) = mpsc::channel();
@@ -108,83 +156,45 @@ impl UsbDebugClient {
         let reader_thread =
             std::thread::spawn(move || reader_thread(reader_handle, ep_in, log_tx, resp_tx, reader_gate));
 
-        Ok(Self {
-            handle,
-            ep_out,
-            log_rx,
-            resp_rx,
-            reader_enabled,
-            transport_poisoned: AtomicBool::new(false),
-            reader_thread: Some(reader_thread),
-        })
+        Ok(Self { handle, ep_out, log_rx, resp_rx, reader_enabled, reader_thread: Some(reader_thread) })
     }
 
     /// Encode `cmd`, send it on the OUT endpoint, and wait up to `timeout` for
     /// the matching `[STATUS][PAYLOAD]` response frame. Validates the status
     /// byte and returns just the payload on success.
-    pub fn send(&self, cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
-        if self.transport_poisoned.load(Ordering::Acquire) {
-            anyhow::bail!("USB debug transport needs to be disconnected and reopened");
-        }
+    ///
+    /// # Errors
+    ///
+    /// `TransportError::OutOfSync` means the exchange itself broke down and the connection has to
+    /// be replaced. `Device` and `Locked` mean the device answered and refused, which leaves the
+    /// transport usable.
+    pub fn send(&self, cmd: Command, timeout: Duration) -> Result<Vec<u8>, TransportError> {
+        let resp = self.exchange(cmd, timeout)?;
 
+        match Status::from_byte(resp.status)? {
+            Status::Ok => Ok(resp.payload),
+            Status::Err => Err(TransportError::Device(resp.status)),
+            Status::Locked => Err(TransportError::Locked),
+        }
+    }
+
+    /// Write the command frame and read back its response frame.
+    fn exchange(&self, cmd: Command, timeout: Duration) -> Result<RawResponse, OutOfSync> {
         let mut out_buf = Vec::with_capacity(64);
         cmd.encode_into(&mut out_buf);
-        let cmd_byte = cmd.cmd_byte();
         let deadline = Instant::now() + timeout;
 
-        if let Err(error) = write_bulk_all(&out_buf, deadline, |remaining, write_timeout| {
-            self.handle.write_bulk(self.ep_out, remaining, write_timeout).context("bulk OUT write")
-        }) {
-            self.transport_poisoned.store(true, Ordering::Release);
-            return Err(error.context("USB command frame may be incomplete; disconnect and reconnect"));
-        }
+        write_bulk_all(&out_buf, deadline, |remaining, write_timeout| {
+            self.handle.write_bulk(self.ep_out, remaining, write_timeout).map_err(OutOfSync::Write)
+        })?;
+
         if needs_out_zlp(out_buf.len()) {
-            let write_timeout = match time_left(deadline, "bulk OUT ZLP write") {
-                Ok(timeout) => timeout,
-                Err(error) => {
-                    self.transport_poisoned.store(true, Ordering::Release);
-                    return Err(error.context("disconnect and reconnect"));
-                }
-            };
-            let written = match self.handle.write_bulk(self.ep_out, &[], write_timeout) {
-                Ok(written) => written,
-                Err(error) => {
-                    self.transport_poisoned.store(true, Ordering::Release);
-                    return Err(anyhow::Error::new(error)
-                        .context("bulk OUT ZLP write failed; disconnect and reconnect"));
-                }
-            };
-            if written != 0 {
-                self.transport_poisoned.store(true, Ordering::Release);
-                anyhow::bail!(
-                    "bulk OUT ZLP write unexpectedly reported {written} bytes; disconnect and reconnect"
-                );
-            }
+            let write_timeout = time_left(deadline, "bulk OUT ZLP write")?;
+            self.handle.write_bulk(self.ep_out, &[], write_timeout).map_err(OutOfSync::Write)?;
         }
 
-        let response_timeout = match time_left(deadline, "USB response") {
-            Ok(timeout) => timeout,
-            Err(error) => {
-                self.transport_poisoned.store(true, Ordering::Release);
-                return Err(error.context("disconnect and reconnect"));
-            }
-        };
-        let resp = match self.resp_rx.recv_timeout(response_timeout) {
-            Ok(response) => response,
-            Err(_) => {
-                self.transport_poisoned.store(true, Ordering::Release);
-                anyhow::bail!(
-                    "Timeout waiting for response to cmd 0x{cmd_byte:02x}; disconnect and reconnect"
-                );
-            }
-        };
-
-        match Status::from_byte(resp.status) {
-            Ok(Status::Ok) => Ok(resp.payload),
-            Ok(Status::Err) => Err(ProtocolError::DeviceError(resp.status).into()),
-            Ok(Status::Locked) => Err(ProtocolError::DeviceLocked.into()),
-            Err(e) => Err(e.into()),
-        }
+        let response_timeout = time_left(deadline, "USB response")?;
+        self.resp_rx.recv_timeout(response_timeout).map_err(|_| OutOfSync::NoResponse { cmd: cmd.cmd_byte() })
     }
 
     /// Block up to `timeout` for one log frame. Pass `Duration::ZERO` for a
@@ -200,38 +210,32 @@ fn needs_out_zlp(len: usize) -> bool { len > 0 && len % USB_DEBUG_BULK_MAX_PACKE
 fn write_bulk_all(
     bytes: &[u8],
     deadline: Instant,
-    mut write: impl FnMut(&[u8], Duration) -> Result<usize>,
-) -> Result<()> {
+    mut write: impl FnMut(&[u8], Duration) -> Result<usize, OutOfSync>,
+) -> Result<(), OutOfSync> {
     let mut written = 0;
     while written < bytes.len() {
         let write_timeout = time_left(deadline, "bulk OUT write")?;
         let count = write(&bytes[written..], write_timeout)?;
+        let remaining = bytes.len() - written;
         if count == 0 {
-            anyhow::bail!("bulk OUT write made no progress after {written} of {} bytes", bytes.len());
+            return Err(OutOfSync::NoProgress { written, total: bytes.len() });
         }
-        if count > bytes.len() - written {
-            anyhow::bail!(
-                "bulk OUT write reported {count} bytes for a {}-byte remainder",
-                bytes.len() - written
-            );
+        if count > remaining {
+            return Err(OutOfSync::OverRun { count, remaining });
         }
-        if count < bytes.len() - written && count % USB_DEBUG_BULK_MAX_PACKET_LEN != 0 {
-            anyhow::bail!(
-                "bulk OUT short write ended the frame after {} of {} bytes",
-                written + count,
-                bytes.len()
-            );
+        if count < remaining && count % USB_DEBUG_BULK_MAX_PACKET_LEN != 0 {
+            return Err(OutOfSync::ShortWrite { written: written + count, total: bytes.len() });
         }
         written += count;
     }
     Ok(())
 }
 
-fn time_left(deadline: Instant, operation: &str) -> Result<Duration> {
+fn time_left(deadline: Instant, operation: &'static str) -> Result<Duration, OutOfSync> {
     deadline
         .checked_duration_since(Instant::now())
         .filter(|remaining| !remaining.is_zero())
-        .ok_or_else(|| anyhow::anyhow!("{operation} timed out"))
+        .ok_or(OutOfSync::TimedOut(operation))
 }
 
 impl Drop for UsbDebugClient {
@@ -340,7 +344,7 @@ mod tests {
         let error =
             write_bulk_all(&bytes, Instant::now() + Duration::from_secs(1), |_, _| Ok(7)).unwrap_err();
 
-        assert!(error.to_string().contains("short write ended the frame"));
+        assert!(matches!(error, OutOfSync::ShortWrite { written: 7, total } if total == bytes.len()));
     }
 
     #[test]
@@ -348,7 +352,7 @@ mod tests {
         let error = write_bulk_all(b"certificate", Instant::now() + Duration::from_secs(1), |_, _| Ok(0))
             .unwrap_err();
 
-        assert!(error.to_string().contains("made no progress"));
+        assert!(matches!(error, OutOfSync::NoProgress { written: 0, total: 11 }));
     }
 
     #[test]

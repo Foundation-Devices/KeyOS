@@ -364,11 +364,15 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     globals.on_refresh_allowed_publishers(move || {
         refresh_allowed_publishers(state);
     });
+    globals.on_select_allowed_publisher(move |fingerprint| {
+        select_allowed_publisher(state, fingerprint.as_str())
+    });
     globals.on_preview_allowed_publisher(move || preview_allowed_publisher(state));
     globals.on_allow_pending_publisher(move || allow_pending_publisher(state));
     globals.on_clear_pending_allowed_publisher(move || clear_pending_allowed_publisher(state));
-    globals
-        .on_remove_allowed_publisher(move |public_key| remove_allowed_publisher(state, public_key.as_str()));
+    globals.on_remove_allowed_publisher(move |fingerprint| {
+        remove_allowed_publisher(state, fingerprint.as_str())
+    });
     globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
     globals.on_install_app(move || install_app(state.clone()));
 }
@@ -552,17 +556,28 @@ fn app_permission_groups(
 }
 
 fn refresh_allowed_publishers(state: StoredValue<AppState>) {
-    let allowed_publishers = state
-        .borrow()
-        .app_manager
-        .get_third_party_certificates()
-        .into_iter()
-        .map(|cert| allowed_publisher(&state.borrow(), cert))
-        .collect::<Vec<_>>();
+    let certs = state.borrow().app_manager.get_third_party_certificates();
+    let allowed_publishers =
+        certs.iter().map(|cert| allowed_publisher(&state.borrow(), cert.clone())).collect::<Vec<_>>();
+    // Cache the certificates so the details page can resolve a fingerprint without asking again.
+    *state.borrow().allowed_publishers.borrow_mut() = certs;
 
     let ui = state.borrow().ui();
     ui.global::<AppManagementGlobal>()
         .set_allowed_publishers(ModelRc::new(VecModel::from(allowed_publishers)));
+}
+
+fn select_allowed_publisher(state: StoredValue<AppState>, fingerprint: &str) -> bool {
+    let cert =
+        state.borrow().allowed_publishers.borrow().iter().find(|c| c.fingerprint == fingerprint).cloned();
+    let Some(cert) = cert else {
+        log::warn!("could not select allowed publisher {fingerprint}");
+        return false;
+    };
+
+    let publisher = allowed_publisher(&state.borrow(), cert);
+    state.borrow().ui().global::<AppManagementGlobal>().set_selected_allowed_publisher(publisher);
+    true
 }
 
 fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateInfo) -> AllowedPublisher {
@@ -600,7 +615,8 @@ fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateI
         claimed_organization: claimed_organization.into(),
         contact_email: sanitize_publisher_claim(&cert.contact_email).into(),
         support_url: sanitize_publisher_claim(&cert.support_url).into(),
-        fingerprint: format_hex_groups(
+        fingerprint: cert.fingerprint.clone().into(),
+        fingerprint_display: format_hex_groups(
             &cert.fingerprint,
             PUBLISHER_HEX_GROUP_LENGTH,
             PUBLISHER_HEX_GROUPS_PER_LINE,
@@ -611,7 +627,6 @@ fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateI
         list_metadata: list_metadata.into(),
         expiration_date: expiration_date.into(),
         date_added: date_added.into(),
-        public_key: cert.public_key.clone().into(),
         public_key_display: format_hex_groups(
             &cert.public_key,
             PUBLISHER_HEX_GROUP_LENGTH,
@@ -970,14 +985,26 @@ fn allow_pending_publisher(state: StoredValue<AppState>) -> AllowedPublisherImpo
         return AllowedPublisherImportResult::SaveFailed;
     };
 
-    let result = { state.borrow().app_manager.import_third_party_certificate(certificate_pem) };
+    // Restate the fingerprint the confirmation screen showed, so the import can only land under
+    // the identity the user actually accepted.
+    let expected_fingerprint = state
+        .borrow()
+        .ui()
+        .global::<AppManagementGlobal>()
+        .get_pending_allowed_publisher()
+        .fingerprint
+        .to_string();
+
+    let result =
+        { state.borrow().app_manager.import_third_party_certificate(certificate_pem, expected_fingerprint) };
     match result {
         Ok(app_manager::ImportThirdPartyCertificateResult::Imported(_)) => {
             clear_pending_allowed_publisher(state);
             refresh_allowed_publishers(state);
             AllowedPublisherImportResult::Installed
         }
-        Ok(app_manager::ImportThirdPartyCertificateResult::Invalid) => {
+        Ok(app_manager::ImportThirdPartyCertificateResult::Invalid)
+        | Ok(app_manager::ImportThirdPartyCertificateResult::FingerprintMismatch) => {
             clear_pending_allowed_publisher(state);
             AllowedPublisherImportResult::Invalid
         }
@@ -1039,9 +1066,12 @@ fn read_third_party_certificate(state: &AppState) -> anyhow::Result<Option<Vec<u
     Ok(Some(certificate_pem))
 }
 
-fn remove_allowed_publisher(state: StoredValue<AppState>, public_key: &str) -> AllowedPublisherRemovalResult {
+fn remove_allowed_publisher(
+    state: StoredValue<AppState>,
+    fingerprint: &str,
+) -> AllowedPublisherRemovalResult {
     let locale = state.borrow().settings.get_locale();
-    let result = { state.borrow().app_manager.remove_third_party_certificate(public_key, locale.lang()) };
+    let result = { state.borrow().app_manager.remove_third_party_certificate(fingerprint, locale.lang()) };
     match result {
         Ok(app_manager::RemoveThirdPartyCertificateResult::Removed)
         | Ok(app_manager::RemoveThirdPartyCertificateResult::NotFound) => {

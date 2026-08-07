@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
-use usb_debug_protocol::{
-    Command, ProtocolError, UsbDebugClient, LOAD_APP_CHUNK_MAX, LOAD_APP_FILE_PATH_MAX,
-};
+use usb_debug_protocol::{Command, TransportError, LOAD_APP_CHUNK_MAX, LOAD_APP_FILE_PATH_MAX};
 
 /// Whether a bundle-root file has to be there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,8 +71,11 @@ fn read_bundle_file(path: &Path) -> Result<Vec<u8>> {
     std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))
 }
 
+/// Upload a bundle over `send`, which is the only thing this needs from a transport. Routing every
+/// command through the caller's sender keeps a bundle upload, the longest exchange the protocol
+/// has, under whatever connection handling the caller already applies to single commands.
 pub(crate) fn load_app(
-    transport: &UsbDebugClient,
+    mut send: impl FnMut(Command, Duration) -> Result<Vec<u8>, TransportError>,
     app_path: &Path,
     kind: SideloadKind,
 ) -> Result<LoadAppReport> {
@@ -95,17 +96,17 @@ pub(crate) fn load_app(
     warn_on_flux_mismatch(manifest, kind);
     let app_id_bytes = decode_app_id(&app_id)?;
 
-    send_ack(transport, kind.begin_command(app_id_bytes), "starting load_app", Duration::from_secs(5))?;
+    send(kind.begin_command(app_id_bytes), Duration::from_secs(5)).context("Cannot start the upload")?;
     for (name, bytes) in &files {
-        upload_file(transport, name, bytes)?;
+        upload_file(&mut send, name, bytes)?;
     }
     let mut resource_bytes = 0usize;
     for resource in &resource_files {
         let data = read_bundle_file(&resource.absolute_path)?;
         resource_bytes += data.len();
-        upload_file(transport, &format!("resources/{}", resource.relative_path), &data)?;
+        upload_file(&mut send, &format!("resources/{}", resource.relative_path), &data)?;
     }
-    send_ack(transport, Command::LoadAppEnd, "finishing load_app", Duration::from_secs(15))?;
+    send(Command::LoadAppEnd, Duration::from_secs(15)).context("Cannot finish the upload")?;
 
     Ok(LoadAppReport {
         app_id,
@@ -132,34 +133,23 @@ fn read_bundle_files(app_path: &Path) -> Result<Vec<(&'static str, Vec<u8>)>> {
     Ok(files)
 }
 
-fn upload_file(transport: &UsbDebugClient, filename: &str, data: &[u8]) -> Result<()> {
+fn upload_file(
+    send: &mut impl FnMut(Command, Duration) -> Result<Vec<u8>, TransportError>,
+    filename: &str,
+    data: &[u8],
+) -> Result<()> {
     ensure!(is_valid_upload_relative_path(filename), "Invalid upload path: {filename}");
     ensure!(filename.len() <= LOAD_APP_FILE_PATH_MAX, "Upload path is too long for usb-debug: {filename}");
-    send_ack(
-        transport,
+    send(
         Command::LoadAppFileBegin { filename: filename.to_string(), size: data.len() as u64 },
-        &format!("starting upload of {filename}"),
         Duration::from_secs(10),
-    )?;
+    )
+    .with_context(|| format!("Cannot start uploading {filename}"))?;
     for chunk in data.chunks(LOAD_APP_CHUNK_MAX) {
-        send_ack(
-            transport,
-            Command::LoadAppChunk(chunk.to_vec()),
-            &format!("uploading {filename}"),
-            Duration::from_secs(10),
-        )?;
+        send(Command::LoadAppChunk(chunk.to_vec()), Duration::from_secs(10))
+            .with_context(|| format!("Cannot upload {filename}"))?;
     }
     Ok(())
-}
-
-fn send_ack(transport: &UsbDebugClient, cmd: Command, context: &str, timeout: Duration) -> Result<()> {
-    match transport.send(cmd, timeout) {
-        Ok(_) => Ok(()),
-        Err(error) if matches!(error.downcast_ref::<ProtocolError>(), Some(ProtocolError::DeviceLocked)) => {
-            Err(anyhow::anyhow!("Device rejected {context}: device is locked"))
-        }
-        Err(error) => Err(error).with_context(|| format!("Device rejected {context}")),
-    }
 }
 
 fn validate_manifest_json(manifest: &[u8]) -> Result<String> {

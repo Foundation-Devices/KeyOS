@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
+
 use app_manager::ThirdPartyCertificateInfo;
 use const_oid::db::{
     rfc3280::EMAIL_ADDRESS,
@@ -8,81 +11,67 @@ use const_oid::db::{
     rfc5280::ID_KP_CODE_SIGNING,
 };
 use const_oid::{AssociatedOid, ObjectIdentifier};
-use file_backed::JsonBacked;
 use fs::Location;
-use serde::{Deserialize, Serialize};
 use x509_cert::{
     attr::AttributeValue,
     der::{
         asn1::{Ia5StringRef, PrintableStringRef, TeletexStringRef, Utf8StringRef},
-        Decode, DecodePem, Tag, Tagged,
+        Decode, DecodePem, Encode, Tag, Tagged,
     },
     ext::pkix::{name::GeneralName, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName},
     time::Validity,
     Certificate, TbsCertificate, Version,
 };
 
-const THIRD_PARTY_CERTS_PATH: &str = "third_party_certs.json";
+use crate::FileSystem;
+
+const THIRD_PARTY_CERTS_DIR: &str = "third_party_certs";
+const CERTIFICATE_SUFFIX: &str = ".der";
 const ID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
 const SECP256K1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.10");
 /// Bounds the imported PEM or DER, which in turn bounds every parsed field, so the display strings
 /// need no per-field caps.
 const MAX_CERTIFICATE_BYTES: usize = 16 * 1024;
 
-type ThirdPartyCertificatesFile =
-    JsonBacked<StoredThirdPartyCertificates, crate::fs_permissions::FileSystemPermissions>;
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct StoredThirdPartyCertificates {
-    certificates: Vec<ThirdPartyCertificateInfo>,
-}
-
+/// The certificate files are the allow list. Every field callers see is derived from them at load,
+/// so a field added later also applies to certificates that are already allowed.
+///
+/// Keyed by fingerprint, which is both the file name and the identity a user checks, so listings
+/// come out in an order no claimed name can influence.
 #[derive(Debug)]
 pub(crate) struct ThirdPartyCertificateStore {
-    certs: ThirdPartyCertificatesFile,
+    fs: FileSystem,
+    certs: BTreeMap<String, ThirdPartyCertificateInfo>,
 }
 
 pub(crate) enum ImportThirdPartyCertificateError {
     Invalid,
+    FingerprintMismatch,
     Storage,
 }
 
-impl Default for ThirdPartyCertificateStore {
-    fn default() -> Self {
-        let (mut certs, _restored) =
-            ThirdPartyCertificatesFile::new(THIRD_PARTY_CERTS_PATH, Location::SystemAppData);
-        certs.set_auto_save(false);
-
-        Self { certs }
-    }
-}
-
 impl ThirdPartyCertificateStore {
-    pub(crate) fn list(&self) -> Vec<ThirdPartyCertificateInfo> {
-        prepare_certificates(self.certs.certificates.clone())
+    pub(crate) fn new(fs: FileSystem) -> Self {
+        match fs.create_dir(THIRD_PARTY_CERTS_DIR, Location::SystemAppData) {
+            Ok(_) | Err(fs::Error::FileAlreadyExists) => {}
+            Err(e) => log::error!("failed to create the third-party certificate directory: {e:?}"),
+        }
+
+        let certs = load_certificates(&fs);
+
+        Self { fs, certs }
     }
+
+    pub(crate) fn list(&self) -> Vec<ThirdPartyCertificateInfo> { self.certs.values().cloned().collect() }
 
     pub(crate) fn allowed_publishers(&self) -> Vec<ThirdPartyCertificateInfo> {
-        let certs = self
-            .certs
-            .certificates
-            .iter()
-            .filter(|cert| cert.is_currently_valid())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        prepare_certificates(certs)
+        self.certs.values().filter(|cert| cert.is_currently_valid()).cloned().collect()
     }
 
-    /// Whether `public_key` currently belongs to an allowed, unexpired certificate.
-    /// An expired cert can no longer launch the app that was signed with it, so the
-    /// removal guard only applies while the cert is still allowed.
-    pub(crate) fn is_allowed(&self, public_key: &str) -> bool {
-        let public_key = normalized_public_key(public_key);
-        self.certs
-            .certificates
-            .iter()
-            .any(|cert| cert.public_key == public_key.as_str() && cert.is_currently_valid())
+    /// The certificate for `fingerprint` while it is still allowed to launch apps. An expired one
+    /// can no longer launch what it signed, so the removal guard only applies before it expires.
+    pub(crate) fn allowed(&self, fingerprint: &str) -> Option<&ThirdPartyCertificateInfo> {
+        self.certs.get(fingerprint).filter(|cert| cert.is_currently_valid())
     }
 
     /// Parse and validate a certificate without changing the allow list.
@@ -97,65 +86,151 @@ impl ThirdPartyCertificateStore {
             })
     }
 
+    /// Add a certificate to the allow list under `expected_fingerprint`, which the caller must
+    /// already have shown the user. A publisher is only ever allowed under a confirmed identity.
     pub(crate) fn import(
         &mut self,
         certificate_bytes: &[u8],
+        expected_fingerprint: &str,
     ) -> Result<ThirdPartyCertificateInfo, ImportThirdPartyCertificateError> {
         let mut cert =
             self.preview(certificate_bytes).map_err(|()| ImportThirdPartyCertificateError::Invalid)?;
-        // Preserve the original date when a user imports the same key again. Legacy entries have
-        // no date, so their first post-upgrade import records one without making them unreadable.
-        cert.added_unix_seconds =
-            added_time_for_import(&self.certs.certificates, &cert.public_key, current_unix_seconds());
+        if cert.fingerprint != expected_fingerprint {
+            log::warn!("third-party certificate holds {}, not the confirmed key", cert.fingerprint);
+            return Err(ImportThirdPartyCertificateError::FingerprintMismatch);
+        }
 
-        // Snapshot the previous list so we can roll back if persistence fails.
-        // Without this, a failing flush() (e.g. I/O / full volume) would leave
-        // `self.certs` mutated while the API returns InternalError, so an imported but
-        // unpersisted cert would silently keep allowing its apps until restart.
-        let previous = self.certs.certificates.clone();
-        {
-            let mut certs = self.certs.guard();
-            certs.certificates.retain(|existing| existing.public_key != cert.public_key);
-            certs.certificates.push(cert.clone());
-        }
-        if let Err(e) = self.flush() {
-            log::error!("failed to save third-party certificates: {e:?}");
-            self.restore(previous);
-            return Err(ImportThirdPartyCertificateError::Storage);
-        }
+        cert.added_unix_seconds =
+            store_certificate(&self.fs, &cert.fingerprint, certificate_bytes).map_err(|e| {
+                log::error!("failed to store third-party certificate: {e:#}");
+                ImportThirdPartyCertificateError::Storage
+            })?;
+
+        // Same fingerprint means the same key, so this renews a publisher rather than adding one.
+        self.certs.insert(cert.fingerprint.clone(), cert.clone());
 
         Ok(cert)
     }
 
-    pub(crate) fn remove(&mut self, public_key: &str) -> Result<bool, fs::Error> {
-        let public_key = normalized_public_key(public_key);
-        if !self.certs.certificates.iter().any(|cert| cert.public_key == public_key.as_str()) {
+    pub(crate) fn remove(&mut self, fingerprint: &str) -> Result<bool, fs::Error> {
+        if !self.certs.contains_key(fingerprint) {
             return Ok(false);
         }
 
-        // Same rationale as `import`: keep in-memory allow-list state in lockstep
-        // with what's persisted. A failed flush() must not leave the cert
-        // "removed in memory but still on disk" (or vice versa on the next
-        // restart).
-        let previous = self.certs.certificates.clone();
-        {
-            let mut certs = self.certs.guard();
-            certs.certificates.retain(|cert| cert.public_key != public_key.as_str());
-        }
+        self.fs.remove(certificate_path(fingerprint), Location::SystemAppData)?;
+        self.certs.remove(fingerprint);
 
-        if let Err(e) = self.flush() {
-            self.restore(previous);
-            return Err(e);
-        }
         Ok(true)
     }
+}
 
-    fn flush(&mut self) -> Result<(), fs::Error> { self.certs.try_save() }
+fn load_certificates(fs: &FileSystem) -> BTreeMap<String, ThirdPartyCertificateInfo> {
+    let dir = match fs.open_dir(THIRD_PARTY_CERTS_DIR, Location::SystemAppData) {
+        Ok(dir) => dir,
+        Err(e) => {
+            log::error!("failed to open the third-party certificate directory: {e:?}");
+            return BTreeMap::new();
+        }
+    };
 
-    fn restore(&mut self, certificates: Vec<ThirdPartyCertificateInfo>) {
-        let mut certs = self.certs.guard();
-        certs.0 = StoredThirdPartyCertificates { certificates };
+    let mut certs = BTreeMap::new();
+    while let Ok(Some(entry)) = dir.next_entry() {
+        if !entry.is_file || !entry.name.ends_with(CERTIFICATE_SUFFIX) {
+            continue;
+        }
+        match load_certificate(fs, &entry) {
+            Ok(cert) => {
+                certs.insert(cert.fingerprint.clone(), cert);
+            }
+            // Leave the file alone: silently deleting something the user allowed is worse than
+            // listing nothing for it until the log says why.
+            Err(e) => log::warn!("ignoring third-party certificate {}: {e:#}", entry.name),
+        }
     }
+
+    certs
+}
+
+fn load_certificate(fs: &FileSystem, entry: &fs::DirEntry) -> anyhow::Result<ThirdPartyCertificateInfo> {
+    if entry.len > MAX_CERTIFICATE_BYTES as u64 {
+        anyhow::bail!("exceeds the {MAX_CERTIFICATE_BYTES}-byte cap: {} bytes", entry.len);
+    }
+
+    let path = format!("{THIRD_PARTY_CERTS_DIR}/{}", entry.name);
+    let mut bytes = Vec::with_capacity(entry.len as usize);
+    fs.open_file(&path, Location::SystemAppData, fs::OpenFlags::READ_ONLY)?.read_to_end(&mut bytes)?;
+
+    let mut cert = parse_third_party_certificate(&bytes)?;
+    // remove() addresses the file by fingerprint, so a name disagreeing with the key inside would
+    // leave a publisher the user cannot delete.
+    if entry.name != certificate_file_name(&cert.fingerprint) {
+        anyhow::bail!("name does not match the key it holds, fingerprinted {}", cert.fingerprint);
+    }
+    cert.added_unix_seconds = created_unix_seconds(fs, &path);
+
+    Ok(cert)
+}
+
+/// Write the certificate to its fingerprint-named file and return the time that file was created.
+/// An interrupted write leaves one that no longer parses, so the publisher goes missing until it is
+/// imported again rather than turning into another one.
+fn store_certificate(
+    fs: &FileSystem,
+    fingerprint: &str,
+    certificate_bytes: &[u8],
+) -> anyhow::Result<Option<u64>> {
+    let path = certificate_path(fingerprint);
+
+    let mut file = fs.open_file(&path, Location::SystemAppData, fs::OpenFlags::CREATE)?;
+    file.write_all(&certificate_der(certificate_bytes)?)?;
+    // Creating does not truncate, so a renewal shorter than the certificate it replaces would keep
+    // the old tail.
+    file.truncate()?;
+    // The directory entry only catches up once the file is closed.
+    drop(file);
+
+    Ok(created_unix_seconds(fs, &path))
+}
+
+/// When the file was first written. Renewing a publisher rewrites its file in place, which keeps the
+/// entry the creation time lives in, so this stays the time the user first allowed that key.
+fn created_unix_seconds(fs: &FileSystem, path: &str) -> Option<u64> {
+    match fs.metadata(path, Location::SystemAppData) {
+        Ok(metadata) => unix_seconds(&metadata.created),
+        Err(e) => {
+            log::warn!("no creation time for {path}: {e:?}");
+            None
+        }
+    }
+}
+
+/// Re-encode an accepted certificate as DER, so the stored file matches the name it is given.
+fn certificate_der(certificate_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let certificate =
+        Certificate::from_pem(certificate_bytes).or_else(|_| Certificate::from_der(certificate_bytes))?;
+
+    Ok(certificate.to_der()?)
+}
+
+fn certificate_file_name(fingerprint: &str) -> String { format!("{fingerprint}{CERTIFICATE_SUFFIX}") }
+
+fn certificate_path(fingerprint: &str) -> String {
+    format!("{THIRD_PARTY_CERTS_DIR}/{}", certificate_file_name(fingerprint))
+}
+
+fn unix_seconds(datetime: &fs::DateTime) -> Option<u64> {
+    let civil = jiff::civil::DateTime::new(
+        datetime.date.year.try_into().ok()?,
+        datetime.date.month.try_into().ok()?,
+        datetime.date.day.try_into().ok()?,
+        datetime.time.hour.try_into().ok()?,
+        datetime.time.min.try_into().ok()?,
+        datetime.time.sec.try_into().ok()?,
+        0,
+    )
+    .ok()?;
+
+    u64::try_from(civil.to_zoned(jiff::tz::TimeZone::UTC).ok()?.timestamp().as_second()).ok()
 }
 
 fn parse_third_party_certificate(certificate_bytes: &[u8]) -> anyhow::Result<ThirdPartyCertificateInfo> {
@@ -174,8 +249,8 @@ fn parse_third_party_certificate(certificate_bytes: &[u8]) -> anyhow::Result<Thi
     }
     reject_unknown_critical_extensions(tbs)?;
 
-    // Keep the validity window in persisted metadata. Admission checks it after parsing, while
-    // list() intentionally retains legacy stale entries so the user can inspect and remove them.
+    // Admission rejects a certificate outside its window, but list() keeps an expired one visible
+    // so the user can still inspect and remove it.
     let (not_before_unix_seconds, not_after_unix_seconds) = certificate_validity_unix_seconds(&tbs.validity);
 
     let name = subject_attribute(&tbs.subject, COMMON_NAME).ok_or_else(|| anyhow::anyhow!("missing CN"))?;
@@ -285,53 +360,9 @@ fn reject_unknown_critical_extensions(tbs: &TbsCertificate) -> anyhow::Result<()
     Ok(())
 }
 
-fn populate_derived_metadata(certs: &mut [ThirdPartyCertificateInfo]) {
-    for cert in certs {
-        let Some(public_key) = decode_public_key_hex(&cert.public_key) else {
-            log::warn!("stored third-party certificate has an invalid public key");
-            continue;
-        };
-        match canonical_publisher_fingerprints(&public_key) {
-            Ok((fingerprint, short_fingerprint)) => {
-                cert.fingerprint = fingerprint;
-                cert.short_fingerprint = short_fingerprint;
-            }
-            Err(error) => {
-                log::error!("failed to derive stored third-party certificate fingerprint: {error}");
-            }
-        }
-    }
-}
-
-fn prepare_certificates(mut certs: Vec<ThirdPartyCertificateInfo>) -> Vec<ThirdPartyCertificateInfo> {
-    populate_derived_metadata(&mut certs);
-    sort_certificates(&mut certs);
-    certs
-}
-
 fn canonical_publisher_fingerprints(public_key: &[u8; 33]) -> anyhow::Result<(String, String)> {
     let fingerprint = publisher_fingerprint::PublisherFingerprint::from_compressed_public_key(public_key)?;
     Ok((fingerprint.full, fingerprint.short))
-}
-
-fn current_unix_seconds() -> Option<u64> {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|time| time.as_secs())
-}
-
-fn added_time_for_import(
-    existing: &[ThirdPartyCertificateInfo],
-    public_key: &str,
-    now: Option<u64>,
-) -> Option<u64> {
-    existing
-        .iter()
-        .find(|certificate| certificate.public_key == public_key)
-        .and_then(|certificate| certificate.added_unix_seconds)
-        .or(now)
-}
-
-fn sort_certificates(certs: &mut [ThirdPartyCertificateInfo]) {
-    certs.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint).then_with(|| a.public_key.cmp(&b.public_key)));
 }
 
 fn certificate_validity_unix_seconds(validity: &Validity) -> (u64, u64) {
@@ -530,64 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_stored_certificate_gets_derived_fingerprints_when_listed() {
-        let legacy_json = r#"{
-            "certificates": [{
-                "name": "Legacy Publisher",
-                "company": "Claimed Company",
-                "contact_email": "",
-                "support_url": "",
-                "public_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-                "not_before_unix_seconds": 0,
-                "not_after_unix_seconds": 18446744073709551615,
-                "serial_number": "1",
-                "issuer": "",
-                "subject": "",
-                "basic_constraints": "CA:FALSE",
-                "key_usage": "Digital Signature",
-                "extended_key_usage": "Code Signing"
-            }]
-        }"#;
-        let stored: StoredThirdPartyCertificates = serde_json::from_str(legacy_json).unwrap();
-        assert!(stored.certificates[0].fingerprint.is_empty());
-        assert!(stored.certificates[0].short_fingerprint.is_empty());
-        assert_eq!(stored.certificates[0].added_unix_seconds, None);
+    fn file_timestamp_converts_to_unix_seconds() {
+        let datetime = |year, month, day, hour, min, sec| fs::DateTime {
+            date: fs::Date { year, month, day },
+            time: fs::Time { hour, min, sec, millis: 0 },
+        };
 
-        let listed = prepare_certificates(stored.certificates);
-
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].fingerprint, "0f715baf5d4c2ed329785cef29e562f73488c8a2bb9dbc5700b361d54b9b0554");
-        assert_eq!(listed[0].short_fingerprint, "0f715baf…4b9b0554");
-        assert_eq!(listed[0].added_unix_seconds, None);
-        assert!(decode_public_key_hex(&listed[0].public_key).is_some());
-    }
-
-    #[test]
-    fn certificate_sort_uses_fingerprint_not_claimed_name() {
-        let mut high_fingerprint = cert(Some(0), Some(u64::MAX));
-        high_fingerprint.name = "A claimed name".to_string();
-        high_fingerprint.fingerprint = "ff".repeat(32);
-        high_fingerprint.public_key = "03".to_string();
-        let mut low_fingerprint = cert(Some(0), Some(u64::MAX));
-        low_fingerprint.name = "Z claimed name".to_string();
-        low_fingerprint.fingerprint = "00".repeat(32);
-        low_fingerprint.public_key = "02".to_string();
-        let mut certs = vec![high_fingerprint, low_fingerprint];
-
-        sort_certificates(&mut certs);
-
-        assert_eq!(certs[0].name, "Z claimed name");
-        assert_eq!(certs[1].name, "A claimed name");
-    }
-
-    #[test]
-    fn reimport_preserves_original_date_added() {
-        let public_key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
-        let mut existing = cert(Some(0), Some(u64::MAX));
-        existing.public_key = public_key.to_string();
-        existing.added_unix_seconds = Some(42);
-
-        assert_eq!(added_time_for_import(&[existing], public_key, Some(99)), Some(42));
-        assert_eq!(added_time_for_import(&[], public_key, Some(99)), Some(99));
+        assert_eq!(unix_seconds(&datetime(2026, 8, 5, 12, 30, 15)), Some(1_785_933_015));
+        assert_eq!(unix_seconds(&datetime(2026, 13, 1, 0, 0, 0)), None);
+        assert_eq!(unix_seconds(&datetime(2026, 2, 30, 0, 0, 0)), None);
     }
 }

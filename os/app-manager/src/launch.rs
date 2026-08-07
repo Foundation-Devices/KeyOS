@@ -7,6 +7,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(keyos)]
+use app_archive::ELF_FILE;
 use xous::{AppId, PID};
 
 #[cfg(keyos)]
@@ -47,14 +49,11 @@ fn app_name_from_path(path: &Path) -> anyhow::Result<String> {
     Ok(app_name.to_string())
 }
 
-/// The app binary, hashed under this bundle-relative key in the signed manifest.
-#[cfg(keyos)]
-const ELF_FILE: &str = "app.elf";
-
 /// Verify the bundle, then launch the ELF. `third_party_signer` is the developer key a sideloaded
 /// app.elf must be signed by; `None` requires an official signature.
 #[cfg(keyos)]
 pub fn verify_and_launch(
+    fs: &FileSystem,
     app_id: &AppId,
     elf_path: &str,
     file_hashes: &std::collections::BTreeMap<String, String>,
@@ -67,7 +66,6 @@ pub fn verify_and_launch(
 
     let (app_dir, _) = elf_path.rsplit_once('/').ok_or(LaunchError::InternalError)?;
 
-    let fs = FileSystem::default();
     let crypto = CryptoApi::default();
 
     let metadata = fs.metadata(elf_path, fs::Location::System).map_err(|_| LaunchError::InternalError)?;

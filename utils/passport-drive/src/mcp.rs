@@ -30,7 +30,8 @@ use rusb::UsbContext as _;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use usb_debug_protocol::{
-    Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient, INSTALL_CERTIFICATE_BYTES_MAX,
+    Command, LaunchAppResult, LaunchAppStatus, OpenError, TransportError, UsbDebugClient,
+    INSTALL_CERTIFICATE_BYTES_MAX,
 };
 use x509_cert::{
     der::{Decode, DecodePem},
@@ -50,7 +51,8 @@ const ID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840
 const SECP256K1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.10");
 
 const INSTRUCTIONS: &str = "\
-Drives a Passport Prime over USB. Call connect first; most tools fail without it.
+Drives a Passport Prime over USB. Commands open the connection themselves; call connect only to
+start buffering logs before triggering whatever produces them.
 
 The server may be configured to confine file access to a base directory, usually the workspace root.
 Where it is, a path that resolves outside that directory is rejected, symlinks followed. Where it is
@@ -99,8 +101,28 @@ impl McpState {
         }
     }
 
-    fn require_device(&self) -> Result<&UsbDebugClient, String> {
-        self.device.as_ref().ok_or_else(|| "Not connected. Call connect first.".to_string())
+    /// The open device, connecting first if nothing is open yet.
+    fn require_device(&mut self) -> Result<&UsbDebugClient, OpenError> {
+        if self.device.is_none() {
+            self.device = Some(UsbDebugClient::open()?);
+        }
+
+        Ok(self.device.as_ref().expect("opened above"))
+    }
+
+    /// Send `cmd` to the device. A command that loses frame sync takes the connection down with it,
+    /// so the next one opens a fresh transport instead of reusing one whose responses have slipped
+    /// a step behind.
+    fn send(&mut self, cmd: Command, timeout: Duration) -> Result<Vec<u8>, TransportError> {
+        let result = self.require_device()?.send(cmd, timeout);
+        if matches!(result, Err(TransportError::OutOfSync(_))) {
+            // The log receiver goes with the transport, so drain it first or the frames leading up
+            // to the desync are dropped, exactly the ones worth reading.
+            self.drain_logs();
+            self.device = None;
+        }
+
+        result
     }
 
     fn require_sambuca(&mut self) -> Result<&mut sambuca::Sambuca, String> {
@@ -328,19 +350,17 @@ impl PassportServer {
         Ok(text_result(&lines.join("\n")))
     }
 
-    /// Connect to the Passport Prime device over USB vendor interface. Auto-detects the device.
+    /// Open the USB connection to the Passport Prime now, auto-detecting the device. Commands
+    /// connect on their own, so this is only worth calling to start capturing logs before
+    /// triggering whatever produces them.
     #[tool]
     fn connect(&self) -> Result<CallToolResult, String> {
-        let mut state = state();
-        if state.device.is_some() {
-            return Err("Already connected. Call disconnect first.".to_string());
-        }
-
-        state.device = Some(UsbDebugClient::open().map_err(|e| format!("Failed to connect: {e}"))?);
+        state().require_device().map_err(|e| format!("Failed to connect: {e}"))?;
         Ok(text_result("Connected via USB vendor interface. Logs and debug commands on single interface."))
     }
 
-    /// Disconnect from the device.
+    /// Release the USB interface and drop buffered logs. Commands reconnect on their own, so this
+    /// is for handing the device to another process or for starting a fresh log capture.
     #[tool]
     fn disconnect(&self) -> CallToolResult {
         let mut state = state();
@@ -350,7 +370,8 @@ impl PassportServer {
         text_result("Disconnected.")
     }
 
-    /// Get recent log lines streamed from the device.
+    /// Get recent log lines streamed from the device. Only lines received since the connection
+    /// opened are held, so connect before triggering whatever you want the logs from.
     #[tool]
     fn get_logs(
         &self,
@@ -392,7 +413,6 @@ impl PassportServer {
     #[tool]
     fn screenshot(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::Screenshot, Duration::from_secs(20))
             .map_err(|e| format!("Screenshot failed: {e}"))?;
 
@@ -405,7 +425,6 @@ impl PassportServer {
     #[tool]
     fn tap(&self, Parameters(TapParams { x, y }): Parameters<TapParams>) -> Result<CallToolResult, String> {
         state()
-            .require_device()?
             .send(
                 Command::Swipe {
                     start_x: x,
@@ -436,7 +455,6 @@ impl PassportServer {
         let steps = steps.unwrap_or(15);
 
         state()
-            .require_device()?
             .send(
                 Command::Swipe { start_x, start_y, end_x, end_y, duration_ms, steps },
                 Duration::from_millis(u64::from(duration_ms) + 5_000),
@@ -455,7 +473,6 @@ impl PassportServer {
         Parameters(PowerButtonParams { long }): Parameters<PowerButtonParams>,
     ) -> Result<CallToolResult, String> {
         state()
-            .require_device()?
             .send(Command::PowerButton { long }, Duration::from_secs(5))
             .map_err(|e| format!("Power button failed: {e}"))?;
 
@@ -476,7 +493,6 @@ impl PassportServer {
         };
 
         let payload = state()
-            .require_device()?
             .send(Command::KernelCmd { cmd_byte: *cmd_byte }, Duration::from_secs(5))
             .map_err(|e| format!("Kernel command failed: {e}"))?;
         Ok(text_result(&String::from_utf8_lossy(&payload)))
@@ -487,8 +503,12 @@ impl PassportServer {
     #[tool]
     fn reboot_to_samba(&self) -> Result<CallToolResult, String> {
         let mut state = state();
-        // The device drops off the bus mid-request, so a transport error here is expected.
-        let _ = state.require_device()?.send(Command::RebootSamba, Duration::from_secs(5));
+        state
+            .send(Command::RebootSamba, Duration::from_secs(5))
+            .map_err(|e| format!("Reboot to SAM-BA failed: {e}"))?;
+        // The log receiver goes with the transport, so drain it first or the frames leading up to
+        // the reboot are dropped.
+        state.drain_logs();
         state.device.take();
 
         Ok(text_result("Device rebooting to SAM-BA mode. Use samba_connect to connect to it."))
@@ -502,7 +522,6 @@ impl PassportServer {
         Parameters(InputTextParams { text }): Parameters<InputTextParams>,
     ) -> Result<CallToolResult, String> {
         state()
-            .require_device()?
             .send(Command::InputText(text.clone()), Duration::from_secs(10))
             .map_err(|e| format!("Input text failed: {e}"))?;
 
@@ -524,10 +543,9 @@ impl PassportServer {
             .try_into()
             .map_err(|_| format!("app_id must be 16 bytes (32 hex chars), got {} bytes", bytes.len()))?;
 
-        let payload =
-            state().require_device()?.send(Command::LaunchApp { app_id }, Duration::from_secs(10)).map_err(
-                |e| format!("Failed to launch app: {}", launch_app_transport_error_message(&e.to_string())),
-            )?;
+        let payload = state().send(Command::LaunchApp { app_id }, Duration::from_secs(10)).map_err(|e| {
+            format!("Failed to launch app: {}", launch_app_transport_error_message(&e.to_string()))
+        })?;
 
         let result =
             LaunchAppResult::decode(&payload).map_err(|e| format!("Invalid launch_app response: {e}"))?;
@@ -558,7 +576,6 @@ impl PassportServer {
         }
 
         state()
-            .require_device()?
             .send(Command::CloseApp { pid }, Duration::from_secs(5))
             .map_err(|e| format!("Failed to close app: {e}"))?;
 
@@ -578,8 +595,13 @@ impl PassportServer {
             true => crate::load_app::SideloadKind::Flux,
             false => crate::load_app::SideloadKind::Standard,
         };
-        let report = crate::load_app::load_app(state().require_device()?, &PathBuf::from(app_path), kind)
-            .map_err(|e| format!("load_app failed: {e:#}"))?;
+        let mut state = state();
+        let report = crate::load_app::load_app(
+            |cmd, timeout| state.send(cmd, timeout),
+            &PathBuf::from(app_path),
+            kind,
+        )
+        .map_err(|e| format!("load_app failed: {e:#}"))?;
 
         Ok(text_result(&format!(
             "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
@@ -635,7 +657,6 @@ impl PassportServer {
                 "internal error: canonical publisher fingerprint has the wrong length".to_string()
             })?;
         state()
-            .require_device()?
             .send(
                 Command::InstallCertificate { expected_fingerprint, certificate_pem },
                 Duration::from_secs(10),
@@ -894,7 +915,6 @@ impl PassportServer {
     #[tool]
     fn get_version(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::GetVersion, Duration::from_secs(5))
             .map_err(|e| format!("get_version request failed: {e}"))?;
         Ok(text_result(&String::from_utf8_lossy(&payload)))
@@ -905,7 +925,6 @@ impl PassportServer {
     #[tool]
     fn get_process_list(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::GetProcessList, Duration::from_secs(5))
             .map_err(|e| format!("Process list request failed: {e}"))?;
         Ok(text_result(&String::from_utf8_lossy(&payload)))
@@ -916,7 +935,6 @@ impl PassportServer {
     #[tool]
     fn get_developer_mode(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::GetDeveloperMode, Duration::from_secs(5))
             .map_err(|e| format!("get_developer_mode request failed: {e}"))?;
 
@@ -936,7 +954,6 @@ impl PassportServer {
     #[tool]
     fn get_system_time(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::GetSystemTime, Duration::from_secs(5))
             .map_err(|e| format!("get_system_time request failed: {e}"))?;
         let unix_seconds = decode_system_time(&payload).map_err(|e| format!("get_system_time: {e:#}"))?;
@@ -960,7 +977,6 @@ impl PassportServer {
         let unix_seconds =
             parse_timestamp(&params.timestamp).map_err(|e| format!("set_system_time: {e:#}"))?;
         state()
-            .require_device()?
             .send(Command::SetSystemTime { unix_seconds }, Duration::from_secs(5))
             .map_err(|e| format!("set_system_time request failed: {e}"))?;
         let formatted = format_utc(unix_seconds).map_err(|e| format!("set_system_time: {e:#}"))?;
@@ -971,7 +987,6 @@ impl PassportServer {
     #[tool]
     fn get_allowed_publisher_count(&self) -> Result<CallToolResult, String> {
         let payload = state()
-            .require_device()?
             .send(Command::GetAllowedPublisherCount, Duration::from_secs(5))
             .map_err(|e| format!("get_allowed_publisher_count request failed: {e}"))?;
         let bytes: [u8; 2] = payload.as_slice().try_into().map_err(|_| {

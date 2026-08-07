@@ -58,6 +58,7 @@ pub fn listen() {
 pub struct AppManagerServer {
     app_event_subscribers: Vec<ArchiveEventSubscriber<AppEvent>>,
     app_registry: AppRegistry,
+    fs: FileSystem,
     permission_grants: PermissionGrantStore,
     /// Per-run "Not Now" answers, keyed by app id and permission subgroup. A subgroup here is
     /// auto-denied without re-prompting until the app relaunches, so a spammy or malicious app
@@ -74,13 +75,15 @@ impl Default for AppManagerServer {
         let panic_message_buf =
             xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
                 .expect("Failed to allocate panic message buffer");
+        let fs = FileSystem::default();
 
         Self {
             app_event_subscribers: Vec::default(),
             app_registry: AppRegistry::default(),
             permission_grants: PermissionGrantStore::default(),
             transient_permission_denies: HashMap::new(),
-            third_party_cert_store: ThirdPartyCertificateStore::default(),
+            third_party_cert_store: ThirdPartyCertificateStore::new(fs.clone()),
+            fs,
             panic_message_buf,
             names: server::xous_names::XousNames::new().expect("xous-names must be reachable"),
         }
@@ -142,7 +145,7 @@ impl BlockingArchiveHandler<GetAppIcon> for AppManagerServer {
                 return None;
             }
         };
-        self.app_registry.app_icon_bytes(app_id, msg.variant)
+        self.app_registry.app_icon_bytes(&self.fs, app_id, msg.variant)
     }
 }
 
@@ -178,12 +181,15 @@ impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> ImportThirdPartyCertificateResult {
-        match self.third_party_cert_store.import(&msg.certificate_pem) {
+        match self.third_party_cert_store.import(&msg.certificate_pem, &msg.expected_fingerprint) {
             Ok(cert) => {
                 self.notify_allowed_publishers_changed();
                 ImportThirdPartyCertificateResult::Imported(cert)
             }
             Err(ImportThirdPartyCertificateError::Invalid) => ImportThirdPartyCertificateResult::Invalid,
+            Err(ImportThirdPartyCertificateError::FingerprintMismatch) => {
+                ImportThirdPartyCertificateResult::FingerprintMismatch
+            }
             Err(ImportThirdPartyCertificateError::Storage) => {
                 ImportThirdPartyCertificateResult::InternalError
             }
@@ -201,15 +207,15 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
         // Only block removal while the certificate is still allowed. An expired cert can
         // no longer launch the app that was signed with it, so the user must be able to
         // delete the stale entry even though an installed app still references that key.
-        if self.third_party_cert_store.is_allowed(&msg.public_key) {
+        if let Some(cert) = self.third_party_cert_store.allowed(&msg.fingerprint) {
             if let Some(app_name) =
-                self.app_registry.app_name_requiring_third_party_key(&msg.public_key, &msg.locale)
+                self.app_registry.app_name_requiring_third_party_key(&cert.public_key, &msg.locale)
             {
                 return RemoveThirdPartyCertificateResult::AppRequiresKey(app_name);
             }
         }
 
-        match self.third_party_cert_store.remove(&msg.public_key) {
+        match self.third_party_cert_store.remove(&msg.fingerprint) {
             Ok(true) => {
                 self.notify_allowed_publishers_changed();
                 RemoveThirdPartyCertificateResult::Removed
@@ -272,7 +278,7 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             }
         }
 
-        match FileSystem::default().remove(&app_dir, fs::Location::System) {
+        match self.fs.remove(&app_dir, fs::Location::System) {
             Ok(()) | Err(fs::Error::FileNotFound) => {}
             Err(e) => {
                 error!("failed to remove app bundle {app_dir}: {e:?}");
@@ -300,8 +306,7 @@ impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Result<InstallAppArchiveResult, InstallError> {
-        let installed =
-            install::install_archive(&FileSystem::default(), &msg.path, msg.location, &self.app_registry);
+        let installed = install::install_archive(&self.fs, &msg.path, msg.location, &self.app_registry);
 
         // Whether it worked or not: an install that fails partway has already removed the bundle
         // it was replacing, so the registry every reader sees is stale either way.
@@ -324,7 +329,7 @@ impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
         let Some(app_name) = self.app_registry.display_name(&app_id, &msg.locale) else {
             error!("installed app 0x{} did not enter the registry", hex::encode(app_id.0));
             self.forget_app_state(app_id);
-            if let Err(e) = FileSystem::default().remove_if_exists(&app_dir, fs::Location::System) {
+            if let Err(e) = self.fs.remove_if_exists(&app_dir, fs::Location::System) {
                 error!("could not remove the bundle that did not register: {e:?}");
             }
             return Err(InstallError::Internal);
@@ -413,9 +418,9 @@ impl BlockingArchiveHandler<GetPermissionRequestInfo> for AppManagerServer {
 
 impl Server for AppManagerServer {
     fn on_start(&mut self, context: &mut ServerContext<Self>) {
-        install::sweep_staged_bundles(&FileSystem::default());
+        install::sweep_staged_bundles(&self.fs);
         self.rescan_and_cache().expect("Failed to scan installed apps");
-        FileSystem::default().subscribe_filesystem_events(context, fs::Location::AppData);
+        self.fs.subscribe_filesystem_events(context, fs::Location::AppData);
 
         xous::register_system_event_handler(SystemEvent::ChildTerminated, context.sid(), ChildCrashed::ID)
             .expect("Failed to register child terminated handler");
@@ -430,7 +435,7 @@ impl AppManagerServer {
     /// Rescan installed apps, install the per-server permission cache the scan built so it never
     /// lags the installed app set, and notify subscribers of any app the scan added or dropped
     fn rescan_and_cache(&mut self) -> anyhow::Result<()> {
-        let (cache, diff) = self.app_registry.scan_installed_apps()?;
+        let (cache, diff) = self.app_registry.scan_installed_apps(&self.fs)?;
         self.permission_grants.set_server_cache(cache);
         self.notify_app_set_changed(diff);
         Ok(())
@@ -448,7 +453,7 @@ impl AppManagerServer {
         }
         self.transient_permission_denies.remove(&app_id);
 
-        if let Err(e) = FileSystem::default().remove_app_data(app_id) {
+        if let Err(e) = self.fs.remove_app_data(app_id) {
             error!("failed to remove AppData for app 0x{}: {e:?}", hex::encode(app_id.0));
             return false;
         }
@@ -583,7 +588,7 @@ impl AppManagerServer {
         let pid = {
             let file_hashes = self.app_registry.file_hashes(app_id).ok_or(LaunchError::UnknownAppId)?;
             let signer = self.app_registry.elf_signer(app_id);
-            crate::launch::verify_and_launch(&app_id, &elf_path, &file_hashes, signer)?
+            crate::launch::verify_and_launch(&self.fs, &app_id, &elf_path, &file_hashes, signer)?
         };
         #[cfg(not(keyos))]
         let pid = {
@@ -624,7 +629,7 @@ impl AppManagerServer {
 
     fn register_app_resources(&self, app_id: AppId) -> Result<(), LaunchError> {
         if let Some(location) = self.app_registry.app_resources_location(app_id) {
-            FileSystem::default()
+            self.fs
                 .register_app_resources(app_id, location.root, location.app_dir)
                 .map_err(|_| LaunchError::InternalError)?;
         }

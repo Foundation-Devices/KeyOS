@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use app_archive::ELF_FILE;
 use app_manager::{
     AppQrMatchRules, IconVariant, InstalledAppInfo, InstalledAppPermissionGroup,
     InstalledAppPermissionSubgroup, LaunchError, PermissionRequestInfo, PermissionRequestInfoResult,
@@ -86,7 +87,8 @@ pub(crate) struct AppInfo {
     manifest_bytes: Vec<u8>,
     source: AppSource,
     is_flux: bool,
-    binary_size: Option<u64>,
+    /// Size of the bundle's elf, 0 when unknown.
+    binary_size: u64,
     /// The developer key that signed this sideloaded app's manifest, captured at scan; trust is
     /// decided later by matching it against the cert store. `None` for built-in apps and on hosted.
     third_party_signer: Option<[u8; 33]>,
@@ -146,7 +148,10 @@ pub(crate) struct AppRegistry {
 }
 
 impl AppRegistry {
-    pub(crate) fn scan_installed_apps(&mut self) -> anyhow::Result<(ServerPermissionCache, AppRegistryDiff)> {
+    pub(crate) fn scan_installed_apps(
+        &mut self,
+        fs: &FileSystem,
+    ) -> anyhow::Result<(ServerPermissionCache, AppRegistryDiff)> {
         let mut installed_apps = HashMap::new();
 
         // Build the per-server cache as we scan. Adding a manifest also detects server-name
@@ -162,9 +167,17 @@ impl AppRegistry {
         // keys, while sideloaded apps live under the sideload roots and only need a valid
         // developer signature here. The simulator reads the same dirs through fs and signs
         // nothing.
-        Self::scan_apps_dir(&mut installed_apps, &mut cache, BUILT_IN_APPS_DIR, AppSource::BuiltIn, false);
-        Self::scan_apps_dir(&mut installed_apps, &mut cache, FLUX_APPS_DIR, AppSource::BuiltIn, true);
         Self::scan_apps_dir(
+            fs,
+            &mut installed_apps,
+            &mut cache,
+            BUILT_IN_APPS_DIR,
+            AppSource::BuiltIn,
+            false,
+        );
+        Self::scan_apps_dir(fs, &mut installed_apps, &mut cache, FLUX_APPS_DIR, AppSource::BuiltIn, true);
+        Self::scan_apps_dir(
+            fs,
             &mut installed_apps,
             &mut cache,
             SIDELOADED_APPS_DIR,
@@ -172,6 +185,7 @@ impl AppRegistry {
             false,
         );
         Self::scan_apps_dir(
+            fs,
             &mut installed_apps,
             &mut cache,
             SIDELOADED_FLUX_APPS_DIR,
@@ -191,13 +205,14 @@ impl AppRegistry {
     /// fs and register it. A missing or unreadable dir is just logged and skipped;
     /// a real loading problem then shows up as a missing app.
     fn scan_apps_dir(
+        fs: &FileSystem,
         installed_apps: &mut HashMap<AppId, AppInfo>,
         cache: &mut ServerPermissionCache,
         apps_dir: &str,
         source: AppSource,
         is_flux: bool,
     ) {
-        let dir = match FileSystem::default().open_dir(apps_dir.to_string(), fs::Location::System) {
+        let dir = match fs.open_dir(apps_dir.to_string(), fs::Location::System) {
             Ok(dir) => dir,
             Err(e) => {
                 log::info!("Not scanning apps in {apps_dir}: {e:?}");
@@ -210,7 +225,7 @@ impl AppRegistry {
                 continue;
             }
             let app_dir = format!("{apps_dir}/{}", entry.name);
-            match Self::load_app(&app_dir, source, is_flux) {
+            match Self::load_app(fs, &app_dir, source, is_flux) {
                 Ok(Some(app)) if installed_apps.contains_key(&app.id) => {
                     log::warn!("Skipping duplicate app_id=0x{} from {source:?}", hex::encode(app.id.0));
                 }
@@ -235,8 +250,14 @@ impl AppRegistry {
     /// manifest's contents (app id, permissions, QR rules) would be trusted the moment it enters
     /// the registry, with no launch required. Returns `None` when a sideloaded bundle's dir name
     /// doesn't match its app id (already logged).
-    fn load_app(app_dir: &str, source: AppSource, is_flux: bool) -> anyhow::Result<Option<AppInfo>> {
+    fn load_app(
+        fs: &FileSystem,
+        app_dir: &str,
+        source: AppSource,
+        is_flux: bool,
+    ) -> anyhow::Result<Option<AppInfo>> {
         let manifest_raw = read_capped_file(
+            fs,
             &format!("{app_dir}/manifest.json"),
             fs::Location::System,
             MAX_MANIFEST_SIZE_BYTES,
@@ -256,7 +277,7 @@ impl AppRegistry {
             manifest_bytes: manifest_json.to_vec(),
             source,
             is_flux,
-            binary_size: None,
+            binary_size: elf_size(fs, &format!("{app_dir}/{ELF_FILE}")),
             third_party_signer,
         }))
     }
@@ -306,45 +327,36 @@ impl AppRegistry {
     }
 
     pub(crate) fn list_apps(
-        &mut self,
+        &self,
         locale: &str,
         allowed_publishers: &[ThirdPartyCertificateInfo],
         filter: &app_manager::AppFilter,
         permission_grants: &PermissionGrantStore,
     ) -> Vec<InstalledAppInfo> {
-        let ids = self
+        let mut apps = self
             .installed_apps
             .values()
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
             .filter(|app_info| filter.third_party.map_or(true, |want| app_info.is_third_party() == want))
-            .map(|app_info| app_info.id)
+            .map(|app_info| {
+                let (publisher, can_launch) = app_info.publisher_and_launchable(allowed_publishers);
+                let (basic_permissions, approvable_permissions) =
+                    app_info.permission_groups(permission_grants, locale);
+                InstalledAppInfo {
+                    app_id: format!("0x{}", app_info.id),
+                    publisher,
+                    can_launch,
+                    can_remove: app_info.is_removable(),
+                    is_flux: app_info.is_flux,
+                    version: app_info.manifest.version.clone().unwrap_or_default(),
+                    size_bytes: app_info.binary_size,
+                    description: app_info.description(),
+                    basic_permissions,
+                    approvable_permissions,
+                    name: app_info.localized_name(locale),
+                }
+            })
             .collect::<Vec<_>>();
-
-        let mut apps = Vec::with_capacity(ids.len());
-        for id in ids {
-            // The binary size is cached lazily, so it takes the only mutable borrow; the
-            // permission sections then resolve policy across all installed manifests immutably.
-            let Some(app_info) = self.installed_apps.get_mut(&id) else { continue };
-            let size_bytes = app_info.binary_size();
-            let app_info = &self.installed_apps[&id];
-            let name = app_info.localized_name(locale);
-            let (publisher, can_launch) = app_info.publisher_and_launchable(allowed_publishers);
-            let (basic_permissions, approvable_permissions) =
-                app_info.permission_groups(permission_grants, locale);
-            apps.push(InstalledAppInfo {
-                app_id: format!("0x{}", app_info.id),
-                publisher,
-                can_launch,
-                can_remove: app_info.is_removable(),
-                is_flux: app_info.is_flux,
-                version: app_info.manifest.version.clone().unwrap_or_default(),
-                size_bytes,
-                description: app_info.description(),
-                basic_permissions,
-                approvable_permissions,
-                name,
-            });
-        }
 
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         apps
@@ -370,11 +382,16 @@ impl AppRegistry {
     /// case) or it can't be read. Most apps ship no dark variant, so a missing one is not an
     /// error: the light icon answers a dark-variant request instead. Built-in icons live in
     /// CommonAssets (keyed by app id); sideloaded icons live in the app bundle.
-    pub(crate) fn app_icon_bytes(&self, app_id: AppId, variant: IconVariant) -> Option<Vec<u8>> {
+    pub(crate) fn app_icon_bytes(
+        &self,
+        fs: &FileSystem,
+        app_id: AppId,
+        variant: IconVariant,
+    ) -> Option<Vec<u8>> {
         let app = self.installed_apps.get(&app_id)?;
         if matches!(variant, IconVariant::Dark) {
             if let Some((path, location)) = app.icon_path(IconVariant::Dark) {
-                match read_capped_file(&path, location, MAX_APP_ICON_SIZE_BYTES) {
+                match read_capped_file(fs, &path, location, MAX_APP_ICON_SIZE_BYTES) {
                     Ok(bytes) if !bytes.is_empty() => return Some(bytes),
                     // An empty file would decode to a blank image, so let the light icon answer.
                     Ok(_) => log::warn!("dark app icon for app_id=0x{app_id} is empty"),
@@ -385,7 +402,7 @@ impl AppRegistry {
         }
 
         let (path, location) = app.icon_path(IconVariant::Light)?;
-        read_capped_file(&path, location, MAX_APP_ICON_SIZE_BYTES)
+        read_capped_file(fs, &path, location, MAX_APP_ICON_SIZE_BYTES)
             .map_err(|e| log::warn!("failed to read app icon for app_id=0x{app_id}: {e:?}"))
             .ok()
     }
@@ -628,7 +645,7 @@ fn clear_manifest_with_names(_app_id: AppId) -> Result<(), xous::Error> {
 
 impl AppInfo {
     /// The launchable `app.elf` lives directly inside the bundle dir.
-    fn elf_path(&self) -> Option<String> { self.app_dir.as_deref().map(|dir| format!("{dir}/app.elf")) }
+    fn elf_path(&self) -> Option<String> { self.app_dir.as_deref().map(|dir| format!("{dir}/{ELF_FILE}")) }
 
     fn localized_name(&self, locale: &str) -> String {
         self.manifest
@@ -814,22 +831,6 @@ impl AppInfo {
         Some(AppResourcesLocation { root, app_dir })
     }
 
-    fn binary_size(&mut self) -> u64 {
-        if self.binary_size.is_none() {
-            // The simulator can't read the app size: the elf isn't in the image.
-            #[cfg(keyos)]
-            {
-                self.binary_size =
-                    Some(self.elf_path().as_deref().and_then(|path| file_size(path).ok()).unwrap_or(0));
-            }
-            #[cfg(not(keyos))]
-            {
-                self.binary_size = Some(0);
-            }
-        }
-        self.binary_size.unwrap_or(0)
-    }
-
     fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
 
     fn is_removable(&self) -> bool { self.is_third_party() || REMOVABLE_BUILTIN.contains(&self.id) }
@@ -866,10 +867,14 @@ fn push_permission_subgroup(
 
 /// Read a bundle file through `fs`, refusing anything larger than `max_size_bytes` before
 /// allocating, so a malformed bundle can't make us read an unbounded amount into memory.
-fn read_capped_file(path: &str, location: fs::Location, max_size_bytes: u64) -> anyhow::Result<Vec<u8>> {
+fn read_capped_file(
+    fs: &FileSystem,
+    path: &str,
+    location: fs::Location,
+    max_size_bytes: u64,
+) -> anyhow::Result<Vec<u8>> {
     use std::io::Read;
 
-    let fs = FileSystem::default();
     let metadata = fs.metadata(path, location)?;
     if metadata.size > max_size_bytes {
         anyhow::bail!("{path} exceeds the {max_size_bytes}-byte cap: {} bytes", metadata.size);
@@ -887,10 +892,15 @@ fn is_file_not_found(error: &anyhow::Error) -> bool {
     matches!(error.downcast_ref::<fs::Error>(), Some(fs::Error::FileNotFound))
 }
 
+/// Size of the app binary, 0 when there is none to read: a system manifest ships no app file.
 #[cfg(keyos)]
-fn file_size(path: &str) -> anyhow::Result<u64> {
-    Ok(FileSystem::default().metadata(path, fs::Location::System)?.size)
+fn elf_size(fs: &FileSystem, path: &str) -> u64 {
+    fs.metadata(path, fs::Location::System).map(|metadata| metadata.size).unwrap_or(0)
 }
+
+/// A host binary's size says nothing about the app that ships, so hosted doesn't report one.
+#[cfg(not(keyos))]
+fn elf_size(_fs: &FileSystem, _path: &str) -> u64 { 0 }
 
 /// Verify a bundle manifest and return its header-stripped JSON together with the developer key
 /// that signed a sideloaded one (`None` for a built-in app). A built-in manifest must carry a
@@ -1038,7 +1048,7 @@ mod tests {
             manifest_bytes: Vec::new(),
             source,
             is_flux: false,
-            binary_size: None,
+            binary_size: 0,
             third_party_signer: None,
         }
     }
@@ -1097,7 +1107,7 @@ mod tests {
 
     #[test]
     fn installed_apps_excludes_system_manifests_without_app_file() {
-        let mut registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
+        let registry = registry_with(vec![app_info(THIRD_PARTY_APP_ID, "System Manifest", None)]);
 
         assert!(registry
             .list_apps(
@@ -1302,7 +1312,7 @@ mod tests {
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
         app.manifest.version = Some("1.2.3".to_string());
-        let mut registry = registry_with(vec![app]);
+        let registry = registry_with(vec![app]);
 
         let apps = registry.list_apps(
             "en",
@@ -1363,7 +1373,7 @@ mod tests {
         flux_app.is_flux = true;
         let built_in_id = "0x426974636f696e2057616c6c65740000";
         let built_in = built_in_app_info(built_in_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf"));
-        let mut registry = registry_with(vec![flux_app, built_in]);
+        let registry = registry_with(vec![flux_app, built_in]);
         let grants = PermissionGrantStore::default();
 
         let third_party = registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only(), &grants);

@@ -20,6 +20,7 @@ file-backed = { workspace = true }
 fs = { workspace = true }
 fw-utils = { path = "../../utils/fw-utils" }
 hex = "0.4.3"
+jiff = { workspace = true }
 log = { workspace = true }
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 num-derive = "0.4"

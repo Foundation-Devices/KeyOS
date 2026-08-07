@@ -63,12 +63,12 @@ export struct AllowedPublisher {
     contact_email: string,
     support_url: string,
     fingerprint: string,
+    fingerprint_display: string,
     short_fingerprint: string,
     status: string,
     list_metadata: string,
     expiration_date: string,
     date_added: string,
-    public_key: string,
     public_key_display: string,
     serial_number: string,
     subject: string,
@@ -125,7 +125,9 @@ export global AppManagementGlobal {
     pure callback app-icon(string, bool) -> image;
 
     in property <[AllowedPublisher]> allowed-publishers: [];
+    in-out property <AllowedPublisher> selected-allowed-publisher;
     in property <AllowedPublisher> pending-allowed-publisher;
+    callback select-allowed-publisher(string) -> bool;
     callback refresh-allowed-publishers();
     callback preview-allowed-publisher() -> AllowedPublisherPreviewResult;
     callback allow-pending-publisher() -> AllowedPublisherImportResult;

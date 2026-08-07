@@ -42,7 +42,6 @@ template = ["fs-generic"]
 "os/ticktimer" = ["SetSystemTime"]
 "os/app-manager" = [
     "ImportThirdPartyCertificate",
-    "PreviewThirdPartyCertificate",
     "GetThirdPartyCertificates",
     "RefreshInstalledApps",
 ]

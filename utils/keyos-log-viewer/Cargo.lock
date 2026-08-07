@@ -1907,10 +1907,10 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 name = "usb-debug-protocol"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "num-derive",
  "num-traits",
  "rusb",
+ "thiserror 2.0.18",
  "xous",
 ]
 

@@ -15,6 +15,7 @@ import { AllowedPublisherDetailField } from "../detail-field.slint";
 import { Navigate } from "../../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../../gen/tr.slint";
 import {
+    AllowedPublisher,
     AppManagementGlobal,
 } from "../../../../../globals/app-management-global.slint";
 import { SettingsNavHeader } from "../../../../../widgets/nav-header.slint";
@@ -23,6 +24,7 @@ import { AllowedPublisherDetailsProps } from "props.slint";
 export component AllowedPublisherDetailsPage inherits BasePage {
     in property <AllowedPublisherDetailsProps> props;
 
+    private property <AllowedPublisher> publisher: AppManagementGlobal.selected-allowed-publisher;
     private property <bool> remove-confirm-visible: false;
     private property <string> remove-error-title: "";
     private property <string> remove-error-message: "";
@@ -30,6 +32,12 @@ export component AllowedPublisherDetailsPage inherits BasePage {
     property <bool> at-top: flickable.viewport-y == 0;
     property <bool> at-bottom: -flickable.viewport-y + flickable.height >= flickable.viewport-height;
     private property <length> shadow-gutter: Size.sz2;
+
+    init => {
+        if (!AppManagementGlobal.select-allowed-publisher(props.fingerprint)) {
+            Navigate.backward();
+        }
+    }
 
     header := SettingsNavHeader {
         y: 0px;
@@ -56,88 +64,88 @@ export component AllowedPublisherDetailsPage inherits BasePage {
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
-                    value: props.fingerprint;
+                    value: root.publisher.fingerprint_display;
                     fixed-width: true;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherStatus);
-                    value: props.status;
+                    value: root.publisher.status;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherExpirationDate);
-                    value: props.expiration_date;
+                    value: root.publisher.expiration_date;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherDateAdded);
-                    value: props.date_added;
+                    value: root.publisher.date_added;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedName);
-                    value: props.claimed_name;
+                    value: root.publisher.claimed_name;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedOrganization);
-                    value: props.claimed_organization;
+                    value: root.publisher.claimed_organization;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedContactEmail);
-                    value: props.contact_email;
+                    value: root.publisher.contact_email;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSupportUrl);
-                    value: props.support_url;
+                    value: root.publisher.support_url;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherPublicKey);
-                    value: props.public_key_display;
+                    value: root.publisher.public_key_display;
                     fixed-width: true;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSerialNumber);
-                    value: props.serial_number;
+                    value: root.publisher.serial_number;
                     fixed-width: true;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherClaimedSubject);
-                    value: props.subject;
+                    value: root.publisher.subject;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherBasicConstraints);
-                    value: props.basic_constraints;
+                    value: root.publisher.basic_constraints;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherKeyUsage);
-                    value: props.key_usage;
+                    value: root.publisher.key_usage;
                 }
 
                 AllowedPublisherDetailField {
                     field-width: parent.width;
                     label: TR2.lookup(TrId.AppsAllowedPublisherExtendedKeyUsage);
-                    value: props.extended_key_usage;
+                    value: root.publisher.extended_key_usage;
                 }
             }
 
@@ -178,7 +186,7 @@ export component AllowedPublisherDetailsPage inherits BasePage {
 
         confirm-clicked => {
             root.remove-confirm-visible = false;
-            let result = AppManagementGlobal.remove-allowed-publisher(props.public_key);
+            let result = AppManagementGlobal.remove-allowed-publisher(props.fingerprint);
             if result.success {
                 Navigate.backward();
             } else {

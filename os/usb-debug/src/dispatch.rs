@@ -26,7 +26,7 @@ power_manager::use_api!();
 security::use_api!();
 settings::use_api!();
 
-use app_manager::{ImportThirdPartyCertificateResult, PreviewThirdPartyCertificateResult};
+use app_manager::ImportThirdPartyCertificateResult;
 use xous_ticktimer::TicktimerPrivileged;
 
 const POWER_BUTTON_SHORT_PRESS_MS: u64 = 200;
@@ -320,23 +320,7 @@ impl DebugProtocol {
         }
         let expected_fingerprint =
             std::str::from_utf8(&expected_fingerprint).expect("protocol validates fingerprint ASCII");
-        match self.app_manager.preview_third_party_certificate(certificate_pem.clone()) {
-            Ok(PreviewThirdPartyCertificateResult::Valid(cert))
-                if cert.fingerprint == expected_fingerprint => {}
-            Ok(PreviewThirdPartyCertificateResult::Valid(_)) => {
-                log::warn!("debug: install_certificate rejected: expected fingerprint does not match");
-                return Response::Err;
-            }
-            Ok(PreviewThirdPartyCertificateResult::Invalid) => {
-                log::warn!("debug: install_certificate rejected: invalid certificate");
-                return Response::Err;
-            }
-            Err(e) => {
-                log::error!("debug: install_certificate preview request failed: {e:?}");
-                return Response::Err;
-            }
-        }
-        match self.app_manager.import_third_party_certificate(certificate_pem) {
+        match self.app_manager.import_third_party_certificate(certificate_pem, expected_fingerprint) {
             Ok(ImportThirdPartyCertificateResult::Imported(cert)) => {
                 log::info!(
                     "debug: installed allowed publisher certificate with fingerprint {}",
@@ -346,6 +330,10 @@ impl DebugProtocol {
             }
             Ok(ImportThirdPartyCertificateResult::Invalid) => {
                 log::warn!("debug: install_certificate rejected: invalid certificate");
+                Response::Err
+            }
+            Ok(ImportThirdPartyCertificateResult::FingerprintMismatch) => {
+                log::warn!("debug: install_certificate rejected: expected fingerprint does not match");
                 Response::Err
             }
             Ok(ImportThirdPartyCertificateResult::InternalError) => {

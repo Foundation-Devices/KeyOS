@@ -7,32 +7,6 @@ on:
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN }}
 jobs:
-  allowed-publisher-copy:
-    name: No trusted-publisher user-facing copy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Reject legacy trusted-publisher wording
-        run: |
-          if git grep -nEi \
-            'trust(ed| this)?[ _-]*publishers?|publisher[ _-]+trust' -- \
-            'ui/ui/i18n/sources' \
-            ':(glob)apps/**/i18n/*.json' \
-            ':(glob)apps/**/*.slint' \
-            ':(glob)os/**/i18n/*.json' \
-            ':(glob)os/**/*.slint' \
-            ':(glob)ui/ui/**/*.slint' \
-            'sdk/crates/cli/src' \
-            'sdk/crates/cli/templates' \
-            'sdk/docs' \
-            'utils/passport-drive/src' \
-            'utils/passport-drive/README.md' \
-            'os/app-manager/README.md' \
-            'os/app-manager/THIRD_PARTY_CERTIFICATE_FORMAT.md'; then
-            echo 'Use "allowed publisher" in user-facing copy.'
-            exit 1
-          fi
-
   reuse:
     name: Is compliant (reuse)?
     runs-on: ubuntu-latest

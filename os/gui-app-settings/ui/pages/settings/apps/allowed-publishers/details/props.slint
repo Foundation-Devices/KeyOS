@@ -1,21 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-@rust-attr(route(path = "/allowed-publisher-details?{claimed_name}&{claimed_organization}&{contact_email}&{support_url}&{fingerprint}&{status}&{expiration_date}&{date_added}&{public_key}&{public_key_display}&{serial_number}&{subject}&{basic_constraints}&{key_usage}&{extended_key_usage}"))
+@rust-attr(route(path = "/allowed-publisher-details?{fingerprint}"))
 export struct AllowedPublisherDetailsProps {
-    claimed_name: string,
-    claimed_organization: string,
-    contact_email: string,
-    support_url: string,
     fingerprint: string,
-    status: string,
-    expiration_date: string,
-    date_added: string,
-    public_key: string,
-    public_key_display: string,
-    serial_number: string,
-    subject: string,
-    basic_constraints: string,
-    key_usage: string,
-    extended_key_usage: string,
 }

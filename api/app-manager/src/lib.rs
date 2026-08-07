@@ -151,23 +151,27 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
     pub fn import_third_party_certificate(
         &self,
         certificate_pem: Vec<u8>,
+        expected_fingerprint: impl Into<String>,
     ) -> Result<ImportThirdPartyCertificateResult, xous::Error>
     where
         P: MessageAllowed<ImportThirdPartyCertificate>,
     {
-        self.0.try_send_blocking_archive(ImportThirdPartyCertificate { certificate_pem })
+        self.0.try_send_blocking_archive(ImportThirdPartyCertificate {
+            certificate_pem,
+            expected_fingerprint: expected_fingerprint.into(),
+        })
     }
 
     pub fn remove_third_party_certificate(
         &self,
-        public_key: impl Into<String>,
+        fingerprint: impl Into<String>,
         locale: &str,
     ) -> Result<RemoveThirdPartyCertificateResult, xous::Error>
     where
         P: MessageAllowed<RemoveThirdPartyCertificate>,
     {
         self.0.try_send_blocking_archive(RemoveThirdPartyCertificate {
-            public_key: public_key.into(),
+            fingerprint: fingerprint.into(),
             locale: locale.to_string(),
         })
     }

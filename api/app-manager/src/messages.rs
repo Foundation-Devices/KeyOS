@@ -149,9 +149,7 @@ pub enum PermissionRequestInfoResult {
     InternalError,
 }
 
-#[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ThirdPartyCertificateInfo {
     pub name: String,
     pub company: String,
@@ -160,17 +158,12 @@ pub struct ThirdPartyCertificateInfo {
     /// Compressed secp256k1 public key encoded as lowercase hexadecimal.
     pub public_key: String,
     /// SHA-256 of the compressed 33-byte public key, encoded as 64 lowercase hex characters.
-    #[serde(default)]
     pub fingerprint: String,
     /// The first and last four fingerprint bytes separated by an ellipsis.
-    #[serde(default)]
     pub short_fingerprint: String,
-    /// When the user first added this certificate. Legacy entries may not have this metadata.
-    #[serde(default)]
+    /// When the certificate was first imported, or None if its file carries an unreadable timestamp.
     pub added_unix_seconds: Option<u64>,
-    #[serde(default)]
     pub not_before_unix_seconds: Option<u64>,
-    #[serde(default)]
     pub not_after_unix_seconds: Option<u64>,
     pub serial_number: String,
     pub issuer: String,
@@ -205,6 +198,7 @@ pub enum PreviewThirdPartyCertificateResult {
 pub enum ImportThirdPartyCertificateResult {
     Imported(ThirdPartyCertificateInfo),
     Invalid,
+    FingerprintMismatch,
     InternalError,
 }
 
@@ -350,12 +344,15 @@ pub struct PreviewThirdPartyCertificate {
 #[response(ImportThirdPartyCertificateResult)]
 pub struct ImportThirdPartyCertificate {
     pub certificate_pem: Vec<u8>,
+    /// The fingerprint the user was shown and accepted. Callers must state it, so a publisher can
+    /// only be allowed under the identity that was actually confirmed.
+    pub expected_fingerprint: String,
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(RemoveThirdPartyCertificateResult)]
 pub struct RemoveThirdPartyCertificate {
-    pub public_key: String,
+    pub fingerprint: String,
     pub locale: String,
 }
 

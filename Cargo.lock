@@ -383,6 +383,7 @@ dependencies = [
  "fs",
  "fw-utils",
  "hex",
+ "jiff",
  "localizer-codegen",
  "log 0.4.27",
  "num-derive",
@@ -14654,10 +14655,10 @@ dependencies = [
 name = "usb-debug-protocol"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "num-derive",
  "num-traits",
  "rusb",
+ "thiserror 2.0.19",
  "xous",
 ]
 

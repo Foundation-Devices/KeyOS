@@ -834,7 +834,7 @@ fn main() -> Result<()> {
         CliCommand::LoadApp { app_path, flux } => {
             let kind = if flux { load_app::SideloadKind::Flux } else { load_app::SideloadKind::Standard };
             eprintln!("Uploading app from {}...", app_path.display());
-            let report = load_app::load_app(&client, &app_path, kind)?;
+            let report = load_app::load_app(|cmd, timeout| client.send(cmd, timeout), &app_path, kind)?;
             eprintln!(
                 "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
                 report.app_id,

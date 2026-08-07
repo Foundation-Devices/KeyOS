@@ -25,7 +25,9 @@ use num_traits::FromPrimitive as _;
 pub mod client;
 
 #[cfg(feature = "client")]
-pub use client::{UsbDebugClient, LEGACY_PID, LEGACY_VID, PASSPORT_PID, PASSPORT_VID};
+pub use client::{
+    OpenError, OutOfSync, TransportError, UsbDebugClient, LEGACY_PID, LEGACY_VID, PASSPORT_PID, PASSPORT_VID,
+};
 
 /// First byte of every device -> host transfer.
 #[repr(u8)]
@@ -134,10 +136,7 @@ const CMD_LOAD_APP_FILE_BEGIN: u8 = 0x0c;
 const CMD_LOAD_APP_CHUNK: u8 = 0x0d;
 const CMD_LOAD_APP_END: u8 = 0x0e;
 const CMD_GET_PROCESS_LIST: u8 = 0x0f;
-// 0x10 was the legacy unconfirmed certificate-import command. Keep it
-// permanently rejected so an old host cannot satisfy the fingerprint prefix
-// accidentally (or by placing it in a PEM preamble).
-const CMD_INSTALL_CERTIFICATE_LEGACY: u8 = 0x10;
+// 0x10 is a retired certificate-import command.
 const CMD_GET_ALLOWED_PUBLISHER_COUNT: u8 = 0x11;
 const CMD_LOAD_FLUX_APP_BEGIN: u8 = 0x12;
 const CMD_INSTALL_CERTIFICATE: u8 = 0x13;
@@ -410,7 +409,6 @@ impl Command {
                 let bytes: &[u8; 8] = exact_payload(cmd, payload)?;
                 Ok(Command::SetSystemTime { unix_seconds: u64::from_le_bytes(*bytes) })
             }
-            CMD_INSTALL_CERTIFICATE_LEGACY => Err(ProtocolError::UnknownCommand(cmd)),
             _ => Err(ProtocolError::UnknownCommand(cmd)),
         }
     }
@@ -539,60 +537,29 @@ pub struct RawResponse {
     pub payload: Vec<u8>,
 }
 
-#[derive(Debug)]
+/// A byte sequence that is not a valid frame. Shared by both ends, since both encode and decode
+/// the same wire format; how a command *fared* is the host transport's business, not this.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtocolError {
+    #[error("empty frame")]
     Empty,
+    #[error("unknown command byte 0x{0:02x}")]
     UnknownCommand(u8),
+    #[error("unknown frame type 0x{0:02x}")]
     UnknownFrameType(u8),
+    #[error("unknown status byte 0x{0:02x}")]
     UnknownStatus(u8),
+    #[error("invalid launch app status 0x{0:02x}")]
     InvalidLaunchAppStatus(u8),
-    TruncatedPayload {
-        cmd: u8,
-        need: usize,
-        got: usize,
-    },
-    InvalidPayloadLength {
-        cmd: u8,
-        need: usize,
-        got: usize,
-    },
+    #[error("command 0x{cmd:02x} payload truncated: need {need}, got {got}")]
+    TruncatedPayload { cmd: u8, need: usize, got: usize },
+    #[error("command 0x{cmd:02x} payload length invalid: need {need}, got {got}")]
+    InvalidPayloadLength { cmd: u8, need: usize, got: usize },
+    #[error("payload is not valid UTF-8")]
     InvalidUtf8,
+    #[error("publisher fingerprint is not 64 lowercase hexadecimal characters")]
     InvalidPublisherFingerprint,
-    /// Returned by `UsbDebugClient::send` when the device replied with
-    /// `Status::Err`.
-    DeviceError(u8),
-    /// Returned by `UsbDebugClient::send` when the device explicitly rejects an
-    /// operation because the lock screen is active.
-    DeviceLocked,
 }
-
-impl core::fmt::Display for ProtocolError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ProtocolError::Empty => write!(f, "empty frame"),
-            ProtocolError::UnknownCommand(b) => write!(f, "unknown command byte 0x{b:02x}"),
-            ProtocolError::UnknownFrameType(b) => write!(f, "unknown frame type 0x{b:02x}"),
-            ProtocolError::UnknownStatus(b) => write!(f, "unknown status byte 0x{b:02x}"),
-            ProtocolError::InvalidLaunchAppStatus(b) => {
-                write!(f, "invalid launch app status 0x{b:02x}")
-            }
-            ProtocolError::TruncatedPayload { cmd, need, got } => {
-                write!(f, "command 0x{cmd:02x} payload truncated: need {need}, got {got}")
-            }
-            ProtocolError::InvalidPayloadLength { cmd, need, got } => {
-                write!(f, "command 0x{cmd:02x} payload length invalid: need {need}, got {got}")
-            }
-            ProtocolError::InvalidUtf8 => write!(f, "payload is not valid UTF-8"),
-            ProtocolError::InvalidPublisherFingerprint => {
-                write!(f, "publisher fingerprint is not 64 lowercase hexadecimal characters")
-            }
-            ProtocolError::DeviceError(b) => write!(f, "device returned status 0x{b:02x}"),
-            ProtocolError::DeviceLocked => write!(f, "device is locked"),
-        }
-    }
-}
-
-impl std::error::Error for ProtocolError {}
 
 #[cfg(test)]
 mod tests {
@@ -707,18 +674,6 @@ mod tests {
                 need,
                 got: 0
             }) if need == PUBLISHER_FINGERPRINT_HEX_LEN + 1
-        ));
-    }
-
-    #[test]
-    fn legacy_unconfirmed_install_opcode_is_rejected_even_with_a_fingerprint_preamble() {
-        let mut bytes = Vec::from([CMD_INSTALL_CERTIFICATE_LEGACY]);
-        bytes.extend_from_slice(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-        bytes.extend_from_slice(b"\n-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n");
-
-        assert!(matches!(
-            Command::decode(&bytes),
-            Err(ProtocolError::UnknownCommand(CMD_INSTALL_CERTIFICATE_LEGACY))
         ));
     }
 

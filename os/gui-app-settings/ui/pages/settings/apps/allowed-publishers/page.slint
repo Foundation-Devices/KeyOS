@@ -64,7 +64,7 @@ component AllowedPublisherConfirmation inherits Rectangle {
                 AllowedPublisherDetailField {
                     field-width: parent.width - (Size.sz6 * 2);
                     label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
-                    value: root.publisher.fingerprint;
+                    value: root.publisher.fingerprint_display;
                     fixed-width: true;
                 }
 
@@ -281,23 +281,11 @@ export component AllowedPublishersPage inherits BasePage {
                                     last: index == AppManagementGlobal.allowed-publishers.length - 1;
 
                                     clicked => {
-                                        Navigate.allowed-publisher-details({
-                                            claimed-name: publisher.claimed_name,
-                                            claimed-organization: publisher.claimed_organization,
-                                            contact-email: publisher.contact_email,
-                                            support-url: publisher.support_url,
-                                            fingerprint: publisher.fingerprint,
-                                            status: publisher.status,
-                                            expiration-date: publisher.expiration_date,
-                                            date-added: publisher.date_added,
-                                            public-key: publisher.public_key,
-                                            public-key-display: publisher.public_key_display,
-                                            serial-number: publisher.serial_number,
-                                            subject: publisher.subject,
-                                            basic-constraints: publisher.basic_constraints,
-                                            key-usage: publisher.key_usage,
-                                            extended-key-usage: publisher.extended_key_usage,
-                                        }, { });
+                                        if AppManagementGlobal.select-allowed-publisher(publisher.fingerprint) {
+                                            Navigate.allowed-publisher-details({
+                                                fingerprint: publisher.fingerprint,
+                                            }, { });
+                                        }
                                     }
                                 }
 
