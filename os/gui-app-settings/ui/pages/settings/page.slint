@@ -46,7 +46,7 @@ export component SettingsPage inherits BasePage {
                     HLine { }
 
                     MenuActionItem {
-                        label: "Date & Time";
+                        label: TR2.lookup(TrId.SettingsDateAndTime);
                         clicked => {
                             Navigate.date-time({ });
                         }
@@ -55,7 +55,7 @@ export component SettingsPage inherits BasePage {
                     HLine { }
 
                     MenuActionItem {
-                        label: "Display";
+                        label: TR2.lookup(TrId.SettingsDisplay);
                         clicked => {
                             Navigate.display({ });
                         }
@@ -64,9 +64,7 @@ export component SettingsPage inherits BasePage {
                     HLine { }
 
                     MenuActionItem {
-                        // fix
-                        // label: TR2.lookup(TrId.SettingsAutoLock);
-                        label: "Auto Lock";
+                        label: TR2.lookup(TrId.SettingsAutoLock);
                         text: SettingGlobal.format-auto-lock(SettingGlobal.auto-lock);
                         clicked => {
                             Navigate.auto-lock({ });

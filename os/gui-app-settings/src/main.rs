@@ -229,9 +229,8 @@ fn setup_settings_global(state: StoredValue<AppState>) {
         state.settings.set_auto_lock(auto_lock);
     });
     globals.on_format_auto_lock(move |seconds| {
-        // TODO: translation
         if seconds == -1 {
-            return "Never".into();
+            return tr::lookup_id(TrId::AutoLockNever).into();
         }
         let minutes = seconds / 60;
 
