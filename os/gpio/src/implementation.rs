@@ -17,6 +17,8 @@ use {
 #[derive(Debug, server::Message)]
 pub(crate) struct SubscriberDisconnected(pub xous::CID);
 
+fn is_reserved_pin(pin: GpioPin) -> bool { matches!(pin, GpioPin::NoiseEn) }
+
 #[derive(Default)]
 struct GpioServerState {
     claimed_gpios: HashMap<GpioPin, (PID, PinSettings)>,
@@ -61,6 +63,11 @@ impl GpioServer {
         ClaimPin { pin, pin_settings, debounce }: ClaimPin,
         sender: PID,
     ) -> Result<(), GpioApiError> {
+        if is_reserved_pin(pin) {
+            log::error!("Pin {pin:?} is reserved for internal use and can't be claimed");
+            return Err(GpioApiError::AlreadyClaimed);
+        }
+
         if self.is_pin_claimed(pin) {
             log::error!("Pin {pin:?} is already claimed");
             return Err(GpioApiError::AlreadyClaimed);
@@ -237,6 +244,7 @@ pub fn init() -> Result<(), xous::Error> {
     pins::init_twi_pins();
     pins::init_isc_pins();
     pins::init_spi0_pins();
+    pins::init_noise_bias_pin();
 
     unsafe {
         GPIO_SERVER_STATE = Some(GpioServerState::default());

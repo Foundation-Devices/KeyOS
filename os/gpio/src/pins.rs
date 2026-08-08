@@ -84,6 +84,8 @@ pub(crate) fn init_flexcom2_pins() {
     flexcom_rx.set_func(Func::C);
 }
 
+pub(crate) fn init_noise_bias_pin() { GpioPin::NoiseEn.configure(PinSettings::OutputHigh, false); }
+
 pub(crate) fn init_spi0_pins() {
     let addr = unsafe { PIO_ADDR.unwrap() };
     // SPI pins
