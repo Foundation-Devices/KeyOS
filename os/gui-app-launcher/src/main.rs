@@ -160,7 +160,6 @@ impl AppState {
         let last_palette = ui.unwrap().global::<CurrentTheme>().get_palette();
         let mut persistent: JsonBacked<PersistentState, FileSystemPermissions> =
             JsonBacked::new(PERSISTENT_STATE_PATH, Location::SystemAppData).0;
-        persistent.set_auto_save(false);
         // Pre-currency-tagged caches are untrusted — could be any fiat. Drop until QL re-seeds.
         if persistent.currency_code.is_empty() && !persistent.prices.is_empty() {
             persistent.guard().prices.clear();
@@ -331,9 +330,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     cx.set_input_handler({
         move |app_input| match app_input.msg {
-            InputMessage::CloseRequested => {
-                state.borrow_mut().persistent.save();
-            }
             InputMessage::Hidden => {
                 let mut state = state.borrow_mut();
                 state.is_visible = false;
@@ -640,7 +636,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             );
             let ui = state.ui();
             sync_launcher_ui(&ui, &state.launcher);
-            state.persistent.save();
         }
     });
 
@@ -931,7 +926,9 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
     let window_start = now_secs.saturating_sub(GRAPH_WINDOW_SECS);
 
     let mut state = state.borrow_mut();
-    {
+    // Only take the guard when a point actually ages out, or the once-a-minute redraw would
+    // rewrite the whole series to flash for as long as the launcher runs.
+    if state.persistent.prices.iter().any(|point| point.timestamp < window_start) {
         let mut persistent = state.persistent.guard();
         persistent.prices.retain(|point| point.timestamp >= window_start);
     }
@@ -1209,7 +1206,6 @@ fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
             refresh_launcher_apps(state);
             let mut state = state.borrow_mut();
             state.sync_layout_orders();
-            state.persistent.save();
         }
         Ok(app_manager::RemoveInstalledAppResult::Running) => {
             log::warn!("failed to remove launcher item {}: app is still running", item.id);

@@ -511,11 +511,9 @@ impl FidoServer {
                 log::trace!("step 16");
                 // 16. Generate a new credential key pair for the algorithm chosen in step 3.
                 let security_key_index = self.security_key_index(None)?;
-                // Peek the next credential public key without committing — fallible attestation
-                // (step 19) runs before we mutate registered-key state, so an attest failure
-                // doesn't leave the in-memory state ahead of disk. ctap_process_cbor only calls
-                // save_and_notify on Ok, so a failure between mutation and return would persist
-                // a half-baked registration on the next successful operation.
+                // Peek the next credential public key without committing: fallible attestation
+                // (step 19) has to run before we mutate registered-key state, or a failure there
+                // would persist a half-baked registration the moment the guard drops.
                 let public_key = self.peek_next_registration_public_key(security_key_index)?;
                 log::trace!("step 17");
                 // 17. If the "rk" option is set to true:
@@ -970,11 +968,11 @@ impl FidoServer {
 
     pub fn ctap_process_cbor(&mut self, cmd: u8, data: &[u8]) -> Vec<u8> {
         let res = self._process_cbor(cmd, data);
-        // Only persist/notify when the command completed successfully — pending retries and
-        // errors don't mutate FIDO state.
+        // Only notify when the command completed successfully; pending retries and errors
+        // don't mutate FIDO state.
         if res.is_ok() {
-            if let Err(e) = self.save_and_notify() {
-                log::error!("Failed to save FIDO states: {:?}", e);
+            if let Err(e) = self.refresh_and_notify() {
+                log::error!("Failed to refresh FIDO keys: {:?}", e);
             }
         }
         Status::from(&res).to_vec(res.unwrap_or_default().as_slice())

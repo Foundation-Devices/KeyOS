@@ -47,7 +47,7 @@ pub(crate) struct ConsumeUpdateStateInvalidatedMarkerError {
 
 pub(crate) fn consume_update_state_invalidated_marker<F>(
     fs: &F,
-    clear_update_state: impl FnOnce() -> Result<(), fs::Error>,
+    clear_update_state: impl FnOnce(),
 ) -> Result<bool, ConsumeUpdateStateInvalidatedMarkerError>
 where
     F: FsAdapter,
@@ -62,8 +62,7 @@ where
         }
     }
 
-    clear_update_state()
-        .map_err(|error| ConsumeUpdateStateInvalidatedMarkerError { marker_observed: true, error })?;
+    clear_update_state();
     fs.remove(marker_path, fs::Location::System)
         .map_err(|error| ConsumeUpdateStateInvalidatedMarkerError { marker_observed: true, error })?;
     match fs.remove_if_exists(&crate::downloader::patches_dir(), fs::Location::System) {

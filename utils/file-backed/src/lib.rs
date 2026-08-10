@@ -54,6 +54,12 @@ impl ByteCodec for String {
 ///
 /// [`FileBacked::guard()`] will return a [`FileBackedGuard`], which will mark the file as dirty on a
 /// mutation and when the guard is dropped, the file will be saved.
+///
+/// Every mutation is persisted, with no way to batch them up. Construction establishes the
+/// invariant the rest of the type stands on: the backing file was readable or creatable at
+/// `location`, so it stays writable until the process exits, and nothing else may write it
+/// behind our back. A write that fails after that is a bug, not a fault to recover from, so
+/// it panics.
 #[derive(Debug)]
 pub struct FileBacked<T, P>
 where
@@ -62,7 +68,6 @@ where
 {
     path: String,
     location: fs::Location,
-    auto_save: bool,
     dirty: bool,
     value: T,
     _marker: PhantomData<fn() -> P>,
@@ -105,69 +110,53 @@ where
     T: ByteCodec,
     P: FileBackedPermissions,
 {
-    // load or create the file backed type
+    /// Load the file, or start from `T::default()` when it is missing or unreadable. The
+    /// returned flag is false in the latter case.
+    ///
+    /// Panics if the backing file cannot be written; `location` must be mounted first, since
+    /// this is where the writability invariant is established.
     pub fn new(path: impl Into<String>, location: fs::Location) -> (Self, bool) {
-        let fs = FileSystem::<P>::default();
-        let path = path.into();
-        let old_path = format!("{}.old", path);
-
-        let (value, restored) = Self::try_restore(&fs, &path, location, true)
-            .or_else(|_| Self::try_restore(&fs, &old_path, location, true))
-            .map(|t| (t, true))
-            .unwrap_or_else(|_| (T::default(), false));
-
-        let mut state = Self {
-            value,
-            path,
-            location,
-            auto_save: true,
-            dirty: !restored,
-            _marker: PhantomData::default(),
-        };
-        // The initial save is the only persist that can run before a caller has
-        // confirmed its fs location is mounted (every explicit save and guard-Drop runs
-        // during active operation, when the location is up). Degrade gracefully here so
-        // constructing against a not-yet-ready or unformatted AppData location logs and
-        // continues instead of crashing; a genuine persistence failure still surfaces as
-        // a panic on the next explicit save.
-        if let Err(e) = state.try_save() {
-            log::warn!("FileBacked: initial save failed (fs not ready?), continuing: {e}");
-        }
-        (state, restored)
+        Self::try_new(path, location)
+            .unwrap_or_else(|e| panic!("FileBacked: could not create the backing file: {e}"))
     }
 
-    /// Enable or disable automatic saving of changes to the backing file.
-    ///
-    /// By default, instances created via [`new`] or [`load`] start with
-    /// `auto_save` set to `true`. In that mode, any mutation that marks the
-    /// value as dirty will cause the data to be written to disk automatically
-    /// (e.g. when the guard is dropped or `save` is called internally).
-    ///
-    /// Setting `auto_save` to `false` disables this behavior. This can be
-    /// useful when you plan to perform a large number of updates and want to
-    /// avoid incurring a filesystem write for each change; instead, you can
-    /// batch your modifications and explicitly call [`save`] or [`try_save`]
-    /// once when you are done.
-    ///
-    /// When auto-save is disabled, **you are responsible** for ensuring that
-    /// [`save`] or [`try_save`] is called at appropriate times. If the process
-    /// exits, crashes, or the device loses power before an explicit save,
-    /// any unsaved changes will be lost.
-    pub fn set_auto_save(&mut self, auto_save: bool) { self.auto_save = auto_save; }
+    /// [`FileBacked::new`], reporting a write failure instead of panicking on it.
+    pub fn try_new(path: impl Into<String>, location: fs::Location) -> Result<(Self, bool), T::Error> {
+        let path = path.into();
+        if let Ok(state) = Self::load(&path, location) {
+            return Ok((state, true));
+        }
+
+        let mut state =
+            Self { value: T::default(), path, location, dirty: true, _marker: PhantomData::default() };
+        if let Err(e) = state.try_save() {
+            // Drop retries a dirty value and panics on failure, so clear it before handing
+            // the error to the caller.
+            state.dirty = false;
+            return Err(e);
+        }
+        Ok((state, false))
+    }
 
     /// load an existing file if it exists
     pub fn load(path: impl Into<String>, location: fs::Location) -> Result<Self, T::Error> {
+        // Usb and Airlock can be unmounted while we hold the file, which breaks the invariant
+        // that opening it once means it stays writable.
+        assert!(
+            !matches!(location, fs::Location::Usb | fs::Location::Airlock),
+            "FileBacked: {location:?} can go away at runtime"
+        );
         let fs = FileSystem::<P>::default();
         let path = path.into();
         let old_path = format!("{}.old", path);
 
-        let value = Self::try_restore(&fs, &path, location, false)
-            .or_else(|_| Self::try_restore(&fs, &old_path, location, false))?;
+        let value = Self::try_restore(&fs, &path, location)
+            .or_else(|_| Self::try_restore(&fs, &old_path, location))?;
 
-        Ok(Self { value, path, location, dirty: false, auto_save: true, _marker: PhantomData::default() })
+        Ok(Self { value, path, location, dirty: false, _marker: PhantomData::default() })
     }
 
-    pub fn try_save(&mut self) -> Result<(), T::Error> {
+    fn try_save(&mut self) -> Result<(), T::Error> {
         if !self.dirty {
             return Ok(());
         }
@@ -194,11 +183,11 @@ where
         Ok(())
     }
 
-    /// Persist to disk, panicking on failure. These writes go to local AppData and
-    /// can only fail on a genuine bug or unrecoverable condition, not a transient
-    /// error worth threading through every caller (CLAUDE.md, panic over
-    /// fallibility). Callers that must handle a failure use `try_save` directly.
-    pub fn save(&mut self) {
+    /// Persist to disk, panicking on failure.
+    ///
+    /// Construction already proved the file writable and nothing else writes it, so a failure
+    /// here is a bug or a dead filesystem, not a transient to recover from.
+    fn save(&mut self) {
         if let Err(e) = self.try_save() {
             panic!("FileBacked: failed to persist to local fs: {e}");
         }
@@ -210,9 +199,8 @@ where
         fs: &FileSystem<P>,
         path: impl Into<String>,
         location: fs::Location,
-        create: bool,
     ) -> Result<T, T::Error> {
-        let file = Self::try_open(fs, path, location, create)?;
+        let file = Self::try_open(fs, path, location, false)?;
         let mut reader = BufReader::with_capacity(fs::FILE_BUFFER_SIZE, file);
         let value = T::from_reader(&mut reader)?;
         Ok(value)
@@ -290,11 +278,7 @@ where
     T: ByteCodec,
     P: FileBackedPermissions,
 {
-    fn drop(&mut self) {
-        if self.inner.auto_save {
-            self.inner.save();
-        }
-    }
+    fn drop(&mut self) { self.inner.save(); }
 }
 
 pub type JsonBacked<T, P> = FileBacked<JsonCodec<T>, P>;

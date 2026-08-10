@@ -971,9 +971,9 @@ fn migrate_old_database(fido_api: &FidoApi) {
         return;
     }
 
-    // edit_security_key and set_archived are now blocking, so by the time we reach this
-    // point every mutation has been ack'd by the server (and persisted via save_and_notify)
-    // — safe to drop the legacy source-of-truth.
+    // edit_security_key and set_archived are blocking, so by the time we reach this point
+    // every mutation has been ack'd by the server and persisted; safe to drop the legacy
+    // source-of-truth.
     if let Err(e) = fs.remove(OLD_DATABASE_FILE.to_string(), fs::Location::AppData) {
         log::warn!("Migration: failed to delete old database: {:?}", e);
     } else {

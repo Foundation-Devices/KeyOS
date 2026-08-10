@@ -16,8 +16,8 @@ use crate::{
     RegisteredKey,
 };
 
-/// Info about a completed FIDO operation, used to defer outcome notification
-/// until after state is saved.
+/// Info about a completed FIDO operation, carried out of `process_apdu` so that only
+/// operations which actually mutated state notify subscribers.
 #[derive(Debug)]
 struct OperationOutcome {
     security_key_index: usize,
@@ -64,7 +64,6 @@ impl FidoServer {
                 // physical tap as consent. USB goes through the non-blocking prompt below.
                 let security_key_index = if transport == Transport::Nfc {
                     let (index, _timestamp) = self
-                        .state
                         .selected
                         .ok_or(Error::Other)
                         .inspect_err(|_| log::error!("No key pre-selected for NFC!"))?;
@@ -72,7 +71,7 @@ impl FidoServer {
                 } else {
                     // Fast-path: a key selected by the user within the timeout window avoids a
                     // re-prompt on back-to-back operations.
-                    let pre_selected = self.state.selected.and_then(|(idx, ts)| {
+                    let pre_selected = self.selected.and_then(|(idx, ts)| {
                         if ts.elapsed() < SELECTION_TIMEOUT {
                             Some(idx)
                         } else {
@@ -147,7 +146,6 @@ impl FidoServer {
                 // Selection via the presence prompt below will also unlock the key for this
                 // request — we re-check after the poll.
                 let currently_selected = self
-                    .state
                     .selected
                     .is_some_and(|(idx, ts)| idx == security_key_index && ts.elapsed() < SELECTION_TIMEOUT);
                 let security_key = self.security_key(security_key_index)?;
@@ -239,26 +237,17 @@ impl FidoServer {
         let status = Status::from(&res);
         let response = status.to_vec(res.as_ref().map(|(data, _)| data.as_slice()).unwrap_or_default());
 
-        // Save state and notify subscribers only when an operation actually completed and
-        // mutated state. Pending retries (ConditionNotSatisfied), check-only queries, and
-        // Version replies all leave state untouched — skipping the save here prevents
-        // spamming subscribers once per retry.
+        // Notify subscribers only when an operation actually completed and mutated state.
+        // Pending retries (ConditionNotSatisfied), check-only queries, and Version replies all
+        // leave state untouched, and notifying on those spams subscribers once per retry.
         if let Ok((_, Some(outcome))) = &res {
             let security_key_index = outcome.security_key_index;
             let is_registration = outcome.is_registration;
-            let save_ok = match self.save_and_notify() {
-                Ok(()) => true,
-                Err(e) => {
-                    log::error!("Failed to save FIDO states: {:?}", e);
-                    false
-                }
-            };
-            let op = if is_registration { "Register" } else { "Authenticate" };
-            if save_ok {
-                log::info!("{op} success (security_key_index={security_key_index})");
-            } else {
-                log::error!("{op} completed but state save failed (security_key_index={security_key_index})");
+            if let Err(e) = self.refresh_and_notify() {
+                log::error!("Failed to refresh FIDO keys: {:?}", e);
             }
+            let op = if is_registration { "Register" } else { "Authenticate" };
+            log::info!("{op} success (security_key_index={security_key_index})");
             self.operation_outcome_subscribers.send(&OperationOutcomeEvent {
                 security_key_index,
                 operation: if is_registration {
@@ -266,7 +255,7 @@ impl FidoServer {
                 } else {
                     OperationType::Authentication
                 },
-                success: save_ok,
+                success: true,
             });
         }
 

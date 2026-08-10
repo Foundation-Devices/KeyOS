@@ -475,8 +475,7 @@ impl MetaStorage for KeyOsMetaStorage {
     }
 
     fn persist(&self) -> anyhow::Result<bool> {
-        let mut data = self.data.lock().unwrap();
-        data.save();
+        // Nothing to do: every mutation went out to disk when its guard dropped.
         Ok(true)
     }
 }

@@ -73,8 +73,6 @@ pub(crate) fn presence_fingerprint(payload: &[u8]) -> [u8; 32] {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FidoKeysState {
     pub security_keys: Vec<SecurityKey>,
-    #[serde(skip)]
-    pub selected: Option<(usize, Instant)>,
 }
 
 impl FidoKeysState {
@@ -142,6 +140,10 @@ pub struct FidoServer {
     /// "Register" / "Authenticate" + `Err(ConditionNotSatisfied)` pair on every retry
     /// during a user-presence polling loop.
     pub(crate) last_u2f_fingerprint: Option<[u8; 32]>,
+    /// The key the user picked, and when. Lives outside [`FidoKeysState`] because it is
+    /// selected mid-transaction, and persisting it there would put a flash write on the
+    /// APDU path for something that never outlives the process.
+    pub(crate) selected: Option<(usize, Instant)>,
 }
 
 /// Server-internal message dispatched by the kernel when a client process disconnects.
@@ -193,9 +195,8 @@ pub fn wait() -> (Security, [u8; 32]) {
 impl FidoServer {
     pub fn new(security: Security, seed: [u8; 32]) -> Result<Self, FidoError> {
         log::info!("starting fido server");
-        let mut state: FileBacked<JsonCodec<FidoKeysState>, _> =
+        let state: FileBacked<JsonCodec<FidoKeysState>, _> =
             JsonBacked::new(STATE_FILE, fs::Location::AppData).0;
-        state.set_auto_save(false);
         log::debug!("Restored State: {:02x?}", state);
 
         // Get the SE's FIDO public key (64 bytes without 0x04 prefix)
@@ -238,6 +239,7 @@ impl FidoServer {
             operation_outcome_subscribers: ArchiveSubList::default(),
             nav: NavThread::start(),
             last_u2f_fingerprint: None,
+            selected: None,
         };
         fido_server.populate_fido_keys()?;
         fido_server.compute_next_signing_keys()?;
@@ -303,10 +305,9 @@ impl FidoServer {
         Ok(next.1)
     }
 
-    /// Save state and notify all subscribers of key changes.
-    pub(crate) fn save_and_notify(&mut self) -> Result<(), FidoError> {
+    /// Refresh the cached next signing keys and notify all subscribers of key changes.
+    pub(crate) fn refresh_and_notify(&mut self) -> Result<(), FidoError> {
         self.compute_next_signing_keys()?;
-        self.state.save();
         self.key_change_subscribers.send(&crate::messages::KeysChangedEvent { keys: self.key_views() });
         Ok(())
     }
@@ -321,6 +322,7 @@ impl FidoServer {
         self.fido_keys = Vec::new();
         self.compute_next_signing_keys()?;
         self.state.guard().0 = FidoKeysState::default();
+        self.selected = None;
         Ok(())
     }
 
@@ -399,8 +401,7 @@ impl FidoServer {
             }
         }
         let now = Instant::now();
-        let mut state = self.state.guard();
-        state.selected = index.map(|idx| (idx, now));
+        self.selected = index.map(|idx| (idx, now));
         Ok(())
     }
 
@@ -439,7 +440,7 @@ impl FidoServer {
         &self,
         force_security_key_index: Option<usize>,
     ) -> Result<usize, FidoError> {
-        Ok(force_security_key_index.unwrap_or(self.state.selected.ok_or(FidoError::UnselectedKey)?.0))
+        Ok(force_security_key_index.unwrap_or(self.selected.ok_or(FidoError::UnselectedKey)?.0))
     }
 
     pub(crate) fn security_key(&self, index: usize) -> Result<&SecurityKey, FidoError> {
@@ -614,10 +615,10 @@ impl BlockingArchiveHandler<CreateSecurityKey> for FidoServer {
             log::warn!("create_security_key failed: {:?}", e);
         })?;
         log::debug!("security key created at index {index}");
-        // save_and_notify failure is intentionally swallowed — see CreateSecurityKey doc on
-        // messages.rs. The key is usable in this session; worst case is lost on reboot.
-        if let Err(e) = self.save_and_notify() {
-            log::error!("failed to save state after key creation: {:?}", e);
+        // The key itself is already persisted, so a failure here only costs the subscriber
+        // notification and the cached next signing key.
+        if let Err(e) = self.refresh_and_notify() {
+            log::error!("failed to refresh keys after key creation: {:?}", e);
         }
         Ok(index)
     }
@@ -633,11 +634,9 @@ impl BlockingArchiveHandler<EditSecurityKey> for FidoServer {
         self.edit_security_key(msg.index, msg.label, msg.color, msg.icon, msg.date).inspect_err(|e| {
             log::warn!("edit_security_key failed: {:?}", e);
         })?;
-        // save_and_notify failure is logged but not surfaced — the in-memory edit is already
-        // applied; worst case is the change is lost on reboot, which mirrors how
-        // CreateSecurityKey treats the same window.
-        if let Err(e) = self.save_and_notify() {
-            log::error!("failed to save state after key edit: {:?}", e);
+        // Same as CreateSecurityKey: the edit is already persisted, only the notification is lost.
+        if let Err(e) = self.refresh_and_notify() {
+            log::error!("failed to refresh keys after key edit: {:?}", e);
         }
         Ok(())
     }
@@ -657,11 +656,9 @@ impl BlockingScalarHandler<SetArchived> for FidoServer {
         })?;
         key.set_archived(msg.archived);
         drop(state);
-        // save_and_notify failure is logged but not surfaced — the in-memory mutation is
-        // already applied; worst case the change is lost on reboot, mirroring how
-        // CreateSecurityKey / EditSecurityKey treat the same window.
-        if let Err(e) = self.save_and_notify() {
-            log::error!("failed to save state after set_archived: {:?}", e);
+        // Same as CreateSecurityKey: the change is already persisted, only the notification is lost.
+        if let Err(e) = self.refresh_and_notify() {
+            log::error!("failed to refresh keys after set_archived: {:?}", e);
         }
         Ok(())
     }
@@ -687,7 +684,7 @@ impl BlockingScalarHandler<GetSelectedSecurityKey> for FidoServer {
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
     ) -> Option<usize> {
-        self.state.selected.map(|(index, _)| index).clone()
+        self.selected.map(|(index, _)| index).clone()
     }
 }
 

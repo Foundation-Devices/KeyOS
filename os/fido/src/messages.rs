@@ -134,10 +134,10 @@ pub struct OperationOutcomeEvent {
 pub struct SubscribeOperationOutcomes;
 
 /// Create a new security key with UI metadata. Returns the new key's index, or an error if
-/// creation failed before any state was mutated. Note: a `save_and_notify` failure after a
-/// successful in-memory create is intentionally still returned as `Ok(index)` and only logged
-/// — the new key is usable in this session and worst case is lost on reboot, which is a softer
-/// failure mode than refusing the create over a transient FS or subscriber hiccup.
+/// creation failed before any state was mutated. A failure to refresh and notify after a
+/// successful create is still returned as `Ok(index)` and only logged: the key is already
+/// persisted by then, so refusing the create over a lost subscriber notification would be the
+/// harsher failure mode.
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<usize, FidoError>)]
 pub struct CreateSecurityKey {

@@ -44,10 +44,9 @@ impl Server {
         let mut state = UpdateState::load();
         if let Err(e) = clear_state_after_recovery(&fs, &mut state) {
             if e.marker_observed {
-                log::error!("failed to clear update state after Recovery: {:?}", e.error);
-                if let Err(e) = reset_update_state(&fs, &mut state) {
-                    log::error!("failed to persist fail-closed update state clear after Recovery: {e:?}");
-                }
+                // The state itself is cleared either way; a surviving marker only means we
+                // redo this on the next boot.
+                log::error!("failed to remove the Recovery update-state marker: {:?}", e.error);
             } else {
                 log::error!("failed to check Recovery update-state marker: {:?}", e.error);
             }
@@ -84,21 +83,12 @@ fn clear_state_after_recovery(
     Ok(())
 }
 
-fn reset_update_state(
-    fs: &FileSystem,
-    state: &mut JsonBacked<UpdateState, FileSystemPermissions>,
-) -> Result<(), fs::Error> {
+fn reset_update_state(fs: &FileSystem, state: &mut JsonBacked<UpdateState, FileSystemPermissions>) {
     let pending_release_paths = state.pending_apply.clone();
     remove_release_files(fs, &pending_release_paths);
 
-    state.set_auto_save(false);
-    {
-        let mut state = state.guard();
-        **state = UpdateState::default();
-    }
-    let save_result = state.try_save();
-    state.set_auto_save(true);
-    save_result
+    let mut state = state.guard();
+    **state = UpdateState::default();
 }
 
 fn remove_release_files(fs: &FileSystem, release_paths: &[String]) {
@@ -337,7 +327,7 @@ impl server::ArchiveHandler<FirmwareInstallWorkerEvent> for Server {
                         UpdateOutcome::Partial(remaining_release_paths) => {
                             log::info!("release requires a reboot, saving remaining releases and rebooting");
                             let expected_version = self.firmware_version_at(STAGED_FIRMWARE_FILE_PATH)?;
-                            self.save_resume_state(remaining_release_paths, expected_version)?;
+                            self.save_resume_state(remaining_release_paths, expected_version);
                             core::finalize_update(&mut self.fs)?;
                             self.notify_and_reboot(ProgressUpdate::Rebooting)?;
                         }
@@ -474,21 +464,11 @@ impl Server {
         Ok(header.version().to_owned())
     }
 
-    fn save_resume_state(
-        &mut self,
-        pending_apply: Vec<String>,
-        expected_version_on_resume: String,
-    ) -> whence::Result<(), Error> {
-        self.state.set_auto_save(false);
-        {
-            let mut state = self.state.guard();
-            state.pending_apply = pending_apply;
-            state.expected_version_on_resume = Some(expected_version_on_resume);
-            state.finalize_update_pending = true;
-        }
-        let save_result = self.state.try_save();
-        self.state.set_auto_save(true);
-        save_result.whence()
+    fn save_resume_state(&mut self, pending_apply: Vec<String>, expected_version_on_resume: String) {
+        let mut state = self.state.guard();
+        state.pending_apply = pending_apply;
+        state.expected_version_on_resume = Some(expected_version_on_resume);
+        state.finalize_update_pending = true;
     }
 
     fn spawn_apply_releases(&mut self, release_paths: Vec<String>) {
