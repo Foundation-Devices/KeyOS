@@ -15,8 +15,7 @@ use {
     std::fmt,
     totp_rs::{Algorithm, TotpUrlError, TOTP},
     url::{form_urlencoded, Url},
-    urlencoding::decode,
-    zeroize::Zeroize,
+    urlencoding::{decode, encode},
 };
 
 pub const DATABASE_FILE: &str = "authenticator_database_v3.json";
@@ -123,23 +122,55 @@ impl SortableCard for Auth {
     fn get_date(&self) -> u64 { self.date }
 }
 
-fn escape_first_n_colons(input: &str, n: usize) -> String {
-    if n == 0 {
-        return input.to_string();
-    }
+fn sanitize_issuer_and_account(totp_url: &str) -> Option<(String, String, String)> {
+    let mut parsed_url = Url::parse(totp_url).ok()?;
+    let decoded_path = decode(parsed_url.path().trim_start_matches('/')).ok()?.to_string();
 
-    let mut escaped_colons = 0;
-    let mut escaped = String::with_capacity(input.len() + (n * 4));
-    for c in input.chars() {
-        if c == ':' && escaped_colons < n {
-            escaped.push_str("%253A");
-            escaped_colons += 1;
+    let (issuer, account) = match parsed_url
+        .query_pairs()
+        .find(|(key, _)| key == "issuer")
+        .map(|(_, value)| value.into_owned())
+    {
+        // A non-empty query issuer is authoritative. Only a matching label
+        // prefix is structural; otherwise preserve the complete label as the
+        // account name.
+        Some(query_issuer) if !query_issuer.is_empty() => {
+            let account = decoded_path
+                .strip_prefix(&query_issuer)
+                .and_then(|path| path.strip_prefix(':'))
+                .unwrap_or(&decoded_path)
+                .to_string();
+            (query_issuer, account)
+        }
+        // Without a usable query issuer, the label is the only issuer and
+        // account source, so its final colon is structural.
+        Some(_) | None => {
+            let (issuer, account) = decoded_path.rsplit_once(':')?;
+            (issuer.to_string(), account.to_string())
+        }
+    };
+
+    // Parse through a colon-free placeholder, then restore the selected account
+    // after totp-rs has read the remaining URI parameters.
+    let encoded_issuer = encode(&issuer);
+    parsed_url.set_path("/account");
+
+    let mut query_serializer = form_urlencoded::Serializer::new(String::new());
+    let mut has_issuer = false;
+    for (key, value) in parsed_url.query_pairs() {
+        if key == "issuer" {
+            query_serializer.append_pair("issuer", &encoded_issuer);
+            has_issuer = true;
         } else {
-            escaped.push(c);
+            query_serializer.append_pair(&key, &value);
         }
     }
+    if !has_issuer {
+        query_serializer.append_pair("issuer", &encoded_issuer);
+    }
+    parsed_url.set_query(Some(&query_serializer.finish()));
 
-    escaped
+    Some((parsed_url.to_string(), issuer, account))
 }
 
 impl Auth {
@@ -147,55 +178,17 @@ impl Auth {
         // Use unchecked, because github, and possibly others, may use short secrets
         let mut totp = match TOTP::from_url_unchecked(&totp_url) {
             Ok(t) => t,
-            Err(TotpUrlError::IssuerMistmatch(url_issuer, param_issuer)) => {
-                let url_issuer = decode(&url_issuer).map(|v| v.to_string()).unwrap_or(url_issuer);
-                let param_issuer = decode(&param_issuer).map(|v| v.to_string()).unwrap_or(param_issuer);
-                let mut sanitized_url = totp_url.clone();
-                if let Ok(mut parsed_url) = Url::parse(&totp_url) {
-                    if let Ok(decoded_path) = decode(parsed_url.path().trim_start_matches('/')) {
-                        let decoded_path = decoded_path.to_string();
-                        let issuer_colons = param_issuer.matches(':').count();
-                        if issuer_colons > 0 {
-                            let expected_prefix = format!("{param_issuer}:");
-                            if decoded_path.starts_with(&expected_prefix)
-                                && param_issuer.starts_with(&url_issuer)
-                            {
-                                let escaped_path = escape_first_n_colons(&decoded_path, issuer_colons);
-                                parsed_url.set_path(&format!("/{escaped_path}"));
-
-                                let escaped_issuer = param_issuer.replace(':', "%3A");
-                                let mut query_serializer = form_urlencoded::Serializer::new(String::new());
-                                for (key, value) in parsed_url.query_pairs() {
-                                    if key == "issuer" {
-                                        query_serializer.append_pair("issuer", &escaped_issuer);
-                                    } else {
-                                        query_serializer.append_pair(&key, &value);
-                                    }
-                                }
-                                let sanitized_query = query_serializer.finish();
-                                parsed_url.set_query(Some(&sanitized_query));
-                                sanitized_url = parsed_url.to_string();
-                            }
-                        } else if let Some((label, account)) = decoded_path.rsplit_once(':') {
-                            // Some providers (e.g. Slack) set the label prefix to a
-                            // friendly name like "Slack (Foundation)" (optionally
-                            // with its own ':' inside) while issuer= is the
-                            // canonical "Slack". Split on the last ':' so labels
-                            // that contain colons stay on the label side, and only
-                            // rewrite when the label is a decoration of the
-                            // canonical issuer so genuinely invalid URLs are still
-                            // rejected.
-                            if label.starts_with(&param_issuer) {
-                                parsed_url.set_path(&format!("/{param_issuer}:{account}"));
-                                sanitized_url = parsed_url.to_string();
-                            }
-                        }
-                    }
-                }
-
+            Err(
+                error @ (TotpUrlError::IssuerMistmatch(_, _)
+                | TotpUrlError::Issuer(_)
+                | TotpUrlError::AccountName(_)),
+            ) => {
+                let (sanitized_url, issuer, account_name) = sanitize_issuer_and_account(&totp_url)
+                    .ok_or(AuthValidationError::InvalidTotpError(error))?;
                 let mut sanitized_totp = TOTP::from_url_unchecked(&sanitized_url)
                     .map_err(AuthValidationError::InvalidTotpError)?;
-                sanitized_totp.issuer = Some(param_issuer);
+                sanitized_totp.issuer = Some(issuer);
+                sanitized_totp.account_name = account_name;
                 sanitized_totp
             }
             Err(e) => return Err(AuthValidationError::InvalidTotpError(e)),
@@ -236,15 +229,6 @@ impl Auth {
     pub fn get_category(&self) -> u32 {
         (if self.archived { AuthCategories::Archived } else { AuthCategories::Active }) as u32
     }
-
-    pub fn zeroize_sensitive(&mut self) {
-        self.totp.secret.zeroize();
-        self.totp.account_name.zeroize();
-        if let Some(issuer) = &mut self.totp.issuer {
-            issuer.zeroize();
-        }
-        self.label.zeroize();
-    }
 }
 
 pub fn make_totp_auth(totp_url: &str, label: Option<&str>) -> anyhow::Result<Auth> {
@@ -255,12 +239,6 @@ pub fn make_totp_auth(totp_url: &str, label: Option<&str>) -> anyhow::Result<Aut
         auth.edit(AuthEditField::Label(auth.get_account().to_string())).map_err(anyhow::Error::new)?;
     }
     Ok(auth)
-}
-
-pub fn zeroize_auth_entries(entries: &mut [Auth]) {
-    for entry in entries {
-        entry.zeroize_sensitive();
-    }
 }
 
 pub fn build_totp_url(
@@ -280,7 +258,7 @@ pub fn build_totp_url(
     let secret = base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret)
         .context("Invalid TOTP secret encoding")?;
     let digits = usize::try_from(digits).context("Invalid TOTP digit count")?;
-    let mut totp = TOTP::new_unchecked(
+    let totp = TOTP::new_unchecked(
         algorithm,
         digits,
         1,
@@ -289,9 +267,7 @@ pub fn build_totp_url(
         issuer.map(str::to_string),
         account.to_string(),
     );
-    let url = totp.get_url();
-    totp.secret.zeroize();
-    Ok(url)
+    Ok(totp.get_url())
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -421,8 +397,8 @@ mod tests {
 
     fn auth_mismatched_label_prefix_with_colon() -> Result<Auth, AuthValidationError> {
         // The friendly prefix itself contains a colon (e.g. "Foundation: Team").
-        // Ensures the prefix is stripped based on the url_issuer totp-rs reported,
-        // not a naive split on the first ':'.
+        // The complete label should remain the account when it does not begin
+        // with the authoritative query issuer plus a colon.
         let url = String::from(
             "otpauth://totp/Slack%20(Foundation%3A%20Team):test@foundation.xyz?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Slack",
         );
@@ -461,17 +437,49 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_issuer_preserves_percent_escape() {
+        let auth = Auth::new(
+            String::from("otpauth://totp/A%253AB:alice?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY&issuer=A%253AB"),
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(auth.get_issuer(), "A%3AB");
+        assert_eq!(auth.get_account(), "alice");
+    }
+
+    #[test]
+    fn sanitize_empty_query_issuer_uses_label_parts() {
+        let auth =
+            Auth::new(String::from("otpauth://totp/ACME:alice?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY&issuer="), 0)
+                .unwrap();
+
+        assert_eq!(auth.get_issuer(), "ACME");
+        assert_eq!(auth.get_account(), "alice");
+    }
+
+    #[test]
+    fn sanitize_missing_query_issuer_uses_label_parts() {
+        let (_, issuer, account) =
+            sanitize_issuer_and_account("otpauth://totp/ACME:alice?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY")
+                .unwrap();
+
+        assert_eq!(issuer, "ACME");
+        assert_eq!(account, "alice");
+    }
+
+    #[test]
     fn create_auth_mismatched_label_prefix() {
         let auth = auth_mismatched_label_prefix().unwrap();
         assert_eq!(auth.get_issuer(), "Slack");
-        assert_eq!(auth.get_account(), "test@foundation.xyz");
+        assert_eq!(auth.get_account(), "Slack (Foundation):test@foundation.xyz");
     }
 
     #[test]
     fn create_auth_mismatched_label_prefix_with_colon() {
         let auth = auth_mismatched_label_prefix_with_colon().unwrap();
         assert_eq!(auth.get_issuer(), "Slack");
-        assert_eq!(auth.get_account(), "test@foundation.xyz");
+        assert_eq!(auth.get_account(), "Slack (Foundation: Team):test@foundation.xyz");
     }
 
     #[test]
@@ -529,13 +537,29 @@ mod tests {
     }
 
     #[test]
-    fn code_invalid_url() {
+    fn mismatched_issuer_uses_query_parameter() {
         let url = String::from("otpauth://totp/Te:st:testuser?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY&issuer=Test");
-        match Auth::new(url, 0) {
-            Ok(_) => panic!("This TOTP URL should not be valid."),
-            Err(AuthValidationError::InvalidTotpError(_)) => (),
-            Err(other) => panic!("Failed with the wrong error: {}", other),
-        }
+        let auth = Auth::new(url, 0).unwrap();
+        assert_eq!(auth.get_issuer(), "Test");
+        assert_eq!(auth.get_account(), "Te:st:testuser");
+    }
+
+    #[test]
+    fn matching_issuer_splits_account_on_first_colon() {
+        let url = String::from("otpauth://totp/Test:te:stuser?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY&issuer=Test");
+        let auth = Auth::new(url, 0).unwrap();
+        assert_eq!(auth.get_issuer(), "Test");
+        assert_eq!(auth.get_account(), "te:stuser");
+    }
+
+    #[test]
+    fn mismatched_issuer_with_colon_uses_query_parameter() {
+        let url = String::from(
+            "otpauth://totp/GitHub:alice?secret=GZ4FORKTNBVFGQTFJJGEIRDOKY&issuer=Foundation%3ASSO",
+        );
+        let auth = Auth::new(url, 0).unwrap();
+        assert_eq!(auth.get_issuer(), "Foundation:SSO");
+        assert_eq!(auth.get_account(), "GitHub:alice");
     }
 
     #[test]

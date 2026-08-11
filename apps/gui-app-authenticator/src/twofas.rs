@@ -3,7 +3,7 @@
 
 use {
     crate::{
-        auth::{build_totp_url, make_totp_auth, zeroize_auth_entries},
+        auth::{build_totp_url, make_totp_auth},
         import_crypto::{decrypt_gcm, GcmDecryptError},
         kdf::{self, Pbkdf2Sha256Request},
         tr, Auth, CryptoApi, TrId,
@@ -13,7 +13,6 @@ use {
     serde::{de::IgnoredAny, Deserialize},
     subtle::ConstantTimeEq,
     url::{form_urlencoded, Url},
-    zeroize::{Zeroize, Zeroizing},
 };
 
 const MIN_SCHEMA_VERSION: u32 = 1;
@@ -80,17 +79,6 @@ struct Service {
     otp: Otp,
 }
 
-impl Drop for Service {
-    fn drop(&mut self) {
-        self.name.zeroize();
-        self.secret.zeroize();
-        self.otp.label.zeroize();
-        self.otp.account.zeroize();
-        self.otp.issuer.zeroize();
-        self.otp.link.zeroize();
-    }
-}
-
 #[derive(Deserialize)]
 struct Otp {
     label: Option<String>,
@@ -122,7 +110,7 @@ pub async fn decrypt_export(
     crypto: &CryptoApi,
     export: &EncryptedExport,
     password: &str,
-) -> Result<Zeroizing<Vec<u8>>, TwoFasError> {
+) -> Result<Vec<u8>, TwoFasError> {
     let reference = decrypt_data(crypto, &export.reference, password).await?;
     if !bool::from(reference.as_slice().ct_eq(REFERENCE)) {
         return Err(TwoFasError::PasswordMismatch);
@@ -153,13 +141,7 @@ fn ingest_services(services: Vec<Service>) -> Result<Vec<Auth>, TwoFasError> {
             continue;
         }
 
-        match parse_service(&service) {
-            Ok(entry) => entries.push(entry),
-            Err(error) => {
-                zeroize_auth_entries(&mut entries);
-                return Err(error);
-            }
-        }
+        entries.push(parse_service(&service)?);
     }
 
     if entries.is_empty() {
@@ -274,17 +256,15 @@ async fn decrypt_data(
     crypto: &CryptoApi,
     encrypted: &EncryptedData,
     password: &str,
-) -> Result<Zeroizing<Vec<u8>>, TwoFasError> {
-    let key = Zeroizing::new(
-        kdf::derive_pbkdf2_sha256(Pbkdf2Sha256Request {
-            password: Zeroizing::new(password.as_bytes().to_vec()),
-            salt: Zeroizing::new(encrypted.salt.to_vec()),
-            iterations: PBKDF2_ITERATIONS,
-            out_len: AES_KEY_LEN,
-        })
-        .await
-        .map_err(anyhow::Error::new)?,
-    );
+) -> Result<Vec<u8>, TwoFasError> {
+    let key = kdf::derive_pbkdf2_sha256(Pbkdf2Sha256Request {
+        password: password.as_bytes().to_vec(),
+        salt: encrypted.salt.to_vec(),
+        iterations: PBKDF2_ITERATIONS,
+        out_len: AES_KEY_LEN,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
 
     let plaintext =
         decrypt_gcm(crypto, key.as_slice(), encrypted.nonce, encrypted.tag, &encrypted.ciphertext, None)
@@ -292,7 +272,7 @@ async fn decrypt_data(
                 GcmDecryptError::AuthenticationFailed => TwoFasError::PasswordMismatch,
                 GcmDecryptError::Operation(error) => error.into(),
             })?;
-    Ok(Zeroizing::new(plaintext))
+    Ok(plaintext)
 }
 
 #[cfg(test)]

@@ -4956,7 +4956,6 @@ dependencies = [
  "urlencoding",
  "xous",
  "xous-api-log",
- "zeroize",
  "zip",
 ]
 

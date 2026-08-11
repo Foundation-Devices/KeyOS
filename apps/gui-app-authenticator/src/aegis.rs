@@ -6,11 +6,10 @@ use {
     base64::engine::general_purpose::STANDARD as BASE64,
     base64::Engine,
     serde::Deserialize,
-    zeroize::Zeroizing,
 };
 
 use crate::{
-    auth::{build_totp_url, get_timestamp_in_seconds, make_totp_auth, zeroize_auth_entries},
+    auth::{build_totp_url, get_timestamp_in_seconds, make_totp_auth},
     import_crypto::{decrypt_gcm, GcmDecryptError},
     kdf::{self, ScryptRequest},
     Auth, AuthEditField, CryptoApi,
@@ -154,13 +153,7 @@ pub fn ingest_uri_export(bytes: &[u8]) -> Result<Vec<Auth>, AegisError> {
             continue;
         }
 
-        match parse_uri_entry(line) {
-            Ok(entry) => entries.push(entry),
-            Err(error) => {
-                zeroize_auth_entries(&mut entries);
-                return Err(error);
-            }
-        }
+        entries.push(parse_uri_entry(line)?);
     }
 
     if entries.is_empty() {
@@ -198,24 +191,22 @@ pub async fn decrypt_export(
     crypto: &CryptoApi,
     export: &EncryptedExport,
     password: &str,
-) -> Result<Zeroizing<Vec<u8>>, AegisError> {
-    let mut db_key: Option<Zeroizing<Vec<u8>>> = None;
+) -> Result<Vec<u8>, AegisError> {
+    let mut db_key: Option<Vec<u8>> = None;
 
     for slot in export.password_slots.iter() {
         let salt = decode_hex(&slot.salt)?;
 
-        let derived_key = Zeroizing::new(
-            kdf::derive_scrypt(ScryptRequest {
-                password: Zeroizing::new(password.as_bytes().to_vec()),
-                salt: Zeroizing::new(salt),
-                n: slot.n,
-                r: slot.r,
-                p: slot.p,
-                out_len: 32,
-            })
-            .await
-            .map_err(|_| anyhow!("Aegis key derivation failed"))?,
-        );
+        let derived_key = kdf::derive_scrypt(ScryptRequest {
+            password: password.as_bytes().to_vec(),
+            salt,
+            n: slot.n,
+            r: slot.r,
+            p: slot.p,
+            out_len: 32,
+        })
+        .await
+        .map_err(|_| anyhow!("Aegis key derivation failed"))?;
 
         let wrapped_key = decode_hex(&slot.key)?;
         let slot_nonce = decode_external_nonce(&slot.key_params.nonce)?;
@@ -223,7 +214,7 @@ pub async fn decrypt_export(
 
         match decrypt_gcm(crypto, derived_key.as_slice(), slot_nonce, slot_tag, &wrapped_key, None) {
             Ok(key) => {
-                db_key = Some(Zeroizing::new(key));
+                db_key = Some(key);
                 break;
             }
             Err(GcmDecryptError::AuthenticationFailed) => {
@@ -237,14 +228,11 @@ pub async fn decrypt_export(
 
     let db_nonce = decode_external_nonce(&export.db_params.nonce)?;
     let db_tag = decode_external_tag(&export.db_params.tag)?;
-    let plaintext = Zeroizing::new(
-        decrypt_gcm(crypto, db_key.as_slice(), db_nonce, db_tag, &export.ciphertext, None).map_err(
-            |error| match error {
-                GcmDecryptError::AuthenticationFailed => AegisError::AuthenticationFailed,
-                GcmDecryptError::Operation(error) => error.into(),
-            },
-        )?,
-    );
+    let plaintext = decrypt_gcm(crypto, db_key.as_slice(), db_nonce, db_tag, &export.ciphertext, None)
+        .map_err(|error| match error {
+            GcmDecryptError::AuthenticationFailed => AegisError::AuthenticationFailed,
+            GcmDecryptError::Operation(error) => error.into(),
+        })?;
 
     Ok(plaintext)
 }
@@ -266,13 +254,7 @@ pub fn ingest_plaintext_db(bytes: &[u8]) -> Result<Vec<Auth>, AegisError> {
         if entry.entry_type != "totp" {
             continue;
         }
-        match parse_plaintext_entry(entry) {
-            Ok(auth) => entries.push(auth),
-            Err(error) => {
-                zeroize_auth_entries(&mut entries);
-                return Err(error);
-            }
-        }
+        entries.push(parse_plaintext_entry(entry)?);
     }
 
     if entries.is_empty() {

@@ -40,7 +40,6 @@ use {
         spawn_local, spawn_worker, StoredValue,
     },
     std::{collections::HashSet, rc::Rc, time::Duration},
-    zeroize::Zeroizing,
 };
 
 use crate::fs_permissions::FileSystemPermissions;
@@ -61,7 +60,7 @@ const MAX_IMPORT_FILE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 
 enum ScanImportInput {
     Url(String),
-    File { bytes: Zeroizing<Vec<u8>>, display_name: String },
+    File { bytes: Vec<u8>, display_name: String },
 }
 
 fn reset_decrypt_ui_state(ui: &AppWindow) {
@@ -139,15 +138,15 @@ struct PendingDecryptImport {
 
 #[derive(Clone)]
 enum ImportPayload {
-    AegisJsonPlain(Zeroizing<Vec<u8>>),
+    AegisJsonPlain(Vec<u8>),
     AegisJsonEncrypted(aegis::EncryptedExport),
-    AegisUri(Zeroizing<Vec<u8>>),
-    ProtonCsv(Zeroizing<Vec<u8>>),
-    ProtonAuthenticatorJsonPlain(Zeroizing<Vec<u8>>),
+    AegisUri(Vec<u8>),
+    ProtonCsv(Vec<u8>),
+    ProtonAuthenticatorJsonPlain(Vec<u8>),
     ProtonAuthenticatorJsonEncrypted(proton::ProtonAuthenticatorEncryptedExport),
-    ProtonZipJson(Zeroizing<Vec<u8>>),
-    ProtonZipPgp(Zeroizing<Vec<u8>>),
-    TwoFasJsonPlain(Zeroizing<Vec<u8>>),
+    ProtonZipJson(Vec<u8>),
+    ProtonZipPgp(Vec<u8>),
+    TwoFasJsonPlain(Vec<u8>),
     TwoFasJsonEncrypted(twofas::EncryptedExport),
 }
 
@@ -715,7 +714,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<AuthenticatorCallbacks>().on_decrypt_file({
         let ui = ui.clone_strong();
         move |password| {
-            let password = Zeroizing::new(password.to_string());
+            let password = password.to_string();
             let (crypto, pending_import, decrypt_job_id) = {
                 let mut app_state = app_state.borrow_mut();
                 let ui_state = ui.global::<AuthenticatorCallbacks>();
@@ -755,18 +754,13 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 // Yield once so the decrypt page can update before starting work
                 sleep(Duration::from_millis(1)).await;
 
-                let mut result =
+                let result =
                     spawn_worker(async move { adapt_decrypt_import(crypto, pending_import, password).await })
                         .await;
                 let ui_state = ui.global::<AuthenticatorCallbacks>();
                 let mut app_state = app_state.borrow_mut();
 
                 if decrypt_job_id != app_state.current_decrypt_job_id {
-                    if let Ok(entries) = &mut result {
-                        for entry in entries.iter_mut() {
-                            entry.zeroize_sensitive();
-                        }
-                    }
                     log::info!("Ignoring stale decrypt result for superseded import job {}", decrypt_job_id);
                     return;
                 }
@@ -781,10 +775,10 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                         app_state.pending_decrypt_import = None;
                         app_state.stage_pending_imports(entries, &ui);
                     }
-                    Err((AuthError::DecryptPasswordMismatch, _pending_import)) => {
+                    Err(AuthError::DecryptPasswordMismatch) => {
                         ui_state.set_decrypt_password_failed(true);
                     }
-                    Err((e, _pending_import)) => {
+                    Err(e) => {
                         log_import_error_redacted("Import decrypt failed", &e);
                         ui_state.set_decrypt_generic_failure(true);
                     }
@@ -1051,13 +1045,7 @@ impl AppState {
         );
     }
 
-    fn discard_pending_imports(&mut self) {
-        if let Some(mut entries) = self.pending_imports.take() {
-            for entry in &mut entries {
-                entry.zeroize_sensitive();
-            }
-        }
-    }
+    fn discard_pending_imports(&mut self) { self.pending_imports = None; }
 
     fn handle_scanned_url(&mut self, url: String, from_edit: bool, ui: &AppWindow) {
         let ui_nav = ui.global::<Navigate>();
@@ -1091,13 +1079,7 @@ impl AppState {
         }
     }
 
-    fn handle_import_file(
-        &mut self,
-        bytes: Zeroizing<Vec<u8>>,
-        display_name: String,
-        from_edit: bool,
-        ui: &AppWindow,
-    ) {
+    fn handle_import_file(&mut self, bytes: Vec<u8>, display_name: String, from_edit: bool, ui: &AppWindow) {
         let ui_nav = ui.global::<Navigate>();
         let ui_state = ui.global::<AuthenticatorCallbacks>();
 
@@ -1106,7 +1088,7 @@ impl AppState {
             return;
         }
 
-        let detected = match detect_import_file(bytes.as_slice()) {
+        let detected = match detect_import_file(bytes) {
             Ok(detected) => detected,
             Err(e) => {
                 log::warn!("Import file rejected before dispatch: {}", e);
@@ -1247,10 +1229,6 @@ fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
 
         let mut import_auth = entry;
         if let Err(error) = import_auth.edit(AuthEditField::Label(label.clone())) {
-            import_auth.zeroize_sensitive();
-            for mut entry in entries {
-                entry.zeroize_sensitive();
-            }
             return Err(error.into());
         }
         import_auth.color = 0;
@@ -1266,8 +1244,8 @@ fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
     Ok(())
 }
 
-fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
-    let proton_zip_json = proton::extract_zip_entry(bytes, proton::ZIP_JSON_ENTRY);
+fn detect_import_file(bytes: Vec<u8>) -> Result<DetectedImportFile, AuthError> {
+    let proton_zip_json = proton::extract_zip_entry(bytes.as_slice(), proton::ZIP_JSON_ENTRY);
     match proton_zip_json {
         Ok(data_json) => {
             return Ok(DetectedImportFile {
@@ -1281,7 +1259,7 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    let proton_zip_pgp = proton::extract_zip_entry(bytes, proton::ZIP_PGP_ENTRY);
+    let proton_zip_pgp = proton::extract_zip_entry(bytes.as_slice(), proton::ZIP_PGP_ENTRY);
     match proton_zip_pgp {
         Ok(data_pgp) => {
             return Ok(DetectedImportFile {
@@ -1295,12 +1273,12 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    match proton::probe_csv_export(bytes) {
+    match proton::probe_csv_export(bytes.as_slice()) {
         Ok(()) => {
             return Ok(DetectedImportFile {
                 format: ImportFileFormat::ProtonCsv,
                 decrypt_type: None,
-                payload: ImportPayload::ProtonCsv(Zeroizing::new(bytes.to_vec())),
+                payload: ImportPayload::ProtonCsv(bytes),
             });
         }
         Err(error) => {
@@ -1309,13 +1287,13 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    match proton::parse_authenticator_export(bytes) {
+    match proton::parse_authenticator_export(bytes.as_slice()) {
         Ok(parsed) => {
             return Ok(match parsed {
-                proton::ParsedAuthenticatorExport::Plain(bytes) => DetectedImportFile {
+                proton::ParsedAuthenticatorExport::Plain => DetectedImportFile {
                     format: ImportFileFormat::ProtonAuthenticatorJson,
                     decrypt_type: None,
-                    payload: ImportPayload::ProtonAuthenticatorJsonPlain(Zeroizing::new(bytes)),
+                    payload: ImportPayload::ProtonAuthenticatorJsonPlain(bytes),
                 },
                 proton::ParsedAuthenticatorExport::Encrypted(export) => DetectedImportFile {
                     format: ImportFileFormat::ProtonAuthenticatorJson,
@@ -1329,13 +1307,13 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    match twofas::parse_export(bytes) {
+    match twofas::parse_export(bytes.as_slice()) {
         Ok(parsed) => {
             return Ok(match parsed {
                 ParsedTwoFasExport::Plain => DetectedImportFile {
                     format: ImportFileFormat::TwoFasJson,
                     decrypt_type: None,
-                    payload: ImportPayload::TwoFasJsonPlain(Zeroizing::new(bytes.to_vec())),
+                    payload: ImportPayload::TwoFasJsonPlain(bytes),
                 },
                 ParsedTwoFasExport::Encrypted(export) => DetectedImportFile {
                     format: ImportFileFormat::TwoFasJson,
@@ -1349,13 +1327,13 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    match aegis::parse_export(bytes) {
+    match aegis::parse_export(bytes.as_slice()) {
         Ok(parsed) => {
             return Ok(match parsed {
                 ParsedAegisExport::Plain(db) => DetectedImportFile {
                     format: ImportFileFormat::AegisJson,
                     decrypt_type: None,
-                    payload: ImportPayload::AegisJsonPlain(Zeroizing::new(db)),
+                    payload: ImportPayload::AegisJsonPlain(db),
                 },
                 ParsedAegisExport::Encrypted(export) => DetectedImportFile {
                     format: ImportFileFormat::AegisJson,
@@ -1369,12 +1347,12 @@ fn detect_import_file(bytes: &[u8]) -> Result<DetectedImportFile, AuthError> {
         }
     }
 
-    match aegis::probe_uri_export(bytes) {
+    match aegis::probe_uri_export(bytes.as_slice()) {
         Ok(()) => {
             return Ok(DetectedImportFile {
                 format: ImportFileFormat::AegisUri,
                 decrypt_type: None,
-                payload: ImportPayload::AegisUri(Zeroizing::new(bytes.to_vec())),
+                payload: ImportPayload::AegisUri(bytes),
             });
         }
         Err(error) => {
@@ -1438,80 +1416,59 @@ fn dispatch_import_file(
 async fn adapt_decrypt_import(
     crypto: CryptoApi,
     pending_import: PendingDecryptImport,
-    password: Zeroizing<String>,
-) -> Result<Vec<Auth>, (AuthError, PendingDecryptImport)> {
+    password: String,
+) -> Result<Vec<Auth>, AuthError> {
     match &pending_import.detected.payload {
         ImportPayload::AegisJsonEncrypted(export) => {
             let plaintext =
                 aegis::decrypt_export(&crypto, export, password.as_str()).await.map_err(|error| {
-                    let auth_error = if matches!(error, AegisError::PasswordMismatch) {
+                    if matches!(error, AegisError::PasswordMismatch) {
                         AuthError::DecryptPasswordMismatch
                     } else {
                         AuthError::AegisImportError(error)
-                    };
-                    (auth_error, pending_import.clone())
+                    }
                 })?;
-            aegis::ingest_plaintext_db(plaintext.as_slice())
-                .map_err(|e| (AuthError::AegisImportError(e), pending_import))
+            aegis::ingest_plaintext_db(plaintext.as_slice()).map_err(AuthError::AegisImportError)
         }
         ImportPayload::TwoFasJsonEncrypted(export) => {
-            let plaintext =
-                twofas::decrypt_export(&crypto, export, password.as_str()).await.map_err(|error| {
-                    let auth_error = match error {
-                        TwoFasError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
-                        TwoFasError::Generic(error) => AuthError::GenericError(error),
-                    };
-                    (auth_error, pending_import.clone())
-                })?;
-            twofas::ingest_decrypted_services(plaintext.as_slice()).map_err(|error| {
-                let auth_error = match error {
+            let plaintext = twofas::decrypt_export(&crypto, export, password.as_str()).await.map_err(
+                |error| match error {
                     TwoFasError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
                     TwoFasError::Generic(error) => AuthError::GenericError(error),
-                };
-                (auth_error, pending_import)
+                },
+            )?;
+            twofas::ingest_decrypted_services(plaintext.as_slice()).map_err(|error| match error {
+                TwoFasError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
+                TwoFasError::Generic(error) => AuthError::GenericError(error),
             })
         }
         ImportPayload::ProtonZipPgp(bytes) => {
             let plaintext = proton::decrypt_pgp_export(bytes.as_slice(), password.as_str()).map_err(
                 |error| match error {
-                    proton::ProtonError::PasswordMismatch => {
-                        (AuthError::DecryptPasswordMismatch, pending_import.clone())
-                    }
-                    proton::ProtonError::Generic(error) => {
-                        (AuthError::GenericError(error), pending_import.clone())
-                    }
+                    proton::ProtonError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
+                    proton::ProtonError::Generic(error) => AuthError::GenericError(error),
                 },
             )?;
-            proton::ingest_json_export(plaintext.as_slice())
-                .map_err(|e| (AuthError::GenericError(e), pending_import))
+            proton::ingest_json_export(plaintext.as_slice()).map_err(AuthError::GenericError)
         }
         ImportPayload::ProtonAuthenticatorJsonEncrypted(export) => {
             let plaintext = proton::decrypt_authenticator_export(&crypto, export, password.as_str())
                 .await
                 .map_err(|error| match error {
-                    proton::ProtonError::PasswordMismatch => {
-                        (AuthError::DecryptPasswordMismatch, pending_import.clone())
-                    }
-                    proton::ProtonError::Generic(error) => {
-                        (AuthError::GenericError(error), pending_import.clone())
-                    }
+                    proton::ProtonError::PasswordMismatch => AuthError::DecryptPasswordMismatch,
+                    proton::ProtonError::Generic(error) => AuthError::GenericError(error),
                 })?;
             Ok(proton::ingest_authenticator_plain_export(plaintext.as_slice())
-                .map_err(|e| (AuthError::GenericError(e), pending_import))?)
+                .map_err(AuthError::GenericError)?)
         }
-        _ => Err((
-            AuthError::UnsupportedImportFile(anyhow::anyhow!(
-                "Pending decrypt import did not contain decryptable payload"
-            )),
-            pending_import,
-        )),
+        _ => Err(AuthError::UnsupportedImportFile(anyhow::anyhow!(
+            "Pending decrypt import did not contain decryptable payload"
+        ))),
     }
 }
 
 #[cfg(not(test))]
-fn execute_file_picker(
-    state: StoredValue<AppState>,
-) -> Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError> {
+fn execute_file_picker(state: StoredValue<AppState>) -> Result<Option<(Vec<u8>, String)>, AuthError> {
     let options = SelectFileOptions::default().with_dirs_allowed(true);
     let files = match select_file::<GuiPermissions>(options) {
         Ok(Some(f)) => f,
@@ -1562,10 +1519,10 @@ fn execute_file_picker(
         )));
     }
 
-    let mut bytes = Zeroizing::new(Vec::new());
+    let mut bytes = Vec::new();
     let _ = opened
         .take(MAX_IMPORT_FILE_SIZE_BYTES + 1)
-        .read_to_end(&mut *bytes)
+        .read_to_end(&mut bytes)
         .context(format!("Failed to read selected file {}", path))
         .map_err(AuthError::UnsupportedImportFile)?;
     if bytes.len() as u64 > MAX_IMPORT_FILE_SIZE_BYTES {
@@ -1582,14 +1539,12 @@ fn execute_file_picker(
 }
 
 #[cfg(test)]
-fn execute_file_picker(
-    _state: StoredValue<AppState>,
-) -> Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError> {
+fn execute_file_picker(_state: StoredValue<AppState>) -> Result<Option<(Vec<u8>, String)>, AuthError> {
     Ok(None)
 }
 
 fn scan_import_input_from_file_picker_result(
-    result: Result<Option<(Zeroizing<Vec<u8>>, String)>, AuthError>,
+    result: Result<Option<(Vec<u8>, String)>, AuthError>,
 ) -> Result<ScanImportInput, AuthError> {
     let (bytes, display_name) = result?.ok_or(AuthError::ScanQrCanceledError)?;
     Ok(ScanImportInput::File { bytes, display_name })

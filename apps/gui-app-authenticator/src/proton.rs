@@ -16,12 +16,11 @@ use {
         io::{Cursor, Read},
     },
     url::Url,
-    zeroize::Zeroizing,
     zip::{CompressionMethod, ZipArchive},
 };
 
 use crate::{
-    auth::{build_totp_url, make_totp_auth, zeroize_auth_entries},
+    auth::{build_totp_url, make_totp_auth},
     import_crypto::{decrypt_gcm, GcmDecryptError},
     Auth, TrId,
 };
@@ -123,11 +122,11 @@ struct ProtonAuthenticatorEntryContent {
 }
 
 pub enum ParsedAuthenticatorExport {
-    Plain(Vec<u8>),
+    Plain,
     Encrypted(ProtonAuthenticatorEncryptedExport),
 }
 
-pub fn extract_zip_entry(bytes: &[u8], entry_name: &str) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+pub fn extract_zip_entry(bytes: &[u8], entry_name: &str) -> anyhow::Result<Vec<u8>> {
     let reader = Cursor::new(bytes);
     let mut archive = ZipArchive::new(reader).context("Invalid ZIP archive")?;
     if archive.index_for_name(entry_name).is_none() {
@@ -139,7 +138,7 @@ pub fn extract_zip_entry(bytes: &[u8], entry_name: &str) -> anyhow::Result<Zeroi
         bail!("Unsupported ZIP compression for {entry_name}: only stored entries are supported");
     }
     let capacity = usize::try_from(file.size()).context("ZIP entry too large to read")?.min(bytes.len());
-    let mut data = Zeroizing::new(Vec::with_capacity(capacity));
+    let mut data = Vec::with_capacity(capacity);
     file.read_to_end(&mut data).context("Failed to read ZIP entry")?;
     Ok(data)
 }
@@ -157,10 +156,10 @@ pub fn parse_authenticator_export(bytes: &[u8]) -> anyhow::Result<ParsedAuthenti
         return Err(anyhow::anyhow!("Unsupported Proton Authenticator export version").into());
     }
 
-    Ok(ParsedAuthenticatorExport::Plain(bytes.to_vec()))
+    Ok(ParsedAuthenticatorExport::Plain)
 }
 
-pub fn decrypt_pgp_export(bytes: &[u8], password: &str) -> Result<Zeroizing<Vec<u8>>, ProtonError> {
+pub fn decrypt_pgp_export(bytes: &[u8], password: &str) -> Result<Vec<u8>, ProtonError> {
     let armored = std::str::from_utf8(bytes).context("Invalid Proton PGP export encoding")?;
     let (message, _headers) = PgpMessage::from_armor(armored.as_bytes()).map_err(map_pgp_error)?;
     let mut decrypted = message.decrypt_with_password(&password.into()).map_err(map_pgp_error)?;
@@ -168,14 +167,14 @@ pub fn decrypt_pgp_export(bytes: &[u8], password: &str) -> Result<Zeroizing<Vec<
         return Err(ProtonError::Generic(anyhow::anyhow!("Compressed OpenPGP payloads are unsupported")));
     }
 
-    decrypted.as_data_vec().map(Zeroizing::new).map_err(map_pgp_io_error)
+    decrypted.as_data_vec().map_err(map_pgp_io_error)
 }
 
 pub async fn decrypt_authenticator_export(
     crypto: &CryptoApi,
     export: &ProtonAuthenticatorEncryptedExport,
     password: &str,
-) -> Result<Zeroizing<Vec<u8>>, ProtonError> {
+) -> Result<Vec<u8>, ProtonError> {
     if export.version != LEGACY_VERSION {
         return Err(anyhow::anyhow!("Unsupported Proton Authenticator export version").into());
     }
@@ -210,7 +209,7 @@ pub async fn decrypt_authenticator_export(
         GcmDecryptError::AuthenticationFailed => ProtonError::PasswordMismatch,
         GcmDecryptError::Operation(error) => error.into(),
     })?;
-    Ok(Zeroizing::new(plaintext))
+    Ok(plaintext)
 }
 
 pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
@@ -223,18 +222,9 @@ pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
                 continue;
             }
 
-            let entry = (|| -> anyhow::Result<Auth> {
-                let name = item.data.metadata.name.as_deref();
-                let totp_uri = normalize_proton_pass_totp_uri(item.data.content.totp_uri.as_str(), name)?;
-                make_totp_auth(totp_uri.as_str(), name)
-            })();
-            match entry {
-                Ok(entry) => entries.push(entry),
-                Err(err) => {
-                    zeroize_auth_entries(&mut entries);
-                    return Err(err);
-                }
-            }
+            let name = item.data.metadata.name.as_deref();
+            let totp_uri = normalize_proton_pass_totp_uri(item.data.content.totp_uri.as_str(), name)?;
+            entries.push(make_totp_auth(totp_uri.as_str(), name)?);
         }
     }
 
@@ -259,13 +249,7 @@ pub fn ingest_authenticator_plain_export(bytes: &[u8]) -> anyhow::Result<Vec<Aut
             continue;
         }
 
-        match parse_authenticator_entry(entry) {
-            Ok(import_entry) => entries.push(import_entry),
-            Err(error) => {
-                zeroize_auth_entries(&mut entries);
-                return Err(error);
-            }
-        }
+        entries.push(parse_authenticator_entry(entry)?);
     }
 
     if entries.is_empty() {
@@ -307,13 +291,8 @@ pub fn ingest_csv_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
     let mut entries = Vec::new();
 
     for row in reader.deserialize::<ProtonCsvItem>() {
-        match parse_csv_entry(row) {
-            Ok(Some(import_entry)) => entries.push(import_entry),
-            Ok(None) => {}
-            Err(error) => {
-                zeroize_auth_entries(&mut entries);
-                return Err(error);
-            }
+        if let Some(import_entry) = parse_csv_entry(row)? {
+            entries.push(import_entry);
         }
     }
 
@@ -343,27 +322,25 @@ fn parse_csv_entry(row: Result<ProtonCsvItem, csv::Error>) -> anyhow::Result<Opt
 async fn derive_authenticator_key(
     password: &[u8],
     salt: &[u8],
-) -> anyhow::Result<Zeroizing<[u8; LEGACY_AES256_KEY_LEN]>> {
-    let derived = Zeroizing::new(
-        kdf::derive_argon2id(Argon2idRequest {
-            password: Zeroizing::new(password.to_vec()),
-            salt: Zeroizing::new(salt.to_vec()),
-            secret: Zeroizing::new(Vec::new()),
-            associated_data: Zeroizing::new(Vec::new()),
-            mem_kib: LEGACY_ARGON2_MEMORY_KIB,
-            iterations: LEGACY_ARGON2_ITERATIONS,
-            parallelism: LEGACY_ARGON2_LANES,
-            out_len: LEGACY_AES256_KEY_LEN,
-        })
-        .await
-        .map_err(|error| anyhow::anyhow!("Proton Authenticator Argon2 key derivation failed: {}", error))?,
-    );
+) -> anyhow::Result<[u8; LEGACY_AES256_KEY_LEN]> {
+    let derived = kdf::derive_argon2id(Argon2idRequest {
+        password: password.to_vec(),
+        salt: salt.to_vec(),
+        secret: Vec::new(),
+        associated_data: Vec::new(),
+        mem_kib: LEGACY_ARGON2_MEMORY_KIB,
+        iterations: LEGACY_ARGON2_ITERATIONS,
+        parallelism: LEGACY_ARGON2_LANES,
+        out_len: LEGACY_AES256_KEY_LEN,
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("Proton Authenticator Argon2 key derivation failed: {}", error))?;
 
     let derived_bytes: &[u8; LEGACY_AES256_KEY_LEN] = derived
         .as_slice()
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid Proton Authenticator derived key length"))?;
-    let mut key = Zeroizing::new([0; LEGACY_AES256_KEY_LEN]);
+    let mut key = [0; LEGACY_AES256_KEY_LEN];
     key.copy_from_slice(derived_bytes);
     Ok(key)
 }
@@ -458,7 +435,7 @@ mod tests {
     #[test]
     fn parse_legacy_export_detects_plain() {
         let parsed = parse_authenticator_export(PROTON_AUTHENTICATOR_PLAIN_EXPORT.as_bytes()).unwrap();
-        assert!(matches!(parsed, ParsedAuthenticatorExport::Plain(_)));
+        assert!(matches!(parsed, ParsedAuthenticatorExport::Plain));
     }
 
     #[test]

@@ -6,7 +6,6 @@ use {
     anyhow::anyhow,
     subtle::ConstantTimeEq,
     xous::{DropDeallocate, MemoryFlags},
-    zeroize::Zeroize,
 };
 
 pub enum GcmDecryptError {
@@ -38,29 +37,16 @@ pub fn decrypt_gcm(
         .map_err(|_| GcmDecryptError::Operation(anyhow!("AES execution failed: failed to map AES buffer")))?;
     buffer.as_slice_mut()[..ciphertext.len()].copy_from_slice(ciphertext);
 
-    if let Err(error) = aes.execute(*buffer, 0, ciphertext.len(), crypto::Direction::Decrypt) {
-        zeroize_plaintext(&mut buffer, ciphertext.len());
-        return Err(GcmDecryptError::Operation(anyhow!("AES execution failed: {error}")));
-    }
+    aes.execute(*buffer, 0, ciphertext.len(), crypto::Direction::Decrypt)
+        .map_err(|error| GcmDecryptError::Operation(anyhow!("AES execution failed: {error}")))?;
 
-    let actual_tag = match aes.gcm_tag() {
-        Ok(tag) => tag,
-        Err(error) => {
-            zeroize_plaintext(&mut buffer, ciphertext.len());
-            return Err(GcmDecryptError::Operation(anyhow!("AES execution failed: {error}")));
-        }
-    };
+    let actual_tag = aes
+        .gcm_tag()
+        .map_err(|error| GcmDecryptError::Operation(anyhow!("AES execution failed: {error}")))?;
     if !bool::from(actual_tag.ct_eq(&expected_tag)) {
-        zeroize_plaintext(&mut buffer, ciphertext.len());
         return Err(GcmDecryptError::AuthenticationFailed);
     }
 
     let plaintext = buffer.as_slice()[..ciphertext.len()].to_vec();
-    zeroize_plaintext(&mut buffer, ciphertext.len());
     Ok(plaintext)
-}
-
-fn zeroize_plaintext(buffer: &mut DropDeallocate, plaintext_len: usize) {
-    let plaintext: &mut [u8] = &mut buffer.as_slice_mut()[..plaintext_len];
-    plaintext.zeroize();
 }

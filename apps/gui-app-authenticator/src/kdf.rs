@@ -5,7 +5,6 @@ use argon2::{Algorithm, Argon2, AssociatedData, ParamsBuilder, Version};
 use pbkdf2::pbkdf2_hmac;
 use scrypt::{scrypt, Params as ScryptParams};
 use sha2::Sha256;
-use zeroize::Zeroizing;
 
 const MAX_PBKDF2_OUT_LEN: usize = 64;
 const MAX_SCRYPT_N: u32 = 65_536;
@@ -21,8 +20,8 @@ pub enum KdfError {
 
 #[derive(Clone)]
 pub struct ScryptRequest {
-    pub password: Zeroizing<Vec<u8>>,
-    pub salt: Zeroizing<Vec<u8>>,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
     pub n: u32,
     pub r: u32,
     pub p: u32,
@@ -31,10 +30,10 @@ pub struct ScryptRequest {
 
 #[derive(Clone)]
 pub struct Argon2idRequest {
-    pub password: Zeroizing<Vec<u8>>,
-    pub salt: Zeroizing<Vec<u8>>,
-    pub secret: Zeroizing<Vec<u8>>,
-    pub associated_data: Zeroizing<Vec<u8>>,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub secret: Vec<u8>,
+    pub associated_data: Vec<u8>,
     pub mem_kib: u32,
     pub iterations: u32,
     pub parallelism: u32,
@@ -43,8 +42,8 @@ pub struct Argon2idRequest {
 
 #[derive(Clone)]
 pub struct Pbkdf2Sha256Request {
-    pub password: Zeroizing<Vec<u8>>,
-    pub salt: Zeroizing<Vec<u8>>,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
     pub iterations: u32,
     pub out_len: usize,
 }
@@ -124,7 +123,6 @@ fn derive_argon2id_sync(request: &Argon2idRequest) -> Result<Vec<u8>, KdfError> 
 #[cfg(test)]
 mod tests {
     use hex_literal::hex;
-    use zeroize::Zeroizing;
 
     use super::{
         derive_argon2id_sync, derive_pbkdf2_sha256_sync, derive_scrypt_sync, Argon2idRequest, KdfError,
@@ -136,8 +134,8 @@ mod tests {
     #[test]
     fn pbkdf2_sha256_matches_rfc7914_section_11_vector_1() {
         let derived = derive_pbkdf2_sha256_sync(&Pbkdf2Sha256Request {
-            password: Zeroizing::new(b"passwd".to_vec()),
-            salt: Zeroizing::new(b"salt".to_vec()),
+            password: b"passwd".to_vec(),
+            salt: b"salt".to_vec(),
             iterations: 1,
             out_len: 64,
         })
@@ -158,8 +156,8 @@ mod tests {
     #[test]
     fn scrypt_matches_rfc7914_empty_vector() {
         let derived = derive_scrypt_sync(&ScryptRequest {
-            password: Zeroizing::new(b"".to_vec()),
-            salt: Zeroizing::new(b"".to_vec()),
+            password: b"".to_vec(),
+            salt: b"".to_vec(),
             n: 16,
             r: 1,
             p: 1,
@@ -182,8 +180,8 @@ mod tests {
     #[test]
     fn scrypt_matches_rfc7914_password_nacl_vector() {
         let derived = derive_scrypt_sync(&ScryptRequest {
-            password: Zeroizing::new(b"password".to_vec()),
-            salt: Zeroizing::new(b"NaCl".to_vec()),
+            password: b"password".to_vec(),
+            salt: b"NaCl".to_vec(),
             n: 1024,
             r: 8,
             p: 16,
@@ -206,10 +204,10 @@ mod tests {
     #[test]
     fn argon2id_matches_rfc9106_section_5_3_vector() {
         let derived = derive_argon2id_sync(&Argon2idRequest {
-            password: Zeroizing::new(vec![0x01; 32]),
-            salt: Zeroizing::new(vec![0x02; 16]),
-            secret: Zeroizing::new(vec![0x03; 8]),
-            associated_data: Zeroizing::new(vec![0x04; 12]),
+            password: vec![0x01; 32],
+            salt: vec![0x02; 16],
+            secret: vec![0x03; 8],
+            associated_data: vec![0x04; 12],
             mem_kib: 32,
             iterations: 3,
             parallelism: 4,
@@ -228,8 +226,8 @@ mod tests {
     #[test]
     fn scrypt_rejects_r_above_limit() {
         let error = derive_scrypt_sync(&ScryptRequest {
-            password: Zeroizing::new(b"password".to_vec()),
-            salt: Zeroizing::new(b"NaCl".to_vec()),
+            password: b"password".to_vec(),
+            salt: b"NaCl".to_vec(),
             n: 1024,
             r: 9,
             p: 1,
@@ -242,8 +240,8 @@ mod tests {
     #[test]
     fn scrypt_rejects_p_above_limit() {
         let error = derive_scrypt_sync(&ScryptRequest {
-            password: Zeroizing::new(b"password".to_vec()),
-            salt: Zeroizing::new(b"NaCl".to_vec()),
+            password: b"password".to_vec(),
+            salt: b"NaCl".to_vec(),
             n: 1024,
             r: 8,
             p: 17,
