@@ -281,7 +281,7 @@ num-traits = "0.2.18"
 oneshot = { version = "0.1" }
 paste = { version = "1" }
 postcard = { version = "1.0.8", features = ["use-std"] }
-rkyv = { version = "0.8.17", default-features = false, features = [
+rkyv = { version = "0.8.18", default-features = false, features = [
     "std",
     "bytecheck",
 ] }
