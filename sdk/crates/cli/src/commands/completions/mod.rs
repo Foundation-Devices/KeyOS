@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Args, Command, CommandFactory};
 use clap_complete::{generate, Shell};
+#[cfg(feature = "experimental-plugins")]
 use foundation_plugins::install::PluginInstaller;
 
 use crate::cli::Cli;
@@ -128,6 +129,7 @@ fn install_completions(shell: Shell) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "experimental-plugins")]
 fn add_installed_plugin_subcommands(cmd: &mut Command) {
     let installer = PluginInstaller::new();
     let installed = installer.list_installed().unwrap_or_default();
@@ -145,6 +147,9 @@ fn add_installed_plugin_subcommands(cmd: &mut Command) {
     }
     *cmd = augmented;
 }
+
+#[cfg(not(feature = "experimental-plugins"))]
+fn add_installed_plugin_subcommands(_cmd: &mut Command) {}
 
 /// Get the completion directory for the given shell
 fn get_completion_dir(shell: Shell) -> Result<PathBuf> {

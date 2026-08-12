@@ -108,9 +108,10 @@ pub enum Commands {
     )]
     Logs(commands::logs::LogsArgs),
 
-    /// Manage Foundation CLI plugins
+    #[cfg(feature = "experimental-plugins")]
+    /// Manage experimental Foundation CLI plugins
     #[command(
-        long_about = "Search, install, and uninstall Foundation CLI plugins",
+        long_about = "Search, install, and uninstall experimental Foundation CLI plugins",
         arg_required_else_help = true
     )]
     Plugin(commands::plugin::PluginArgs),

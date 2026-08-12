@@ -49,6 +49,11 @@ jobs:
       - name: Test foundation CLI workspace
         working-directory: sdk
         run: nix develop --command cargo test --manifest-path crates/cli/Cargo.toml --workspace
+      - name: Test experimental plugin implementation
+        working-directory: sdk
+        run: >-
+          nix develop --command cargo test --manifest-path crates/cli/Cargo.toml
+          --package foundation --features experimental-plugins
       - name: Test SDK xtask workspace
         working-directory: sdk
         run: nix develop --command cargo test --manifest-path Cargo.toml --workspace

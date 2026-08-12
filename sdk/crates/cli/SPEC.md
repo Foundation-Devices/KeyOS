@@ -26,18 +26,19 @@ The currently implemented built-in commands are:
 - `themes`
 - `doctor`
 - `preview`
-- `plugin`
 - `completions`
 
-The CLI also dispatches unknown subcommands to external `foundation-*` plugins discovered in `~/.foundation/plugins` or on `PATH`.
+Supported builds do not discover or dispatch external `foundation-*` commands.
+The plugin implementation is retained only behind the default-off
+`experimental-plugins` Cargo feature while its trust model is redesigned.
 
 ## Architecture Overview
 
 The CLI workspace is organized around a few small responsibilities:
 
 - `foundation-core`: shared project config, SDK discovery, project discovery, emitted manifest model
-- `foundation-plugins`: plugin discovery, install/uninstall, cache, and external command dispatch
-- `foundation-plugin-sdk`: support crate for plugin authors
+- `foundation-plugins`: quarantined plugin discovery, installation, cache, and dispatch implementation
+- `foundation-plugin-sdk`: quarantined support crate for plugin authors
 - `foundation-ui`: terminal UI helpers
 - `foundation-mcp`: MCP client helpers for host/device control flows
 
@@ -62,16 +63,10 @@ The CLI uses `~/.foundation` for user-managed state:
 | Path | Purpose |
 |------|---------|
 | `~/.foundation/.zshrc` (or `.bashrc`) | Shell rc for `foundation develop` (Foundation-managed, but free for user customization) |
-| `~/.foundation/plugins/` | Installed external plugin binaries (`foundation-<name>`) |
-| `~/.foundation/plugin-index.toml` | Plugin registry index (overridable via `FOUNDATION_PLUGIN_INDEX`) |
 | `~/.foundation/signing/<identity>/private.pem` | ECDSA secp256k1 private key for app signing |
 | `~/.foundation/signing/<identity>/public.pub` | Public key, hex-encoded |
 | `~/.foundation/signing/<identity>/<identity>.crt` | X.509 publisher certificate |
 | `~/.foundation/signing/<identity>/cosign2.toml` | cosign2 config pointing at the above |
-
-The plugin cache lives in the user cache directory (resolved via the `dirs`
-crate) as `foundation/plugin-cache.json`. On a stale or unreadable cache the
-CLI warns to stderr and rebuilds; on a version mismatch it warns and rebuilds.
 
 ### SDK root discovery
 
@@ -635,71 +630,6 @@ Behavior:
 - Uses a default reconnect timeout of 3 seconds
 - Requires connected Passport hardware for useful output
 
-### `plugin`
-
-Signature:
-
-```text
-foundation plugin <install|uninstall|search> ...
-```
-
-Behavior:
-
-- Provides the built-in plugin-management subcommands
-
-#### `plugin search`
-
-Signature:
-
-```text
-foundation plugin search <query>
-```
-
-Behavior:
-
-- Searches the local plugin index
-- Uses:
-  - `FOUNDATION_PLUGIN_INDEX`, if set
-  - otherwise `~/.foundation/plugin-index.toml`
-- Matches against plugin name, description, and tags
-
-#### `plugin install`
-
-Signature:
-
-```text
-foundation plugin install <plugin>
-```
-
-Accepted inputs:
-
-- a plugin name from the local index
-- a direct GitHub repository reference `owner/repo`
-
-Behavior:
-
-- Resolves index entries when the input is not already `owner/repo`
-- Fetches the latest GitHub release for the repository
-- Chooses the asset whose filename ends with the current platform target triple
-- Downloads the binary to `~/.foundation/plugins`
-- Marks it executable on Unix
-- Updates the plugin cache
-- Installs binaries as `foundation-<plugin-name>`
-- Direct `owner/repo` installs normalize to the repository name, stripping a leading `foundation-` prefix when present
-
-#### `plugin uninstall`
-
-Signature:
-
-```text
-foundation plugin uninstall <plugin>
-```
-
-Behavior:
-
-- Removes `~/.foundation/plugins/foundation-<plugin>`
-- Removes the cache entry for that plugin
-
 ### `completions`
 
 Signature:
@@ -712,19 +642,22 @@ Behavior:
 
 - Without `--install`, writes completions to stdout
 - With `--install`, writes to the standard user-scoped location for the target shell
-- Generated completions include installed plugin subcommands from `~/.foundation/plugins`
 
-### External plugin dispatch
+### Experimental plugin quarantine
 
-Before argument parsing, `foundation` resolves its first argument against external `foundation-<name>` plugins. Resolution is unconditional, so an installed plugin can shadow a built-in command or a global flag (`-h`, `--help`, `-V`, `--version`).
+Plugin commands, discovery, installation, completion augmentation, and external
+dispatch are compiled out of normal and packaged SDK builds. Their source is
+retained behind the `experimental-plugins` Cargo feature so the implementation
+can be tested while signature verification and the publisher trust model are
+designed.
 
-Resolution sources:
+The experimental feature is not a supported user-facing contract. When enabled
+for maintainer testing:
 
-- installed plugin cache
-- `~/.foundation/plugins`
-- `PATH`
-
-When resolved, `foundation <name> ...` execs the external plugin binary directly; otherwise argument parsing proceeds normally. Resolution runs on every invocation, so a built-in command also triggers a plugin-cache lookup (and a `PATH` rescan on a cache miss).
+- plugin management remains available under `foundation plugin`
+- unknown non-option commands may resolve to external plugins
+- built-in commands and options always take precedence and cannot be shadowed
+- generated completions may include installed plugins
 
 ## Deferred / Planned Features
 

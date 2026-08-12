@@ -5,7 +5,7 @@
 install:
     # Remove build artifacts from embedded directories
     rm -rf nix-flake/imports/*/target nix-flake/imports/*/.git
-    cargo install --path .
+    cargo install --path . --no-default-features
     [ "$(uname)" = "Darwin" ] && codesign -s - -f ~/.cargo/bin/foundation || true
     @echo "Installed size: $(ls -lh ~/.cargo/bin/foundation | awk '{print $5}')"
 

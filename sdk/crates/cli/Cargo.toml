@@ -66,12 +66,20 @@ description = "Foundation CLI for KeyOS app development"
 name = "foundation"
 path = "src/main.rs"
 
+[features]
+default = []
+# Retains the CLI plugin implementation for development while its trust model
+# is redesigned. This feature is intentionally excluded from SDK packages:
+# plugin installation currently downloads and executes external binaries
+# without the signature verification required for a supported release.
+experimental-plugins = ["dep:foundation-plugins", "dep:foundation-plugin-sdk"]
+
 [dependencies]
 # Internal dependencies
 foundation-core = { workspace = true }
 foundation-ui = { workspace = true }
-foundation-plugins = { workspace = true }
-foundation-plugin-sdk = { workspace = true }
+foundation-plugins = { workspace = true, optional = true }
+foundation-plugin-sdk = { workspace = true, optional = true }
 foundation-mcp = { workspace = true }
 
 # External dependencies

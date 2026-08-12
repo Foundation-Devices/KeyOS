@@ -4,9 +4,10 @@
 //! `foundation plugin` - search, install, and uninstall CLI plugins.
 
 use anyhow::Result;
-use clap::{Args, Subcommand};
+use clap::{Args, CommandFactory, Subcommand};
 use foundation_plugins::{exec_plugin, CommandRegistry, ResolvedCommand};
 
+use crate::cli::Cli;
 use crate::commands::{install, search, uninstall};
 
 #[derive(Args)]
@@ -56,17 +57,48 @@ pub async fn execute(args: &PluginArgs) -> Result<()> {
     }
 }
 
-/// Git-style external dispatch: if the first argument resolves to a
-/// `foundation-*` binary on PATH, replace this process with it. Runs before
-/// clap, so an installed plugin may shadow a built-in command or global flag.
-/// Returns when nothing matches, leaving the arguments for clap.
+/// Git-style external dispatch for unknown, non-option command names.
+///
+/// Built-in commands and options always remain under clap's control, so an
+/// external binary cannot shadow supported behavior or global flags.
 pub fn dispatch_external(args: &[String]) {
     let Some(command_name) = args.get(1) else {
         return;
     };
 
+    if !is_external_command_candidate(command_name) {
+        return;
+    }
+
     let mut registry = CommandRegistry::new();
     if let Some(ResolvedCommand::External(path)) = registry.resolve(command_name) {
         exec_plugin(&path, &args[2..]);
+    }
+}
+
+fn is_external_command_candidate(command_name: &str) -> bool {
+    if command_name.starts_with('-') {
+        return false;
+    }
+
+    let command = Cli::command();
+    let is_builtin = command.get_subcommands().any(|subcommand| {
+        subcommand.get_name() == command_name
+            || subcommand.get_all_aliases().any(|alias| alias == command_name)
+    });
+    !is_builtin
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_external_command_candidate;
+
+    #[test]
+    fn external_plugins_cannot_shadow_builtins_or_options() {
+        assert!(!is_external_command_candidate("build"));
+        assert!(!is_external_command_candidate("plugin"));
+        assert!(!is_external_command_candidate("--help"));
+        assert!(!is_external_command_candidate("-V"));
+        assert!(is_external_command_candidate("third-party-command"));
     }
 }

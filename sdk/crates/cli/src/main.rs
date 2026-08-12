@@ -26,7 +26,9 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    // A `foundation-*` binary on PATH is exec'd before clap sees the arguments.
+    // External command dispatch is quarantined with the rest of the plugin
+    // surface until the plugin trust model is ready for supported releases.
+    #[cfg(feature = "experimental-plugins")]
     commands::plugin::dispatch_external(&std::env::args().collect::<Vec<_>>());
 
     match Cli::parse().command {
@@ -46,6 +48,7 @@ async fn run() -> Result<()> {
         Commands::Doctor => commands::doctor::execute()?,
         Commands::Preview(args) => commands::preview::execute(&args)?,
         Commands::Logs(args) => commands::logs::execute(&args)?,
+        #[cfg(feature = "experimental-plugins")]
         Commands::Plugin(args) => commands::plugin::execute(&args).await?,
         Commands::Completions(args) => commands::completions::execute(&args)?,
     }

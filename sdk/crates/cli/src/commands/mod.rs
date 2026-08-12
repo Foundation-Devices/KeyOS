@@ -10,17 +10,21 @@ pub mod completions;
 pub mod develop;
 pub mod doctor;
 pub mod exit;
+#[cfg(feature = "experimental-plugins")]
 pub mod install;
 pub mod logs;
 pub mod new;
 pub mod pack;
+#[cfg(feature = "experimental-plugins")]
 pub mod plugin;
 pub mod preview;
+#[cfg(feature = "experimental-plugins")]
 pub mod search;
 pub mod sideload;
 pub mod sim;
 pub mod theme;
 pub mod themes;
+#[cfg(feature = "experimental-plugins")]
 pub mod uninstall;
 
 /// Render a byte count for a build artifact, e.g. `3.4 MiB`.

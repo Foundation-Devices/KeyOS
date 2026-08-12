@@ -23,6 +23,9 @@ name = "foundation"
 manifest = "crates/cli"
 artifact = "foundation"
 binary = "foundation"
+# Supported SDK bundles must not include the quarantined plugin surface even
+# if a default feature is added to the CLI in the future.
+cargo_flags = ["--no-default-features"]
 
 [[compile]]
 name = "foundation-asset-tool"

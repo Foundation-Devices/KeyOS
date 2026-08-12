@@ -1,6 +1,6 @@
 ---
 name: foundation-cli
-description: Use when choosing, explaining, or running Foundation SDK `foundation` CLI commands for KeyOS app development, especially build, preview, simulator, sideload, logs, plugin, completions, and signing workflows.
+description: Use when choosing, explaining, or running Foundation SDK `foundation` CLI commands for KeyOS app development, especially build, preview, simulator, sideload, logs, completions, and signing workflows.
 ---
 
 <!--
@@ -24,6 +24,7 @@ Follow these rules:
 - Do not create slash commands that merely duplicate `foundation` commands.
 - Do not run `foundation sideload` or `foundation logs` unless the user intends to interact with connected hardware.
 - Do not run `foundation cert gen` or edit signing identities unless the user explicitly asked for signing setup.
+- Do not recommend plugin commands; plugins are unavailable in supported SDK builds while their trust model is redesigned.
 - Prefer `foundation preview` for UI checks, `foundation sim` for hosted runtime checks, and `foundation build` for signed hardware artifacts.
 
 Command quick reference:
@@ -40,5 +41,4 @@ Command quick reference:
 - `foundation sideload`: copy and optionally launch on connected Passport hardware.
 - `foundation logs`: open the Passport USB log viewer.
 - `foundation cert gen` / `foundation cert print`: create or inspect publisher signing certificates.
-- `foundation plugin search` / `foundation plugin install` / `foundation plugin uninstall`: manage CLI plugins.
 - `foundation completions`: generate or install shell completions.

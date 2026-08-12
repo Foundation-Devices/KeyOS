@@ -16,7 +16,6 @@ const BUILT_IN_COMMANDS: &[&str] = &[
     "doctor",
     "preview",
     "logs",
-    "plugin",
     "completions",
 ];
 

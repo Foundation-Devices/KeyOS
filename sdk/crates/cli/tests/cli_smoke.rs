@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 #[test]
 fn built_in_commands_expose_help() {
-    for command in [
+    let mut commands = vec![
         "new",
         "develop",
         "exit",
@@ -23,9 +23,13 @@ fn built_in_commands_expose_help() {
         "doctor",
         "preview",
         "logs",
-        "plugin",
         "completions",
-    ] {
+    ];
+    if cfg!(feature = "experimental-plugins") {
+        commands.push("plugin");
+    }
+
+    for command in commands {
         let output = Command::new(foundation_bin()).arg(command).arg("--help").output().unwrap();
 
         assert!(output.status.success(), "help failed for {command}: {}", stderr(&output));
@@ -36,6 +40,7 @@ fn built_in_commands_expose_help() {
         );
     }
 
+    #[cfg(feature = "experimental-plugins")]
     for subcommand in ["install", "uninstall", "search"] {
         let output =
             Command::new(foundation_bin()).arg("plugin").arg(subcommand).arg("--help").output().unwrap();
@@ -57,6 +62,36 @@ fn built_in_commands_expose_help() {
             stdout(&output)
         );
     }
+}
+
+#[cfg(not(feature = "experimental-plugins"))]
+#[test]
+fn plugin_surface_is_absent_without_the_experimental_feature() {
+    let env = TestEnv::new();
+
+    let help = env.command().arg("--help").output().unwrap();
+    assert!(help.status.success(), "top-level help failed: {}", stderr(&help));
+    assert!(!stdout(&help).contains("plugin"), "top-level help exposed plugins: {}", stdout(&help));
+
+    let plugin_command = env.command().arg("plugin").arg("--help").output().unwrap();
+    assert!(!plugin_command.status.success(), "plugin command unexpectedly succeeded");
+
+    // FOUNDATION_FAKE_BIN contains a foundation-echo executable. A normal CLI
+    // build must leave the unknown command to clap instead of executing it.
+    let external = env.command().arg("echo").arg("alpha").output().unwrap();
+    assert!(!external.status.success(), "external plugin unexpectedly executed");
+    assert!(!stdout(&external).contains("plugin:"), "external plugin produced output: {}", stdout(&external));
+
+    env.install_home_plugin("demo");
+    let installed = env.command().arg("demo").output().unwrap();
+    assert!(!installed.status.success(), "installed plugin unexpectedly executed");
+
+    let completions = env.command().arg("completions").arg("bash").output().unwrap();
+    assert!(completions.status.success(), "completions failed: {}", stderr(&completions));
+    assert!(
+        !stdout(&completions).contains("plugin") && !stdout(&completions).contains("demo"),
+        "completions exposed plugins"
+    );
 }
 
 #[test]
@@ -333,6 +368,7 @@ fn theme_command_opens_an_explicit_file_without_rewriting_it() {
     );
 }
 
+#[cfg(feature = "experimental-plugins")]
 #[test]
 fn plugin_and_completion_commands_work_in_smoke_env() {
     let env = TestEnv::new();
@@ -384,19 +420,22 @@ fn english_commands_still_work_when_locale_is_non_english() {
     let english = env.command().env("FOUNDATION_LANG", "es").arg("new").arg("--help").output().unwrap();
     assert!(english.status.success(), "english command failed in es locale: {}", stderr(&english));
 
-    let english_plugin = env
-        .command()
-        .env("FOUNDATION_LANG", "es")
-        .arg("plugin")
-        .arg("install")
-        .arg("--help")
-        .output()
-        .unwrap();
-    assert!(
-        english_plugin.status.success(),
-        "english plugin command failed in es locale: {}",
-        stderr(&english_plugin)
-    );
+    #[cfg(feature = "experimental-plugins")]
+    {
+        let english_plugin = env
+            .command()
+            .env("FOUNDATION_LANG", "es")
+            .arg("plugin")
+            .arg("install")
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert!(
+            english_plugin.status.success(),
+            "english plugin command failed in es locale: {}",
+            stderr(&english_plugin)
+        );
+    }
 
     let english_cert =
         env.command().env("FOUNDATION_LANG", "es").arg("cert").arg("gen").arg("--help").output().unwrap();
@@ -501,6 +540,7 @@ impl TestEnv {
         link(&Path::new(env!("FOUNDATION_FAKE_BIN")).join("noop"), &plugin);
     }
 
+    #[cfg(feature = "experimental-plugins")]
     fn write_plugin_index(&self) {
         fs::write(
             self.home.join(".foundation").join("plugin-index.toml"),

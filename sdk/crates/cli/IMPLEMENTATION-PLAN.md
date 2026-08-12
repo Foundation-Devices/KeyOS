@@ -54,6 +54,10 @@ This plan has now largely been executed. It remains in the repo as a compact com
 
 ### Plugins
 
+The implementation below is quarantined behind the default-off
+`experimental-plugins` feature. Supported SDK packages compile it out until
+artifact verification and the publisher trust model are complete.
+
 - [x] Dispatch unknown commands to installed external plugins
 - [x] Normalize direct `owner/repo` plugin installs
 - [x] Keep installs in `~/.foundation/plugins`
@@ -73,10 +77,12 @@ This plan has now largely been executed. It remains in the repo as a compact com
   - `cert`
   - `doctor`
   - `preview`
+  - `completions`
+  - absence of plugin commands and dispatch in default builds
+- [x] Keep experimental-feature coverage for:
   - `plugin search`
   - `plugin install`
   - `plugin uninstall`
-  - `completions`
   - external plugin dispatch
 
 ## Verification
@@ -85,9 +91,11 @@ Current verification command:
 
 ```bash
 cargo test --manifest-path crates/cli/Cargo.toml --workspace
+cargo test --manifest-path crates/cli/Cargo.toml --package foundation --features experimental-plugins
 ```
 
-This includes unit coverage plus process-level CLI smoke tests for the built-in subcommands and plugin flows.
+This includes unit coverage plus process-level CLI smoke tests for supported
+commands, the default plugin quarantine, and the retained experimental flows.
 
 ## Deferred Backlog
 

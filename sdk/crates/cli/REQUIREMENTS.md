@@ -7,6 +7,10 @@ SPDX-License-Identifier: MIT
 
 This document is historical context only.
 
+Plugin support described here is not part of supported SDK builds. Its
+implementation is retained only behind the default-off `experimental-plugins`
+feature while the trust model is redesigned.
+
 The maintained current-state contract for the CLI is now [SPEC.md](SPEC.md).
 
 `REQUIREMENTS.md` originally mixed:

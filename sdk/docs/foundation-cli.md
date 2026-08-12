@@ -40,10 +40,12 @@ Use the canonical English command names in generated commands and docs.
 | `foundation cert print [name]` | Inspect a stored publisher certificate. | App project for default identity lookup, otherwise anywhere. | OpenSSL available; certificate exists. | Prints decoded certificate details. | Identity not found, certificate missing, OpenSSL failure. |
 | `foundation cert fingerprint <cert>` | Print the stable identity users should compare before allowing a publisher. | Anywhere. | OpenSSL available; PEM or DER X.509 certificate exists and contains a secp256k1 public key. | Prints the full and short canonical publisher fingerprint; does not modify the certificate. | Certificate missing or malformed, unsupported public key or curve, OpenSSL failure. |
 | `foundation cert install [name]` | Review a stored publisher certificate and allow it on connected hardware. | App project for default identity lookup, otherwise anywhere. | OpenSSL available; certificate exists; Passport unlocked and connected by USB with Developer Mode enabled; interactive user confirmation. | Shows the unverified-identity warning and full/short fingerprint before the prompt, then installs the certificate only after the user chooses Allow; declining makes no changes. | Non-interactive session, identity not found, fingerprint extraction failure, USB debug unavailable, Developer Mode disabled. |
-| `foundation plugin search <query>` | Search the configured Foundation plugin index. | Anywhere. | `FOUNDATION_PLUGIN_INDEX` set or `~/.foundation/plugin-index.toml` present. | Prints matching plugin entries. | Plugin index missing or no matches. |
-| `foundation plugin install <plugin>` | Install a Foundation CLI plugin from the index or `owner/repo`. | Anywhere. | Network access; matching GitHub release asset for the current platform. | Downloads executable to `~/.foundation/plugins` and updates plugin cache. | Invalid plugin spec, release/asset not found, download failure. |
-| `foundation plugin uninstall <plugin>` | Remove an installed plugin. | Anywhere. | Plugin installed under `~/.foundation/plugins`. | Deletes `foundation-<plugin>` and removes its cache entry. | Plugin not installed or file removal failure. |
 | `foundation completions <bash\|zsh\|fish\|powershell> [--install]` | Generate or install shell completions. | Anywhere. | Shell name must be supported. | Prints completions to stdout or writes them to the user shell completion directory. | Unsupported shell, install path creation/write failure. |
+
+CLI plugins are temporarily unavailable in supported SDK builds while the
+installation and publisher trust model is redesigned. The implementation is
+retained only for maintainer testing behind a default-off Cargo feature; do not
+recommend plugin commands to SDK users.
 
 ## Project Files Agents Should Know
 
