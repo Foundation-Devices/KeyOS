@@ -148,6 +148,35 @@ Replace `<domain>` with the publisher's official domain and `<hex>` with the ful
 fingerprint. This is a publication convention only in v1: KeyOS and Foundation do not retrieve or verify the record.
 It is intended as a stable home for a future attestation service.
 
+## App Hash and Reproducible Builds
+
+The app hash is the SHA-256 digest of `app.elf` without its 2048-byte cosign2 signature header, rendered as 64
+lowercase hexadecimal characters. The header is excluded because it stamps the wall-clock time of the signing
+run, and the signature covers those bytes, so two reproducible builds of the same source produce the same app
+hash but different signed files.
+
+`foundation build` prints the app hash after signing. The bundle's `manifest.json` records it under
+`fileHashes`, where the manifest signature covers it, and KeyOS re-checks it against the ELF's own header on every
+launch. On the device the same digest appears under Settings > Apps > *app* > App Hash, grouped in fours for
+readability; ignore the spaces when comparing.
+
+A user can recompute it from any signed `app.elf`:
+
+```bash
+tail -c +2049 app.elf | sha256sum
+```
+
+What publishers distribute is the packed `.app` bundle, which is a gzipped tar holding `app.elf` alongside
+`manifest.json`, the icons and the resources. Hashing that archive is not the app hash; extract the ELF first:
+
+```bash
+tar -xOf myapp.app app.elf | tail -c +2049 | sha256sum
+```
+
+Publishers with a reproducible build should publish the app hash of each release alongside their fingerprint, so
+users can check the app on their Passport against the published value rather than only against a build they made
+themselves.
+
 ## AI Skills and Slash Workflows
 
 The SDK ships Codex and Claude skill files under `.agents/skills/` and `.claude/skills/` in the SDK bundle.

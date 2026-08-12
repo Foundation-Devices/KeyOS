@@ -56,7 +56,7 @@ pub fn verify_and_launch(
     fs: &FileSystem,
     app_id: &AppId,
     elf_path: &str,
-    file_hashes: &std::collections::BTreeMap<String, String>,
+    file_hashes: &std::collections::BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]>,
     third_party_signer: Option<[u8; 33]>,
 ) -> Result<PID, LaunchError> {
     use std::io::Read;
@@ -104,10 +104,7 @@ pub fn verify_and_launch(
         log::error!("manifest does not hash {ELF_FILE}");
         LaunchError::Verification(VerificationError::Unverified)
     })?;
-    let mut expected_bytes = [0u8; 32];
-    if hex::decode_to_slice(expected_elf, &mut expected_bytes).is_err()
-        || &expected_bytes != header.binary_hash()
-    {
+    if expected_elf != header.binary_hash() {
         log::error!("manifest hash mismatch for {ELF_FILE}");
         return Err(LaunchError::Verification(VerificationError::Unverified));
     }
@@ -135,8 +132,7 @@ pub fn verify_and_launch(
         let actual = fw_utils::hash::sha256_streaming(&crypto, size, file, |_| {})
             .map_err(|_| LaunchError::InternalError)?;
 
-        let mut expected_bytes = [0u8; 32];
-        if hex::decode_to_slice(expected, &mut expected_bytes).is_err() || expected_bytes != actual {
+        if expected != &actual {
             log::error!("manifest hash mismatch for bundle file: {rel}");
             return Err(LaunchError::Verification(VerificationError::Unverified));
         }

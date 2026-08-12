@@ -10,6 +10,7 @@ use app_manifest::{Locale, Manifest};
 use crate::config::{AppConfig, PermissionEntries};
 
 pub type AppManifest = Manifest;
+pub use app_manifest::FILE_HASH_BYTE_LEN;
 
 pub fn app_manifest_from_config(config: &AppConfig, permissions: PermissionEntries) -> AppManifest {
     AppManifest {

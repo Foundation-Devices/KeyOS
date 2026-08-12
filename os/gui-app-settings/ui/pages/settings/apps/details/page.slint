@@ -17,7 +17,7 @@ import {
     TextMd,
     TextSm,
 } from "@ui/widgets.slint";
-import { CurrentTheme, Importance, Palette, Size } from "@ui/theme.slint";
+import { CurrentTheme, Font, Importance, Palette, Size } from "@ui/theme.slint";
 
 import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
@@ -123,6 +123,23 @@ component DescriptionRow inherits Rectangle {
         width: parent.width - (Size.sz4 * 2);
         text: root.description;
         color: Palette.content-primary;
+        wrap: word-wrap;
+    }
+}
+
+component AppHashRow inherits Rectangle {
+    in property <string> hash;
+
+    height: hash-text.preferred-height + Size.sz8;
+
+    hash-text := TextMd {
+        x: Size.sz4;
+        y: Size.sz4;
+        width: parent.width - (Size.sz4 * 2);
+        text: root.hash;
+        color: Palette.content-primary;
+        font-family: "Source Code Pro";
+        font-size: Font.text-sm.size;
         wrap: word-wrap;
     }
 }
@@ -323,6 +340,17 @@ export component AppDetailsPage inherits BasePage {
                     InfoRow {
                         label: TR2.lookup(TrId.AppsAppId);
                         value: AppManagementGlobal.selected-app.app_id;
+                    }
+                }
+            }
+
+            MenuSection {
+                // TODO: localize (SFT-7609)
+                title: "App Hash";
+
+                MenuSectionLayout {
+                    AppHashRow {
+                        hash: AppManagementGlobal.selected-app.app_hash;
                     }
                 }
             }

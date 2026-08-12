@@ -1253,9 +1253,9 @@ fn write_raw_icon(source: &Path, dest: &Path) {
         .unwrap_or_else(|e| panic!("Could not write bundled icon to {}: {e}", dest.display()));
 }
 
-/// Hex sha256 of every bundle file except `manifest.json`, keyed by bundle-relative path with
+/// Sha256 of every bundle file except `manifest.json`, keyed by bundle-relative path with
 /// forward slashes. The manifest is the signed container, so it never lists its own hash.
-fn bundle_file_hashes(bundle_dir: &Path) -> BTreeMap<String, String> {
+fn bundle_file_hashes(bundle_dir: &Path) -> BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]> {
     use sha2::{Digest, Sha256};
 
     let mut hashes = BTreeMap::new();
@@ -1272,7 +1272,7 @@ fn bundle_file_hashes(bundle_dir: &Path) -> BTreeMap<String, String> {
                 continue;
             }
             let bytes = fs::read(&path).expect("Couldn't read app bundle file");
-            hashes.insert(rel, hex::encode(Sha256::digest(&bytes)));
+            hashes.insert(rel, Sha256::digest(&bytes).into());
         }
     }
     hashes

@@ -528,6 +528,12 @@ fn installed_app(state: &AppState, app: app_manager::InstalledAppInfo, lang: &st
         is_flux: app.is_flux,
         version: app.version.into(),
         size: format_app_size(app.size_bytes, lang).into(),
+        app_hash: format_hex_groups(
+            &hex::encode(app.app_hash),
+            PUBLISHER_HEX_GROUP_LENGTH,
+            APP_HASH_HEX_GROUPS_PER_LINE,
+        )
+        .into(),
         description: app.description.into(),
         basic_permissions: app_permission_groups(app.basic_permissions),
         approvable_permissions: app_permission_groups(app.approvable_permissions),
@@ -708,6 +714,7 @@ const CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS: usize = 48;
 const PUBLISHER_DATE_FORMAT: &str = "%B %-d, %Y";
 const PUBLISHER_HEX_GROUP_LENGTH: usize = 4;
 const PUBLISHER_HEX_GROUPS_PER_LINE: usize = 7;
+const APP_HASH_HEX_GROUPS_PER_LINE: usize = 6;
 
 /// Make a certificate's self-asserted text safe for display without silently treating it as an
 /// identity. Certificate strings are hostile input: normalize all whitespace and controls so a

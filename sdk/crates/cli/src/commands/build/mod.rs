@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use app_archive::ELF_FILE;
 use clap::Args;
 use foundation_core::{
     app_manifest_from_config, configured_signing_identities, is_valid_identity_name, signing_identity_paths,
-    AppConfig, ProjectContext, SdkRoot, SigningIdentityPaths,
+    AppConfig, ProjectContext, SdkRoot, SigningIdentityPaths, FILE_HASH_BYTE_LEN,
 };
 use foundation_ui::Prompts;
 
@@ -104,6 +105,7 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     println!("Generating manifest.json...");
     let file_hashes = bundle_file_hashes(&output_dir)?;
     let hashed_files = file_hashes.keys().cloned().collect();
+    let app_hash = file_hashes.get(ELF_FILE).cloned().unwrap_or_default();
     let manifest_path = output_dir.join("manifest.json");
     generate_manifest(config, project_root, &sdk, &manifest_path, file_hashes)?;
 
@@ -127,6 +129,8 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     }
     println!("  resources/");
     println!("Version: {}", config.version);
+    println!("App hash: {}", hex::encode(app_hash));
+    println!("Compare it with App Hash under Settings > Apps > {} on the device.", config.app_name);
 
     Ok(BuiltBundle { bundle_dir: output_dir, hashed_files })
 }
@@ -316,7 +320,7 @@ fn generate_manifest(
     project_root: &Path,
     sdk: &SdkRoot,
     output: &Path,
-    file_hashes: BTreeMap<String, String>,
+    file_hashes: BTreeMap<String, [u8; FILE_HASH_BYTE_LEN]>,
 ) -> Result<()> {
     let permissions = config.resolved_permissions(project_root, Some(&sdk.keyos_root().join("api")))?;
     let mut manifest = app_manifest_from_config(config, permissions);
@@ -327,9 +331,9 @@ fn generate_manifest(
     Ok(())
 }
 
-/// Hex sha256 of every staged bundle file except `manifest.json`, keyed by bundle-relative path
+/// Sha256 of every staged bundle file except `manifest.json`, keyed by bundle-relative path
 /// with forward slashes. The manifest is the signed container, so it never lists its own hash.
-fn bundle_file_hashes(bundle_dir: &Path) -> Result<BTreeMap<String, String>> {
+fn bundle_file_hashes(bundle_dir: &Path) -> Result<BTreeMap<String, [u8; FILE_HASH_BYTE_LEN]>> {
     use sha2::{Digest, Sha256};
 
     let mut hashes = BTreeMap::new();
@@ -345,7 +349,7 @@ fn bundle_file_hashes(bundle_dir: &Path) -> Result<BTreeMap<String, String>> {
             if rel == "manifest.json" {
                 continue;
             }
-            hashes.insert(rel, hex::encode(Sha256::digest(fs::read(&path)?)));
+            hashes.insert(rel, Sha256::digest(fs::read(&path)?).into());
         }
     }
     Ok(hashes)

@@ -114,6 +114,8 @@ pub struct InstalledAppInfo {
     pub is_flux: bool,
     pub version: String,
     pub size_bytes: u64,
+    /// Sha256 of `app.elf` without its cosign2 header.
+    pub app_hash: [u8; 32],
     pub description: String,
     /// Auto-granted permissions (shown but not user-toggleable).
     pub basic_permissions: Vec<InstalledAppPermissionGroup>,

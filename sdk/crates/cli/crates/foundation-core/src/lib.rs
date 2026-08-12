@@ -18,7 +18,7 @@ pub use config::{
 };
 pub use context::{ContextError, ProjectContext};
 pub use errors::{FoundationCoreError, FoundationCoreResult};
-pub use manifest::{app_manifest_from_config, AppManifest};
+pub use manifest::{app_manifest_from_config, AppManifest, FILE_HASH_BYTE_LEN};
 pub use sdk::{SdkError, SdkLayout, SdkRoot};
 pub use signing::{
     configured_signing_identities, foundation_dir, is_valid_identity_name, list_signing_identities,

@@ -15,6 +15,7 @@ pub mod schema;
 /// Length of an `app_id` hex string without the `0x` prefix.
 pub const APP_ID_HEX_LEN: usize = 32;
 pub const APP_ID_BYTE_LEN: usize = 16;
+pub const FILE_HASH_BYTE_LEN: usize = 32;
 
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum AppIdParseError {
@@ -218,6 +219,35 @@ pub(crate) mod app_id_hex {
     }
 }
 
+/// Serde `with` codec mapping `fileHashes` between its bare hex wire form and
+/// `[u8; FILE_HASH_BYTE_LEN]`, so a value that is not a sha256 digest is rejected at
+/// deserialize time rather than travelling as an arbitrary string.
+pub(crate) mod file_hashes_hex {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::FILE_HASH_BYTE_LEN;
+
+    type Hashes = BTreeMap<String, [u8; FILE_HASH_BYTE_LEN]>;
+
+    pub fn serialize<S: Serializer>(hashes: &Hashes, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_map(hashes.iter().map(|(path, hash)| (path, hex::encode(hash))))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Hashes, D::Error> {
+        BTreeMap::<String, String>::deserialize(d)?
+            .into_iter()
+            .map(|(path, hex_hash)| {
+                let mut hash = [0u8; FILE_HASH_BYTE_LEN];
+                hex::decode_to_slice(&hex_hash, &mut hash)
+                    .map_err(|e| serde::de::Error::custom(format!("{path}: {e}")))?;
+                Ok((path, hash))
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +276,28 @@ mod tests {
         let json =
             format!(r#"{{"manifestVersion":"99","appName":{{"en":"Test"}},"appId":"{}"}}"#, VALID_APP_ID);
         assert!(try_from_bytes(json.as_bytes()).is_err());
+    }
+
+    /// Every signed manifest in the field carries bare hex, and the signature covers those exact
+    /// bytes, so decoding to an array must not move the wire form.
+    #[test]
+    fn file_hashes_keep_their_bare_hex_wire_form() {
+        const HASH: &str = "14af488a6c10ee9b5f628bfb1c1f01b27965f583aafdd75bfaeefd39fbbcb221";
+
+        let manifest =
+            try_from_bytes(v0_json(&format!(r#","fileHashes":{{"app.elf":"{HASH}"}}"#)).as_bytes()).unwrap();
+
+        assert_eq!(manifest.file_hashes["app.elf"], hex::decode(HASH).unwrap()[..]);
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(json.contains(&format!(r#""fileHashes":{{"app.elf":"{HASH}"}}"#)), "{json}");
+    }
+
+    #[test]
+    fn file_hashes_reject_anything_that_is_not_a_sha256_digest() {
+        for value in ["", "not hex", "14af488a", &"ab".repeat(33)] {
+            let json = v0_json(&format!(r#","fileHashes":{{"app.elf":"{value}"}}"#));
+            assert!(try_from_bytes(json.as_bytes()).is_err(), "accepted {value:?}");
+        }
     }
 
     #[test]

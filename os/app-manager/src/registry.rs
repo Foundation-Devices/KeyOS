@@ -350,6 +350,7 @@ impl AppRegistry {
                     is_flux: app_info.is_flux,
                     version: app_info.manifest.version.clone().unwrap_or_default(),
                     size_bytes: app_info.binary_size,
+                    app_hash: app_info.manifest.file_hashes.get(ELF_FILE).copied().unwrap_or_default(),
                     description: app_info.description(),
                     basic_permissions,
                     approvable_permissions,
@@ -426,7 +427,10 @@ impl AppRegistry {
     /// The bundle file hashes from the app's manifest, verified and stored at scan time. Launch
     /// checks the files against these without re-reading or re-verifying the manifest.
     #[cfg(keyos)]
-    pub(crate) fn file_hashes(&self, app_id: AppId) -> Option<std::collections::BTreeMap<String, String>> {
+    pub(crate) fn file_hashes(
+        &self,
+        app_id: AppId,
+    ) -> Option<std::collections::BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]>> {
         self.installed_apps.get(&app_id).map(|app_info| app_info.manifest.file_hashes.clone())
     }
 
@@ -1357,6 +1361,7 @@ mod tests {
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
         app.manifest.version = Some("1.2.3".to_string());
+        app.manifest.file_hashes.insert(ELF_FILE.to_string(), [0xab; 32]);
         let registry = registry_with(vec![app]);
 
         let apps = registry.list_apps(
@@ -1370,6 +1375,7 @@ mod tests {
         assert_eq!(apps[0].launch_error, Some(LaunchError::NoCertificate));
         assert_eq!(apps[0].description, "Example description");
         assert_eq!(apps[0].version, "1.2.3");
+        assert_eq!(apps[0].app_hash, [0xab; 32]);
     }
 
     #[test]
