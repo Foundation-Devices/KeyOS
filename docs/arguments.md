@@ -64,7 +64,7 @@ of data.
 
 ### MREx
 
-Extra memory regions.  See [memory.md](memory.md) for more information.
+Extra memory regions.
 
 ### XKrn
 
