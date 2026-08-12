@@ -10,7 +10,7 @@ component Dot inherits Rectangle {
     width: Size.sz3;
     height: Size.sz3;
     border-radius: self.height / 2;
-    background: selected ? Palette.content-brand : Palette.content-disabled;
+    background: selected ? Palette.content-brand : Palette.border-secondary;
     animate background { duration: Timings.prop-change; }
 
     callback clicked(int);

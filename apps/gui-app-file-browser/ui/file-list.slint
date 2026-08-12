@@ -71,6 +71,7 @@ component FileEntry inherits Rectangle {
             RadioButton {
                 checked: root.is-selected;
                 controlled: true;
+                enabled: root.enabled;
             }
         }
 
@@ -117,7 +118,7 @@ component FileEntry inherits Rectangle {
         y: root.height - 1px;
         height: 1px;
         width: root.width;
-        background: Palette.content-tertiary;
+        background: Palette.border-tertiary;
     }
 
     @children
@@ -169,7 +170,7 @@ component FileLoadingEntry inherits Rectangle {
         y: root.height - 1px;
         height: 1px;
         width: root.width;
-        background: Palette.content-tertiary;
+        background: Palette.border-tertiary;
     }
 }
 

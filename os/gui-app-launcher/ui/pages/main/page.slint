@@ -40,7 +40,7 @@ component PageDot inherits Rectangle {
     width: 12px;
     height: 12px;
     border-radius: self.height / 2;
-    background: selected ? Palette.content-brand : Palette.content-disabled;
+    background: selected ? Palette.content-brand : Palette.border-secondary;
 
     animate background { duration: Timings.prop-change; }
 
@@ -120,7 +120,7 @@ component PriceGraph inherits Rectangle {
 
                 HeadingXl {
                     text: (State.is-price-expired && !State.bitcoin-scrub-active) ? "" : (State.bitcoin-scrub-active ? State.bitcoin-scrub-price : State.bitcoin-price);
-                    color: root.show-last-update ? Palette.content-disabled : Palette.content-primary;
+                    color: root.show-last-update ? Palette.content-disabled : Palette.content-secondary;
                 }
             }
 

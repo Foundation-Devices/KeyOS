@@ -24,6 +24,8 @@ macro_rules! color {
     };
 }
 
+include!(concat!(env!("OUT_DIR"), "/ui_colors.rs"));
+
 pub struct KeyColors {
     pub text: ColorU8,
     pub background: ColorU8,
@@ -40,55 +42,55 @@ pub struct ColorScheme {
 
 const COLORS_DARK: ColorScheme = ColorScheme {
     normal: KeyColors {
-        text: color!(0xFF, 0xFF, 0xFF),
-        background: color!(0x23, 0x1F, 0x20),
-        gradient_top: color!(0x44, 0x44, 0x44),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_PRIMARY_WHITE,
+        background: UI_NEUTRAL_950,
+        gradient_top: UI_NEUTRAL_900,
+        gradient_bottom: UI_NEUTRAL_950,
     },
     accent: KeyColors {
-        text: color!(0xFF, 0xFF, 0xFF),
-        background: color!(0x44, 0x44, 0x44),
-        gradient_top: color!(0x5A, 0x5A, 0x5A),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_PRIMARY_WHITE,
+        background: UI_NEUTRAL_900,
+        gradient_top: UI_NEUTRAL_800,
+        gradient_bottom: UI_NEUTRAL_950,
     },
     cta: KeyColors {
-        text: color!(0xFF, 0xFF, 0xFF),
-        background: color!(0x00, 0x9D, 0xB9),
-        gradient_top: color!(0x33, 0xB7, 0xC1),
-        gradient_bottom: color!(0x00, 0x9D, 0xB9),
+        text: UI_PRIMARY_WHITE,
+        background: UI_BLUE_500,
+        gradient_top: UI_TEAL_400,
+        gradient_bottom: UI_BLUE_500,
     },
     disabled: KeyColors {
-        text: color!(0x94, 0x94, 0x94),
-        background: color!(0x44, 0x44, 0x44),
-        gradient_top: color!(0x5A, 0x5A, 0x5A),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_NEUTRAL_600,
+        background: UI_NEUTRAL_900,
+        gradient_top: UI_NEUTRAL_800,
+        gradient_bottom: UI_NEUTRAL_950,
     },
 };
 
 const COLORS_LIGHT: ColorScheme = ColorScheme {
     normal: KeyColors {
-        text: color!(0x23, 0x1F, 0x20),
-        background: color!(0xFF, 0xFF, 0xFF),
-        gradient_top: color!(0x94, 0x94, 0x94),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_NEUTRAL_950,
+        background: UI_PRIMARY_WHITE,
+        gradient_top: UI_NEUTRAL_600,
+        gradient_bottom: UI_NEUTRAL_950,
     },
     accent: KeyColors {
-        text: color!(0x23, 0x1F, 0x20),
-        background: color!(0xD5, 0xD5, 0xD5),
-        gradient_top: color!(0x94, 0x94, 0x94),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_NEUTRAL_950,
+        background: UI_NEUTRAL_200,
+        gradient_top: UI_NEUTRAL_600,
+        gradient_bottom: UI_NEUTRAL_950,
     },
     cta: KeyColors {
-        text: color!(0xFF, 0xFF, 0xFF),
-        background: color!(0x00, 0x9D, 0xB9),
-        gradient_top: color!(0x33, 0xB7, 0xC1),
-        gradient_bottom: color!(0x00, 0x9D, 0xB9),
+        text: UI_PRIMARY_WHITE,
+        background: UI_BLUE_500,
+        gradient_top: UI_TEAL_400,
+        gradient_bottom: UI_BLUE_500,
     },
     disabled: KeyColors {
-        text: color!(0xC1, 0xC1, 0xC1),
-        background: color!(0xD5, 0xD5, 0xD5),
-        gradient_top: color!(0x94, 0x94, 0x94),
-        gradient_bottom: color!(0x23, 0x1F, 0x20),
+        text: UI_NEUTRAL_500,
+        background: UI_NEUTRAL_100,
+        gradient_top: UI_NEUTRAL_600,
+        gradient_bottom: UI_NEUTRAL_950,
     },
 };
 

@@ -13,7 +13,8 @@ export component RadioButton inherits Rectangle {
     clip: true;
 
     // Private properties
-    private property <brush> bg-color: checked ? Palette.background-brand : Palette.background-primary-alternative;
+    private property <brush> bg-color: checked ? Palette.background-brand : Palette.background-primary;
+    private property <brush> radio-border-color: checked ? Palette.transparent : Palette.border-primary;
 
     // Public properties
     in property <string> id;
@@ -26,6 +27,7 @@ export component RadioButton inherits Rectangle {
 
     Circle {
         background: bg-color;
+        border-color: root.radio-border-color;
         border-width: checked ? Size.zero : Size.sz0_5;
         size: root.width;
         animate background {
@@ -35,7 +37,7 @@ export component RadioButton inherits Rectangle {
 
         Icon {
             name: "check";
-            color: Palette.border-inverse;
+            color: root.enabled ? Palette.border-inverse : Palette.content-disabled;
             size: Size.sz6;
             opacity: checked ? 1 : 0;
 
@@ -45,11 +47,11 @@ export component RadioButton inherits Rectangle {
 
         states [
             disabled when !root.enabled: {
-                background: checked ? Palette.content-disabled : Palette.background-disabled;
+                background: Palette.background-disabled;
                 border-color: checked ? Palette.transparent : Palette.border-disabled;
             }
-            pressed when touchArea.pressed && enabled: {
-                background: checked ? Palette.background-brand-pressed : Palette.border-disabled;
+            pressed when touchArea.pressed && enabled && checked: {
+                background: Palette.background-brand-pressed;
             }
         ]
     }

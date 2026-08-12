@@ -7,7 +7,7 @@ use tiny_skia::{
 };
 
 use crate::{
-    colors::{to_color, KeyStyle},
+    colors::{to_color, KeyStyle, UI_BLUE_600},
     drawing::{drop_shadow, round_rect_path},
     font::draw_text,
     keyboard::{KEY_BORDER_RADIUS, KEY_HEIGHT, ROW_HEIGHT},
@@ -19,7 +19,7 @@ const MARGIN: f32 = 2.0;
 const FONT_SCALE: f32 = 48.0;
 const BUBBLE_SLOT_PLUS_WIDTH: f32 = 10.0;
 const BUBBLE_HEIGHT: f32 = 80.0;
-const BUBBLE_BACKGROUND: ColorU8 = color!(0x00, 0x8f, 0xa8);
+const BUBBLE_BACKGROUND: ColorU8 = UI_BLUE_600;
 const BUBBLE_BORDER_RADIUS: f32 = 18.0;
 const BUBBLE_Y_OFFSET: f32 = 96.0;
 
