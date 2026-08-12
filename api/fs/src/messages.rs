@@ -67,8 +67,6 @@ pub struct MapFileMessage {
 pub enum AppResourcesRoot {
     BuiltIn,
     Sideloaded,
-    /// A sideloaded Flux child app: its bundle lives under the emulator's own sideload dir.
-    SideloadedFlux,
 }
 
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

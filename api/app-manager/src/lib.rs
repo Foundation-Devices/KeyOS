@@ -9,15 +9,9 @@ pub mod messages;
 use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 use xous::{AppId, PID};
 
-/// The Flux emulator's built-in app directory, holding its `app.elf` and `manifest.json`. Sideloaded
-/// Flux apps live beneath it (see [`SIDELOADED_FLUX_APPS_DIR`]).
-pub const FLUX_EMULATOR_APP_DIR: &str = "keyos/apps/gui-app-emu-flux";
-
-/// Sideload bundle directories, relative to the system volume root: general apps under
-/// [`SIDELOADED_APPS_DIR`], Flux children under [`SIDELOADED_FLUX_APPS_DIR`], which nests inside
-/// the emulator's own directory ([`FLUX_EMULATOR_APP_DIR`]).
+/// The sideload bundle directory, relative to the system volume root. Every sideloaded app,
+/// Flux children included, installs into `<SIDELOADED_APPS_DIR>/<hex app id>`.
 pub const SIDELOADED_APPS_DIR: &str = "keyos/sideloaded-apps";
-pub const SIDELOADED_FLUX_APPS_DIR: &str = "keyos/apps/gui-app-emu-flux/sideloaded-apps";
 
 #[macro_export]
 macro_rules! use_api {
@@ -82,7 +76,7 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
     }
 
     /// List installed apps, optionally narrowed by `filter`. Pass `AppFilter::default()`
-    /// for everything, `AppFilter::third_party_only()` for sideloaded apps, etc.
+    /// for everything, `AppFilter::sideloaded_only()` for sideloaded apps, etc.
     pub fn list_apps(&self, locale: &str, filter: AppFilter) -> Vec<InstalledAppInfo>
     where
         P: MessageAllowed<ListApps>,

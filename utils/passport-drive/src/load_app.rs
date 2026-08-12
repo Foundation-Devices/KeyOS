@@ -39,31 +39,8 @@ impl LoadAppReport {
     }
 }
 
-/// Which sideload directory the bundle lands in on the device.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SideloadKind {
-    /// A standard SDK app, launched directly from the system launcher.
-    Standard,
-    /// A Flux child app, run by the Flux emulator (Legacy mode).
-    Flux,
-}
-
-impl SideloadKind {
-    fn begin_command(self, app_id: [u8; 16]) -> Command {
-        match self {
-            SideloadKind::Standard => Command::LoadAppBegin { app_id },
-            SideloadKind::Flux => Command::LoadFluxAppBegin { app_id },
-        }
-    }
-
-    /// The on-device directory the bundle lands in, for reporting.
-    pub(crate) fn device_dir(self) -> &'static str {
-        match self {
-            SideloadKind::Standard => "keyos/sideloaded-apps",
-            SideloadKind::Flux => "keyos/apps/gui-app-emu-flux/sideloaded-apps",
-        }
-    }
-}
+/// The on-device directory the bundle lands in, for reporting.
+pub(crate) const DEVICE_DIR: &str = "keyos/sideloaded-apps";
 
 /// Read a file from a bundle, refusing one that resolves outside the confinement root.
 fn read_bundle_file(path: &Path) -> Result<Vec<u8>> {
@@ -77,7 +54,6 @@ fn read_bundle_file(path: &Path) -> Result<Vec<u8>> {
 pub(crate) fn load_app(
     mut send: impl FnMut(Command, Duration) -> Result<Vec<u8>, TransportError>,
     app_path: &Path,
-    kind: SideloadKind,
 ) -> Result<LoadAppReport> {
     crate::check_jail(app_path)?;
     let metadata =
@@ -93,10 +69,10 @@ pub(crate) fn load_app(
         .map(|(_, bytes)| bytes.as_slice())
         .expect("manifest.json is a required bundle file");
     let app_id = validate_manifest_json(manifest)?;
-    warn_on_flux_mismatch(manifest, kind);
     let app_id_bytes = decode_app_id(&app_id)?;
 
-    send(kind.begin_command(app_id_bytes), Duration::from_secs(5)).context("Cannot start the upload")?;
+    send(Command::LoadAppBegin { app_id: app_id_bytes }, Duration::from_secs(5))
+        .context("Cannot start the upload")?;
     for (name, bytes) in &files {
         upload_file(&mut send, name, bytes)?;
     }
@@ -171,32 +147,6 @@ fn manifest_json(manifest: &[u8]) -> Result<&[u8]> {
     manifest
         .get(cosign2::Header::DEFAULT_SIZE..)
         .context("manifest.json is too short to hold a cosign2 header")
-}
-
-/// Warn when `--flux` disagrees with the bundle's manifest. A Flux app's manifest declares the
-/// `os/gui-app-emu-flux` server, so uploading it without `--flux` (or a non-Flux app with
-/// `--flux`) lands it in the wrong directory and is almost certainly a mistake. The flag and the
-/// manifest are a hidden dependency, so surface the mismatch rather than silently proceed.
-fn warn_on_flux_mismatch(manifest: &[u8], kind: SideloadKind) {
-    let Ok(json) = manifest_json(manifest)
-        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).context("manifest.json is not valid JSON"))
-    else {
-        return;
-    };
-    let declares_emulator =
-        json.get("permissions").and_then(|perms| perms.get("os/gui-app-emu-flux")).is_some();
-    match (kind, declares_emulator) {
-        (SideloadKind::Standard, true) => eprintln!(
-            "Warning: this bundle declares the Flux emulator server (os/gui-app-emu-flux) but --flux \
-             was not passed; it will land in {} and the Flux emulator won't see it. Did you mean --flux?",
-            SideloadKind::Standard.device_dir()
-        ),
-        (SideloadKind::Flux, false) => eprintln!(
-            "Warning: --flux was passed but this bundle does not declare the Flux emulator server \
-             (os/gui-app-emu-flux); it may not be a Flux app."
-        ),
-        _ => {}
-    }
 }
 
 fn normalize_app_id(app_id: &str) -> Result<String> {

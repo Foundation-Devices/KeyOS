@@ -49,28 +49,31 @@ fn app_name_from_path(path: &Path) -> anyhow::Result<String> {
     Ok(app_name.to_string())
 }
 
-/// Verify the bundle, then launch the ELF. `third_party_signer` is the developer key a sideloaded
-/// app.elf must be signed by; `None` requires an official signature.
+/// Verify the bundle out of the registry's scan facts, then launch the ELF. The elf must carry
+/// the signature class its manifest carried at scan: the Foundation signature when the manifest
+/// had it, otherwise the same developer key that signed the manifest.
 #[cfg(keyos)]
 pub fn verify_and_launch(
     fs: &FileSystem,
-    app_id: &AppId,
-    elf_path: &str,
-    file_hashes: &std::collections::BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]>,
-    third_party_signer: Option<[u8; 33]>,
+    registry: &crate::registry::AppRegistry,
+    app_id: AppId,
 ) -> Result<PID, LaunchError> {
     use std::io::Read;
 
     use app_manager::VerificationError;
     use xous::DropDeallocate;
 
+    let elf_path = registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
+    let file_hashes = registry.file_hashes(app_id).ok_or(LaunchError::UnknownAppId)?;
+    let signer = registry.bundle_signer(&app_id).ok_or(LaunchError::UnknownAppId)?;
     let (app_dir, _) = elf_path.rsplit_once('/').ok_or(LaunchError::InternalError)?;
 
     let crypto = CryptoApi::default();
 
-    let metadata = fs.metadata(elf_path, fs::Location::System).map_err(|_| LaunchError::InternalError)?;
+    let metadata =
+        fs.metadata(elf_path.as_str(), fs::Location::System).map_err(|_| LaunchError::InternalError)?;
     let mut elf_file = fs
-        .open_file(elf_path, fs::Location::System, fs::OpenFlags::READ_ONLY)
+        .open_file(elf_path.as_str(), fs::Location::System, fs::OpenFlags::READ_ONLY)
         .map_err(|_| LaunchError::InternalError)?;
     let size = metadata.size as usize;
     let size_aligned = size.next_multiple_of(4096);
@@ -78,13 +81,9 @@ pub fn verify_and_launch(
         DropDeallocate::new(xous::map_memory(None, None, size_aligned, xous::MemoryFlags::W)?);
     elf_file.read_exact(&mut elf_bytes.as_slice_mut()[..size]).map_err(|_| LaunchError::InternalError)?;
 
-    let header = match third_party_signer {
-        None => fw_utils::hash::verify_cosign2_mem(
-            &crypto,
-            &elf_bytes.as_slice::<u8>()[..size],
-            cfg!(feature = "production"),
-        )
-        .map_err(hash_error_to_launch_error)?,
+    let header = match signer {
+        None => crate::registry::verify_foundation(&crypto, &elf_bytes.as_slice::<u8>()[..size])
+            .map_err(hash_error_to_launch_error)?,
         Some(signer) => {
             let header =
                 fw_utils::hash::verify_cosign2_mem_third_party(&crypto, &elf_bytes.as_slice::<u8>()[..size])
@@ -132,7 +131,7 @@ pub fn verify_and_launch(
         let actual = fw_utils::hash::sha256_streaming(&crypto, size, file, |_| {})
             .map_err(|_| LaunchError::InternalError)?;
 
-        if expected != &actual {
+        if expected != actual {
             log::error!("manifest hash mismatch for bundle file: {rel}");
             return Err(LaunchError::Verification(VerificationError::Unverified));
         }
@@ -142,7 +141,7 @@ pub fn verify_and_launch(
     elf_bytes.as_slice_mut::<u8>().copy_within(cosign2::Header::DEFAULT_SIZE.., 0);
 
     let process_name = elf_path.split('/').rev().nth(1).ok_or(LaunchError::InternalError)?.to_string();
-    let new_pid = xous::create_process(xous::ProcessArgs::new(*app_id, &process_name, *elf_bytes))?.0;
+    let new_pid = xous::create_process(xous::ProcessArgs::new(app_id, &process_name, *elf_bytes))?.0;
     elf_bytes.leak();
 
     Ok(new_pid)

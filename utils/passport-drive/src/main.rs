@@ -278,10 +278,6 @@ enum CliCommand {
     LoadApp {
         /// Directory containing app.elf, manifest.json, and optional icon.bin/resources
         app_path: PathBuf,
-        /// Upload as a Flux child app (lands in keyos/apps/gui-app-emu-flux/sideloaded-apps
-        /// and is launched by the Flux emulator instead of the system launcher)
-        #[arg(long)]
-        flux: bool,
     },
     /// Start MCP server mode for AI integration (JSON-RPC over stdio, or HTTP with --http)
     Mcp {
@@ -836,14 +832,13 @@ fn main() -> Result<()> {
         CliCommand::GetProcessList => do_get_process_list(&client)?,
         CliCommand::GetTime => do_get_time(&client)?,
         CliCommand::SetTime { timestamp } => do_set_time(&client, &timestamp)?,
-        CliCommand::LoadApp { app_path, flux } => {
-            let kind = if flux { load_app::SideloadKind::Flux } else { load_app::SideloadKind::Standard };
+        CliCommand::LoadApp { app_path } => {
             eprintln!("Uploading app from {}...", app_path.display());
-            let report = load_app::load_app(|cmd, timeout| client.send(cmd, timeout), &app_path, kind)?;
+            let report = load_app::load_app(|cmd, timeout| client.send(cmd, timeout), &app_path)?;
             eprintln!(
                 "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
                 report.app_id,
-                kind.device_dir(),
+                load_app::DEVICE_DIR,
                 report.app_id,
                 report.files_summary(),
                 report.resource_files,

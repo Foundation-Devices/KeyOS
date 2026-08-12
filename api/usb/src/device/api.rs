@@ -221,6 +221,41 @@ impl<P: CheckedPermissions> UsbRegisteredInterface<P> {
     }
 }
 
+/// A shared enabled flag for a runtime-toggleable interface: endpoint reader threads park on
+/// [`EnabledGate::wait_enabled`] while the interface is disabled instead of spinning on
+/// `InterfaceDisabled` errors. Open the gate only after `set_enabled(true)` succeeded.
+#[derive(Clone)]
+pub struct EnabledGate {
+    inner: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl EnabledGate {
+    pub fn new(enabled: bool) -> Self {
+        Self { inner: std::sync::Arc::new((std::sync::Mutex::new(enabled), std::sync::Condvar::new())) }
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        let (lock, cvar) = &*self.inner;
+        *lock.lock().unwrap() = enabled;
+        if enabled {
+            cvar.notify_all();
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        let (lock, _) = &*self.inner;
+        *lock.lock().unwrap()
+    }
+
+    pub fn wait_enabled(&self) {
+        let (lock, cvar) = &*self.inner;
+        let mut enabled = lock.lock().unwrap();
+        while !*enabled {
+            enabled = cvar.wait(enabled).unwrap();
+        }
+    }
+}
+
 pub struct UsbEmulatedEndpoint<P: CheckedPermissions> {
     connection: CheckedConn<P>,
     endpoint_number: u8,

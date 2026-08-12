@@ -383,7 +383,7 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     // size formatting below) are honored instead of always asking for English.
     let locale = state.borrow().settings.get_locale();
     let lang = locale.lang();
-    let apps = state.borrow().app_manager.list_apps(lang, app_manager::AppFilter::third_party_only());
+    let apps = state.borrow().app_manager.list_apps(lang, app_manager::AppFilter::sideloaded_only());
 
     let installed_apps =
         apps.iter().map(|app| installed_app(&state.borrow(), app.clone(), lang)).collect::<Vec<_>>();
@@ -1265,6 +1265,10 @@ fn remove_installed_app(state: StoredValue<AppState>, app_id: &str) -> SharedStr
         }
         Ok(app_manager::RemoveInstalledAppResult::Running) => {
             tr::lookup_id(TrId::AppsRemoveAppRunning).into()
+        }
+        Ok(app_manager::RemoveInstalledAppResult::FluxAppsInstalled) => {
+            // TODO: localize
+            "Remove the installed Legacy apps first, then try again.".into()
         }
         Ok(app_manager::RemoveInstalledAppResult::NotSideloaded)
         | Ok(app_manager::RemoveInstalledAppResult::InternalError) => {

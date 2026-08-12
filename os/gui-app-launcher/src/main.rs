@@ -666,12 +666,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
-    ui.global::<LauncherCallbacks>().on_delete_legacy_confirmed({
-        move || {
-            delete_legacy_confirmed(state);
-        }
-    });
-
     {
         let state = state.borrow();
         sync_launcher_ui(&state.ui(), &state.launcher);
@@ -1156,25 +1150,14 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
         return;
     }
 
-    let LauncherTarget::App { app_id } = item.target.clone() else {
+    if !matches!(item.target, LauncherTarget::App { .. }) {
         log::warn!("Ignoring remove request for non-app launcher item: {}", item.id);
         return;
-    };
+    }
 
     {
         let ui = state.borrow().ui();
         clear_rearrange_state(&ui);
-    }
-
-    // Legacy is a built-in exception: deleting it is irreversible and cascades to its emulated
-    // apps, so it confirms with a centered destructive modal (matching the Figma pop-up) instead
-    // of the generic sideloaded bottom-sheet alert. The removal runs once the user confirms.
-    if app_id.as_str() == LEGACY_APP_ID {
-        let ui = state.borrow().ui();
-        let launcher_state = ui.global::<State>();
-        launcher_state.set_pending_delete_item_id(item.id.clone().into());
-        launcher_state.set_delete_legacy_active(true);
-        return;
     }
 
     let result = {
@@ -1232,6 +1215,22 @@ fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
             log::warn!("failed to remove launcher item {}: app is still running", item.id);
             show_remove_app_error(state, &item.label);
         }
+        Ok(app_manager::RemoveInstalledAppResult::FluxAppsInstalled) => {
+            log::warn!("failed to remove launcher item {}: Legacy apps are still installed", item.id);
+            let gui = state.borrow().gui.clone();
+            let _ = gui.invoke_alert(InvokeAlert {
+                app_title: None,
+                title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
+                icon: "alert".to_string(),
+                // TODO: localize
+                line1: "Remove the installed Legacy apps in Settings > Apps first, then try again."
+                    .to_string(),
+                line2: None,
+                button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
+                button2_title: None,
+                button3_title: None,
+            });
+        }
         Ok(app_manager::RemoveInstalledAppResult::NotSideloaded) => {
             log::warn!("failed to remove launcher item {}: app is not sideloaded", item.id);
             show_remove_app_error(state, &item.label);
@@ -1245,26 +1244,6 @@ fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
             show_remove_app_error(state, &item.label);
         }
     }
-}
-
-/// Run the Legacy removal after the user confirms in the centered delete modal, dismissing the
-/// modal first. Operates on the item snapshotted when the modal was shown.
-fn delete_legacy_confirmed(state: StoredValue<AppState>) {
-    let item_id = {
-        let ui = state.borrow().ui();
-        let launcher_state = ui.global::<State>();
-        launcher_state.set_delete_legacy_active(false);
-        let id = launcher_state.get_pending_delete_item_id().to_string();
-        launcher_state.set_pending_delete_item_id("".into());
-        id
-    };
-
-    let Some(item) = state.borrow().launcher_item_by_id(&item_id).cloned() else {
-        log::warn!("delete-legacy confirmed but launcher item {item_id} is gone");
-        return;
-    };
-
-    remove_launcher_item(state, &item);
 }
 
 fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {

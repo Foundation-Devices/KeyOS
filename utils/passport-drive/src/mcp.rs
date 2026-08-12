@@ -244,9 +244,6 @@ struct LoadAppParams {
     /// Local app bundle directory containing app.elf, manifest.json, and optional
     /// icon.bin/resources. Must resolve inside the server's base directory when access is confined.
     app_path: String,
-    /// Upload as a Flux child app (Legacy mode), launched by the Flux emulator instead of the
-    /// system launcher
-    flux: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -583,30 +580,22 @@ impl PassportServer {
     }
 
     /// Upload an arbitrary app directory into keyos/sideloaded-apps/<app-id> on the device over
-    /// usb-debug (or keyos/apps/gui-app-emu-flux/sideloaded-apps/<app-id> with flux=true, for apps
-    /// run by the Flux emulator). The directory must contain app.elf and manifest.json; icon.bin
-    /// and resources/ are uploaded when present. Replaces those files if the app already exists.
+    /// usb-debug. The directory must contain app.elf and manifest.json; icon.bin and resources/
+    /// are uploaded when present. Replaces those files if the app already exists.
     #[tool]
     fn load_app(
         &self,
-        Parameters(LoadAppParams { app_path, flux }): Parameters<LoadAppParams>,
+        Parameters(LoadAppParams { app_path }): Parameters<LoadAppParams>,
     ) -> Result<CallToolResult, String> {
-        let kind = match flux.unwrap_or(false) {
-            true => crate::load_app::SideloadKind::Flux,
-            false => crate::load_app::SideloadKind::Standard,
-        };
         let mut state = state();
-        let report = crate::load_app::load_app(
-            |cmd, timeout| state.send(cmd, timeout),
-            &PathBuf::from(app_path),
-            kind,
-        )
-        .map_err(|e| format!("load_app failed: {e:#}"))?;
+        let report =
+            crate::load_app::load_app(|cmd, timeout| state.send(cmd, timeout), &PathBuf::from(app_path))
+                .map_err(|e| format!("load_app failed: {e:#}"))?;
 
         Ok(text_result(&format!(
             "Loaded {} into {}/{} ({}, resources: {} files / {} bytes).",
             report.app_id,
-            kind.device_dir(),
+            crate::load_app::DEVICE_DIR,
             report.app_id,
             report.files_summary(),
             report.resource_files,

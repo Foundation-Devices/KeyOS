@@ -7,7 +7,7 @@ use app_archive::ELF_FILE;
 use app_manager::{
     AppQrMatchRules, IconVariant, InstalledAppInfo, InstalledAppPermissionGroup,
     InstalledAppPermissionSubgroup, LaunchError, PermissionRequestInfo, PermissionRequestInfoResult,
-    ThirdPartyCertificateInfo, SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR,
+    ThirdPartyCertificateInfo, SIDELOADED_APPS_DIR,
 };
 use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
@@ -21,16 +21,14 @@ use crate::{
     FileSystem,
 };
 
+// The key this firmware build was signed with, emitted by build.rs from the repo cosign2.toml.
+#[cfg(all(keyos, not(feature = "production")))]
+include!(concat!(env!("OUT_DIR"), "/dev_signer.rs"));
+
 const BUILT_IN_APPS_DIR: &str = "/keyos/apps";
-/// The sideload bundle roots (shared with usb-debug via `app_manager`) whose dir names must
-/// equal the app id (see `sideloaded_app_dir_matches_app_id`).
-const SIDELOAD_ROOTS: &[&str] = &[SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR];
-/// The Flux emulator host's AppId: the 16 ASCII bytes of `gui-app-emu-flux`.
-pub(crate) const FLUX_EMULATOR_APP_ID: AppId = AppId(*b"gui-app-emu-flux");
-/// Built-in apps the OS permits the user to permanently delete, as a deliberate exception
-/// to the "only sideloaded apps are removable" rule. The trusted OS binary decides this,
-/// never the app's own (signed-but-self-asserted) manifest.
-const REMOVABLE_BUILTIN: &[AppId] = &[FLUX_EMULATOR_APP_ID];
+/// The server a Flux child declares to reach the emulator; declaring it is what tags an app
+/// as a Flux child, and providing it is what tags an app as the emulator.
+pub(crate) const FLUX_EMULATOR_SERVER: &str = "os/gui-app-emu-flux";
 // Each icon file holds one 110x110 RGBA archived RawImage (~47 KiB of pixels)
 // plus rkyv header/alignment overhead. Leave margin for format drift and
 // oversized sources.
@@ -45,24 +43,6 @@ const BUNDLED_ICON_FILE: &str = "icon.bin";
 /// `app-icons/<app-id>-dark.bin` sibling in CommonAssets.
 const BUNDLED_DARK_ICON_FILE: &str = "icon-dark.bin";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppSource {
-    BuiltIn,
-    ThirdParty,
-}
-
-impl AppSource {
-    /// The signature level an app from this source carries: built-ins are Foundation-signed,
-    /// sideloads are third-party-signed. (Foundation-signed sideloads are not supported yet; the
-    /// load directory stands in for the signer until a later PR.)
-    fn signature(self) -> RequiredSignature {
-        match self {
-            AppSource::BuiltIn => RequiredSignature::Foundation,
-            AppSource::ThirdParty => RequiredSignature::ThirdParty,
-        }
-    }
-}
-
 /// How a declared message is available to an app once its signature is taken into account:
 /// granted automatically, granted through the user's subgroup decision, or not reachable at
 /// all (the signature requirement isn't met, or the message is not user-facing).
@@ -72,8 +52,6 @@ enum MessageAvailability {
     ApprovalBased,
     Unavailable,
 }
-
-const FLUX_APPS_DIR: &str = "/keyos/apps/gui-app-emu-flux/apps";
 
 #[derive(Debug, Clone)]
 pub(crate) struct AppInfo {
@@ -85,13 +63,44 @@ pub(crate) struct AppInfo {
     manifest: Manifest,
     /// The verified manifest JSON as scanned, handed verbatim to the name server at launch.
     manifest_bytes: Vec<u8>,
-    source: AppSource,
+    /// The root the bundle was scanned from: built-ins ship in the firmware image, sideloads
+    /// install under the sideload root and are removable.
+    root: AppResourcesRoot,
+    /// The signature class the manifest carried at scan.
+    signature: AppSignature,
     is_flux: bool,
     /// Size of the bundle's elf, 0 when unknown.
     binary_size: u64,
-    /// The developer key that signed this sideloaded app's manifest, captured at scan; trust is
-    /// decided later by matching it against the cert store. `None` for built-in apps and on hosted.
-    third_party_signer: Option<[u8; 33]>,
+}
+
+/// The signature class a manifest carried at scan, derived from which key signed it:
+/// Foundation for the official signature (or, on a development build, the developer signature
+/// of the key this firmware was built with); ThirdParty carries the developer key that signed
+/// the bundle, so trust can be decided later against the cert store (`None` on hosted builds,
+/// which sign nothing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AppSignature {
+    Foundation,
+    ThirdParty(Option<[u8; 33]>),
+}
+
+impl AppSignature {
+    /// The signature level this class satisfies when a message's requirement is checked.
+    fn required(self) -> RequiredSignature {
+        match self {
+            AppSignature::Foundation => RequiredSignature::Foundation,
+            AppSignature::ThirdParty(_) => RequiredSignature::ThirdParty,
+        }
+    }
+
+    /// The developer key that signed a third-party bundle; `None` for Foundation-signed apps
+    /// and on hosted builds.
+    pub(crate) fn signer(self) -> Option<[u8; 33]> {
+        match self {
+            AppSignature::Foundation => None,
+            AppSignature::ThirdParty(signer) => signer,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,14 +142,6 @@ impl AppRegistryDiff {
     }
 }
 
-/// Whether an installed app is a Flux child or a standard one, which decides the sideload root
-/// its bundle lives under.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AppKind {
-    Standard,
-    Flux,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct AppRegistry {
     installed_apps: HashMap<AppId, AppInfo>,
@@ -162,35 +163,23 @@ impl AppRegistry {
             cache.add_manifest(manifest).expect("system manifests must not declare colliding servers");
         }
 
-        // App location is the source of truth for both trust classification and the Flux
-        // tag: firmware-shipped apps live under /keyos/apps and verify against the official
-        // keys, while sideloaded apps live under the sideload roots and only need a valid
-        // developer signature here. The simulator reads the same dirs through fs and signs
-        // nothing.
+        // Location decides built-in versus sideloaded: firmware-shipped apps live under
+        // /keyos/apps and must carry the Foundation signature, while a sideloaded bundle's
+        // trust class follows from the key that signed it. The simulator reads the same dirs
+        // through fs and signs nothing.
         Self::scan_apps_dir(
             fs,
             &mut installed_apps,
             &mut cache,
             BUILT_IN_APPS_DIR,
-            AppSource::BuiltIn,
-            false,
+            AppResourcesRoot::BuiltIn,
         );
-        Self::scan_apps_dir(fs, &mut installed_apps, &mut cache, FLUX_APPS_DIR, AppSource::BuiltIn, true);
         Self::scan_apps_dir(
             fs,
             &mut installed_apps,
             &mut cache,
             SIDELOADED_APPS_DIR,
-            AppSource::ThirdParty,
-            false,
-        );
-        Self::scan_apps_dir(
-            fs,
-            &mut installed_apps,
-            &mut cache,
-            SIDELOADED_FLUX_APPS_DIR,
-            AppSource::ThirdParty,
-            true,
+            AppResourcesRoot::Sideloaded,
         );
 
         let diff = AppRegistryDiff::new(&self.installed_apps, &installed_apps);
@@ -209,8 +198,7 @@ impl AppRegistry {
         installed_apps: &mut HashMap<AppId, AppInfo>,
         cache: &mut ServerPermissionCache,
         apps_dir: &str,
-        source: AppSource,
-        is_flux: bool,
+        root: AppResourcesRoot,
     ) {
         let dir = match fs.open_dir(apps_dir.to_string(), fs::Location::System) {
             Ok(dir) => dir,
@@ -225,9 +213,9 @@ impl AppRegistry {
                 continue;
             }
             let app_dir = format!("{apps_dir}/{}", entry.name);
-            match Self::load_app(fs, &app_dir, source, is_flux) {
+            match Self::load_app(fs, &app_dir, root) {
                 Ok(Some(app)) if installed_apps.contains_key(&app.id) => {
-                    log::warn!("Skipping duplicate app_id=0x{} from {source:?}", hex::encode(app.id.0));
+                    log::warn!("Skipping duplicate app_id=0x{} from {root:?}", hex::encode(app.id.0));
                 }
                 Ok(Some(app)) => {
                     if let Err(collision) = cache.add_manifest(&app.manifest) {
@@ -250,35 +238,30 @@ impl AppRegistry {
     /// manifest's contents (app id, permissions, QR rules) would be trusted the moment it enters
     /// the registry, with no launch required. Returns `None` when a sideloaded bundle's dir name
     /// doesn't match its app id (already logged).
-    fn load_app(
-        fs: &FileSystem,
-        app_dir: &str,
-        source: AppSource,
-        is_flux: bool,
-    ) -> anyhow::Result<Option<AppInfo>> {
+    fn load_app(fs: &FileSystem, app_dir: &str, root: AppResourcesRoot) -> anyhow::Result<Option<AppInfo>> {
         let manifest_raw = read_capped_file(
             fs,
             &format!("{app_dir}/manifest.json"),
             fs::Location::System,
             MAX_MANIFEST_SIZE_BYTES,
         )?;
-        let (manifest_json, third_party_signer) = check_manifest_signature(&manifest_raw, source)?;
+        let (manifest_json, signature) = check_manifest_signature(&manifest_raw, root)?;
         let manifest = app_manifest::try_from_bytes(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
 
         let app_id = AppId(manifest.app_id);
-        if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, source) {
+        if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, root) {
             return Ok(None);
         }
         Ok(Some(AppInfo {
             id: app_id,
             app_dir: Some(app_dir.to_string()),
+            is_flux: manifest.permissions.contains_key(FLUX_EMULATOR_SERVER),
             manifest,
             manifest_bytes: manifest_json.to_vec(),
-            source,
-            is_flux,
+            root,
+            signature,
             binary_size: elf_size(fs, &format!("{app_dir}/{ELF_FILE}")),
-            third_party_signer,
         }))
     }
 
@@ -337,7 +320,7 @@ impl AppRegistry {
             .installed_apps
             .values()
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
-            .filter(|app_info| filter.third_party.map_or(true, |want| app_info.is_third_party() == want))
+            .filter(|app_info| filter.sideloaded.map_or(true, |want| app_info.is_sideloaded() == want))
             .map(|app_info| {
                 let (publisher, launch_error) = app_info.publisher_and_launch_error(publishers);
                 let (basic_permissions, approvable_permissions) =
@@ -346,7 +329,7 @@ impl AppRegistry {
                     app_id: format!("0x{}", app_info.id),
                     publisher,
                     launch_error,
-                    can_remove: app_info.is_removable(),
+                    can_remove: app_info.is_sideloaded(),
                     is_flux: app_info.is_flux,
                     version: app_info.manifest.version.clone().unwrap_or_default(),
                     size_bytes: app_info.binary_size,
@@ -370,8 +353,9 @@ impl AppRegistry {
     ) -> Option<String> {
         let public_key = crate::third_party_certs::decode_public_key_hex(public_key)?;
 
-        self.installed_apps.values().filter(|app_info| app_info.is_third_party()).find_map(|app_info| {
-            (app_info.third_party_signer == Some(public_key)).then(|| app_info.localized_name(locale))
+        self.installed_apps.values().find_map(|app_info| {
+            (app_info.signature == AppSignature::ThirdParty(Some(public_key)))
+                .then(|| app_info.localized_name(locale))
         })
     }
 
@@ -434,34 +418,31 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).map(|app_info| app_info.manifest.file_hashes.clone())
     }
 
-    /// The developer key that signed a sideloaded app, captured at scan; `None` for a built-in app
-    /// (signed with the official key).
-    #[cfg(keyos)]
-    pub(crate) fn elf_signer(&self, app_id: AppId) -> Option<[u8; 33]> {
-        self.installed_apps.get(&app_id).and_then(|app_info| app_info.third_party_signer)
-    }
-
     pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
 
     /// The key that signed the bundle installed under this app id, `None` when no app is installed
     /// under it. The key is itself optional: a hosted build's manifests are unsigned.
     pub(crate) fn bundle_signer(&self, app_id: &AppId) -> Option<Option<[u8; 33]>> {
-        self.installed_apps.get(app_id).map(|app_info| app_info.third_party_signer)
+        self.installed_apps.get(app_id).map(|app_info| app_info.signature.signer())
     }
 
-    /// Which sideload root holds the bundle installed under this app id, `None` when no app is
-    /// installed under it.
-    pub(crate) fn bundle_kind(&self, app_id: &AppId) -> Option<AppKind> {
-        self.installed_apps
-            .get(app_id)
-            .map(|app_info| if app_info.is_flux { AppKind::Flux } else { AppKind::Standard })
-    }
-
-    /// AppIds of every installed Flux child (built-in or sideloaded). The emulator host
-    /// itself is not flux, so this returns the children only. Each child persists its NVM
-    /// to its own AppData, a tree that removing the emulator does not otherwise touch.
+    /// AppIds of every installed Flux child. The emulator host itself is not flux, so this
+    /// returns the children only.
     pub(crate) fn flux_child_app_ids(&self) -> Vec<AppId> {
         self.installed_apps.values().filter(|a| a.is_flux).map(|a| a.id).collect()
+    }
+
+    /// Whether this installed app provides the Flux emulator's server, i.e. is the emulator the
+    /// Flux children depend on.
+    pub(crate) fn provides_flux_emulator(&self, app_id: &AppId) -> bool {
+        self.installed_apps
+            .get(app_id)
+            .is_some_and(|app| app.manifest.servers.contains_key(FLUX_EMULATOR_SERVER))
+    }
+
+    /// Whether any installed app provides the Flux emulator's server.
+    pub(crate) fn flux_emulator_installed(&self) -> bool {
+        self.installed_apps.values().any(|app| app.manifest.servers.contains_key(FLUX_EMULATOR_SERVER))
     }
 
     pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
@@ -472,16 +453,14 @@ impl AppRegistry {
     ///
     /// A scan registers built-ins before sideloads and skips a second bundle claiming an id it
     /// already has, so a sideloaded bundle under a built-in's id can never take effect.
-    /// Whether an app id belongs to the firmware, installed right now or not. Removing the Flux
-    /// emulator deletes its built-in children with it, so the set comes from what the image shipped.
     pub(crate) fn is_built_in(&self, app_id: &AppId) -> bool {
-        self.installed_apps.get(app_id).is_some_and(|app_info| app_info.source == AppSource::BuiltIn)
+        self.installed_apps.get(app_id).is_some_and(|app_info| !app_info.is_sideloaded())
             || permission_catalog::system_manifests().iter().any(|m| m.app_id == app_id.0)
     }
 
     pub(crate) fn removable_bundle_dir(&self, app_id: AppId) -> Option<String> {
         let app_info = self.installed_apps.get(&app_id)?;
-        if !app_info.is_removable() {
+        if !app_info.is_sideloaded() {
             return None;
         }
 
@@ -543,8 +522,8 @@ impl AppRegistry {
         let Some(app_info) = self.installed_apps.get(&app_id) else {
             return app_manager::SetAppPermissionGrantResult::AppNotFound;
         };
-        // Built-in permissions are not user-managed (see effective_manifest_bytes), so there is
-        // nothing to grant or revoke for them.
+        // Foundation-signed apps' permissions are not user-managed (see effective_manifest_bytes),
+        // so there is nothing to grant or revoke for them.
         if !app_info.is_third_party() {
             return app_manager::SetAppPermissionGrantResult::AppNotFound;
         }
@@ -588,8 +567,8 @@ impl AppRegistry {
         let Some(app_info) = self.installed_apps.get(&sender_app_id) else {
             return PermissionRequestInfoResult::AppNotFound;
         };
-        // Built-ins bypass the permission mechanism and are never parked for a prompt; this is
-        // defensive so a built-in message can't be routed through the grant flow.
+        // Foundation-signed apps bypass the permission mechanism and are never parked for a
+        // prompt; this is defensive so their messages can't be routed through the grant flow.
         if !app_info.is_third_party() {
             return PermissionRequestInfoResult::NotGrantable;
         }
@@ -671,13 +650,11 @@ impl AppInfo {
         &self,
         entry: &crate::permission_catalog::MessageMetadata,
     ) -> MessageAvailability {
-        // A message restricted to Flux children is reachable only by an app the OS classified as
-        // one (from its install directory, not a manifest claim); any other app is refused.
-        if entry.requires_flux() && !self.is_flux {
+        if !entry.signature_satisfied_by(self.signature.required()) {
             MessageAvailability::Unavailable
-        } else if !entry.signature_satisfied_by(self.source.signature()) {
-            MessageAvailability::Unavailable
-        } else if entry.is_auto_allow() {
+        } else if entry.is_auto_allow() || !self.is_third_party() {
+            // Foundation-signed apps, built-in or sideloaded, get every declared message
+            // automatically; only third-party apps go through approvals.
             MessageAvailability::AutoAllow
         } else if entry.is_approval_based() {
             MessageAvailability::ApprovalBased
@@ -728,9 +705,10 @@ impl AppInfo {
         &self,
         permission_grants: &PermissionGrantStore,
     ) -> Result<Vec<u8>, LaunchError> {
-        // Built-ins run with everything they declare and are not user-managed: trust comes from
-        // the /keyos/apps directory itself, so they bypass filtering, first-use prompts, and
-        // Settings entirely. Only sideloaded apps get their manifest narrowed to the granted set.
+        // Foundation-signed apps, built-in or sideloaded, run with everything they declare and
+        // are not user-managed: trust comes from the Foundation signature, so they bypass
+        // filtering, first-use prompts, and Settings entirely. Only third-party apps get their
+        // manifest narrowed to the granted set.
         if !self.is_third_party() {
             return Ok(self.manifest_bytes.clone());
         }
@@ -779,8 +757,8 @@ impl AppInfo {
     /// The publisher fingerprint to show and why a launch would fail, if it would. `publishers` is
     /// every stored certificate rather than only the usable ones, so a signer that matches an
     /// unusable certificate is reported under that certificate instead of as a missing one.
-    /// Neither built-in nor hosted apps carry a publisher fingerprint. The simulator signs nothing,
-    /// so it launches everything.
+    /// Neither built-in, Foundation-signed, nor hosted apps carry a publisher fingerprint. The
+    /// simulator signs nothing, so it launches everything.
     fn publisher_and_launch_error(
         &self,
         publishers: &[ThirdPartyCertificateInfo],
@@ -792,11 +770,8 @@ impl AppInfo {
         }
         #[cfg(any(keyos, test))]
         {
-            let Some(signer) = self.third_party_signer else {
-                return match self.source {
-                    AppSource::BuiltIn => (String::new(), None),
-                    _ => (String::new(), Some(LaunchError::NoCertificate)),
-                };
+            let AppSignature::ThirdParty(Some(signer)) = self.signature else {
+                return (String::new(), self.is_third_party().then_some(LaunchError::NoCertificate));
             };
             let Some(publisher) = publishers
                 .iter()
@@ -819,22 +794,19 @@ impl AppInfo {
     fn description(&self) -> String { self.manifest.description.clone().unwrap_or_default() }
 
     fn icon_path(&self, variant: IconVariant) -> Option<(String, fs::Location)> {
-        match self.source {
-            AppSource::BuiltIn => {
-                let suffix = match variant {
-                    IconVariant::Light => "",
-                    IconVariant::Dark => "-dark",
-                };
-                Some((format!("app-icons/{}{suffix}.bin", self.id), fs::Location::CommonAssets))
-            }
-            AppSource::ThirdParty => {
-                let file = match variant {
-                    IconVariant::Light => BUNDLED_ICON_FILE,
-                    IconVariant::Dark => BUNDLED_DARK_ICON_FILE,
-                };
-                let app_dir = self.app_dir.as_deref()?;
-                Some((format!("{app_dir}/{file}"), fs::Location::System))
-            }
+        if self.is_sideloaded() {
+            let file = match variant {
+                IconVariant::Light => BUNDLED_ICON_FILE,
+                IconVariant::Dark => BUNDLED_DARK_ICON_FILE,
+            };
+            let app_dir = self.app_dir.as_deref()?;
+            Some((format!("{app_dir}/{file}"), fs::Location::System))
+        } else {
+            let suffix = match variant {
+                IconVariant::Light => "",
+                IconVariant::Dark => "-dark",
+            };
+            Some((format!("app-icons/{}{suffix}.bin", self.id), fs::Location::CommonAssets))
         }
     }
 
@@ -845,22 +817,14 @@ impl AppInfo {
             return None;
         }
 
-        let root = match (self.source, self.is_flux) {
-            (AppSource::BuiltIn, _) => AppResourcesRoot::BuiltIn,
-            (AppSource::ThirdParty, true) => AppResourcesRoot::SideloadedFlux,
-            (AppSource::ThirdParty, false) => AppResourcesRoot::Sideloaded,
-        };
-        let app_dir = match self.source {
-            AppSource::BuiltIn => app_dir.to_string(),
-            AppSource::ThirdParty => self.id.to_string(),
-        };
+        let app_dir = if self.is_sideloaded() { self.id.to_string() } else { app_dir.to_string() };
 
-        Some(AppResourcesLocation { root, app_dir })
+        Some(AppResourcesLocation { root: self.root, app_dir })
     }
 
-    fn is_third_party(&self) -> bool { self.source == AppSource::ThirdParty }
+    fn is_third_party(&self) -> bool { matches!(self.signature, AppSignature::ThirdParty(_)) }
 
-    fn is_removable(&self) -> bool { self.is_third_party() || REMOVABLE_BUILTIN.contains(&self.id) }
+    fn is_sideloaded(&self) -> bool { self.root == AppResourcesRoot::Sideloaded }
 }
 
 /// File `entry`'s subgroup under its top-level group, creating either level on first sight.
@@ -929,56 +893,104 @@ fn elf_size(fs: &FileSystem, path: &str) -> u64 {
 #[cfg(not(keyos))]
 fn elf_size(_fs: &FileSystem, _path: &str) -> u64 { 0 }
 
-/// Verify a bundle manifest and return its header-stripped JSON together with the developer key
-/// that signed a sideloaded one (`None` for a built-in app). A built-in manifest must carry a
-/// valid official signature; production requires it trusted. A sideloaded manifest only needs a
-/// valid developer signature here, since whether its key is allowed is decided at launch and
-/// listing time against the cert store.
+/// Verify a Foundation-signed binary: a built-in, or a sideload bundle from the same build.
+/// Production requires the official double signature; a development build accepts exactly a
+/// developer signature by the key this firmware was built with.
+#[cfg(all(keyos, feature = "production"))]
+pub(crate) fn verify_foundation(
+    crypto: &crate::CryptoApi,
+    data: &[u8],
+) -> Result<cosign2::Header, fw_utils::hash::HashError> {
+    fw_utils::hash::verify_cosign2_mem(crypto, data, true)
+}
+
+#[cfg(all(keyos, not(feature = "production")))]
+pub(crate) fn verify_foundation(
+    crypto: &crate::CryptoApi,
+    data: &[u8],
+) -> Result<cosign2::Header, fw_utils::hash::HashError> {
+    let header = fw_utils::hash::verify_cosign2_mem_third_party(crypto, data)?;
+    if header.pubkey2() != DEV_SIGNER {
+        return Err(fw_utils::hash::HashError::NotTrusted);
+    }
+    Ok(header)
+}
+
+/// Classify a sideloaded bundle by the key that signed it: the build's own signer (or the
+/// official roster on production) is Foundation, any other developer key is third-party.
+#[cfg(keyos)]
+fn classify_sideload(
+    crypto: &crate::CryptoApi,
+    data: &[u8],
+) -> Result<AppSignature, fw_utils::hash::HashError> {
+    #[cfg(not(feature = "production"))]
+    {
+        let header = fw_utils::hash::verify_cosign2_mem_third_party(crypto, data)?;
+        Ok(if header.pubkey2() == DEV_SIGNER {
+            AppSignature::Foundation
+        } else {
+            AppSignature::ThirdParty(Some(header.pubkey2()))
+        })
+    }
+    #[cfg(feature = "production")]
+    {
+        if verify_foundation(crypto, data).is_ok() {
+            return Ok(AppSignature::Foundation);
+        }
+        let header = fw_utils::hash::verify_cosign2_mem_third_party(crypto, data)?;
+        Ok(AppSignature::ThirdParty(Some(header.pubkey2())))
+    }
+}
+
+/// Verify a bundle manifest and return its header-stripped JSON and its signature class,
+/// derived from which key signed it. A built-in must carry the Foundation signature; a
+/// third-party manifest only needs a valid developer signature here, since whether its key is
+/// allowed is decided at launch and listing time against the cert store.
 #[cfg(keyos)]
 fn check_manifest_signature(
     manifest_raw: &[u8],
-    source: AppSource,
-) -> anyhow::Result<(&[u8], Option<[u8; 33]>)> {
+    root: AppResourcesRoot,
+) -> anyhow::Result<(&[u8], AppSignature)> {
     // Drop the cosign2 header, leaving the JSON it wraps.
     let manifest_json = manifest_raw
         .get(cosign2::Header::DEFAULT_SIZE..)
         .ok_or_else(|| anyhow::anyhow!("manifest is too short to hold a cosign2 header"))?;
 
     let crypto = crate::CryptoApi::default();
-    let signer = match source {
-        AppSource::BuiltIn => {
-            fw_utils::hash::verify_cosign2_mem(&crypto, manifest_raw, cfg!(feature = "production"))
+    let signature = match root {
+        AppResourcesRoot::BuiltIn => {
+            verify_foundation(&crypto, manifest_raw)
                 .map_err(|e| anyhow::anyhow!("unverified manifest: {e:?}"))?;
-            None
+            AppSignature::Foundation
         }
-        AppSource::ThirdParty => {
-            let header = fw_utils::hash::verify_cosign2_mem_third_party(&crypto, manifest_raw)
-                .map_err(|e| anyhow::anyhow!("unverified manifest: {e:?}"))?;
-            Some(header.pubkey2())
-        }
+        AppResourcesRoot::Sideloaded => classify_sideload(&crypto, manifest_raw)
+            .map_err(|e| anyhow::anyhow!("unverified manifest: {e:?}"))?,
     };
-    Ok((manifest_json, signer))
+    Ok((manifest_json, signature))
 }
 
-/// Hosted manifests are unsigned, so the raw bytes are the JSON and there is no signer.
+/// Hosted manifests are unsigned, so the raw bytes are the JSON, there is no signer, and only
+/// the root decides the class: hosted sideloads behave as third-party.
 #[cfg(not(keyos))]
 fn check_manifest_signature(
     manifest_raw: &[u8],
-    _source: AppSource,
-) -> anyhow::Result<(&[u8], Option<[u8; 33]>)> {
-    Ok((manifest_raw, None))
+    root: AppResourcesRoot,
+) -> anyhow::Result<(&[u8], AppSignature)> {
+    let signature = match root {
+        AppResourcesRoot::BuiltIn => AppSignature::Foundation,
+        AppResourcesRoot::Sideloaded => AppSignature::ThirdParty(None),
+    };
+    Ok((manifest_raw, signature))
 }
 
-/// Verify a sideloaded bundle's manifest, returning its header-stripped JSON and the developer
-/// key that signed it (`None` on hosted builds, where manifests are unsigned).
-pub(crate) fn verified_third_party_manifest(
-    manifest_raw: &[u8],
-) -> anyhow::Result<(&[u8], Option<[u8; 33]>)> {
-    check_manifest_signature(manifest_raw, AppSource::ThirdParty)
+/// Verify a sideloaded bundle's manifest, returning its header-stripped JSON and its signature
+/// class.
+pub(crate) fn verified_sideload_manifest(manifest_raw: &[u8]) -> anyhow::Result<(&[u8], AppSignature)> {
+    check_manifest_signature(manifest_raw, AppResourcesRoot::Sideloaded)
 }
 
-fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, source: AppSource) -> bool {
-    if source != AppSource::ThirdParty {
+fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, root: AppResourcesRoot) -> bool {
+    if root == AppResourcesRoot::BuiltIn {
         return true;
     }
 
@@ -986,7 +998,7 @@ fn sideloaded_app_dir_matches_app_id(app_dir: Option<&str>, app_id: &AppId, sour
         return true;
     };
 
-    if !SIDELOAD_ROOTS.iter().any(|root| app_dir.starts_with(root)) {
+    if !app_dir.starts_with(SIDELOADED_APPS_DIR) {
         return true;
     }
 
@@ -1015,7 +1027,7 @@ fn sideloaded_app_dir_name(app_dir: &str) -> Option<&str> {
 }
 
 fn sideloaded_path_suffix(path: &str) -> Option<&str> {
-    SIDELOAD_ROOTS.iter().find_map(|root| path.strip_prefix(root).and_then(|path| path.strip_prefix('/')))
+    path.strip_prefix(SIDELOADED_APPS_DIR).and_then(|path| path.strip_prefix('/'))
 }
 
 #[cfg(test)]
@@ -1032,8 +1044,12 @@ mod tests {
     const THIRD_PARTY_ELF_PATH: &str = "/keyos/sideloaded-apps/00112233445566778899aabbccddeeff/app.elf";
 
     fn app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
-        let source = if elf_path.is_some() { AppSource::ThirdParty } else { AppSource::BuiltIn };
-        app_info_with_source(app_id, name, elf_path, source)
+        let (root, signature) = if elf_path.is_some() {
+            (AppResourcesRoot::Sideloaded, AppSignature::ThirdParty(None))
+        } else {
+            (AppResourcesRoot::BuiltIn, AppSignature::Foundation)
+        };
+        app_info_with_trust(app_id, name, elf_path, root, signature)
     }
 
     fn third_party_app_with_permissions(permissions: &[(&str, &[&str])]) -> AppInfo {
@@ -1051,10 +1067,16 @@ mod tests {
     }
 
     fn built_in_app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
-        app_info_with_source(app_id, name, elf_path, AppSource::BuiltIn)
+        app_info_with_trust(app_id, name, elf_path, AppResourcesRoot::BuiltIn, AppSignature::Foundation)
     }
 
-    fn app_info_with_source(app_id: &str, name: &str, elf_path: Option<&str>, source: AppSource) -> AppInfo {
+    fn app_info_with_trust(
+        app_id: &str,
+        name: &str,
+        elf_path: Option<&str>,
+        root: AppResourcesRoot,
+        signature: AppSignature,
+    ) -> AppInfo {
         AppInfo {
             id: decode_app_id_str(app_id).unwrap(),
             app_dir: elf_path.map(|path| path.strip_suffix("/app.elf").unwrap_or(path).to_owned()),
@@ -1073,10 +1095,10 @@ mod tests {
                 file_hashes: BTreeMap::new(),
             },
             manifest_bytes: Vec::new(),
-            source,
+            root,
+            signature,
             is_flux: false,
             binary_size: 0,
-            third_party_signer: None,
         }
     }
 
@@ -1140,7 +1162,7 @@ mod tests {
             .list_apps(
                 "en",
                 &[],
-                &app_manager::AppFilter::third_party_only(),
+                &app_manager::AppFilter::sideloaded_only(),
                 &PermissionGrantStore::default()
             )
             .is_empty());
@@ -1184,7 +1206,7 @@ mod tests {
     #[test]
     fn sideloaded_app_launchable_only_with_matching_publisher() {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
-        app.third_party_signer = Some(signer_bytes());
+        app.signature = AppSignature::ThirdParty(Some(signer_bytes()));
 
         // No matching publisher: not launchable and no publisher fingerprint to show.
         assert_eq!(app.publisher_and_launch_error(&[]), (String::new(), Some(LaunchError::NoCertificate)));
@@ -1200,7 +1222,7 @@ mod tests {
     #[test]
     fn expired_publisher_blocks_launch_under_its_own_fingerprint() {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
-        app.third_party_signer = Some(signer_bytes());
+        app.signature = AppSignature::ThirdParty(Some(signer_bytes()));
         let publishers =
             vec![publisher_cert_valid_until(SIGNER_HEX, "Acme", app_manager::now_unix_seconds() - 1)];
 
@@ -1214,7 +1236,7 @@ mod tests {
     fn launch_error_tracks_signer_and_builtin() {
         let built_in_id = "0x426974636f696e2057616c6c65740000";
         let mut sideloaded = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
-        sideloaded.third_party_signer = Some(signer_bytes());
+        sideloaded.signature = AppSignature::ThirdParty(Some(signer_bytes()));
         let registry = registry_with(vec![
             sideloaded,
             built_in_app_info(built_in_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf")),
@@ -1231,11 +1253,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn permission_request_info_prompts_for_requested_approval_based_permission() {
-        // Provide the camera server's manifest through an installed app so the message-id
-        // lookup does not depend on the xtask-generated SYSTEM_MANIFESTS (empty under plain
-        // `cargo test`).
+    /// A built-in app providing the camera server's manifest, so the message-id lookup does not
+    /// depend on the xtask-generated SYSTEM_MANIFESTS (empty under plain `cargo test`).
+    fn camera_provider() -> AppInfo {
         let camera_app_id_hex = "0x6775692d6170702d63616d6572610000";
         let mut camera = built_in_app_info(camera_app_id_hex, "Camera", Some("/keyos/apps/camera/app.elf"));
         camera.manifest.servers = BTreeMap::from([(
@@ -1249,13 +1269,19 @@ mod tests {
                     cfg: None,
                     permission_group: Some("peripherals.camera-use".to_string()),
                     required_signature: Some(app_manifest::RequiredSignature::ThirdParty),
-                    required_type: None,
                     approval: app_manifest::ApprovalBehavior::GrantOnFirstUse,
                 },
             )]),
         )]);
-        let registry =
-            registry_with(vec![third_party_app_with_permissions(&[("os/camera", &["Subscribe"])]), camera]);
+        camera
+    }
+
+    #[test]
+    fn permission_request_info_prompts_for_requested_approval_based_permission() {
+        let registry = registry_with(vec![
+            third_party_app_with_permissions(&[("os/camera", &["Subscribe"])]),
+            camera_provider(),
+        ]);
 
         let result = registry.permission_request_info(
             decode_app_id_str(THIRD_PARTY_APP_ID).unwrap(),
@@ -1274,6 +1300,42 @@ mod tests {
             }
             other => panic!("unexpected permission request result: {other:?}"),
         }
+    }
+
+    /// A Foundation-signed sideload is trusted like a built-in (launches with no publisher cert,
+    /// every declared permission auto-granted, never prompted) but removable like any sideload.
+    #[test]
+    fn foundation_sideloaded_app_is_trusted_like_a_built_in_but_removable() {
+        let mut app = app_info_with_trust(
+            THIRD_PARTY_APP_ID,
+            "Legacy",
+            Some(THIRD_PARTY_ELF_PATH),
+            AppResourcesRoot::Sideloaded,
+            AppSignature::Foundation,
+        );
+        app.manifest.permissions =
+            BTreeMap::from([("os/camera".to_string(), BTreeSet::from(["Subscribe".to_string()]))]);
+        let registry = registry_with(vec![app, camera_provider()]);
+        let grants = grants_for(&registry);
+
+        let apps = registry.list_apps("en", &[], &app_manager::AppFilter::sideloaded_only(), &grants);
+        assert_eq!(apps.len(), 1, "Settings lists the Foundation sideload");
+        assert_eq!(apps[0].launch_error, None, "launchable with no publisher cert");
+        assert!(apps[0].can_remove);
+        assert!(apps[0].publisher.is_empty());
+        assert!(apps[0].approvable_permissions.is_empty(), "nothing is left to approve");
+        assert_eq!(apps[0].basic_permissions.len(), 1, "declared permissions are auto-granted");
+
+        assert_eq!(
+            registry.permission_request_info(
+                decode_app_id_str(THIRD_PARTY_APP_ID).unwrap(),
+                "os/camera",
+                1,
+                "en",
+                &grants,
+            ),
+            PermissionRequestInfoResult::NotGrantable
+        );
     }
 
     #[test]
@@ -1367,7 +1429,7 @@ mod tests {
         let apps = registry.list_apps(
             "en",
             &[],
-            &app_manager::AppFilter::third_party_only(),
+            &app_manager::AppFilter::sideloaded_only(),
             &PermissionGrantStore::default(),
         );
 
@@ -1379,14 +1441,14 @@ mod tests {
     }
 
     #[test]
-    fn sideloaded_flux_dir_name_must_match_app_id() {
+    fn sideloaded_dir_name_must_match_app_id() {
         let app_id = decode_app_id_str(THIRD_PARTY_APP_ID).unwrap();
 
-        let matching = format!("{SIDELOADED_FLUX_APPS_DIR}/{THIRD_PARTY_APP_DIR}");
-        assert!(sideloaded_app_dir_matches_app_id(Some(&matching), &app_id, AppSource::ThirdParty));
+        let matching = format!("{SIDELOADED_APPS_DIR}/{THIRD_PARTY_APP_DIR}");
+        assert!(sideloaded_app_dir_matches_app_id(Some(&matching), &app_id, AppResourcesRoot::Sideloaded));
 
-        let mismatched = format!("{SIDELOADED_FLUX_APPS_DIR}/ffffffffffffffffffffffffffffffff");
-        assert!(!sideloaded_app_dir_matches_app_id(Some(&mismatched), &app_id, AppSource::ThirdParty));
+        let mismatched = format!("{SIDELOADED_APPS_DIR}/ffffffffffffffffffffffffffffffff");
+        assert!(!sideloaded_app_dir_matches_app_id(Some(&mismatched), &app_id, AppResourcesRoot::Sideloaded));
     }
 
     /// An archive claiming a built-in's app id is refused at install time, because a scan would
@@ -1419,7 +1481,7 @@ mod tests {
 
     #[test]
     fn list_apps_filters_and_tags_sideloaded_flux_apps() {
-        let flux_elf = format!("{SIDELOADED_FLUX_APPS_DIR}/{THIRD_PARTY_APP_DIR}/app.elf");
+        let flux_elf = format!("{SIDELOADED_APPS_DIR}/{THIRD_PARTY_APP_DIR}/app.elf");
         let mut flux_app = app_info(THIRD_PARTY_APP_ID, "Monero", Some(&flux_elf));
         flux_app.is_flux = true;
         let built_in_id = "0x426974636f696e2057616c6c65740000";
@@ -1427,7 +1489,7 @@ mod tests {
         let registry = registry_with(vec![flux_app, built_in]);
         let grants = PermissionGrantStore::default();
 
-        let third_party = registry.list_apps("en", &[], &app_manager::AppFilter::third_party_only(), &grants);
+        let third_party = registry.list_apps("en", &[], &app_manager::AppFilter::sideloaded_only(), &grants);
         assert_eq!(third_party.len(), 1);
         assert!(third_party[0].is_flux, "Settings sees the sideloaded flux app tagged as flux");
         assert!(third_party[0].can_remove);

@@ -11,9 +11,7 @@
 use std::io::Read;
 
 use anyhow::Context;
-use app_manager::{
-    ArchiveLocation, InstallError, FLUX_EMULATOR_APP_DIR, SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR,
-};
+use app_manager::{ArchiveLocation, InstallError, SIDELOADED_APPS_DIR};
 use app_manifest::Manifest;
 use fs::adapter::FsAdapter;
 use fs::messages::{
@@ -23,11 +21,7 @@ use fs::messages::{
 use server::{CheckedPermissions, MessageAllowed};
 use xous::AppId;
 
-use crate::registry::{AppKind, AppRegistry};
-
-/// The server a Flux child declares to reach the emulator; declaring it is what makes an archive
-/// a Flux app.
-const FLUX_EMULATOR_SERVER: &str = "os/gui-app-emu-flux";
+use crate::registry::{AppRegistry, FLUX_EMULATOR_SERVER};
 
 /// Appended to a bundle directory's name while its archive is being written; the registry never
 /// scans such a name as an app.
@@ -82,7 +76,7 @@ pub(crate) trait InstalledApps {
     fn is_built_in(&self, app_id: &AppId) -> bool;
     fn is_running(&self, app_id: &AppId) -> bool;
     fn bundle_signer(&self, app_id: &AppId) -> Option<Option<[u8; 33]>>;
-    fn bundle_kind(&self, app_id: &AppId) -> Option<AppKind>;
+    fn flux_emulator_installed(&self) -> bool;
 }
 
 impl InstalledApps for AppRegistry {
@@ -94,7 +88,7 @@ impl InstalledApps for AppRegistry {
         AppRegistry::bundle_signer(self, app_id)
     }
 
-    fn bundle_kind(&self, app_id: &AppId) -> Option<AppKind> { AppRegistry::bundle_kind(self, app_id) }
+    fn flux_emulator_installed(&self) -> bool { AppRegistry::flux_emulator_installed(self) }
 }
 
 /// Where an install put an app, so a caller that has to undo it does not have to guess.
@@ -154,12 +148,15 @@ pub(crate) fn install_archive(
         .map_err(|e| install_error(InstallError::InvalidSignature, format!("{e:#}")))?;
 
     let app_id = AppId(manifest.app_id);
-    let kind = if manifest.permissions.contains_key(FLUX_EMULATOR_SERVER) {
-        AppKind::Flux
-    } else {
-        AppKind::Standard
-    };
-    let app_dir = bundle_dir(fs, kind, &app_id)?;
+    let app_dir = format!("{SIDELOADED_APPS_DIR}/{}", hex::encode(app_id.0));
+    // A Flux child is run by the emulator, so it installs only while the emulator itself is
+    // installed; the emulator need not be running.
+    if manifest.permissions.contains_key(FLUX_EMULATOR_SERVER) && !installed.flux_emulator_installed() {
+        return Err(install_error(
+            InstallError::FluxEmulatorMissing,
+            format!("app 0x{} is a Flux child and the emulator is not installed", hex::encode(app_id.0)),
+        ));
+    }
     if installed.is_built_in(&app_id) {
         return Err(install_error(
             InstallError::BuiltInApp,
@@ -182,24 +179,14 @@ pub(crate) fn install_archive(
                 format!("app 0x{} is installed from another publisher", hex::encode(app_id.0)),
             ));
         }
-        // And only into the root it already lives in, or the other one keeps a second bundle under
-        // this id and the next scan sees the same app twice.
-        if installed.bundle_kind(&app_id) != Some(kind) {
-            return Err(install_error(
-                InstallError::Internal,
-                format!("app 0x{} is installed as the other kind of app", hex::encode(app_id.0)),
-            ));
-        }
     } else {
         // A bundle the scan skipped is not in the registry but still owns this id's grants and
         // AppData, so its directory alone blocks the id.
-        for dir in bundle_dirs(&app_id) {
-            if fs.metadata(&dir, fs::Location::System).is_ok() {
-                return Err(install_error(
-                    InstallError::PublisherMismatch,
-                    format!("app 0x{} is installed from another publisher", hex::encode(app_id.0)),
-                ));
-            }
+        if fs.metadata(&app_dir, fs::Location::System).is_ok() {
+            return Err(install_error(
+                InstallError::PublisherMismatch,
+                format!("app 0x{} is installed from another publisher", hex::encode(app_id.0)),
+            ));
         }
     }
 
@@ -277,48 +264,26 @@ fn write_bundle<R: Read>(
 
 /// Drop the staging directories a power loss left behind; nothing else reclaims them.
 pub(crate) fn sweep_staged_bundles(fs: &impl InstallFs) {
-    for root in [SIDELOADED_APPS_DIR, SIDELOADED_FLUX_APPS_DIR] {
-        let Ok(dir) = fs.open_dir(root, fs::Location::System) else { continue };
-        // Collect before removing: fatfs iterates entries in place.
-        let staged: Vec<String> = dir
-            .filter_map(Result::ok)
-            .filter(|entry| entry.is_dir && entry.name.ends_with(STAGING_SUFFIX))
-            .map(|entry| entry.name)
-            .collect();
-        for name in staged {
-            log::info!("removing {root}/{name}, left by an interrupted install");
-            let _ = fs.remove_if_exists(&format!("{root}/{name}"), fs::Location::System);
-        }
+    let Ok(dir) = fs.open_dir(SIDELOADED_APPS_DIR, fs::Location::System) else { return };
+    // Collect before removing: fatfs iterates entries in place.
+    let staged: Vec<String> = dir
+        .filter_map(Result::ok)
+        .filter(|entry| entry.is_dir && entry.name.ends_with(STAGING_SUFFIX))
+        .map(|entry| entry.name)
+        .collect();
+    for name in staged {
+        log::info!("removing {SIDELOADED_APPS_DIR}/{name}, left by an interrupted install");
+        let _ = fs.remove_if_exists(&format!("{SIDELOADED_APPS_DIR}/{name}"), fs::Location::System);
     }
 }
 
-/// Both places a bundle for this app id can live.
-fn bundle_dirs(app_id: &AppId) -> [String; 2] {
-    let dir_name = hex::encode(app_id.0);
-    [format!("{SIDELOADED_APPS_DIR}/{dir_name}"), format!("{SIDELOADED_FLUX_APPS_DIR}/{dir_name}")]
-}
-
-/// The bundle directory an archive installs into.
-fn bundle_dir(fs: &impl InstallFs, kind: AppKind, app_id: &AppId) -> Result<String, InstallError> {
-    let root = match kind {
-        AppKind::Flux => {
-            let emulator_elf = format!("{FLUX_EMULATOR_APP_DIR}/{}", app_archive::ELF_FILE);
-            if fs.metadata(&emulator_elf, fs::Location::System).is_err() {
-                return Err(InstallError::FluxEmulatorMissing);
-            }
-            SIDELOADED_FLUX_APPS_DIR
-        }
-        AppKind::Standard => SIDELOADED_APPS_DIR,
-    };
-    Ok(format!("{root}/{}", hex::encode(app_id.0)))
-}
-
-/// Verify an archive manifest as a third-party bundle, returning it with its signer.
+/// Verify an archive manifest as a sideloaded bundle, returning it with its signer (`None` for a
+/// Foundation-signed archive).
 fn verify_manifest(manifest_raw: &[u8]) -> anyhow::Result<(Manifest, Option<[u8; 33]>)> {
-    let (manifest_json, signer) = crate::registry::verified_third_party_manifest(manifest_raw)?;
+    let (manifest_json, signature) = crate::registry::verified_sideload_manifest(manifest_raw)?;
     let manifest =
         app_manifest::try_from_bytes(manifest_json).map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
-    Ok((manifest, signer))
+    Ok((manifest, signature.signer()))
 }
 
 fn entry_name_and_size<R: Read>(entry: &tar::Entry<'_, R>) -> anyhow::Result<(String, u64)> {
@@ -389,7 +354,7 @@ mod tests {
         built_in: bool,
         running: bool,
         signer: Option<Option<[u8; 33]>>,
-        kind: Option<AppKind>,
+        emulator_installed: bool,
     }
 
     impl InstalledApps for FakeInstalledApps {
@@ -399,7 +364,7 @@ mod tests {
 
         fn bundle_signer(&self, _app_id: &AppId) -> Option<Option<[u8; 33]>> { self.signer }
 
-        fn bundle_kind(&self, _app_id: &AppId) -> Option<AppKind> { self.kind }
+        fn flux_emulator_installed(&self) -> bool { self.emulator_installed }
     }
 
     fn app_id() -> AppId { AppId(app_manifest::parse_app_id_bytes(APP_ID).unwrap()) }
@@ -491,15 +456,14 @@ mod tests {
     }
 
     #[test]
-    fn installs_a_flux_app_under_the_emulator() {
+    fn installs_a_flux_app_when_the_emulator_is_installed() {
         let manifest = manifest_json(&[("app.elf", ELF)], &[FLUX_EMULATOR_SERVER]);
         let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
-        write_file(&fs, &format!("{FLUX_EMULATOR_APP_DIR}/app.elf"), &mut &b"emulator"[..]).unwrap();
+        let installed = FakeInstalledApps { emulator_installed: true, ..Default::default() };
 
-        install(&fs, &FakeInstalledApps::default()).unwrap();
+        install(&fs, &installed).unwrap();
 
-        let flux_dir = format!("{SIDELOADED_FLUX_APPS_DIR}/{}", hex::encode(app_id().0));
-        assert_eq!(read(&fs, &format!("{flux_dir}/app.elf")).as_deref(), Some(ELF));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
     }
 
     #[test]
@@ -600,11 +564,7 @@ mod tests {
     #[test]
     fn another_publishers_app_under_the_same_id_is_rejected() {
         let fs = staged(&valid_archive());
-        let installed = FakeInstalledApps {
-            signer: Some(Some([9u8; 33])),
-            kind: Some(AppKind::Standard),
-            ..Default::default()
-        };
+        let installed = FakeInstalledApps { signer: Some(Some([9u8; 33])), ..Default::default() };
 
         let error = install(&fs, &installed).unwrap_err();
 
@@ -612,35 +572,21 @@ mod tests {
         assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None, "the installed app is untouched");
     }
 
-    /// The same publisher is not enough on its own: an archive that changed kind installs into the
-    /// other sideload root, leaving the bundle it meant to replace for the next scan to find under
-    /// the same app id.
-    #[test]
-    fn an_archive_that_changed_kind_is_not_an_update() {
-        let fs = staged(&valid_archive());
-        let installed =
-            FakeInstalledApps { signer: Some(None), kind: Some(AppKind::Flux), ..Default::default() };
-
-        let error = install(&fs, &installed).unwrap_err();
-
-        assert!(matches!(error, InstallError::Internal));
-        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None, "nothing is written");
-    }
-
     /// A bundle the scan skipped is not in the registry but still owns the AppData and grants
-    /// keyed by its app id, so its directory blocks the id even at the other sideload root.
+    /// keyed by its app id, so its directory blocks the id.
     #[test]
     fn an_unregistered_bundle_blocks_the_id() {
-        let manifest = manifest_json(&[("app.elf", ELF)], &[FLUX_EMULATOR_SERVER]);
-        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
-        write_file(&fs, &format!("{FLUX_EMULATOR_APP_DIR}/app.elf"), &mut &b"emulator"[..]).unwrap();
+        let fs = staged(&valid_archive());
         write_file(&fs, &format!("{APP_DIR}/app.elf"), &mut &b"unknown to the registry"[..]).unwrap();
 
         let error = install(&fs, &FakeInstalledApps::default()).unwrap_err();
 
         assert!(matches!(error, InstallError::PublisherMismatch));
-        let flux_dir = format!("{SIDELOADED_FLUX_APPS_DIR}/{}", hex::encode(app_id().0));
-        assert_eq!(read(&fs, &format!("{flux_dir}/app.elf")), None, "nothing is written");
+        assert_eq!(
+            read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(),
+            Some(&b"unknown to the registry"[..]),
+            "the unregistered bundle is untouched"
+        );
     }
 
     #[test]
@@ -649,8 +595,7 @@ mod tests {
         write_file(&fs, &format!("{APP_DIR}/app.elf"), &mut &b"the installed app"[..]).unwrap();
         // Hosted manifests are unsigned, so the signer both sides is None; what matters is that a
         // matching identity is an update rather than a takeover.
-        let installed =
-            FakeInstalledApps { signer: Some(None), kind: Some(AppKind::Standard), ..Default::default() };
+        let installed = FakeInstalledApps { signer: Some(None), ..Default::default() };
 
         install(&fs, &installed).unwrap();
 
@@ -682,8 +627,7 @@ mod tests {
         let manifest = manifest_json(&[("app.elf", ELF), ("icon.bin", ICON)], &[]);
         let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
         write_file(&fs, &format!("{APP_DIR}/app.elf"), &mut &b"the installed app"[..]).unwrap();
-        let installed =
-            FakeInstalledApps { signer: Some(None), kind: Some(AppKind::Standard), ..Default::default() };
+        let installed = FakeInstalledApps { signer: Some(None), ..Default::default() };
 
         let error = install(&fs, &installed).unwrap_err();
 

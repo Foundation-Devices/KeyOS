@@ -85,6 +85,7 @@ lint:
     just check-workspace
     cargo xtask build --hosted --dont-sign
     cargo xtask build --dont-sign
+    cargo xtask build-sideload-apps --dont-sign
     cargo xtask build --is-recovery
     cargo xtask build sys-benchmark
     cargo audit

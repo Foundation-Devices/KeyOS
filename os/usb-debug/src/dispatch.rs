@@ -202,17 +202,6 @@ impl DebugProtocol {
                 }
             },
             Command::LoadAppBegin { app_id } => self.load_app_begin(app_id, app_manager::SIDELOADED_APPS_DIR),
-            Command::LoadFluxAppBegin { app_id } => {
-                // A sideloaded Flux app lives under the emulator's directory and is run by it, so
-                // refuse to sideload one when the emulator itself is not installed, rather than
-                // recreating its directory underneath.
-                let emu_elf = format!("{}/app.elf", app_manager::FLUX_EMULATOR_APP_DIR);
-                if self.fs.metadata(emu_elf, Location::System).is_err() {
-                    log::warn!("debug: LOAD_FLUX_APP rejected: the Flux emulator is not installed");
-                    return Response::Err;
-                }
-                self.load_app_begin(app_id, app_manager::SIDELOADED_FLUX_APPS_DIR)
-            }
             Command::LoadAppFileBegin { filename, size } => self.load_app_file_begin(&filename, size),
             Command::LoadAppChunk(data) => self.load_app_chunk(&data),
             Command::LoadAppEnd => self.load_app_end(),
@@ -760,7 +749,6 @@ fn command_allowed(cmd: &Command) -> bool {
             | Command::LaunchApp { .. }
             | Command::GetDeveloperMode
             | Command::LoadAppBegin { .. }
-            | Command::LoadFluxAppBegin { .. }
             | Command::LoadAppFileBegin { .. }
             | Command::LoadAppChunk(_)
             | Command::LoadAppEnd

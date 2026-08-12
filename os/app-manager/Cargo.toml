@@ -48,7 +48,9 @@ flate2 = "1.1"
 fs = { workspace = true, features = ["test"] }
 
 [build-dependencies]
+hex = "0.4.3"
 localizer-codegen = { workspace = true }
+toml = "0.9"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

@@ -111,7 +111,6 @@ const DEFAULT_APPS_NORMAL: &[&str] = &[
     "gui-app-alerts",
     "gui-app-authenticator",
     "gui-app-bitcoin",
-    "gui-app-emu-flux-server",
     "gui-app-file-browser",
     "gui-app-onboarding",
     "gui-app-qr-scanner",
@@ -131,9 +130,13 @@ const DEV_APPS: &[&str] = &[
     "gui-app-update-test",
 ];
 
-const DEFAULT_FLUX_APPS_NORMAL: &[&str] = &["app-flux-ethereum", "app-flux-solana"];
-
-const DEFAULT_FLUX_APPS_HOSTED: &[&str] = &[/*"app-flux-ethereum"*/];
+/// Legacy mode components: built and signed with the system, but emitted as individual
+/// sideloadable `.app` archives next to the images instead of being staged into the system.
+/// Their bundles are signed with the build's own key, which the firmware trusts as
+/// Foundation, so the device treats them like built-ins while they install and remove like
+/// sideloads.
+pub const FOUNDATION_SIDELOAD_APPS: &[&str] =
+    &["gui-app-emu-flux-server", "app-flux-ethereum", "app-flux-solana"];
 
 // Services whose exit should take the whole hosted system down with them. A service
 // belongs here when it runs a real hosted server (its `main` keeps listening), so an
@@ -214,9 +217,9 @@ enum Commands {
         /// (default: <target-root>/app-bundles)
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Developer signing key's cosign2.toml (e.g. from the SDK `foundation cert gen`, whose
-        /// publisher certificate is installed on the device). Defaults to the repo key, which is
-        /// not an allowed publisher (the bundle uploads but will not launch).
+        /// Third-party developer signing key's cosign2.toml (e.g. from the SDK `foundation cert
+        /// gen`, whose publisher certificate is installed on the device). Without it the repo
+        /// key signs, which firmware built from the same key trusts as Foundation.
         #[arg(long = "cosign2", value_name = "COSIGN2_TOML")]
         cosign2: Option<PathBuf>,
         /// Build for the simulator (hosted) instead of hardware; leaves the bundle unsigned.
@@ -227,6 +230,22 @@ enum Commands {
         /// is a host binary, so the device could only reject an archive of one.
         #[arg(long, conflicts_with = "hosted")]
         archive: bool,
+    },
+    /// Build Foundation-signed sideloadable <APP>.app archives next to the images.
+    BuildSideloadApps {
+        /// App crates to build and pack (default: the Legacy mode components)
+        #[arg(value_name = "APP")]
+        apps: Vec<String>,
+        /// Don't sign the bundles (used for CI)
+        #[arg(long)]
+        dont_sign: bool,
+        /// Use the reproducible build settings production firmware builds use.
+        #[arg(long)]
+        reproducible: bool,
+        /// Build with the production feature set, as a production firmware build does.
+        /// Implies --reproducible.
+        #[arg(long)]
+        production_firmware: bool,
     },
     /// Build a full flash-able firmware image, combining the bootloader, the recovery and normal images.
     /// Run the following first (in this order):
@@ -311,11 +330,6 @@ struct BuildArgs {
     /// Can be specified multiple times.
     #[arg(long = "app", verbatim_doc_comment, value_name = "APP")]
     apps: Vec<String>,
-    /// Flux App to build and include in the firmware image.
-    /// These are not run by default, but launched by gui-app-emu-flux instead.
-    /// Can be specified multiple times.
-    #[arg(long = "flux", verbatim_doc_comment, value_name = "FLUX")]
-    flux_apps: Vec<String>,
     /// Build or run in hosted mode, i.e. on the PC. Also known as running the simulator.
     #[arg(long)]
     hosted: bool,
@@ -385,7 +399,8 @@ fn main() {
         Commands::BuildApp { app, out, cosign2, hosted, archive } => {
             let builder = if hosted { Builder::hosted() } else { Builder::hardware() };
             let out = out.unwrap_or_else(|| builder.get_target_root().join("app-bundles"));
-            let bundle = builder.build_app(&app, &out, cosign2);
+            let bundle =
+                builder.build_app(&app, &out, cosign2, SigningMode::Developer, FOUNDATION_SIDELOAD_APPS);
             println!();
             println!("App bundle ready at {}", bundle.dir.display());
             println!("Sideload it (device unlocked, Developer Mode on) with:");
@@ -394,13 +409,26 @@ fn main() {
                 pack_app_archive(&bundle, &out.join(app_archive::archive_file_name(&app)));
             }
         }
+        Commands::BuildSideloadApps { apps, dont_sign, reproducible, production_firmware } => {
+            build_sideload_apps(
+                &apps,
+                dont_sign,
+                BuildArgs { reproducible, production_firmware, ..Default::default() },
+            );
+        }
         Commands::BuildFirmwareImage { samba_crypt_args } => {
             create_boot_image(samba_crypt_args);
         }
         Commands::BuildAll { build_args, dont_sign, bootloader_args, samba_crypt_args } => {
             build_keyos_boot(bootloader_args);
             build(build_args.clone().with_recovery(true), dont_sign);
+            let sideload_args = BuildArgs {
+                reproducible: build_args.reproducible,
+                production_firmware: build_args.production_firmware,
+                ..Default::default()
+            };
             build(build_args, dont_sign);
+            build_sideload_apps(&[], dont_sign, sideload_args);
             create_boot_image(samba_crypt_args);
         }
         Commands::Run { gdb, mut build_args } => {
@@ -437,21 +465,6 @@ fn main() {
     }
 }
 
-/// Pack a built bundle into an app archive the device can install from a USB drive.
-fn pack_app_archive(bundle: &BundledApp, archive_path: &std::path::Path) {
-    let report = app_archive::pack_bundle(&bundle.dir, archive_path, &bundle.hashed_files)
-        .unwrap_or_else(|e| panic!("Could not pack {}: {e}", bundle.dir.display()));
-    println!();
-    println!(
-        "App archive ready at {} ({} entries, {} bytes from {} bytes of bundle)",
-        report.archive_path.display(),
-        report.entries,
-        report.archive_bytes,
-        report.bundle_bytes
-    );
-    println!("Copy it to a USB drive and install it from Settings > Apps on the device.");
-}
-
 fn build(mut build_args: BuildArgs, dont_sign: bool) {
     let is_recovery = build_args.is_recovery;
     process_services(&mut build_args);
@@ -461,6 +474,48 @@ fn build(mut build_args: BuildArgs, dont_sign: bool) {
         signing_mode,
         KEYOS_VERSION,
     );
+}
+
+/// Build `apps` (default: [`FOUNDATION_SIDELOAD_APPS`]) as Foundation-signed sideloadable
+/// bundles and pack each into an `<APP>.app` archive next to the images. `build_args` carries
+/// the reproducibility and feature flags of the image build the bundles belong to.
+///
+/// print-hashes reports the bundle dir as release artifacts, so bundles and archives must stay
+/// paired: the default full-set run wipes the bundle dir and every `.app` archive first, making
+/// its output authoritative, while an explicit subset replaces only its own bundles and
+/// archives and leaves the rest of the shipped set in place. A `--dont-sign` run only validates
+/// the manifests and builds the crates: its unsigned bundles would shadow the signed artifacts,
+/// so they land in a scratch dir and nothing shipped is touched or packed.
+fn build_sideload_apps(apps: &[String], dont_sign: bool, build_args: BuildArgs) {
+    let builder = Builder::new(build_args);
+    // Developer signing: development firmware classifies a bundle as Foundation by its slot-2
+    // key matching the build's own; production bundles are signed externally by the release
+    // pipeline.
+    let signing_mode = if dont_sign { SigningMode::None } else { SigningMode::Developer };
+    let bundles_dir = if dont_sign {
+        builder.get_target_root().join("sideload-bundles-unsigned")
+    } else {
+        builder.get_target_root().join(SIDELOAD_BUNDLES_DIR)
+    };
+    if apps.is_empty() && !dont_sign {
+        std::fs::remove_dir_all(&bundles_dir).ok();
+        for entry in Builder::images_path().read_dir().expect("images dir is readable").flatten() {
+            if entry.path().extension().is_some_and(|ext| ext == "app") {
+                std::fs::remove_file(entry.path()).expect("stale app archive is removable");
+            }
+        }
+    }
+    let apps: Vec<&str> = if apps.is_empty() {
+        FOUNDATION_SIDELOAD_APPS.to_vec()
+    } else {
+        apps.iter().map(String::as_str).collect()
+    };
+    for app_name in &apps {
+        let bundle = builder.build_app(app_name, &bundles_dir, None, signing_mode, FOUNDATION_SIDELOAD_APPS);
+        if !dont_sign {
+            pack_app_archive(&bundle, &Builder::images_path().join(app_archive::archive_file_name(app_name)));
+        }
+    }
 }
 
 fn process_services(build_args: &mut BuildArgs) {
@@ -505,9 +560,6 @@ fn process_services(build_args: &mut BuildArgs) {
                 build_args.apps = DEFAULT_APPS_NORMAL.iter().map(|s| s.to_string()).collect();
                 build_args.apps.extend(DEV_APPS.iter().map(|s| s.to_string()));
             }
-            if build_args.flux_apps.is_empty() {
-                build_args.flux_apps = DEFAULT_FLUX_APPS_HOSTED.iter().map(|s| s.to_string()).collect();
-            }
             SYSTEM_SERVICES_HOSTED.iter().chain(DEFAULT_SERVICES_HOSTED.iter()).copied().collect()
         } else if build_args.is_recovery {
             DEFAULT_SERVICES_RECOVERY.to_vec()
@@ -517,9 +569,6 @@ fn process_services(build_args: &mut BuildArgs) {
                 if !build_args.production_firmware {
                     build_args.apps.extend(DEV_APPS.iter().map(|s| s.to_string()));
                 }
-            };
-            if build_args.flux_apps.is_empty() {
-                build_args.flux_apps = DEFAULT_FLUX_APPS_NORMAL.iter().map(|s| s.to_string()).collect()
             };
             DEFAULT_SERVICES_NORMAL.to_vec()
         };
@@ -568,6 +617,9 @@ fn check_crates(crates: Vec<String>) {
         // Add all apps
         all_crates.extend(DEFAULT_APPS_NORMAL.iter().map(|s| s.to_string()));
         all_crates.extend(DEV_APPS.iter().map(|s| s.to_string()));
+        // Of the sideload archives, only the emulator: the flux apps' build scripts fetch
+        // their pinned upstream sources, which a check sweep should not depend on.
+        all_crates.push("gui-app-emu-flux-server".to_string());
 
         // Remove duplicates
         all_crates.sort();

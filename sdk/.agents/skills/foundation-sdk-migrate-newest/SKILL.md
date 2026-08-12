@@ -90,13 +90,11 @@ For every message the app grants, resolve its effective signature requirement fr
    `permissionGroup`; `thirdParty` is grantable even when it carries none.
 2. With no explicit `requiredSignature`, a grouped message defaults to `thirdParty` and an ungrouped one to
    `foundation`.
-3. A `requiredType` narrows it further, so `flux` leaves the message unreachable to an ordinary sideloaded app
-   whatever its signature says.
-4. Finally, `approval` must be `autoAllow` or `grantOnFirstUse`. It is `notUserGrantable` when absent, and that
-   is unavailable no matter what the three steps above resolved to.
+3. Finally, `approval` must be `autoAllow` or `grantOnFirstUse`. It is `notUserGrantable` when absent, and that
+   is unavailable no matter what the two steps above resolved to.
 
 `approval` does not decide grantability in the other direction: an `autoAllow` message is not third-party-usable
-unless steps 1 to 3 already said so. Checking for a `permissionGroup` alone passes messages that are grouped
+unless steps 1 and 2 already said so. Checking for a `permissionGroup` alone passes messages that are grouped
 *and* `requiredSignature = "foundation"`, which is a live combination (several `os/settings` and
 `os/quantum-link` entries), so the app ships and the call is refused the first time it runs. That refusal aborts
 the app wherever the API wrapper unwraps it, which is most of them, and comes back as an error where the wrapper

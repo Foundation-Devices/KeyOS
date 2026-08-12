@@ -343,4 +343,10 @@ pub(crate) fn print_hashes() {
     let apps_dir_local =
         project_root().join("target").join(TARGET_TRIPLE_KEYOS).join("release").join(KEYOS_APPS_DIR);
     print_app_hashes(&apps_dir_local, &apps_dir_local);
+    // The sideload archives are release artifacts too. Their signed bundle files live in the
+    // per-build sideload bundle dir, named by app id; the archives re-pack deterministically
+    // from them, so hashing the header-stripped elf compares across signing identities. Resolve
+    // the dir the way the build wrote it, so CARGO_TARGET_DIR is honoured.
+    let target_root = Builder::hardware().get_target_root();
+    print_app_hashes(&target_root.join(crate::builder::SIDELOAD_BUNDLES_DIR), &target_root);
 }

@@ -376,7 +376,7 @@ impl Gui {
             #[cfg(not(feature = "recovery-os"))]
             locale: settings::global::Locale::default(),
             #[cfg(all(keyos, not(feature = "recovery-os")))]
-            developer_mode_enabled: false,
+            developer_mode_enabled: cfg!(not(feature = "production")),
             startup_state,
         })
     }

@@ -22,7 +22,6 @@ export global LauncherCallbacks {
     callback item-clicked(length, length, string);
     callback move-item(string, int, string, int);
     callback remove-item-requested(string);
-    callback delete-legacy-confirmed();
     callback scan-clicked(bool);
     callback bitcoin-scrub-update(length, length);
     callback bitcoin-scrub-end();
@@ -42,10 +41,6 @@ export global LauncherCallbacks {
 export global State {
     in-out property <string> loading-item-id: "";
     in property <bool> update-resume-active: false;
-    // Set when the user asks to delete Legacy; drives the centered confirmation modal. The
-    // pending item id is snapshotted so confirm removes exactly what was tapped.
-    in-out property <bool> delete-legacy-active: false;
-    in-out property <string> pending-delete-item-id: "";
     in-out property <bool> rearrange-mode: false;
     in-out property <int> jiggle-step: 0;
     in-out property <int> current-page: 0;

@@ -228,13 +228,12 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             return RemoveInstalledAppResult::Running;
         }
 
-        // Removing the Legacy emulator wipes every Flux child's AppData below. A child can still
-        // be running even when the emulator process itself was reaped or crashed, so refuse while
-        // any child is running rather than delete its NVM out from under it.
-        if app_id == crate::registry::FLUX_EMULATOR_APP_ID
-            && self.app_registry.flux_child_app_ids().iter().any(|id| self.app_registry.is_running(id))
+        // Flux children are installed and removed as apps of their own, so the emulator goes
+        // last: removing it first would strand children nothing can run or remove.
+        if self.app_registry.provides_flux_emulator(&app_id)
+            && !self.app_registry.flux_child_app_ids().is_empty()
         {
-            return RemoveInstalledAppResult::Running;
+            return RemoveInstalledAppResult::FluxAppsInstalled;
         }
 
         let Some(app_dir) = self.app_registry.removable_bundle_dir(app_id) else {
@@ -251,17 +250,6 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
         // while its data is still on disk.
         if !self.forget_app_state(app_id) {
             return RemoveInstalledAppResult::InternalError;
-        }
-
-        // Flux children persist their NVM to their own AppData (nvm.bin), which removing
-        // the emulator does not otherwise reach: the bundle removal below deletes only the
-        // built-in children's bundles, and sideloaded children live under a separate root.
-        if app_id == crate::registry::FLUX_EMULATOR_APP_ID {
-            for child_id in self.app_registry.flux_child_app_ids() {
-                if !self.forget_app_state(child_id) {
-                    return RemoveInstalledAppResult::InternalError;
-                }
-            }
         }
 
         match self.fs.remove(&app_dir, fs::Location::System) {
@@ -554,13 +542,9 @@ impl AppManagerServer {
 
         self.transient_permission_denies.remove(&app_id);
 
-        // The registry tracks the bundle's fs `app.elf` path; the device launches
-        // it from the image, the simulator from the staged host binary.
-        let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
-
-        // Allowance is dynamic: a sideloaded app launches only while its signer matches a
+        // Allowance is dynamic: a third-party app launches only while its signer matches a
         // currently-valid publisher cert, so importing or removing a cert takes effect
-        // without a rescan. Built-in and hosted apps are always launchable.
+        // without a rescan. Foundation-signed and hosted apps are always launchable.
         if let Some(error) = self.app_registry.launch_error(app_id, &self.third_party_cert_store.list()) {
             return Err(error);
         }
@@ -571,13 +555,10 @@ impl AppManagerServer {
         // The manifest's signed file hashes guard app.elf and the resources at launch; on the
         // simulator nothing is signed, so the staged host binary just runs.
         #[cfg(keyos)]
-        let pid = {
-            let file_hashes = self.app_registry.file_hashes(app_id).ok_or(LaunchError::UnknownAppId)?;
-            let signer = self.app_registry.elf_signer(app_id);
-            crate::launch::verify_and_launch(&self.fs, &app_id, &elf_path, &file_hashes, signer)?
-        };
+        let pid = crate::launch::verify_and_launch(&self.fs, &self.app_registry, app_id)?;
         #[cfg(not(keyos))]
         let pid = {
+            let elf_path = self.app_registry.elf_path(app_id).ok_or(LaunchError::UnknownAppId)?;
             let host_elf = crate::launch::host_elf_path(&elf_path).ok_or(LaunchError::UnknownAppId)?;
             launch_app(&app_id, &host_elf)?
         };

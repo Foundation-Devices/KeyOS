@@ -9,7 +9,7 @@ use server::{
 use server::{BlockingArchiveHandler, MessageId as _};
 #[cfg(keyos)]
 use usb::device::{
-    api::{EndpointDirection, EndpointType},
+    api::{EnabledGate, EndpointDirection, EndpointType},
     messages::{EndpointProperties, SetupPacketCallback},
 };
 
@@ -126,7 +126,7 @@ impl server::CheckedPermissions for InternalPermissions {
 impl server::MessageAllowed<DeliverHidApdu> for InternalPermissions {}
 
 #[cfg(keyos)]
-fn out_thread(mut ep_out: UsbEmulatedEndpoint) {
+fn out_thread(mut ep_out: UsbEmulatedEndpoint, gate: EnabledGate) {
     let usb_api = UsbDeviceEmulation::default();
     let out_buffer = xous::DropDeallocate::new(
         xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
@@ -137,6 +137,7 @@ fn out_thread(mut ep_out: UsbEmulatedEndpoint) {
     let mut reassembler = hid::Reassembler::new();
 
     loop {
+        gate.wait_enabled();
         match ep_out.read_buf(*out_buffer, hid::REPORT_SIZE as u16) {
             Ok(l) => {
                 let report = &out_buffer.as_slice::<u8>()[..l];
@@ -166,6 +167,7 @@ fn out_thread(mut ep_out: UsbEmulatedEndpoint) {
                 usb_api.wait_for_connection().expect("Error waiting for connection");
                 log::info!("legacy-hid out_thread: host reconnected");
             }
+            Err(usb::error::UsbError::InterfaceDisabled) => reassembler.reset(),
             Err(e) => log::error!("Error while reading from USB: {e:?}"),
         }
     }
@@ -200,8 +202,10 @@ impl HidInEndpoint {
                     self.buffer.as_slice_mut::<u8>()[..hid::REPORT_SIZE].copy_from_slice(report);
                     match self.endpoint.write_buf(*self.buffer, hid::REPORT_SIZE) {
                         Ok(_) => log::trace!("Rapdu: wrote HID report {}/{}", i + 1, reports.len()),
-                        Err(usb::error::UsbError::HostDisconnected) => {
-                            log::debug!("legacy-hid: host disconnected; dropping outgoing APDU");
+                        Err(
+                            usb::error::UsbError::HostDisconnected | usb::error::UsbError::InterfaceDisabled,
+                        ) => {
+                            log::debug!("legacy-hid: endpoint gone; dropping outgoing APDU");
                             break;
                         }
                         Err(e) => {
@@ -216,7 +220,7 @@ impl HidInEndpoint {
 }
 
 #[cfg(keyos)]
-fn start_hid() -> HidInEndpoint {
+fn start_hid() -> (UsbRegisteredInterface, HidInEndpoint, EnabledGate) {
     let mut usb_api = UsbDeviceEmulation::default();
     let (hid_interface, [hid_ep_in, hid_ep_out]) = usb_api
         .register_interface(
@@ -232,19 +236,25 @@ fn start_hid() -> HidInEndpoint {
         )
         .unwrap();
 
-    if let Err(e) = hid_interface.set_enabled(true) {
-        log::error!("legacy-hid: failed to enable USB HID interface: {e:?}");
-    } else {
-        std::thread::spawn(|| out_thread(hid_ep_out));
-    }
-    HidInEndpoint::new(hid_ep_in)
+    // Registered but disabled: the interface enters the descriptors only while Legacy mode is
+    // active (SetLegacyMode), riding the re-enumeration the identity switch causes anyway.
+    let gate = EnabledGate::new(false);
+    std::thread::spawn({
+        let gate = gate.clone();
+        move || out_thread(hid_ep_out, gate)
+    });
+    (hid_interface, HidInEndpoint::new(hid_ep_in), gate)
 }
 
 #[derive(server::Server)]
 #[name = "os/legacy-hid"]
 pub struct LegacyHidServer {
     #[cfg(keyos)]
+    hid_interface: UsbRegisteredInterface,
+    #[cfg(keyos)]
     hid_in: HidInEndpoint,
+    #[cfg(keyos)]
+    gate: EnabledGate,
     subscribers: Vec<ArchiveEventSubscriber<IncomingApdu>>,
 }
 
@@ -252,9 +262,15 @@ impl Server for LegacyHidServer {}
 
 impl Default for LegacyHidServer {
     fn default() -> Self {
+        #[cfg(keyos)]
+        let (hid_interface, hid_in, gate) = start_hid();
         Self {
             #[cfg(keyos)]
-            hid_in: start_hid(),
+            hid_interface,
+            #[cfg(keyos)]
+            hid_in,
+            #[cfg(keyos)]
+            gate,
             subscribers: Vec::new(),
         }
     }
@@ -303,15 +319,27 @@ impl BlockingScalarHandler<SetLegacyMode> for LegacyHidServer {
     ) {
         #[cfg(keyos)]
         {
+            // Each step re-enumerates on its own, so the order keeps every intermediate state
+            // benign: the normal identity with the HID interface present.
             let mut usb_api = UsbDeviceEmulation::default();
             if _active {
+                log::info!("Legacy Mode: enabling HID interface, switching USB identity to 0x2c97:0x7011");
+                self.hid_interface
+                    .set_enabled(true)
+                    .expect("toggling a registered USB interface cannot fail");
+                self.gate.set_enabled(true);
                 // App-mode PID: hosts read the model from the high byte (0x70);
                 // a bare 0x0007 reads as the bootloader identity they won't drive.
-                log::info!("Legacy Mode: switching USB identity to 0x2c97:0x7011");
                 usb_api.set_custom_vid_pid(Some(0x2c97), Some(0x7011));
             } else {
-                log::info!("Legacy Mode: reverting USB identity to boot default");
+                log::info!("Legacy Mode: reverting USB identity, disabling HID interface");
+                // Close the gate first, or out_thread spins on InterfaceDisabled between the
+                // interface going down and the gate closing.
+                self.gate.set_enabled(false);
                 usb_api.set_custom_vid_pid(None, None);
+                self.hid_interface
+                    .set_enabled(false)
+                    .expect("toggling a registered USB interface cannot fail");
             }
         }
     }

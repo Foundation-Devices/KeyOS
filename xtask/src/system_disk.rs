@@ -65,8 +65,7 @@ const UI2_ICON_SIZES: [usize; 3] = [20, 24, 28];
 /// What to stage onto a system volume. Only the derived trees are touched, so a
 /// persistent volume keeps its settings and user data across builds.
 pub struct SystemVolume<'a> {
-    /// Host directory holding the staged `keyos/apps` tree. Flux child apps are
-    /// nested under `gui-app-emu-flux/apps`, so a recursive copy covers them.
+    /// Host directory holding the staged `keyos/apps` tree.
     pub apps_src: &'a Path,
     /// Drop `app.elf` while copying apps. The simulator execs the host binary,
     /// so the device ELF would only waste space there.

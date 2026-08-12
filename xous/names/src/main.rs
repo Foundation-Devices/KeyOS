@@ -629,7 +629,6 @@ mod tests {
                     cfg: None,
                     permission_group: None,
                     required_signature: None,
-                    required_type: None,
                     approval: ApprovalBehavior::NotUserGrantable,
                 },
             );

@@ -229,6 +229,8 @@ pub enum RemoveInstalledAppResult {
     NotFound,
     NotSideloaded,
     Running,
+    /// The Flux emulator cannot be removed while Flux apps are installed; remove those first.
+    FluxAppsInstalled,
     InternalError,
 }
 
@@ -268,7 +270,9 @@ pub struct GetQrMatchRules {
 #[derive(Debug, Clone, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AppFilter {
     pub is_flux: Option<bool>,
-    pub third_party: Option<bool>,
+    /// `true` matches apps installed under the sideload root, whatever signed them; `false`
+    /// built-ins shipped with the firmware.
+    pub sideloaded: Option<bool>,
 }
 
 impl AppFilter {
@@ -278,8 +282,8 @@ impl AppFilter {
     /// Filter to Flux child apps only.
     pub fn flux_only() -> Self { Self { is_flux: Some(true), ..Default::default() } }
 
-    /// Filter to sideloaded third-party apps only.
-    pub fn third_party_only() -> Self { Self { third_party: Some(true), ..Default::default() } }
+    /// Filter to sideloaded apps only.
+    pub fn sideloaded_only() -> Self { Self { sideloaded: Some(true), ..Default::default() } }
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

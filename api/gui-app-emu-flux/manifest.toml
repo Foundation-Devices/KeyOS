@@ -3,12 +3,9 @@
 
 # The emulator's child-facing syscall channel: internal plumbing between a Flux child and its
 # emulator, not a user-facing permission, so it carries no permissionGroup and never shows in
-# Settings. `requiredSignature = "thirdParty"` lets a signed sideloaded app hold it (an ungrouped
-# message would otherwise default to Foundation-only), and `requiredType = "flux"` further
-# restricts it to Flux child apps (the OS decides which apps qualify from their install directory,
-# so an ordinary sideloaded app is refused). Built-in Flux apps bypass permission filtering and
-# always get these. Auto-allowed for the children that qualify.
+# Settings. Ungrouped messages default to Foundation-only, which is the point: the channel
+# reaches seed-derived key material, so only Foundation-signed children may hold it.
 [servers."os/gui-app-emu-flux"]
-SendSeph = { id = 1, type = "archive", requiredSignature = "thirdParty", requiredType = "flux", approval = "autoAllow" }
-RecvSeph = { id = 2, type = "blockingArchive", requiredSignature = "thirdParty", requiredType = "flux", approval = "autoAllow" }
-SyscallBuffer = { id = 3, type = "lendMut", requiredSignature = "thirdParty", requiredType = "flux", approval = "autoAllow" }
+SendSeph = { id = 1, type = "archive" }
+RecvSeph = { id = 2, type = "blockingArchive" }
+SyscallBuffer = { id = 3, type = "lendMut" }

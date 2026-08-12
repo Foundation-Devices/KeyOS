@@ -31,11 +31,9 @@
 mod dispatch;
 mod msos20;
 
-use std::sync::{Arc, Condvar, Mutex};
-
 use server::{Server, ServerContext, ServerMessages};
 use usb::device::{
-    api::{EndpointDirection, EndpointType},
+    api::{EnabledGate, EndpointDirection, EndpointType},
     messages::EndpointProperties,
 };
 use usb_debug_protocol::{Response, USB_DEBUG_OUT_TRANSFER_MAX};
@@ -50,36 +48,6 @@ const DEBUG_OUT_READ_LEN: u16 = USB_DEBUG_OUT_TRANSFER_MAX as u16;
 /// Max pending log messages in the channel before the log drain starts dropping.
 /// Each chunk is up to 16 KB, so 8 chunks ≈ 128 KB max buffered.
 const MAX_PENDING_LOGS: usize = 8;
-
-#[derive(Clone)]
-struct EnabledGate {
-    inner: Arc<(Mutex<bool>, Condvar)>,
-}
-
-impl EnabledGate {
-    fn new(enabled: bool) -> Self { Self { inner: Arc::new((Mutex::new(enabled), Condvar::new())) } }
-
-    fn set_enabled(&self, enabled: bool) {
-        let (lock, cvar) = &*self.inner;
-        *lock.lock().unwrap() = enabled;
-        if enabled {
-            cvar.notify_all();
-        }
-    }
-
-    fn is_enabled(&self) -> bool {
-        let (lock, _) = &*self.inner;
-        *lock.lock().unwrap()
-    }
-
-    fn wait_enabled(&self) {
-        let (lock, cvar) = &*self.inner;
-        let mut enabled = lock.lock().unwrap();
-        while !*enabled {
-            enabled = cvar.wait(enabled).unwrap();
-        }
-    }
-}
 
 struct DeveloperModeWatcher {
     interface: UsbRegisteredInterface,
