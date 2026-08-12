@@ -5,6 +5,7 @@ import {
     BasePage,
     Button,
     ButtonSection,
+    ConfirmationModal,
     ErrorModal,
     HLine,
     IconButton,
@@ -165,6 +166,7 @@ export component AppsPage inherits BasePage {
     // (its own Size.sz6 padding plus the section's Size.sz2), so this page's button sits where
     // every other page's does.
     private property <length> install-button-band: Size.sz15 + Size.sz8;
+    private property <bool> developer-mode-confirm-visible;
 
     init => {
         AppManagementGlobal.refresh-installed-apps();
@@ -260,7 +262,11 @@ export component AppsPage inherits BasePage {
                     checked: SettingGlobal.developer-mode;
                     changed(enabled) => {
                         if row.action_id == 1 {
-                            SettingGlobal.set-developer-mode(enabled);
+                            if enabled {
+                                root.developer-mode-confirm-visible = true;
+                            } else {
+                                SettingGlobal.set-developer-mode(false);
+                            }
                         }
                     }
                 }
@@ -305,6 +311,28 @@ export component AppsPage inherits BasePage {
             clicked => {
                 AppManagementGlobal.install-app();
             }
+        }
+    }
+
+    if developer-mode-confirm-visible: ConfirmationModal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        icon: "alert";
+        notice: true;
+        title: TR2.lookup(TrId.AppsModalDeveloperModeRisksTitle);
+        text: TR2.lookup(TrId.AppsModalDeveloperModeRisksContent);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+        confirm-button-label: TR2.lookup(TrId.AppsModalDeveloperModeRisksEnableDeveloperMode);
+
+        cancel-clicked => {
+            root.developer-mode-confirm-visible = false;
+        }
+
+        confirm-clicked => {
+            root.developer-mode-confirm-visible = false;
+            SettingGlobal.set-developer-mode(true);
         }
     }
 

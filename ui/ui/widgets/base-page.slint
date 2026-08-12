@@ -200,9 +200,11 @@ export component Modal inherits Rectangle {
 export component ConfirmationModal inherits Modal {
     in property <string> confirm-button-label;
     in property <bool> critical: false;
+    // Copper icon and confirm button, for opt-in warnings rather than destructive actions.
+    in property <bool> notice: false;
     in property <string> cancel-button-label;
 
-    icon-color: critical ? Palette.content-negative : Palette.content-brand;
+    icon-color: critical ? Palette.content-negative : notice ? Palette.content-notice : Palette.content-brand;
 
     callback cancel-clicked();
     callback confirm-clicked();
@@ -219,7 +221,7 @@ export component ConfirmationModal inherits Modal {
     Button {
         icon: "";
         label: confirm-button-label;
-        importance: critical ? Importance.negative : Importance.primary;
+        importance: critical ? Importance.negative : notice ? Importance.notice : Importance.primary;
 
         clicked => {
             confirm-clicked();
