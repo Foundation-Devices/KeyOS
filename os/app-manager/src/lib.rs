@@ -25,11 +25,10 @@ use std::collections::{HashMap, HashSet};
 
 use app_manager::{
     AppEvent, GetPermissionRequestInfo, GetThirdPartyCertificates, ImportThirdPartyCertificate,
-    ImportThirdPartyCertificateResult, InstallAppArchive, InstallAppArchiveResult, InstallError, LaunchError,
-    PermissionGrantDecision, PermissionRequestInfoResult, PreviewThirdPartyCertificate,
-    PreviewThirdPartyCertificateResult, RemoveInstalledApp, RemoveInstalledAppResult,
+    InstallAppArchive, InstallAppArchiveResult, InstallError, LaunchError, PermissionGrantDecision,
+    PermissionRequestInfoResult, PreviewThirdPartyCertificate, RemoveInstalledApp, RemoveInstalledAppResult,
     RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, SetAppPermissionGrant,
-    SetAppPermissionGrantResult, ThirdPartyCertificateInfo,
+    SetAppPermissionGrantResult, ThirdPartyCertificateError, ThirdPartyCertificateInfo,
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetQrMatchRules, InstalledAppInfo, LaunchApp, LaunchAppBlocking, ListApps,
@@ -38,7 +37,7 @@ use app_manager::{
 use fs::adapter::FsAdapter;
 use permission_grants::PermissionGrantStore;
 use system_messages::{ChildCrashed, Disconnected};
-use third_party_certs::{ImportThirdPartyCertificateError, ThirdPartyCertificateStore};
+use third_party_certs::ThirdPartyCertificateStore;
 
 crypto::use_api!();
 fs::use_api!();
@@ -97,7 +96,7 @@ impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Vec<app_manager::AppQrMatchRules> {
-        self.app_registry.qr_match_rules(&msg.app_ids, &self.third_party_cert_store.allowed_publishers())
+        self.app_registry.qr_match_rules(&msg.app_ids, &self.third_party_cert_store.list())
     }
 }
 
@@ -110,7 +109,7 @@ impl BlockingArchiveHandler<ListApps> for AppManagerServer {
     ) -> Vec<InstalledAppInfo> {
         self.app_registry.list_apps(
             &msg.locale,
-            &self.third_party_cert_store.allowed_publishers(),
+            &self.third_party_cert_store.list(),
             &msg.filter,
             &self.permission_grants,
         )
@@ -166,11 +165,8 @@ impl BlockingArchiveHandler<PreviewThirdPartyCertificate> for AppManagerServer {
         msg: PreviewThirdPartyCertificate,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> PreviewThirdPartyCertificateResult {
-        match self.third_party_cert_store.preview(&msg.certificate_pem) {
-            Ok(cert) => PreviewThirdPartyCertificateResult::Valid(cert),
-            Err(()) => PreviewThirdPartyCertificateResult::Invalid,
-        }
+    ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
+        self.third_party_cert_store.preview(&msg.certificate_pem)
     }
 }
 
@@ -180,20 +176,10 @@ impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
         msg: ImportThirdPartyCertificate,
         _sender: PID,
         _context: &mut ServerContext<Self>,
-    ) -> ImportThirdPartyCertificateResult {
-        match self.third_party_cert_store.import(&msg.certificate_pem, &msg.expected_fingerprint) {
-            Ok(cert) => {
-                self.notify_allowed_publishers_changed();
-                ImportThirdPartyCertificateResult::Imported(cert)
-            }
-            Err(ImportThirdPartyCertificateError::Invalid) => ImportThirdPartyCertificateResult::Invalid,
-            Err(ImportThirdPartyCertificateError::FingerprintMismatch) => {
-                ImportThirdPartyCertificateResult::FingerprintMismatch
-            }
-            Err(ImportThirdPartyCertificateError::Storage) => {
-                ImportThirdPartyCertificateResult::InternalError
-            }
-        }
+    ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
+        let cert = self.third_party_cert_store.import(&msg.certificate_pem, &msg.expected_fingerprint)?;
+        self.notify_allowed_publishers_changed();
+        Ok(cert)
     }
 }
 
@@ -575,8 +561,8 @@ impl AppManagerServer {
         // Allowance is dynamic: a sideloaded app launches only while its signer matches a
         // currently-valid publisher cert, so importing or removing a cert takes effect
         // without a rescan. Built-in and hosted apps are always launchable.
-        if !self.app_registry.is_launchable(app_id, &self.third_party_cert_store.allowed_publishers()) {
-            return Err(LaunchError::NoCertificate);
+        if let Some(error) = self.app_registry.launch_error(app_id, &self.third_party_cert_store.list()) {
+            return Err(error);
         }
 
         self.register_app_resources(app_id)?;

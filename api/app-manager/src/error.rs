@@ -24,6 +24,12 @@ pub enum AppManagerError {
 
     #[error("No Certificate")]
     NoCertificate = 3,
+
+    #[error("Publisher Certificate Expired")]
+    PublisherCertificateExpired = 4,
+
+    #[error("Publisher Certificate Not Active Yet")]
+    PublisherCertificateNotYetActive = 5,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -39,6 +45,8 @@ pub enum LaunchError {
     Verification(VerificationError),
     NameRegistration,
     NoCertificate,
+    PublisherCertificateExpired,
+    PublisherCertificateNotYetActive,
     OutOfMemory,
     InternalError,
 }
@@ -62,6 +70,10 @@ impl From<LaunchError> for AppManagerError {
             LaunchError::UnknownAppId => AppManagerError::UnknownAppId,
             LaunchError::Verification(_) => AppManagerError::VerificationFailed,
             LaunchError::NoCertificate => AppManagerError::NoCertificate,
+            LaunchError::PublisherCertificateExpired => AppManagerError::PublisherCertificateExpired,
+            LaunchError::PublisherCertificateNotYetActive => {
+                AppManagerError::PublisherCertificateNotYetActive
+            }
             _ => AppManagerError::InternalError,
         }
     }

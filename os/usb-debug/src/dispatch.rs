@@ -26,7 +26,6 @@ power_manager::use_api!();
 security::use_api!();
 settings::use_api!();
 
-use app_manager::ImportThirdPartyCertificateResult;
 use xous_ticktimer::TicktimerPrivileged;
 
 const POWER_BUTTON_SHORT_PRESS_MS: u64 = 200;
@@ -167,6 +166,12 @@ impl DebugProtocol {
                     let status = match reason {
                         LaunchFailureReason::SignatureRejected => LaunchAppStatus::SignatureRejected,
                         LaunchFailureReason::NoCertificate => LaunchAppStatus::NoCertificate,
+                        LaunchFailureReason::PublisherCertificateExpired => {
+                            LaunchAppStatus::PublisherCertificateExpired
+                        }
+                        LaunchFailureReason::PublisherCertificateNotYetActive => {
+                            LaunchAppStatus::PublisherCertificateNotYetActive
+                        }
                         LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
                     };
                     Response::LaunchAck(LaunchAppResult::new(0, status).encode())
@@ -321,23 +326,15 @@ impl DebugProtocol {
         let expected_fingerprint =
             std::str::from_utf8(&expected_fingerprint).expect("protocol validates fingerprint ASCII");
         match self.app_manager.import_third_party_certificate(certificate_pem, expected_fingerprint) {
-            Ok(ImportThirdPartyCertificateResult::Imported(cert)) => {
+            Ok(Ok(cert)) => {
                 log::info!(
                     "debug: installed allowed publisher certificate with fingerprint {}",
                     cert.fingerprint
                 );
                 Response::Ack
             }
-            Ok(ImportThirdPartyCertificateResult::Invalid) => {
-                log::warn!("debug: install_certificate rejected: invalid certificate");
-                Response::Err
-            }
-            Ok(ImportThirdPartyCertificateResult::FingerprintMismatch) => {
-                log::warn!("debug: install_certificate rejected: expected fingerprint does not match");
-                Response::Err
-            }
-            Ok(ImportThirdPartyCertificateResult::InternalError) => {
-                log::error!("debug: install_certificate failed to persist certificate");
+            Ok(Err(error)) => {
+                log::warn!("debug: install_certificate rejected: {error:?}");
                 Response::Err
             }
             Err(e) => {
@@ -348,16 +345,15 @@ impl DebugProtocol {
     }
 
     fn get_allowed_publisher_count(&mut self) -> Response {
-        let count = self
-            .app_manager
-            .get_third_party_certificates()
-            .iter()
-            .filter(|cert| cert.is_currently_valid())
-            .count();
-        let count = u16::try_from(count).unwrap_or(u16::MAX);
+        let certificates = self.app_manager.get_third_party_certificates();
+        let usable = certificates.iter().filter(|cert| cert.is_usable()).count();
+        let usable = u16::try_from(usable).unwrap_or(u16::MAX);
+        let installed = u16::try_from(certificates.len()).unwrap_or(u16::MAX);
 
-        log::debug!("debug: allowed publisher count -> {count}");
-        Response::AllowedPublisherCount(count.to_le_bytes().to_vec())
+        log::debug!("debug: allowed publisher count -> {usable} usable of {installed}");
+        let mut payload = usable.to_le_bytes().to_vec();
+        payload.extend_from_slice(&installed.to_le_bytes());
+        Response::AllowedPublisherCount(payload)
     }
 
     /// Readable while locked and in production builds: the clock is not a secret, and it is the

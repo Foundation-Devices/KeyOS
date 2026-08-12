@@ -428,7 +428,9 @@ component LauncherCollectionItem inherits Rectangle {
                 root.ignore-release-click = false;
                 return;
             }
-            if (!State.rearrange-mode && root.item.enabled) {
+            // A dimmed tile still reports its tap: the launch is attempted, and Rust shows why it
+            // was refused. `enabled` only dims the tile.
+            if (!State.rearrange-mode) {
                 root.activate(shell.absolute-position.x + shell.width / 2, shell.absolute-position.y + shell.height / 2, root.item.id);
             }
         }

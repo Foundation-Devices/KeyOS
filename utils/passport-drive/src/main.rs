@@ -81,6 +81,12 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
         LaunchAppStatus::NoCertificate => Some(
             "no matching allowed publisher certificate is installed; import the matching certificate in Settings > Apps > Allowed Publishers",
         ),
+        LaunchAppStatus::PublisherCertificateExpired => Some(
+            "the matching publisher certificate has expired; compare get_system_time with its expiry date in Settings > Apps > Allowed Publishers",
+        ),
+        LaunchAppStatus::PublisherCertificateNotYetActive => Some(
+            "the matching publisher certificate is not valid yet; compare get_system_time with its start date in Settings > Apps > Allowed Publishers",
+        ),
         LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
         LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
     }
@@ -257,8 +263,7 @@ enum CliCommand {
     GetVersion,
     /// Print the compact kernel process list
     GetProcessList,
-    /// Print the device clock in UTC. Check this when a publisher certificate or a sideloaded app
-    /// is rejected: validity windows are judged against it.
+    /// Print the device clock in UTC
     #[command(name = "get_time", alias = "get-time")]
     GetTime,
     /// Set the device clock. Requires Developer Mode and an unlocked device.

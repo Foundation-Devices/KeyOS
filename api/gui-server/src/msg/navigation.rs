@@ -32,6 +32,10 @@ pub enum LaunchFailureReason {
     SignatureRejected,
     /// No matching allowed-publisher certificate is installed, so this third-party app cannot launch.
     NoCertificate,
+    /// The matching publisher certificate's validity window has passed.
+    PublisherCertificateExpired,
+    /// The matching publisher certificate's validity window has not started yet.
+    PublisherCertificateNotYetActive,
     /// Anything else: app-manager-internal failure, IPC failure, etc.
     Internal,
 }

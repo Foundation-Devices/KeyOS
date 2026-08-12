@@ -22,6 +22,19 @@ Imports are limited to 16 KiB before decoding. The certificate must contain:
 The subject and subject-alternative-name values are publisher-supplied claims. They are not proof
 of publisher identity.
 
+## Validity window and the device clock
+
+`notBefore` and `notAfter` are read from the stored certificate and checked every time it is
+used: at import, at launch, and wherever the certificate is listed. A certificate outside its
+window authorizes nothing, and the app signed with it stops launching without a rescan.
+
+Those checks are only as good as the device clock, which the user and a paired Envoy can both
+set. Moving the clock back inside an expired window re-enables the certificate, so the window
+bounds a publisher's intent, not an attacker. It is not a revocation mechanism.
+
+A certificate must expire no earlier than it starts; one whose `notAfter` precedes its `notBefore`
+is refused at import.
+
 ## Publisher fingerprint
 
 The canonical publisher fingerprint is:

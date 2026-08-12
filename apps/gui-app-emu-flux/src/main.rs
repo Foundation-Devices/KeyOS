@@ -279,10 +279,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let all = VecModel::default();
         let enabled = VecModel::default();
         for e in entries {
-            // An app whose signer isn't trusted can't launch (app-manager reports
-            // can_launch=false). Don't list it at all: a launcher tile would fail
-            // silently on tap, and a settings toggle for it wouldn't take effect.
-            if !e.can_launch {
+            // An app whose signer isn't allowed can't launch. Don't list it at all: a launcher tile
+            // would fail silently on tap, and a settings toggle for it wouldn't take effect.
+            if e.launch_error.is_some() {
                 continue;
             }
             let is_on = !disabled.contains(&e.app_id);

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
-use app_manager::ThirdPartyCertificateInfo;
+use app_manager::{ThirdPartyCertificateError, ThirdPartyCertificateInfo};
 use const_oid::db::{
     rfc3280::EMAIL_ADDRESS,
     rfc4519::{COMMON_NAME, ORGANIZATION_NAME},
@@ -44,12 +44,6 @@ pub(crate) struct ThirdPartyCertificateStore {
     certs: BTreeMap<String, ThirdPartyCertificateInfo>,
 }
 
-pub(crate) enum ImportThirdPartyCertificateError {
-    Invalid,
-    FingerprintMismatch,
-    Storage,
-}
-
 impl ThirdPartyCertificateStore {
     pub(crate) fn new(fs: FileSystem) -> Self {
         match fs.create_dir(THIRD_PARTY_CERTS_DIR, Location::SystemAppData) {
@@ -64,26 +58,36 @@ impl ThirdPartyCertificateStore {
 
     pub(crate) fn list(&self) -> Vec<ThirdPartyCertificateInfo> { self.certs.values().cloned().collect() }
 
-    pub(crate) fn allowed_publishers(&self) -> Vec<ThirdPartyCertificateInfo> {
-        self.certs.values().filter(|cert| cert.is_currently_valid()).cloned().collect()
-    }
-
     /// The certificate for `fingerprint` while it is still allowed to launch apps. An expired one
     /// can no longer launch what it signed, so the removal guard only applies before it expires.
     pub(crate) fn allowed(&self, fingerprint: &str) -> Option<&ThirdPartyCertificateInfo> {
-        self.certs.get(fingerprint).filter(|cert| cert.is_currently_valid())
+        self.certs.get(fingerprint).filter(|cert| cert.is_usable())
     }
 
     /// Parse and validate a certificate without changing the allow list.
-    pub(crate) fn preview(&self, certificate_bytes: &[u8]) -> Result<ThirdPartyCertificateInfo, ()> {
-        parse_third_party_certificate(certificate_bytes)
-            .and_then(|cert| {
-                ensure_current_certificate_validity(&cert)?;
-                Ok(cert)
-            })
-            .map_err(|e| {
-                log::warn!("invalid third-party certificate: {e}");
-            })
+    pub(crate) fn preview(
+        &self,
+        certificate_bytes: &[u8],
+    ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
+        let cert = parse_third_party_certificate(certificate_bytes).map_err(|e| {
+            log::warn!("invalid third-party certificate: {e}");
+            ThirdPartyCertificateError::Invalid
+        })?;
+
+        if cert.has_expired() {
+            log::warn!("third-party certificate expired at {}", cert.not_after_unix_seconds);
+            return Err(ThirdPartyCertificateError::Expired {
+                not_after_unix_seconds: cert.not_after_unix_seconds,
+            });
+        }
+        if cert.is_not_yet_valid() {
+            log::warn!("third-party certificate starts at {}", cert.not_before_unix_seconds);
+            return Err(ThirdPartyCertificateError::NotYetValid {
+                not_before_unix_seconds: cert.not_before_unix_seconds,
+            });
+        }
+
+        Ok(cert)
     }
 
     /// Add a certificate to the allow list under `expected_fingerprint`, which the caller must
@@ -92,18 +96,17 @@ impl ThirdPartyCertificateStore {
         &mut self,
         certificate_bytes: &[u8],
         expected_fingerprint: &str,
-    ) -> Result<ThirdPartyCertificateInfo, ImportThirdPartyCertificateError> {
-        let mut cert =
-            self.preview(certificate_bytes).map_err(|()| ImportThirdPartyCertificateError::Invalid)?;
+    ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
+        let mut cert = self.preview(certificate_bytes)?;
         if cert.fingerprint != expected_fingerprint {
             log::warn!("third-party certificate holds {}, not the confirmed key", cert.fingerprint);
-            return Err(ImportThirdPartyCertificateError::FingerprintMismatch);
+            return Err(ThirdPartyCertificateError::FingerprintMismatch);
         }
 
         cert.added_unix_seconds =
             store_certificate(&self.fs, &cert.fingerprint, certificate_bytes).map_err(|e| {
                 log::error!("failed to store third-party certificate: {e:#}");
-                ImportThirdPartyCertificateError::Storage
+                ThirdPartyCertificateError::Internal
             })?;
 
         // Same fingerprint means the same key, so this renews a publisher rather than adding one.
@@ -252,6 +255,9 @@ fn parse_third_party_certificate(certificate_bytes: &[u8]) -> anyhow::Result<Thi
     // Admission rejects a certificate outside its window, but list() keeps an expired one visible
     // so the user can still inspect and remove it.
     let (not_before_unix_seconds, not_after_unix_seconds) = certificate_validity_unix_seconds(&tbs.validity);
+    if not_before_unix_seconds > not_after_unix_seconds {
+        anyhow::bail!("third-party certificate expires before it starts");
+    }
 
     let name = subject_attribute(&tbs.subject, COMMON_NAME).ok_or_else(|| anyhow::anyhow!("missing CN"))?;
     let company =
@@ -325,8 +331,8 @@ fn parse_third_party_certificate(certificate_bytes: &[u8]) -> anyhow::Result<Thi
         fingerprint,
         short_fingerprint,
         added_unix_seconds: None,
-        not_before_unix_seconds: Some(not_before_unix_seconds),
-        not_after_unix_seconds: Some(not_after_unix_seconds),
+        not_before_unix_seconds,
+        not_after_unix_seconds,
         serial_number: tbs.serial_number.to_string(),
         issuer: tbs.issuer.to_string(),
         subject: tbs.subject.to_string(),
@@ -334,13 +340,6 @@ fn parse_third_party_certificate(certificate_bytes: &[u8]) -> anyhow::Result<Thi
         key_usage: key_usage_text(&key_usage),
         extended_key_usage: extended_key_usage_text(&extended_key_usage),
     })
-}
-
-fn ensure_current_certificate_validity(cert: &ThirdPartyCertificateInfo) -> anyhow::Result<()> {
-    if !cert.is_currently_valid() {
-        anyhow::bail!("third-party certificate is not currently valid");
-    }
-    Ok(())
 }
 
 /// Unknown non-critical X.509 v3 extensions are intentionally left uninterpreted. This is the
@@ -462,44 +461,6 @@ fn extended_key_usage_text(extended_key_usage: &ExtendedKeyUsage) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cert(not_before: Option<u64>, not_after: Option<u64>) -> ThirdPartyCertificateInfo {
-        ThirdPartyCertificateInfo {
-            name: "Example".to_string(),
-            company: "Example Company".to_string(),
-            contact_email: "hello@example.com".to_string(),
-            support_url: "https://example.com".to_string(),
-            public_key: String::new(),
-            fingerprint: String::new(),
-            short_fingerprint: String::new(),
-            added_unix_seconds: None,
-            not_before_unix_seconds: not_before,
-            not_after_unix_seconds: not_after,
-            serial_number: "1".to_string(),
-            issuer: String::new(),
-            subject: String::new(),
-            basic_constraints: String::new(),
-            key_usage: String::new(),
-            extended_key_usage: String::new(),
-        }
-    }
-
-    #[test]
-    fn currently_valid_needs_both_bounds_with_now_in_window() {
-        // `now` is the real wall clock, so use windows whose result doesn't depend on its value.
-        assert!(cert(Some(0), Some(u64::MAX)).is_currently_valid());
-        assert!(!cert(Some(0), Some(0)).is_currently_valid());
-        assert!(!cert(None, Some(u64::MAX)).is_currently_valid());
-        assert!(!cert(Some(0), None).is_currently_valid());
-    }
-
-    #[test]
-    fn import_admission_rejects_expired_not_yet_valid_and_unknown_windows() {
-        assert!(ensure_current_certificate_validity(&cert(Some(0), Some(u64::MAX))).is_ok());
-        assert!(ensure_current_certificate_validity(&cert(Some(0), Some(0))).is_err());
-        assert!(ensure_current_certificate_validity(&cert(Some(u64::MAX), Some(u64::MAX))).is_err());
-        assert!(ensure_current_certificate_validity(&cert(None, Some(u64::MAX))).is_err());
-    }
 
     #[test]
     fn canonical_fingerprint_matches_sdk_test_vector() {

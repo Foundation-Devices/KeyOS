@@ -74,6 +74,8 @@ pub enum LaunchAppStatus {
     NoCertificate = 4,
     NotReady = 6,
     InternalError = 7,
+    PublisherCertificateExpired = 8,
+    PublisherCertificateNotYetActive = 9,
 }
 
 impl LaunchAppStatus {
@@ -486,7 +488,10 @@ pub enum Response {
     /// Reply to `Command::GetDeveloperMode`. Single-byte payload: 0x00 = off, 0x01 = on.
     /// Device-side usb-debug returns `true` because the interface itself is Developer Mode gated.
     DeveloperMode(bool),
-    /// Reply to `Command::GetAllowedPublisherCount`. Payload is little-endian `u16`.
+    /// Reply to `Command::GetAllowedPublisherCount`. Payload is two little-endian `u16`s: how many
+    /// stored certificates are usable right now, then how many are stored at all. A device that
+    /// holds certificates none of which are usable reports `0, n`, which separates "no publisher
+    /// was ever added" from "the ones added cannot be used".
     AllowedPublisherCount(Vec<u8>),
     /// Reply to `Command::GetSystemTime`. Payload is little-endian `u64`: seconds since the Unix
     /// epoch, UTC.

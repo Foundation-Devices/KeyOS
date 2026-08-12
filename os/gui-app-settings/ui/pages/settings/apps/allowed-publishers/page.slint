@@ -207,6 +207,7 @@ export component AllowedPublishersPage inherits BasePage {
     in property <AllowedPublishersProps> props;
 
     private property <bool> invalid-certificate-visible: false;
+    private property <bool> not-valid-now-visible: false;
     private property <bool> save-failed-visible: false;
     private property <bool> allow-confirm-visible: false;
     private property <AllowedPublisherPreviewResult> preview-result: AllowedPublisherPreviewResult.canceled;
@@ -307,6 +308,9 @@ export component AllowedPublishersPage inherits BasePage {
                     if root.preview-result == AllowedPublisherPreviewResult.failed {
                         root.invalid-certificate-visible = true;
                     }
+                    if root.preview-result == AllowedPublisherPreviewResult.not-valid-now {
+                        root.not-valid-now-visible = true;
+                    }
                     if root.preview-result == AllowedPublisherPreviewResult.ready {
                         root.allow-confirm-visible = true;
                     }
@@ -337,6 +341,25 @@ export component AllowedPublishersPage inherits BasePage {
 
         confirm-clicked => {
             root.invalid-certificate-visible = false;
+        }
+    }
+
+    // No date action here: the certificate is usually genuinely outside its window, and the text
+    // already says to check the date, so a prominent shortcut would push the user at the one
+    // control that breaks a working device.
+    if not-valid-now-visible: ErrorModal {
+        modal-width: 400px;
+        modal-border-width: 0px;
+        modal-level: 4;
+        button-section-padding: 0px;
+        icon: "alert";
+        // TODO: localize
+        title: "Certificate not valid right now";
+        text: AppManagementGlobal.publisher-problem;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+
+        confirm-clicked => {
+            root.not-valid-now-visible = false;
         }
     }
 
@@ -371,6 +394,9 @@ export component AllowedPublishersPage inherits BasePage {
                 root.allow-confirm-visible = false;
                 if root.import-result == AllowedPublisherImportResult.invalid {
                     root.invalid-certificate-visible = true;
+                }
+                if root.import-result == AllowedPublisherImportResult.not-valid-now {
+                    root.not-valid-now-visible = true;
                 }
                 if root.import-result == AllowedPublisherImportResult.save-failed {
                     root.save-failed-visible = true;

@@ -10,6 +10,7 @@ use std::{
 };
 
 use anyhow::{self, Context};
+use app_manager::{LaunchError, ThirdPartyCertificateError};
 use bip39::Mnemonic;
 use ngwallet::{bdk_wallet::bitcoin::Network, bip39::MasterKey};
 use quantum_link::{
@@ -384,7 +385,8 @@ fn refresh_installed_apps(state: StoredValue<AppState>) {
     let lang = locale.lang();
     let apps = state.borrow().app_manager.list_apps(lang, app_manager::AppFilter::third_party_only());
 
-    let installed_apps = apps.iter().map(|app| installed_app(app.clone(), lang)).collect::<Vec<_>>();
+    let installed_apps =
+        apps.iter().map(|app| installed_app(&state.borrow(), app.clone(), lang)).collect::<Vec<_>>();
     // Cache the full list so the details page and permission toggles read from it rather than
     // re-requesting each app.
     *state.borrow().installed_apps.borrow_mut() = apps;
@@ -460,7 +462,8 @@ fn select_installed_app(state: StoredValue<AppState>, app_id: &str) -> bool {
         return false;
     };
 
-    state.borrow().ui().global::<AppManagementGlobal>().set_selected_app(installed_app(app, lang));
+    let selected = installed_app(&state.borrow(), app, lang);
+    state.borrow().ui().global::<AppManagementGlobal>().set_selected_app(selected);
     true
 }
 
@@ -514,12 +517,13 @@ fn set_app_permission_subgroup_grant(
     true
 }
 
-fn installed_app(app: app_manager::InstalledAppInfo, lang: &str) -> InstalledApp {
+fn installed_app(state: &AppState, app: app_manager::InstalledAppInfo, lang: &str) -> InstalledApp {
     InstalledApp {
         app_id: app.app_id.into(),
         name: app.name.into(),
         publisher: app.publisher.into(),
-        can_launch: app.can_launch,
+        can_launch: app.launch_error.is_none(),
+        launch_blocked_reason: launch_blocked_reason(state, app.launch_error).into(),
         can_remove: app.can_remove,
         is_flux: app.is_flux,
         version: app.version.into(),
@@ -583,15 +587,10 @@ fn select_allowed_publisher(state: StoredValue<AppState>, fingerprint: &str) -> 
 fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateInfo) -> AllowedPublisher {
     let claimed_name = sanitize_publisher_claim(&cert.name);
     let claimed_organization = sanitize_publisher_claim(&cert.company);
-    let status = allowed_publisher_status_at(
-        cert.not_before_unix_seconds,
-        cert.not_after_unix_seconds,
-        SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()),
-    );
-    let status = allowed_publisher_status_label(status);
+    let status = allowed_publisher_status_label(&cert);
     let date_added = format_date(state, cert.added_unix_seconds)
         .unwrap_or_else(|| tr::lookup_id(TrId::AppsAllowedPublisherDateUnavailable).to_string());
-    let expiration_date = format_date(state, cert.not_after_unix_seconds);
+    let expiration_date = format_date(state, Some(cert.not_after_unix_seconds));
     let list_metadata = expiration_date
         .as_deref()
         .map(|expiration_date| {
@@ -641,43 +640,68 @@ fn allowed_publisher(state: &AppState, cert: app_manager::ThirdPartyCertificateI
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AllowedPublisherStatus {
-    Active,
-    Expired,
-    NotActiveYet,
-    Inactive,
+fn allowed_publisher_status_label(cert: &app_manager::ThirdPartyCertificateInfo) -> String {
+    let id = if cert.has_expired() {
+        TrId::AppsAllowedPublisherStatusExpired
+    } else if cert.is_not_yet_valid() {
+        TrId::AppsAllowedPublisherStatusNotActiveYet
+    } else {
+        TrId::AppsAllowedPublisherStatusActive
+    };
+    tr::lookup_id(id).to_string()
 }
 
-fn allowed_publisher_status_at(
-    not_before_unix_seconds: Option<u64>,
-    not_after_unix_seconds: Option<u64>,
-    now_unix_seconds: Option<u64>,
-) -> AllowedPublisherStatus {
-    let (Some(not_before), Some(not_after), Some(now)) =
-        (not_before_unix_seconds, not_after_unix_seconds, now_unix_seconds)
-    else {
-        return AllowedPublisherStatus::Inactive;
-    };
-    if not_before > not_after {
-        AllowedPublisherStatus::Inactive
-    } else if now < not_before {
-        AllowedPublisherStatus::NotActiveYet
-    } else if now > not_after {
-        AllowedPublisherStatus::Expired
-    } else {
-        AllowedPublisherStatus::Active
+fn date_or_unavailable(state: &AppState, unix_seconds: Option<u64>) -> String {
+    format_date(state, unix_seconds)
+        .unwrap_or_else(|| tr::lookup_id(TrId::AppsAllowedPublisherDateUnavailable).to_string())
+}
+
+/// The device's own date, which every certificate-window message names so a wrong clock and a wrong
+/// certificate do not read the same.
+fn device_date(state: &AppState) -> String {
+    date_or_unavailable(state, Some(app_manager::now_unix_seconds()))
+}
+
+/// Why a certificate is outside its validity window, or `None` when the cause is the file itself.
+// TODO: localize
+fn certificate_window_text(state: &AppState, error: ThirdPartyCertificateError) -> Option<String> {
+    match error {
+        ThirdPartyCertificateError::NotYetValid { not_before_unix_seconds } => Some(format!(
+            "This certificate is not valid until {}, and Passport's date is {}. Check the date and \
+             time, then try again.",
+            date_or_unavailable(state, Some(not_before_unix_seconds)),
+            device_date(state)
+        )),
+        ThirdPartyCertificateError::Expired { not_after_unix_seconds } => Some(format!(
+            "This certificate expired on {}, and Passport's date is {}. If that date is wrong, \
+             correct it; otherwise ask the publisher for a current certificate.",
+            date_or_unavailable(state, Some(not_after_unix_seconds)),
+            device_date(state)
+        )),
+        _ => None,
     }
 }
 
-fn allowed_publisher_status_label(status: AllowedPublisherStatus) -> String {
-    let id = match status {
-        AllowedPublisherStatus::Active => TrId::AppsAllowedPublisherStatusActive,
-        AllowedPublisherStatus::Expired => TrId::AppsAllowedPublisherStatusExpired,
-        AllowedPublisherStatus::NotActiveYet => TrId::AppsAllowedPublisherStatusNotActiveYet,
-        AllowedPublisherStatus::Inactive => TrId::AppsAllowedPublisherStatusInactive,
-    };
-    tr::lookup_id(id).to_string()
+/// Why the Open App button is disabled, ready to show; empty when it is not.
+// TODO: localize
+fn launch_blocked_reason(state: &AppState, error: Option<LaunchError>) -> String {
+    match error {
+        Some(LaunchError::NoCertificate) => {
+            "This app's publisher is not allowed. Import their certificate under Allowed Publishers."
+                .to_string()
+        }
+        Some(LaunchError::PublisherCertificateExpired) => format!(
+            "This app's publisher certificate expired, and Passport's date is {}. Compare it with \
+             the certificate's dates under Allowed Publishers.",
+            device_date(state)
+        ),
+        Some(LaunchError::PublisherCertificateNotYetActive) => format!(
+            "This app's publisher certificate is not valid yet, and Passport's date is {}. Compare \
+             it with the certificate's dates under Allowed Publishers.",
+            device_date(state)
+        ),
+        _ => String::new(),
+    }
 }
 
 const CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS: usize = 48;
@@ -803,8 +827,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod publisher_claim_tests {
     use super::{
-        allowed_publisher_status_at, confirmation_publisher_claim, format_distinguished_name,
-        format_hex_groups, sanitize_publisher_claim, AllowedPublisherStatus,
+        confirmation_publisher_claim, format_distinguished_name, format_hex_groups, sanitize_publisher_claim,
         CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS, PUBLISHER_DATE_FORMAT, PUBLISHER_HEX_GROUPS_PER_LINE,
         PUBLISHER_HEX_GROUP_LENGTH,
     };
@@ -853,32 +876,6 @@ mod publisher_claim_tests {
         let subject = r"CN=Jos\c3\a9,O=Example\\,OU=Line\0aBreak";
 
         assert_eq!(format_distinguished_name(subject), "CN=José\nO=Example\\\nOU=Line Break");
-    }
-
-    #[test]
-    fn publisher_status_distinguishes_each_non_authorizing_state() {
-        assert_eq!(
-            allowed_publisher_status_at(Some(100), Some(200), Some(100)),
-            AllowedPublisherStatus::Active
-        );
-        assert_eq!(
-            allowed_publisher_status_at(Some(100), Some(200), Some(200)),
-            AllowedPublisherStatus::Active
-        );
-        assert_eq!(
-            allowed_publisher_status_at(Some(100), Some(200), Some(99)),
-            AllowedPublisherStatus::NotActiveYet
-        );
-        assert_eq!(
-            allowed_publisher_status_at(Some(100), Some(200), Some(201)),
-            AllowedPublisherStatus::Expired
-        );
-        assert_eq!(
-            allowed_publisher_status_at(Some(200), Some(100), Some(150)),
-            AllowedPublisherStatus::Inactive
-        );
-        assert_eq!(allowed_publisher_status_at(None, Some(200), Some(150)), AllowedPublisherStatus::Inactive);
-        assert_eq!(allowed_publisher_status_at(Some(100), Some(200), None), AllowedPublisherStatus::Inactive);
     }
 
     #[test]
@@ -950,7 +947,7 @@ fn preview_allowed_publisher(state: StoredValue<AppState>) -> AllowedPublisherPr
             let result =
                 { state.borrow().app_manager.preview_third_party_certificate(certificate_pem.clone()) };
             match result {
-                Ok(app_manager::PreviewThirdPartyCertificateResult::Valid(cert)) => {
+                Ok(Ok(cert)) => {
                     let publisher = allowed_publisher(&state.borrow(), cert);
                     *state.borrow().pending_allowed_publisher_certificate.borrow_mut() =
                         Some(certificate_pem);
@@ -961,9 +958,10 @@ fn preview_allowed_publisher(state: StoredValue<AppState>) -> AllowedPublisherPr
                         .set_pending_allowed_publisher(publisher);
                     AllowedPublisherPreviewResult::Ready
                 }
-                Ok(app_manager::PreviewThirdPartyCertificateResult::Invalid) => {
-                    AllowedPublisherPreviewResult::Failed
+                Ok(Err(error)) if set_certificate_window_problem(state, error) => {
+                    AllowedPublisherPreviewResult::NotValidNow
                 }
+                Ok(Err(_)) => AllowedPublisherPreviewResult::Failed,
                 Err(e) => {
                     log::error!("failed to preview third-party certificate: {e:?}");
                     AllowedPublisherPreviewResult::Failed
@@ -997,27 +995,32 @@ fn allow_pending_publisher(state: StoredValue<AppState>) -> AllowedPublisherImpo
 
     let result =
         { state.borrow().app_manager.import_third_party_certificate(certificate_pem, expected_fingerprint) };
+    clear_pending_allowed_publisher(state);
     match result {
-        Ok(app_manager::ImportThirdPartyCertificateResult::Imported(_)) => {
-            clear_pending_allowed_publisher(state);
+        Ok(Ok(_)) => {
             refresh_allowed_publishers(state);
             AllowedPublisherImportResult::Installed
         }
-        Ok(app_manager::ImportThirdPartyCertificateResult::Invalid)
-        | Ok(app_manager::ImportThirdPartyCertificateResult::FingerprintMismatch) => {
-            clear_pending_allowed_publisher(state);
-            AllowedPublisherImportResult::Invalid
+        Ok(Err(ThirdPartyCertificateError::Internal)) => AllowedPublisherImportResult::SaveFailed,
+        Ok(Err(error)) if set_certificate_window_problem(state, error) => {
+            AllowedPublisherImportResult::NotValidNow
         }
-        Ok(app_manager::ImportThirdPartyCertificateResult::InternalError) => {
-            clear_pending_allowed_publisher(state);
-            AllowedPublisherImportResult::SaveFailed
-        }
+        Ok(Err(_)) => AllowedPublisherImportResult::Invalid,
         Err(e) => {
             log::error!("failed to allow third-party publisher: {e:?}");
-            clear_pending_allowed_publisher(state);
             AllowedPublisherImportResult::SaveFailed
         }
     }
+}
+
+/// Hand the page the sentence to show for a certificate outside its validity window, so the modal
+/// names the device date instead of blaming the file. False when the file itself is the problem.
+fn set_certificate_window_problem(state: StoredValue<AppState>, error: ThirdPartyCertificateError) -> bool {
+    let Some(text) = certificate_window_text(&state.borrow(), error) else {
+        return false;
+    };
+    state.borrow().ui().global::<AppManagementGlobal>().set_publisher_problem(text.into());
+    true
 }
 
 fn clear_pending_allowed_publisher(state: StoredValue<AppState>) {

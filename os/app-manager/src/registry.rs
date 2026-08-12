@@ -308,7 +308,7 @@ impl AppRegistry {
         self.installed_apps
             .values()
             .filter(|app_info| app_ids.is_empty() || app_ids.contains(&app_info.id))
-            .filter(|app_info| app_info.publisher_and_launchable(publishers).1)
+            .filter(|app_info| app_info.publisher_and_launch_error(publishers).1.is_none())
             .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
             .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
                 Ok(rules_json) if !rules_json.is_empty() => {
@@ -329,7 +329,7 @@ impl AppRegistry {
     pub(crate) fn list_apps(
         &self,
         locale: &str,
-        allowed_publishers: &[ThirdPartyCertificateInfo],
+        publishers: &[ThirdPartyCertificateInfo],
         filter: &app_manager::AppFilter,
         permission_grants: &PermissionGrantStore,
     ) -> Vec<InstalledAppInfo> {
@@ -339,13 +339,13 @@ impl AppRegistry {
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
             .filter(|app_info| filter.third_party.map_or(true, |want| app_info.is_third_party() == want))
             .map(|app_info| {
-                let (publisher, can_launch) = app_info.publisher_and_launchable(allowed_publishers);
+                let (publisher, launch_error) = app_info.publisher_and_launch_error(publishers);
                 let (basic_permissions, approvable_permissions) =
                     app_info.permission_groups(permission_grants, locale);
                 InstalledAppInfo {
                     app_id: format!("0x{}", app_info.id),
                     publisher,
-                    can_launch,
+                    launch_error,
                     can_remove: app_info.is_removable(),
                     is_flux: app_info.is_flux,
                     version: app_info.manifest.version.clone().unwrap_or_default(),
@@ -411,9 +411,16 @@ impl AppRegistry {
         self.installed_apps.get(&app_id).and_then(AppInfo::app_resources_location)
     }
 
-    /// Whether the app may launch: a sideloaded app's signer must match a currently-valid cert.
-    pub(crate) fn is_launchable(&self, app_id: AppId, publishers: &[ThirdPartyCertificateInfo]) -> bool {
-        self.installed_apps.get(&app_id).is_some_and(|app| app.publisher_and_launchable(publishers).1)
+    /// Why launching the app would fail right now, or `None` while it would get as far as the
+    /// signature check.
+    pub(crate) fn launch_error(
+        &self,
+        app_id: AppId,
+        publishers: &[ThirdPartyCertificateInfo],
+    ) -> Option<LaunchError> {
+        self.installed_apps
+            .get(&app_id)
+            .map_or(Some(LaunchError::UnknownAppId), |app| app.publisher_and_launch_error(publishers).1)
     }
 
     /// The bundle file hashes from the app's manifest, verified and stored at scan time. Launch
@@ -765,27 +772,43 @@ impl AppInfo {
         effective
     }
 
-    /// The publisher fingerprint to show and whether the app may launch. A sideloaded app is launchable
-    /// only while its signer matches one of the currently-valid `publishers`; neither built-in nor
-    /// hosted apps carry a publisher fingerprint. The simulator signs nothing, so it launches everything.
-    fn publisher_and_launchable(&self, publishers: &[ThirdPartyCertificateInfo]) -> (String, bool) {
+    /// The publisher fingerprint to show and why a launch would fail, if it would. `publishers` is
+    /// every stored certificate rather than only the usable ones, so a signer that matches an
+    /// unusable certificate is reported under that certificate instead of as a missing one.
+    /// Neither built-in nor hosted apps carry a publisher fingerprint. The simulator signs nothing,
+    /// so it launches everything.
+    fn publisher_and_launch_error(
+        &self,
+        publishers: &[ThirdPartyCertificateInfo],
+    ) -> (String, Option<LaunchError>) {
         #[cfg(all(not(keyos), not(test)))]
         {
             let _ = publishers;
-            (String::new(), true)
+            (String::new(), None)
         }
         #[cfg(any(keyos, test))]
         {
             let Some(signer) = self.third_party_signer else {
-                return (String::new(), self.source == AppSource::BuiltIn);
+                return match self.source {
+                    AppSource::BuiltIn => (String::new(), None),
+                    _ => (String::new(), Some(LaunchError::NoCertificate)),
+                };
             };
-            match publishers
+            let Some(publisher) = publishers
                 .iter()
                 .find(|p| crate::third_party_certs::decode_public_key_hex(&p.public_key) == Some(signer))
-            {
-                Some(publisher) => (publisher.short_fingerprint.clone(), true),
-                None => (String::new(), false),
-            }
+            else {
+                return (String::new(), Some(LaunchError::NoCertificate));
+            };
+
+            let error = if publisher.has_expired() {
+                Some(LaunchError::PublisherCertificateExpired)
+            } else if publisher.is_not_yet_valid() {
+                Some(LaunchError::PublisherCertificateNotYetActive)
+            } else {
+                None
+            };
+            (publisher.short_fingerprint.clone(), error)
         }
     }
 
@@ -1126,6 +1149,14 @@ mod tests {
     fn signer_bytes() -> [u8; 33] { crate::third_party_certs::decode_public_key_hex(SIGNER_HEX).unwrap() }
 
     fn publisher_cert(public_key_hex: &str, name: &str) -> ThirdPartyCertificateInfo {
+        publisher_cert_valid_until(public_key_hex, name, app_manager::now_unix_seconds() + 3600)
+    }
+
+    fn publisher_cert_valid_until(
+        public_key_hex: &str,
+        name: &str,
+        not_after_unix_seconds: u64,
+    ) -> ThirdPartyCertificateInfo {
         ThirdPartyCertificateInfo {
             name: name.to_string(),
             company: String::new(),
@@ -1135,8 +1166,8 @@ mod tests {
             fingerprint: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             short_fingerprint: "00000000…00000000".to_string(),
             added_unix_seconds: None,
-            not_before_unix_seconds: None,
-            not_after_unix_seconds: None,
+            not_before_unix_seconds: app_manager::now_unix_seconds() - 3600,
+            not_after_unix_seconds,
             serial_number: String::new(),
             issuer: String::new(),
             subject: String::new(),
@@ -1152,18 +1183,31 @@ mod tests {
         app.third_party_signer = Some(signer_bytes());
 
         // No matching publisher: not launchable and no publisher fingerprint to show.
-        assert_eq!(app.publisher_and_launchable(&[]), (String::new(), false));
+        assert_eq!(app.publisher_and_launch_error(&[]), (String::new(), Some(LaunchError::NoCertificate)));
 
         // A publisher whose key matches the stored signer makes it launchable under its fingerprint.
         let publishers = vec![publisher_cert(SIGNER_HEX, "Acme")];
         assert_eq!(
-            app.publisher_and_launchable(&publishers),
-            (publishers[0].short_fingerprint.clone(), true)
+            app.publisher_and_launch_error(&publishers),
+            (publishers[0].short_fingerprint.clone(), None)
         );
     }
 
     #[test]
-    fn is_launchable_tracks_signer_and_builtin() {
+    fn expired_publisher_blocks_launch_under_its_own_fingerprint() {
+        let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        app.third_party_signer = Some(signer_bytes());
+        let publishers =
+            vec![publisher_cert_valid_until(SIGNER_HEX, "Acme", app_manager::now_unix_seconds() - 1)];
+
+        assert_eq!(
+            app.publisher_and_launch_error(&publishers),
+            (publishers[0].short_fingerprint.clone(), Some(LaunchError::PublisherCertificateExpired))
+        );
+    }
+
+    #[test]
+    fn launch_error_tracks_signer_and_builtin() {
         let built_in_id = "0x426974636f696e2057616c6c65740000";
         let mut sideloaded = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
         sideloaded.third_party_signer = Some(signer_bytes());
@@ -1173,12 +1217,13 @@ mod tests {
         ]);
 
         let third_party = decode_app_id_str(THIRD_PARTY_APP_ID).unwrap();
-        assert!(registry.is_launchable(third_party, &[publisher_cert(SIGNER_HEX, "Acme")]));
-        assert!(!registry.is_launchable(third_party, &[]));
+        assert_eq!(registry.launch_error(third_party, &[publisher_cert(SIGNER_HEX, "Acme")]), None);
+        assert_eq!(registry.launch_error(third_party, &[]), Some(LaunchError::NoCertificate));
         // Built-in apps launch regardless of publishers; an unknown id never does.
-        assert!(registry.is_launchable(decode_app_id_str(built_in_id).unwrap(), &[]));
-        assert!(
-            !registry.is_launchable(decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap(), &[])
+        assert_eq!(registry.launch_error(decode_app_id_str(built_in_id).unwrap(), &[]), None);
+        assert_eq!(
+            registry.launch_error(decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap(), &[]),
+            Some(LaunchError::UnknownAppId)
         );
     }
 
@@ -1322,7 +1367,7 @@ mod tests {
         );
 
         assert!(apps[0].publisher.is_empty());
-        assert!(!apps[0].can_launch);
+        assert_eq!(apps[0].launch_error, Some(LaunchError::NoCertificate));
         assert_eq!(apps[0].description, "Example description");
         assert_eq!(apps[0].version, "1.2.3");
     }
@@ -1398,7 +1443,7 @@ mod tests {
         );
         app.manifest.publisher = Some("Different Publisher".to_string());
 
-        assert_eq!(app.publisher_and_launchable(&[]), (String::new(), true));
+        assert_eq!(app.publisher_and_launch_error(&[]), (String::new(), None));
     }
 
     #[test]

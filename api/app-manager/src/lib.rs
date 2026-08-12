@@ -141,7 +141,7 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
     pub fn preview_third_party_certificate(
         &self,
         certificate_pem: Vec<u8>,
-    ) -> Result<PreviewThirdPartyCertificateResult, xous::Error>
+    ) -> Result<Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError>, xous::Error>
     where
         P: MessageAllowed<PreviewThirdPartyCertificate>,
     {
@@ -152,7 +152,7 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         &self,
         certificate_pem: Vec<u8>,
         expected_fingerprint: impl Into<String>,
-    ) -> Result<ImportThirdPartyCertificateResult, xous::Error>
+    ) -> Result<Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError>, xous::Error>
     where
         P: MessageAllowed<ImportThirdPartyCertificate>,
     {

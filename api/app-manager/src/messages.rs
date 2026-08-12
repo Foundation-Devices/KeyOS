@@ -100,9 +100,14 @@ pub struct InstalledAppPermissionGroup {
 pub struct InstalledAppInfo {
     pub app_id: String,
     pub name: String,
-    /// Short fingerprint of the allowed third-party publisher; empty for built-in apps.
+    /// Short fingerprint of the third-party publisher that signed the app, whether or not its
+    /// certificate currently allows a launch; empty for built-in apps and for a signer no stored
+    /// certificate matches.
     pub publisher: String,
-    pub can_launch: bool,
+    /// Why launching the app would fail right now, or `None` while it would succeed. The signature
+    /// is only checked by an actual launch, so a launch can still fail with an error this never
+    /// reports.
+    pub launch_error: Option<LaunchError>,
     pub can_remove: bool,
     /// Whether this is a Flux child app: it runs inside the Flux emulator, so
     /// direct-launch affordances (e.g. an Open App button) don't apply to it.
@@ -163,8 +168,8 @@ pub struct ThirdPartyCertificateInfo {
     pub short_fingerprint: String,
     /// When the certificate was first imported, or None if its file carries an unreadable timestamp.
     pub added_unix_seconds: Option<u64>,
-    pub not_before_unix_seconds: Option<u64>,
-    pub not_after_unix_seconds: Option<u64>,
+    pub not_before_unix_seconds: u64,
+    pub not_after_unix_seconds: u64,
     pub serial_number: String,
     pub issuer: String,
     pub subject: String,
@@ -174,32 +179,38 @@ pub struct ThirdPartyCertificateInfo {
 }
 
 impl ThirdPartyCertificateInfo {
-    /// Whether the current time falls within the certificate's validity window. A missing bound or
-    /// an unreadable clock counts as invalid.
-    pub fn is_currently_valid(&self) -> bool {
-        let Ok(elapsed) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
-            return false;
-        };
-        let now = elapsed.as_secs();
-        matches!(
-            (self.not_before_unix_seconds, self.not_after_unix_seconds),
-            (Some(not_before), Some(not_after)) if not_before <= now && now <= not_after
-        )
-    }
+    /// Whether the device clock falls inside the validity window, the only state in which the
+    /// certificate authorizes an app.
+    pub fn is_usable(&self) -> bool { !self.has_expired() && !self.is_not_yet_valid() }
+
+    pub fn has_expired(&self) -> bool { now_unix_seconds() > self.not_after_unix_seconds }
+
+    pub fn is_not_yet_valid(&self) -> bool { now_unix_seconds() < self.not_before_unix_seconds }
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum PreviewThirdPartyCertificateResult {
-    Valid(ThirdPartyCertificateInfo),
-    Invalid,
+/// The device clock, in seconds since the Unix epoch.
+pub fn now_unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum ImportThirdPartyCertificateResult {
-    Imported(ThirdPartyCertificateInfo),
+/// Why a publisher certificate cannot be used. The window variants carry the bound the device clock
+/// falls outside of, so a caller holding no certificate can still name the date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ThirdPartyCertificateError {
+    /// Not a certificate this device accepts.
     Invalid,
+    Expired {
+        not_after_unix_seconds: u64,
+    },
+    NotYetValid {
+        not_before_unix_seconds: u64,
+    },
+    /// The certificate holds a different key than the fingerprint the user confirmed.
     FingerprintMismatch,
-    InternalError,
+    Internal,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -335,13 +346,13 @@ pub struct GetPermissionRequestInfo {
 pub struct GetThirdPartyCertificates;
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(PreviewThirdPartyCertificateResult)]
+#[response(Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError>)]
 pub struct PreviewThirdPartyCertificate {
     pub certificate_pem: Vec<u8>,
 }
 
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(ImportThirdPartyCertificateResult)]
+#[response(Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError>)]
 pub struct ImportThirdPartyCertificate {
     pub certificate_pem: Vec<u8>,
     /// The fingerprint the user was shown and accepted. Callers must state it, so a publisher can

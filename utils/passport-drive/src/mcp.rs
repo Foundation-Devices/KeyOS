@@ -947,10 +947,7 @@ impl PassportServer {
         }
     }
 
-    /// Read the device clock, in UTC. Check this FIRST whenever a publisher certificate is refused
-    /// or a sideloaded app will not launch: certificate validity is judged against this clock, and
-    /// a Passport that lost backup power reads 2024-01-01, which rejects every valid certificate.
-    /// Settings shows the local time zone on top of this UTC value.
+    /// Read the device clock, in UTC. Settings shows the local time zone on top of this UTC value.
     #[tool]
     fn get_system_time(&self) -> Result<CallToolResult, String> {
         let payload = state()
@@ -983,16 +980,27 @@ impl PassportServer {
         Ok(text_result(&format!("device clock set to {formatted} (unix {unix_seconds})")))
     }
 
-    /// Return the number of currently allowed publisher certificates installed on the device.
+    /// Return how many installed publisher certificates are usable right now, and how many are
+    /// installed at all.
     #[tool]
     fn get_allowed_publisher_count(&self) -> Result<CallToolResult, String> {
         let payload = state()
             .send(Command::GetAllowedPublisherCount, Duration::from_secs(5))
             .map_err(|e| format!("get_allowed_publisher_count request failed: {e}"))?;
-        let bytes: [u8; 2] = payload.as_slice().try_into().map_err(|_| {
-            format!("get_allowed_publisher_count: expected 2 payload bytes, got {}", payload.len())
+        let counts: [u8; 4] = payload.as_slice().try_into().map_err(|_| {
+            format!("get_allowed_publisher_count: expected 4 payload bytes, got {}", payload.len())
         })?;
-        Ok(text_result(&u16::from_le_bytes(bytes).to_string()))
+        let usable = u16::from_le_bytes([counts[0], counts[1]]);
+        let installed = u16::from_le_bytes([counts[2], counts[3]]);
+
+        let mut report = format!("{usable} usable of {installed} installed");
+        if usable == 0 && installed > 0 {
+            report.push_str(
+                "; every installed certificate is outside its validity window, which usually means \
+                 the device date is wrong (get_system_time)",
+            );
+        }
+        Ok(text_result(&report))
     }
 }
 

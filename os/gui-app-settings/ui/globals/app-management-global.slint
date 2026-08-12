@@ -21,6 +21,8 @@ export struct InstalledApp {
     name: string,
     publisher: string,
     can_launch: bool,
+    // Why the app cannot be launched, ready to show; empty when it can.
+    launch_blocked_reason: string,
     can_remove: bool,
     // A Flux child app runs inside the Flux emulator, so it has no direct-launch
     // affordance here: the play button and Open App button are hidden for it.
@@ -81,6 +83,9 @@ export enum AllowedPublisherPreviewResult {
     canceled,
     ready,
     failed,
+    // A certificate Passport accepts, outside its validity window right now. Kept apart from
+    // `failed` so the page can point at the date instead of at the certificate.
+    not-valid-now,
 }
 
 export struct AllowedPublisherRemovalResult {
@@ -102,6 +107,7 @@ export struct InstallAppResult {
 export enum AllowedPublisherImportResult {
     installed,
     invalid,
+    not-valid-now,
     save-failed,
 }
 
@@ -127,6 +133,8 @@ export global AppManagementGlobal {
     in property <[AllowedPublisher]> allowed-publishers: [];
     in-out property <AllowedPublisher> selected-allowed-publisher;
     in property <AllowedPublisher> pending-allowed-publisher;
+    /// Why the certificate the user just picked cannot be used, ready to show.
+    in property <string> publisher-problem;
     callback select-allowed-publisher(string) -> bool;
     callback refresh-allowed-publishers();
     callback preview-allowed-publisher() -> AllowedPublisherPreviewResult;

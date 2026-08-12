@@ -218,6 +218,32 @@ impl AppState {
 
 app!("Launcher", role = ClaimLauncherRole);
 
+/// Why the launch was refused, in terms of what the user can go and change; `None` for failures
+/// with nothing to act on, which fall back to the crash message and its details.
+// TODO: localize
+fn launch_error_reason(error: &app_manager::LaunchError) -> Option<&'static str> {
+    use app_manager::LaunchError;
+
+    match error {
+        LaunchError::NoCertificate => Some(
+            "This app's publisher is not allowed. Import their certificate in Settings > Apps > \
+             Allowed Publishers.",
+        ),
+        LaunchError::PublisherCertificateExpired => Some(
+            "This app's publisher certificate expired. Compare Passport's date in Settings > Date & \
+             Time with the certificate's expiry date in Settings > Apps > Allowed Publishers.",
+        ),
+        LaunchError::PublisherCertificateNotYetActive => Some(
+            "This app's publisher certificate is not valid yet. Compare Passport's date in Settings \
+             > Date & Time with the certificate's start date in Settings > Apps > Allowed Publishers.",
+        ),
+        LaunchError::Verification(_) => {
+            Some("This app's files do not match what its publisher signed. Install it again.")
+        }
+        _ => None,
+    }
+}
+
 /// Items the launcher can display: the fixed built-in app allowlist, sideloaded
 /// apps reported by the app manager, plus the launcher's own Scan QR action.
 fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
@@ -238,7 +264,7 @@ fn discover_launcher_items(app_manager: &AppManagerApi) -> Vec<LauncherItem> {
             label: known_app_label(&entry.app_id).unwrap_or(entry.name),
             icon_key: entry.app_id.clone(),
             target: LauncherTarget::App { app_id: entry.app_id },
-            enabled: entry.can_launch,
+            enabled: entry.launch_error.is_none(),
             can_remove: entry.can_remove,
         });
     }
@@ -526,11 +552,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
             // Ignore item clicks when an app is already being launched (SFT-6854)
             if is_launching(&ui) {
-                return;
-            }
-
-            if !item.enabled {
-                log::info!("Ignoring disabled launcher item click: {}", item.id);
                 return;
             }
 
@@ -1407,10 +1428,14 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
             }
         }
 
-        app_manager::AppEvent::LaunchError { app_id, error: e } => {
-            log::error!("App launch error: {e:?}");
+        app_manager::AppEvent::LaunchError { app_id, error } => {
+            log::error!("App launch error: {error:?}");
             clear_update_settings_crash(state, app_id);
-            launcher_crash_error(&ui, format!("{e:?}"));
+            match launch_error_reason(&error) {
+                // TODO: localize
+                Some(reason) => error_message(&ui, "Can't open this app", reason, None, None, None),
+                None => launcher_crash_error(&ui, format!("{error:?}")),
+            }
         }
 
         // TODO (SFT-5433): push the crash message into a log

@@ -373,6 +373,15 @@ export component AppDetailsPage inherits BasePage {
                 }
             }
 
+            // Same condition as the button above: a Flux child has no Open App button for this to
+            // explain.
+            if !AppManagementGlobal.selected-app.is_flux && AppManagementGlobal.selected-app.launch_blocked_reason != "": TextSm {
+                text: AppManagementGlobal.selected-app.launch_blocked_reason;
+                color: Palette.content-secondary;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
             Button {
                 label: TR2.lookup(TrId.AppsRemoveApp);
                 importance: Importance.negative;

@@ -96,6 +96,16 @@ impl Gui {
                     app_manager::AppManagerError::NoCertificate => {
                         RunAppResponse::LaunchFailed { reason: LaunchFailureReason::NoCertificate }
                     }
+                    app_manager::AppManagerError::PublisherCertificateExpired => {
+                        RunAppResponse::LaunchFailed {
+                            reason: LaunchFailureReason::PublisherCertificateExpired,
+                        }
+                    }
+                    app_manager::AppManagerError::PublisherCertificateNotYetActive => {
+                        RunAppResponse::LaunchFailed {
+                            reason: LaunchFailureReason::PublisherCertificateNotYetActive,
+                        }
+                    }
                     _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
                 }
             })?;
