@@ -135,7 +135,7 @@ pub fn set_irq_enabled(irq_no: IrqNumber, enabled: bool) {
         IrqNumber::Uart1 => PeripheralId::Uart1,
         IrqNumber::Uart2 => PeripheralId::Uart2,
         IrqNumber::Uart3 => PeripheralId::Uart3,
-        IrqNumber::Uart4 => PeripheralId::Uart3,
+        IrqNumber::Uart4 => PeripheralId::Uart4,
 
         IrqNumber::Pioa => PeripheralId::Pioa,
         IrqNumber::Piob => PeripheralId::Piob,

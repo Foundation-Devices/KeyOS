@@ -155,7 +155,15 @@ impl Aic {
     pub fn set_interrupt_enabled(&mut self, id: PeripheralId, enabled: bool) {
         let mut aic_csr = CSR::new(self.base_addr as *mut u32);
         aic_csr.wfo(SSR_INTSEL, id as u32);
-        aic_csr.wfo(IECR_INTEN, enabled.into());
+
+        armv7::asm::dsb();
+        armv7::asm::isb();
+
+        if enabled {
+            aic_csr.wfo(IECR_INTEN, 1);
+        } else {
+            aic_csr.wfo(IDCR_INTD, 1);
+        }
     }
 
     /// Returns a 128-bit mask of pending IRQs.
