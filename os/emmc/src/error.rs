@@ -19,6 +19,8 @@ pub enum EmmcError {
     UnalignedBufferSize,
     #[error("Read or write would go beyond the capacity of the device")]
     OutOfRange,
+    #[error("No blocks were requested")]
+    EmptyRequest,
 }
 
 impl From<xous::Error> for EmmcError {
@@ -33,6 +35,7 @@ impl From<usize> for EmmcError {
             0x80000002 => Self::BufferTooLarge,
             0x80000003 => Self::UnalignedBufferSize,
             0x80000004 => Self::OutOfRange,
+            0x80000005 => Self::EmptyRequest,
             other => Self::XousError(other),
         }
     }
@@ -46,6 +49,7 @@ impl From<EmmcError> for usize {
             EmmcError::BufferTooLarge => 0x80000002,
             EmmcError::UnalignedBufferSize => 0x80000003,
             EmmcError::OutOfRange => 0x80000004,
+            EmmcError::EmptyRequest => 0x80000005,
             EmmcError::XousError(other) => other,
         }
     }

@@ -17,8 +17,8 @@ use crate::{
 };
 
 impl ScalarHandler<SdmmcDone> for EmmcServer {
-    fn handle(&mut self, _msg: SdmmcDone, _sender: xous::PID, _ctx: &mut server::ServerContext<Self>) {
-        self.pipeline.on_sdmmc_done();
+    fn handle(&mut self, msg: SdmmcDone, _sender: xous::PID, _ctx: &mut server::ServerContext<Self>) {
+        self.pipeline.on_sdmmc_done(msg.0);
     }
 }
 
@@ -38,6 +38,10 @@ impl DeferredLendMutHandler<ReadBlocks> for EmmcServer {
         let block_index = msg.body().block_index;
         let block_count = msg.body().block_count;
 
+        if block_count == 0 {
+            msg.set_response(Err(EmmcError::EmptyRequest));
+            return;
+        }
         if block_count * BLOCK_SIZE > msg.body().buf.len() || block_count > SD_BUFFER_BLOCKS {
             msg.set_response(Err(EmmcError::BufferTooLarge));
             return;
@@ -83,6 +87,10 @@ impl DeferredLendMutHandler<WriteBlocks> for EmmcServer {
         let block_index = msg.body().block_index;
         let block_count = msg.body().block_count;
 
+        if block_count == 0 {
+            msg.set_response(Err(EmmcError::EmptyRequest));
+            return;
+        }
         if block_count * BLOCK_SIZE > msg.body().buf.len() || block_count > SD_BUFFER_BLOCKS {
             msg.set_response(Err(EmmcError::BufferTooLarge));
             return;
@@ -123,6 +131,10 @@ impl DeferredLendMutHandler<ReadEncryptedBlocks> for EmmcServer {
         let block_index = msg.body().block_index;
         let block_count = msg.body().block_count;
 
+        if block_count == 0 {
+            msg.set_response(Err(EmmcError::EmptyRequest));
+            return;
+        }
         if block_count * BLOCK_SIZE > msg.body().buf.len() || block_count > SD_BUFFER_BLOCKS {
             msg.set_response(Err(EmmcError::BufferTooLarge));
             return;
@@ -164,6 +176,10 @@ impl DeferredLendMutHandler<WriteEncryptedBlocks> for EmmcServer {
         let block_index = msg.body().block_index;
         let block_count = msg.body().block_count;
 
+        if block_count == 0 {
+            msg.set_response(Err(EmmcError::EmptyRequest));
+            return;
+        }
         if block_count * BLOCK_SIZE > msg.body().buf.len() || block_count > SD_BUFFER_BLOCKS {
             msg.set_response(Err(EmmcError::BufferTooLarge));
             return;

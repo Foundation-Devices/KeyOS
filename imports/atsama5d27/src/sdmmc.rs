@@ -17,8 +17,10 @@ const OFFSET_BCR: u32 = 0x06;
 const OFFSET_CCR: u32 = 0x2C;
 const OFFSET_TCR: u32 = 0x2e;
 const OFFSET_NISTR: u32 = 0x30;
+const OFFSET_NISTER: u32 = 0x34;
 const OFFSET_NISIER: u32 = 0x38;
 const OFFSET_EISTR: u32 = 0x32;
+const OFFSET_EISTER: u32 = 0x36;
 const OFFSET_EISIER: u32 = 0x3A;
 const OFFSET_RR0: u32 = 0x10;
 const OFFSET_PCR: u32 = 0x29;
@@ -157,8 +159,8 @@ impl From<SDCmd> for u32 {
 
 #[derive(Debug, Copy, Clone)]
 enum AutoCmd {
-    Cmd12 = 1,
     #[allow(dead_code)]
+    Cmd12 = 1,
     Cmd23 = 2,
 }
 
@@ -319,6 +321,10 @@ impl Sdmmc {
             SdmmcStatus::CMDINHC
         })?;
 
+        // ERRINT is read-only and mirrors EISTR, so a bit left over from an earlier command makes
+        // this one look like it failed the moment we poll.
+        self.clear_error_status(ErrorStatus::all());
+
         let mut csr = CSR::new(self.base_addr as *mut u32);
         let mut cmd_reg = (u32::from(cmd) << 8) as u16;
         let mut wait_mask = NormalStatus::CMDC;
@@ -356,8 +362,15 @@ impl Sdmmc {
 
             cmd_reg |= 1 << 5; // CR_DPSEL
 
+            let multi_block = matches!(
+                cmd,
+                SDCmd::Sd(SDCmdInner::ReadMultipleBlocks | SDCmdInner::WriteMultipleBlocks)
+            );
+
             let mut tmr = 1 << 1; // TMR_BCEN
-            if dma_params.blocks > 1 {
+                                  // CMD18/CMD25 stream until something stops them, so they need multi-block mode and a
+                                  // block count even for one block. Auto CMD23 is what stops them.
+            if multi_block || dma_params.blocks > 1 {
                 tmr |= 1 << 5; // TMR_MSBSEL
             }
             if let DataDirection::Read = dma_params.direction {
@@ -366,18 +379,17 @@ impl Sdmmc {
             // Enable DMA for these commands
             tmr |= 1; // TMR_DMAEN
 
-            if matches!(
-                cmd,
-                SDCmd::Sd(SDCmdInner::ReadMultipleBlocks | SDCmdInner::WriteMultipleBlocks)
-            ) {
-                tmr |= (AutoCmd::Cmd12 as u16) << 2; // Auto CMD12
+            // Auto CMD23 rather than Auto CMD12: CMD12 trails the data phase, and this controller
+            // raises TRFC while it is still in flight, so its response could not be checked.
+            if multi_block {
+                tmr |= (AutoCmd::Cmd23 as u16) << 2;
+                csr.wo(SSAR, dma_params.blocks as u32);
             }
 
             self.write_byte_reg(OFFSET_TCR, 0xe);
             self.write_u16_reg(OFFSET_BSR, dma_params.block_size);
-            if dma_params.blocks > 1 {
-                self.write_u16_reg(OFFSET_BCR, dma_params.blocks as u16);
-            }
+            // Always, or else a stale count from an earlier transfer disagrees with SSAR.
+            self.write_u16_reg(OFFSET_BCR, dma_params.blocks as u16);
 
             self.write_u16_reg(OFFSET_TMR, tmr);
 
@@ -408,6 +420,13 @@ impl Sdmmc {
         }
 
         Ok(resp)
+    }
+
+    /// Unmask status flags so the controller records them.
+    #[inline]
+    pub fn enable_status(&mut self, normal: NormalStatus, error: ErrorStatus) {
+        self.write_u16_reg(OFFSET_NISTER, normal.bits());
+        self.write_u16_reg(OFFSET_EISTER, error.bits());
     }
 
     #[inline]

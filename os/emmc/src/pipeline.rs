@@ -37,6 +37,10 @@ pub trait HardwareImpl {
     /// virt addr of the data buffer.
     fn sdmmc_dma(&mut self, direction: Direction, block_index: u32, blocks: usize, buf_ptr: *mut u8);
 
+    /// Panic if the card has failed anything since the last call. Must not be called while a
+    /// transfer is in flight, as it puts a command on the bus.
+    fn assert_card_healthy(&mut self);
+
     /// Submit one disk-encrypt sub-op (one XTS cluster at most). Fire-and-forget; completion
     /// arrives via `Pipeline::on_disk_encrypt_complete`.
     fn disk_encrypt(
@@ -280,10 +284,12 @@ impl<H: HardwareImpl> Pipeline<H> {
     }
 
     /// Drain any Flush barriers at the head of the queue once all earlier work has completed.
-    fn drain_flushes(&mut self) {
+    /// Returns whether the card was asked for its status.
+    fn drain_flushes(&mut self) -> bool {
         if self.sdmmc_running.is_some() {
-            return;
+            return false;
         }
+        let mut checked = false;
         while let Some((_, head)) = self.ops.iter().next() {
             if !head.op.is_flush() {
                 break;
@@ -296,18 +302,30 @@ impl<H: HardwareImpl> Pipeline<H> {
             }
             let s = self.ops.remove(&flush_seq).unwrap();
             if let OperationType::Flush { deferred } = s.op {
+                // Ask before responding, or else the barrier reports success for writes the card
+                // has not confirmed. One answer covers the whole batch.
+                if !checked {
+                    self.hw.assert_card_healthy();
+                    checked = true;
+                }
                 deferred.respond(()).ok();
             }
         }
+        checked
     }
 
     fn try_advance(&mut self) {
-        self.drain_flushes();
+        let checked = self.drain_flushes();
         self.drain_inbox();
         self.schedule_sdmmc();
         self.schedule_crypt();
 
         if self.is_idle() {
+            // Going idle is the last chance to notice a failure the card only reports on request,
+            // and it covers the writes nobody flushed.
+            if !checked {
+                self.hw.assert_card_healthy();
+            }
             self.hw.idle();
         }
     }
@@ -321,8 +339,9 @@ impl<H: HardwareImpl> Pipeline<H> {
             _ => panic!("run_sdmmc called on non-SDMMC op"),
         };
 
-        self.hw.sdmmc_dma(direction, s.range.start, s.range.count, buf_ptr);
+        let range = s.range;
         self.sdmmc_running = Some(s);
+        self.hw.sdmmc_dma(direction, range.start, range.count, buf_ptr);
     }
 
     /// Send exactly one AES sub-op (one XTS cluster at most). op must be a *Crypt variant.
@@ -353,7 +372,9 @@ impl<H: HardwareImpl> Pipeline<H> {
         self.crypt_running = Some(s);
     }
 
-    pub fn on_sdmmc_done(&mut self) {
+    pub fn on_sdmmc_done(&mut self, error_status: u32) {
+        assert_eq!(error_status, 0, "SDMMC transfer error, EISTR {error_status:#06x}");
+
         let Operation { seq, range, op } = match self.sdmmc_running.take() {
             Some(s) => s,
             None => {
@@ -572,6 +593,7 @@ pub mod test_support {
     pub enum HardwareCall {
         SdmmcDma { direction: Direction, block_index: u32, blocks: usize },
         DiskEncrypt { tweak: [u8; 16], j: usize, dir: crypto::Direction, len: usize },
+        AssertCardHealthy,
         ArmIdleTimer,
         DisarmIdleTimer,
         SuspendSdmmc,
@@ -581,6 +603,8 @@ pub mod test_support {
         fn sdmmc_dma(&mut self, direction: Direction, block_index: u32, blocks: usize, _buf_ptr: *mut u8) {
             self.calls.push(HardwareCall::SdmmcDma { direction, block_index, blocks });
         }
+
+        fn assert_card_healthy(&mut self) { self.calls.push(HardwareCall::AssertCardHealthy); }
 
         fn disk_encrypt(
             &mut self,
@@ -605,6 +629,10 @@ pub mod test_support {
 mod tests {
     use super::test_support::{was_returned, HardwareCall, MockHardware, MockLendMut, Returned};
     use super::*;
+
+    /// SDMMC_EISTR bit for a data CRC error. Which bit it is makes no difference to the pipeline,
+    /// it only ever asks the hardware whether the transfer was clean.
+    const EISTR_DATCRC: u32 = 0x1 << 5;
 
     fn pipeline() -> Pipeline<MockHardware> { Pipeline::new(MockHardware::default()) }
 
@@ -668,6 +696,10 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn card_checks(hw: &MockHardware) -> usize {
+        hw.calls.iter().filter(|c| matches!(c, HardwareCall::AssertCardHealthy)).count()
     }
 
     fn crypt_runs(hw: &MockHardware) -> Vec<(crypto::Direction, usize)> {
@@ -738,8 +770,8 @@ mod tests {
         admit_plain_write(&mut pipe, 0, 4);
         let read = admit_plain_read(&mut pipe, 100, 4);
 
-        pipe.on_sdmmc_done();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
+        pipe.on_sdmmc_done(0);
 
         let runs = sdmmc_runs(&pipe.hw);
         assert_eq!(runs.len(), 2, "expected two SDMMC calls, got {:?}", runs);
@@ -767,28 +799,28 @@ mod tests {
         }
 
         test_disjoint(|pipe| {
-            pipe.on_sdmmc_done();
+            pipe.on_sdmmc_done(0);
             pipe.on_disk_encrypt_complete();
-            pipe.on_sdmmc_done();
-            pipe.on_disk_encrypt_complete();
-        });
-        test_disjoint(|pipe| {
-            pipe.on_disk_encrypt_complete();
-            pipe.on_sdmmc_done();
-            pipe.on_disk_encrypt_complete();
-            pipe.on_sdmmc_done();
-        });
-        test_disjoint(|pipe| {
-            pipe.on_disk_encrypt_complete();
-            pipe.on_sdmmc_done();
-            pipe.on_sdmmc_done();
+            pipe.on_sdmmc_done(0);
             pipe.on_disk_encrypt_complete();
         });
         test_disjoint(|pipe| {
-            pipe.on_sdmmc_done();
+            pipe.on_disk_encrypt_complete();
+            pipe.on_sdmmc_done(0);
+            pipe.on_disk_encrypt_complete();
+            pipe.on_sdmmc_done(0);
+        });
+        test_disjoint(|pipe| {
+            pipe.on_disk_encrypt_complete();
+            pipe.on_sdmmc_done(0);
+            pipe.on_sdmmc_done(0);
+            pipe.on_disk_encrypt_complete();
+        });
+        test_disjoint(|pipe| {
+            pipe.on_sdmmc_done(0);
             pipe.on_disk_encrypt_complete();
             pipe.on_disk_encrypt_complete();
-            pipe.on_sdmmc_done();
+            pipe.on_sdmmc_done(0);
         });
     }
 
@@ -806,13 +838,13 @@ mod tests {
         assert!(!was_returned(&read));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         let runs = sdmmc_runs(&pipe.hw);
         assert_eq!(runs, vec![(Direction::Write, 10, 5), (Direction::Read, 12, 1)]);
         assert!(!was_returned(&read), "read deferred set before its SDMMC completed");
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert!(was_returned(&read));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
     }
@@ -832,11 +864,11 @@ mod tests {
         assert_eq!(sdmmc_runs(&pipe.hw).len(), 1);
         assert_eq!(crypt_runs(&pipe.hw).len(), 1);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert_eq!(sdmmc_runs(&pipe.hw).len(), 2);
         assert_eq!(crypt_runs(&pipe.hw).len(), 1);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert_eq!(sdmmc_runs(&pipe.hw).len(), 2);
         assert_eq!(crypt_runs(&pipe.hw).len(), 2);
 
@@ -861,8 +893,8 @@ mod tests {
         assert_eq!(runs, vec![(Direction::Write, 10, 5)]);
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
+        pipe.on_sdmmc_done(0);
         assert_eq!(sdmmc_runs(&pipe.hw), vec![(Direction::Write, 10, 5), (Direction::Write, 12, 1)]);
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
     }
@@ -874,9 +906,9 @@ mod tests {
         let write_b = admit_enc_write(&mut pipe, 12, 1);
 
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
 
         let sd = sdmmc_runs(&pipe.hw);
         assert_eq!(sd, vec![(Direction::Write, 10, 5), (Direction::Write, 12, 1)]);
@@ -893,8 +925,8 @@ mod tests {
         let read_a = admit_plain_read(&mut pipe, 0, 4);
         let read_b = admit_plain_read(&mut pipe, 100, 4);
 
-        pipe.on_sdmmc_done();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
+        pipe.on_sdmmc_done(0);
 
         let runs = sdmmc_runs(&pipe.hw);
         assert_eq!(runs.len(), 2);
@@ -911,9 +943,9 @@ mod tests {
         let read_a = admit_enc_read(&mut pipe, 0, 4);
         let read_b = admit_enc_read(&mut pipe, 100, 4);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         pipe.on_disk_encrypt_complete();
 
         let sd = sdmmc_runs(&pipe.hw);
@@ -942,7 +974,7 @@ mod tests {
 
         // SDMMC done → first crypt sub-op fires (4 blocks, the head of the range up to the
         // cluster boundary).
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert_eq!(crypt_runs(&pipe.hw), vec![(crypto::Direction::Decrypt, SUB_BLOCKS * BLOCK_SIZE)]);
         assert!(!was_returned(&read));
 
@@ -981,7 +1013,7 @@ mod tests {
         assert!(!was_returned(&read_returned));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         // Flush has now returned; the read may begin.
         assert!(was_returned(&flush_returned));
         let runs = sdmmc_runs(&pipe.hw);
@@ -989,7 +1021,7 @@ mod tests {
         assert!(!was_returned(&read_returned));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert!(was_returned(&read_returned));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
     }
@@ -1005,12 +1037,12 @@ mod tests {
         assert!(!was_returned(&flush));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert!(was_returned(&flush));
         assert_eq!(sdmmc_runs(&pipe.hw), vec![(Direction::Write, 0, 4), (Direction::Write, 100, 4)]);
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
     }
 
@@ -1030,12 +1062,12 @@ mod tests {
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
 
         assert!(was_returned(&flush));
         assert!(!was_returned(&read));
 
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         pipe.on_disk_encrypt_complete();
         assert!(was_returned(&read));
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
@@ -1057,17 +1089,50 @@ mod tests {
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm]);
 
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
 
         assert!(was_returned(&write_a));
         assert!(was_returned(&flush));
         assert!(!was_returned(&write_b));
 
         pipe.on_disk_encrypt_complete();
-        pipe.on_sdmmc_done();
+        pipe.on_sdmmc_done(0);
         assert!(was_returned(&write_b));
 
         assert_eq!(sdmmc_runs(&pipe.hw), vec![(Direction::Write, 0, 4), (Direction::Write, 100, 4)]);
         assert_eq!(power_events(&pipe.hw), vec![PowerEvent::Disarm, PowerEvent::Arm]);
+    }
+
+    // --- transfer errors take the system down instead of completing the op ---
+
+    #[test]
+    #[should_panic(expected = "SDMMC transfer error")]
+    fn transfer_error_panics_instead_of_completing_the_op() {
+        let mut pipe = pipeline();
+        admit_plain_read(&mut pipe, 0, 4);
+        pipe.on_sdmmc_done(EISTR_DATCRC);
+    }
+
+    #[test]
+    fn going_idle_asks_the_card() {
+        let mut pipe = pipeline();
+        admit_plain_write(&mut pipe, 0, 4);
+        assert_eq!(card_checks(&pipe.hw), 0);
+
+        pipe.on_sdmmc_done(0);
+        assert_eq!(card_checks(&pipe.hw), 1);
+    }
+
+    #[test]
+    fn consecutive_flushes_ask_the_card_once() {
+        let mut pipe = pipeline();
+        admit_plain_write(&mut pipe, 0, 4);
+        let first = admit_flush(&mut pipe);
+        let second = admit_flush(&mut pipe);
+
+        pipe.on_sdmmc_done(0);
+        assert!(was_returned(&first));
+        assert!(was_returned(&second));
+        assert_eq!(card_checks(&pipe.hw), 1, "the batch and the idle transition share one answer");
     }
 }

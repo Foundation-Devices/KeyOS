@@ -98,5 +98,6 @@ impl From<WriteEncryptedBlocks> for server::SimpleMemoryMessage {
 pub struct Flush;
 
 /// In-process scalar sent by the SDMMC IRQ handler to the eMMC server to signal DMA completion.
+/// Carries the raw SDMMC_EISTR bits, zero when the transfer succeeded.
 #[derive(Debug, Clone, Copy, server::Message)]
-pub(crate) struct SdmmcDone;
+pub(crate) struct SdmmcDone(pub(crate) u32);

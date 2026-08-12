@@ -21,6 +21,10 @@ power_manager::use_api!();
 /// The relative card address, shifted to the position most commands expect.
 const RCA_SHIFTED: u32 = 1 << 16;
 
+/// Error bits of the R1 card status (JESD84-A43 Table 28). The bits left out are informational
+/// (CURRENT_STATE, READY_FOR_DATA, CARD_IS_LOCKED, APP_CMD) or reserved.
+const CARD_STATUS_ERRORS: u32 = 0xFDFF_A080;
+
 const POWER_SAVE_AFTER_MS: usize = 500;
 
 /// Production `HardwareImpl` for the atsama5d27 SDMMC + crypto/dma servers.
@@ -118,6 +122,8 @@ impl HardwareImpl for KeyOsHardware {
         if !self.enabled {
             self.enable();
         }
+        // BLKCNT of 0 transfers nothing, so TRFC never arrives and the pipeline stalls for good.
+        assert!(blocks > 0, "kick_sdmmc: blocks == 0");
         assert!(blocks <= SD_BUFFER_BLOCKS, "kick_sdmmc: blocks > SD_BUFFER_BLOCKS");
 
         let (cmd, dma_dir) = match direction {
@@ -147,10 +153,30 @@ impl HardwareImpl for KeyOsHardware {
         }
 
         self.sdmmc.clear_normal_status(self.sdmmc.normal_status());
+        self.sdmmc.clear_error_status(ErrorStatus::all());
+
         self.sdmmc.enable_interrupt_signal(NormalStatus::TRFC);
-        self.sdmmc
+        // Arm before the command, not after. A completion landing in between would leave this live
+        // with no transfer running, and the next stray error would take the device down.
+        self.sdmmc.enable_error_interrupt_signal(ErrorStatus::all());
+        let resp = self
+            .sdmmc
             .send_command(SDCmd::Sd(cmd), SDRespType::R1, block_index, Some(dma_params))
             .expect("SDMMC hardware error at kick - unrecoverable");
+
+        assert_eq!(resp[0] & CARD_STATUS_ERRORS, 0, "eMMC rejected the transfer, R1 {:#010x}", resp[0]);
+    }
+
+    fn assert_card_healthy(&mut self) {
+        if !self.enabled {
+            self.enable();
+        }
+        let resp = self
+            .sdmmc
+            .send_command(SDCmd::Sd(SDCmdInner::SendStatus), SDRespType::R1, RCA_SHIFTED, None)
+            .expect("SDMMC hardware error on CMD13 - unrecoverable");
+
+        assert_eq!(resp[0] & CARD_STATUS_ERRORS, 0, "eMMC reported a failure, R1 {:#010x}", resp[0]);
     }
 
     fn disk_encrypt(
@@ -194,13 +220,20 @@ pub struct EmmcServer {
 
 impl server::Server for EmmcServer {
     fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
+        self.pipeline.hw.sdmmc.clear_error_status(ErrorStatus::all());
+        // The status enables reset to zero and the bootloader leaves Auto CMD errors masked, so a
+        // failed CMD23 would never raise ERRINT.
+        self.pipeline.hw.sdmmc.enable_status(NormalStatus::CMDC | NormalStatus::TRFC, ErrorStatus::all());
+        // Start masked rather than inheriting the bootloader's state; a transfer arms what it needs.
+        self.pipeline.hw.sdmmc.enable_interrupt_signal(NormalStatus::empty());
+        self.pipeline.hw.sdmmc.enable_error_interrupt_signal(ErrorStatus::empty());
+
         let int_ctx = Box::into_raw(Box::new(InterruptContext {
             conn: CheckedConn::default(),
             sdmmc: Sdmmc::with_alt_base_addr(self.pipeline.hw.sdmmc_addr),
         }));
         xous::claim_interrupt(IrqNumber::Sdmmc0, sdmmc0_irq_handler, int_ctx as *mut usize)
             .expect("emmc: claim SDMMC0 IRQ failed");
-        self.pipeline.hw.sdmmc.enable_error_interrupt_signal(ErrorStatus::all());
 
         self.pipeline
             .hw
@@ -239,13 +272,21 @@ fn sdmmc0_irq_handler(_irq_no: usize, arg: *mut usize) {
     let ctx = unsafe { &mut *(arg as *mut InterruptContext) };
     let ns = ctx.sdmmc.normal_status();
     if ns.contains(NormalStatus::TRFC) || ns.contains(NormalStatus::ERRINT) {
+        let mut es = ErrorStatus::empty();
         if ns.contains(NormalStatus::ERRINT) {
-            let es = ctx.sdmmc.error_status();
-            ctx.sdmmc.clear_error_status(es);
+            es = ctx.sdmmc.error_status();
             log::error!("SDMMC ERRINT: {ns:?} {es:?}");
         }
         ctx.sdmmc.clear_normal_status(ns & (NormalStatus::TRFC | NormalStatus::ERRINT));
         ctx.sdmmc.enable_interrupt_signal(NormalStatus::empty());
-        ctx.conn.send_scalar_nowait(SdmmcDone).ok();
+        ctx.sdmmc.enable_error_interrupt_signal(ErrorStatus::empty());
+        // Masking the signal already stops re-entry, so leave EISTR latched. This can fire while
+        // send_command is still polling, and the latched bit is what makes it return Err with the
+        // real cause and panic before the message is ever dispatched. A completion landing there
+        // is harmless the same way: only TRFC is cleared, never the CMDC it waits for.
+        // Panicking in an interrupt handler does not work, so the server acts on the status.
+        if let Err(e) = ctx.conn.send_scalar_nowait(SdmmcDone(es.bits() as u32)) {
+            log::error!("emmc: could not post SdmmcDone: {e:?}");
+        }
     }
 }
