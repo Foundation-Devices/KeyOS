@@ -23,6 +23,8 @@ export global LauncherCallbacks {
     callback move-item(string, int, string, int);
     callback remove-item-requested(string);
     callback app-blocked-go-to-settings();
+    callback remove-item-confirmed(string);
+    callback remove-blocked-go-to-settings();
     callback scan-clicked(bool);
     callback bitcoin-scrub-update(length, length);
     callback bitcoin-scrub-end();
@@ -48,6 +50,10 @@ export global State {
     in property <bool> update-resume-active: false;
     // Why the tapped app cannot launch; non-empty shows the blocked-app pop-up.
     in-out property <string> app-blocked-reason: "";
+    in-out property <string> remove-error-message: "";
+    in-out property <bool> remove-blocked-by-legacy-apps: false;
+    in-out property <string> remove-confirm-item-id: "";
+    in-out property <string> remove-confirm-item-label: "";
     in-out property <bool> rearrange-mode: false;
     in-out property <int> jiggle-step: 0;
     in-out property <int> current-page: 0;

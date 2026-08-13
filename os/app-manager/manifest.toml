@@ -12,6 +12,7 @@ Disconnected = { id = 65, type = "scalar" }
 
 [permissions]
 template = ["fs-generic", "crypto-sha"]
+"os/gui-server" = ["RequestAppClose"]
 "os/crypto" = ["ShaSetContext", "ShaUpdate", "ShaGetContext", "ShaDrop"]
 "os/fs" = [
     "GetSystemReadAccess",

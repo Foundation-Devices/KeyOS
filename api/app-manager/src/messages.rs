@@ -254,9 +254,7 @@ pub enum RemoveThirdPartyCertificateResult {
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum RemoveInstalledAppResult {
     Removed,
-    NotFound,
     NotSideloaded,
-    Running,
     /// The Flux emulator cannot be removed while Flux apps are installed; remove those first.
     FluxAppsInstalled,
     InternalError,
@@ -399,13 +397,6 @@ pub struct ImportThirdPartyCertificate {
 pub struct RemoveThirdPartyCertificate {
     pub fingerprint: String,
     pub locale: String,
-}
-
-#[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[response(RemoveInstalledAppResult)]
-pub struct RemoveInstalledApp {
-    #[rkyv(with = WithAppId)]
-    pub app_id: AppId,
 }
 
 /// Storage an app archive may be installed from: the places a user can put a file, and no

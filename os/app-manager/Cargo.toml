@@ -19,6 +19,7 @@ crypto = { workspace = true }
 file-backed = { workspace = true }
 fs = { workspace = true }
 fw-utils = { path = "../../utils/fw-utils" }
+gui-server-api = { workspace = true }
 hex = "0.4.3"
 jiff = { workspace = true }
 log = { workspace = true }

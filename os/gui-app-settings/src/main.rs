@@ -387,7 +387,7 @@ fn setup_app_management_global(state: StoredValue<AppState>) -> AppIconCache {
     globals.on_remove_allowed_publisher(move |fingerprint| {
         remove_allowed_publisher(state, fingerprint.as_str())
     });
-    globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
+    globals.on_remove_installed_app(move |app_id| request_remove_installed_app(state, app_id.as_str()));
     globals.on_install_app(move || install_app(state.clone()));
 
     icon_cache
@@ -401,9 +401,23 @@ fn setup_app_manager_event_updates(state: StoredValue<AppState>, app_icon_cache:
         );
         while let Some(event) = sub.next().await {
             match event {
-                app_manager::AppEvent::AppSetChanged { installed, .. } => {
+                app_manager::AppEvent::AppSetChanged { installed, removed } => {
+                    state.borrow().pending_removal.borrow_mut().take_if(|pending| removed.contains(pending));
                     invalidate_settings_app_icons(&app_icon_cache, &installed);
                     refresh_installed_apps_and_selection(state);
+                }
+                app_manager::AppEvent::AppRemovalFailed { app_id, result } => {
+                    let requested_here =
+                        state.borrow().pending_removal.borrow_mut().take_if(|pending| *pending == app_id);
+                    if requested_here.is_some() {
+                        let message = match result {
+                            app_manager::RemoveInstalledAppResult::FluxAppsInstalled => {
+                                TrId::AppsUnableToRemoveAppRemoveLegacyAppsFirst
+                            }
+                            _ => TrId::AppsUnableToRemoveAppThisApp,
+                        };
+                        show_remove_app_error(state, message);
+                    }
                 }
                 app_manager::AppEvent::AllowedPublishersChanged => {
                     // A certificate changes both the Publisher list and whether every sideloaded app
@@ -1325,39 +1339,27 @@ fn install_app_failure(title: TrId, text: TrId) -> InstallAppResult {
     }
 }
 
-fn remove_installed_app(state: StoredValue<AppState>, app_id: &str) -> SharedString {
+fn request_remove_installed_app(state: StoredValue<AppState>, app_id: &str) {
     let app_id = match app_manager::decode_app_id_str(app_id) {
         Ok(app_id) => app_id,
         Err(e) => {
             log::error!("invalid installed app id for removal: {app_id}: {e:?}");
-            return tr::lookup_id(TrId::AppsRemoveAppFailed).into();
+            show_remove_app_error(state, TrId::AppsUnableToRemoveAppThisApp);
+            return;
         }
     };
 
-    let result = { state.borrow().app_manager.remove_installed_app(&app_id) };
-    match result {
-        Ok(app_manager::RemoveInstalledAppResult::Removed)
-        | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {
-            refresh_installed_apps(state);
-            state.borrow().ui().global::<AppManagementGlobal>().set_selected_app(InstalledApp::default());
-            SharedString::default()
-        }
-        Ok(app_manager::RemoveInstalledAppResult::Running) => {
-            tr::lookup_id(TrId::AppsRemoveAppRunning).into()
-        }
-        Ok(app_manager::RemoveInstalledAppResult::FluxAppsInstalled) => {
-            // TODO: localize
-            "Remove the installed Legacy apps first, then try again.".into()
-        }
-        Ok(app_manager::RemoveInstalledAppResult::NotSideloaded)
-        | Ok(app_manager::RemoveInstalledAppResult::InternalError) => {
-            tr::lookup_id(TrId::AppsRemoveAppFailed).into()
-        }
-        Err(e) => {
-            log::error!("failed to remove installed app {app_id}: {e:?}");
-            tr::lookup_id(TrId::AppsRemoveAppFailed).into()
-        }
+    *state.borrow().pending_removal.borrow_mut() = Some(app_id);
+    if let Err(e) = state.borrow().app_manager.remove_app(&app_id) {
+        log::error!("failed to request removal of app {app_id}: {e:?}");
+        state.borrow().pending_removal.borrow_mut().take();
+        show_remove_app_error(state, TrId::AppsUnableToRemoveAppThisApp);
     }
+}
+
+fn show_remove_app_error(state: StoredValue<AppState>, message: TrId) {
+    let ui = state.borrow().ui();
+    ui.global::<AppManagementGlobal>().set_remove_error_message(tr::lookup_id(message).into());
 }
 
 fn format_app_size(size_bytes: u64, locale: &str) -> String {

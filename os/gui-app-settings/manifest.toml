@@ -16,7 +16,7 @@ template = ["gui-app", "fs-generic"]
     "PreviewThirdPartyCertificate",
     "ImportThirdPartyCertificate",
     "RemoveThirdPartyCertificate",
-    "RemoveInstalledApp",
+    "RemoveApp",
     "InstallAppArchive",
 ]
 "os/backup" = ["StatusSubscribe", "CreateBackup", "CreateBackupFile"]

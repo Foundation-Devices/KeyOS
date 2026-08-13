@@ -16,6 +16,7 @@ Shutdown = { id = 29, type = "blockingScalar", approval = "autoAllow" }
 SimulatePowerButton = { id = 33, type = "scalar", cfg = "not(keyos)" }
 SwitchToLauncher = { id = 34, type = "blockingScalar", approval = "autoAllow" }
 CloseApp = { id = 35, type = "blockingScalar", approval = "autoAllow" }
+RequestAppClose = { id = 36, type = "scalar", approval = "autoAllow" }
 AnimateNextFrame = { id = 39, type = "scalar", permissionGroup = "ui-and-input.app-surface", approval = "autoAllow" }
 NavigateTo = { id = 40, type = "blockingArchive", approval = "autoAllow" }
 ShowModal = { id = 44, type = "blockingArchive", permissionGroup = "ui-and-input.brokered-modal", approval = "grantOnFirstUse" }

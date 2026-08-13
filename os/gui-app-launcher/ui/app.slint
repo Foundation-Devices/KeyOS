@@ -3,7 +3,14 @@
 
 import { Router } from "./gen/router.slint";
 import { LauncherCallbacks, State } from "./launcher-callbacks.slint";
-import { Images, CurrentTheme, Utils, Size, Palette } from "@ui/theme.slint";
+import {
+    Images,
+    CurrentTheme,
+    Utils,
+    Size,
+    Palette,
+    Importance,
+} from "@ui/theme.slint";
 import { TR } from "@ui/i18n/i18n.slint";
 import { TR2, TrId } from "./gen/tr.slint";
 import {
@@ -12,7 +19,10 @@ import {
     TimerLoader,
     HeadingMd,
     TextSm,
+    Modal,
+    ErrorModal,
     ConfirmationModal,
+    Button,
 } from "@ui/widgets.slint";
 
 export component AppWindow inherits BaseWindow {
@@ -20,6 +30,61 @@ export component AppWindow inherits BaseWindow {
     background-image-dark: @image-url("assets/launcher-bg-dark.png");
 
     Router { }
+
+    if State.remove-confirm-item-id != "": ConfirmationModal {
+        icon: "alert";
+        icon-color: Palette.content-notice;
+        title: TR2.lookup(TrId.RemoveAppHeader);
+        text: TR2.format(TrId.RemoveAppContent, [State.remove-confirm-item-label]);
+        cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDelete);
+
+        cancel-clicked => {
+            State.remove-confirm-item-id = "";
+        }
+
+        confirm-clicked => {
+            LauncherCallbacks.remove-item-confirmed(State.remove-confirm-item-id);
+            State.remove-confirm-item-id = "";
+        }
+    }
+
+    if State.remove-error-message != "": ErrorModal {
+        icon: "alert";
+        icon-color: Palette.content-notice;
+        title: TR2.lookup(TrId.RemoveAppFailedHeader);
+        text: State.remove-error-message;
+        confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
+        confirm-clicked => {
+            State.remove-error-message = "";
+        }
+    }
+
+    if State.remove-blocked-by-legacy-apps: Modal {
+        icon: "alert";
+        icon-color: Palette.content-notice;
+        title: TR2.lookup(TrId.RemoveAppFailedHeader);
+        text: TR2.lookup(TrId.RemoveAppRemoveLegacyAppsFirst);
+
+        Button {
+            icon: "";
+            label: TR2.lookup(TrId.ButtonGoToSettings);
+            importance: Importance.secondary;
+            clicked => {
+                State.remove-blocked-by-legacy-apps = false;
+                LauncherCallbacks.remove-blocked-go-to-settings();
+            }
+        }
+
+        Button {
+            icon: "";
+            label: TR2.lookup(TrId.CommonButtonConfirm);
+            importance: Importance.primary;
+            clicked => {
+                State.remove-blocked-by-legacy-apps = false;
+            }
+        }
+    }
 
     if State.update-resume-active: Rectangle {
         width: parent.width;

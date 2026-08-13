@@ -24,7 +24,7 @@
     {
       "name": "launcher",
       "path": "os/gui-app-launcher",
-      "include": ["common.button", "common.time", "settings.apps.removeAppRunning"]
+      "include": ["common.button", "common.time"]
     },
     {
       "name": "legacy",

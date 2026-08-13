@@ -119,7 +119,10 @@ export global AppManagementGlobal {
     callback select-installed-app(string) -> bool;
     callback launch-installed-app(string);
     callback set-app-permission-subgroup-grant(string, string, bool) -> bool;
-    callback remove-installed-app(string) -> string;
+    /// Starts an app removal and returns at once; a failure arrives on `remove-error-message`.
+    /// in-out so the page can clear it when the user dismisses the error.
+    callback remove-installed-app(string);
+    in-out property <string> remove-error-message: "";
     /// Starts an install and returns at once; the result arrives on `install-result`, which is
     /// unset again while one is running so a second tap cannot start over the first.
     callback install-app();

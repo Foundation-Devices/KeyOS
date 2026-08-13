@@ -382,6 +382,7 @@ dependencies = [
  "flate2",
  "fs",
  "fw-utils",
+ "gui-server-api",
  "hex",
  "jiff",
  "localizer-codegen",

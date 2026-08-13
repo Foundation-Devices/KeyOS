@@ -14,7 +14,6 @@ ImportThirdPartyCertificate = { id = 7, type = "blockingArchive", approval = "au
 RemoveThirdPartyCertificate = { id = 8, type = "blockingArchive", approval = "autoAllow" }
 GetAppIcon = { id = 9, type = "blockingArchive", permissionGroup = "app-management.app-metadata", approval = "autoAllow" }
 RefreshInstalledApps = { id = 11, type = "blockingScalar" }
-RemoveInstalledApp = { id = 12, type = "blockingArchive", approval = "autoAllow" }
 InstallAppArchive = { id = 13, type = "blockingArchive", approval = "autoAllow" }
 SetAppPermissionGrant = { id = 14, type = "blockingArchive", approval = "autoAllow" }
 GetPermissionRequestInfo = { id = 15, type = "blockingArchive" }

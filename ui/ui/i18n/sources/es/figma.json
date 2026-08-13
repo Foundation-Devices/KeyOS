@@ -626,7 +626,7 @@
       "failedContent": "Passport could not remove {0}.",
       "failedHeader": "Unable to Remove App",
       "header": "Remove App?",
-      "removeLegacyAppsFirst": "Remove the installed Legacy apps in Settings under Apps first, then try again."
+      "removeLegacyAppsFirst": "Remove all Legacy apps before removing Legacy Mode."
     },
     "removeLegacy": {
       "content": "This permanently deletes Legacy Mode. To restore access to Legacy Mode and its emulated apps, a firmware recovery is required.",
@@ -1396,8 +1396,6 @@
       "publisher": "Publisher",
       "publisherProblemNotAllowed": "This app's publisher is not allowed. Import their certificate under Allowed Publishers.",
       "removeApp": "Remove App",
-      "removeAppFailed": "Unable to remove this app.",
-      "removeAppRunning": "Close this app before removing it.",
       "removePublisher": "Remove Publisher",
       "removePublisherConfirm": "Are you sure you want to remove this Publisher?",
       "removePublisherConfirmButton": "Remove",
@@ -1405,7 +1403,6 @@
       "sectionSettings": "Settings",
       "size": "Size",
       "title": "Apps",
-      "unableToRemoveApp": "Unable to remove App",
       "usbLogging": "USB Logging",
       "version": "Version"
     },
@@ -1466,8 +1463,8 @@
       "remove": "Remove"
     },
     "appsUnableToRemoveApp": {
-      "closeThisApp": "Close this app before removing it.",
-      "header": "Unable to remove App",
+      "header": "Unable to Remove App",
+      "removeLegacyAppsFirst": "Remove all Legacy apps before removing Legacy Mode.",
       "thisApp": "Unable to remove this app."
     },
     "autoLock": {

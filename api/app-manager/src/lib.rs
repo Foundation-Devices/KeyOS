@@ -181,13 +181,6 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         })
     }
 
-    pub fn remove_installed_app(&self, app_id: &AppId) -> Result<RemoveInstalledAppResult, xous::Error>
-    where
-        P: MessageAllowed<RemoveInstalledApp>,
-    {
-        self.0.try_send_blocking_archive(RemoveInstalledApp { app_id: *app_id })
-    }
-
     /// Sends a non-blocking app removal request
     pub fn remove_app(&self, app_id: &AppId) -> Result<(), xous::Error>
     where

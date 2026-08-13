@@ -465,8 +465,12 @@ impl AppRegistry {
         self.installed_apps.values().any(|app| app.manifest.servers.contains_key(FLUX_EMULATOR_SERVER))
     }
 
-    pub(crate) fn is_running(&self, app_id: &AppId) -> bool {
-        self.running_apps.values().any(|running_app| running_app.info.id == *app_id)
+    pub(crate) fn is_running(&self, app_id: &AppId) -> bool { self.running_pid(app_id).is_some() }
+
+    pub(crate) fn running_pid(&self, app_id: &AppId) -> Option<PID> {
+        self.running_apps
+            .iter()
+            .find_map(|(pid, running_app)| (running_app.info.id == *app_id).then_some(*pid))
     }
 
     /// Whether an app id belongs to a firmware-shipped app.

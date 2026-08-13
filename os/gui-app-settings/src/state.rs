@@ -45,6 +45,9 @@ pub struct AppState {
     pub ticktimer: TicktimerPrivileged,
     pub bt: BluetoothApi,
     pub app_manager: AppManagerApi,
+    /// The app whose removal this process requested and still awaits an event for; removal
+    /// outcomes for other requestors' removals are not surfaced in the settings UI.
+    pub pending_removal: RefCell<Option<server::xous::AppId>>,
     /// The last `ListApps` result, cached so the app details page and permission toggles read
     /// from it instead of re-requesting each app one by one. Refreshed by `refresh_installed_apps`.
     pub installed_apps: RefCell<Vec<app_manager::InstalledAppInfo>>,
@@ -88,6 +91,7 @@ impl AppState {
             ticktimer: TicktimerPrivileged::default(),
             bt: BluetoothApi::default(),
             app_manager: AppManagerApi::default(),
+            pending_removal: RefCell::new(None),
             installed_apps: RefCell::new(Vec::new()),
             allowed_publishers: RefCell::new(Vec::new()),
             pending_allowed_publisher_certificate: RefCell::new(None),

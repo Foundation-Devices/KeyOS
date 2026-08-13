@@ -21,12 +21,13 @@ mod third_party_certs;
 // locale, with no Slint dependency.
 include!(concat!(env!("OUT_DIR"), "/tr.rs"));
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
 use app_manager::{
     AppEvent, GetPermissionRequestInfo, GetThirdPartyCertificates, ImportThirdPartyCertificate,
     InstallAppArchive, InstallAppArchiveResult, InstallError, LaunchError, PermissionGrantDecision,
-    PermissionRequestInfoResult, PreviewThirdPartyCertificate, RemoveInstalledApp, RemoveInstalledAppResult,
+    PermissionRequestInfoResult, PreviewThirdPartyCertificate, RemoveInstalledAppResult,
     RemoveThirdPartyCertificate, RemoveThirdPartyCertificateResult, SetAppPermissionGrant,
     SetAppPermissionGrantResult, ThirdPartyCertificateError, ThirdPartyCertificateInfo,
 };
@@ -41,6 +42,7 @@ use third_party_certs::ThirdPartyCertificateStore;
 
 crypto::use_api!();
 fs::use_api!();
+gui_server_api::use_api!();
 
 #[cfg(not(keyos))]
 use crate::launch::launch_app;
@@ -67,6 +69,12 @@ pub struct AppManagerServer {
     third_party_cert_store: ThirdPartyCertificateStore,
     panic_message_buf: xous::MemoryRange,
     names: server::xous_names::XousNames,
+    /// Connected on the first close request: connecting at startup would deadlock the boot,
+    /// as gui-server waits for app-manager the same way.
+    gui_server: OnceCell<GuiApiLight>,
+    /// Apps whose removal waits for their process to finish closing; the removal resumes in
+    /// the child-terminated handler.
+    pending_close_removals: HashSet<AppId>,
 }
 
 impl Default for AppManagerServer {
@@ -85,6 +93,8 @@ impl Default for AppManagerServer {
             fs,
             panic_message_buf,
             names: server::xous_names::XousNames::new().expect("xous-names must be reachable"),
+            gui_server: OnceCell::new(),
+            pending_close_removals: HashSet::new(),
         }
     }
 }
@@ -246,17 +256,6 @@ impl BlockingArchiveHandler<RemoveThirdPartyCertificate> for AppManagerServer {
     }
 }
 
-impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
-    fn handle(
-        &mut self,
-        msg: RemoveInstalledApp,
-        _sender: PID,
-        _context: &mut ServerContext<Self>,
-    ) -> RemoveInstalledAppResult {
-        self.remove_app(msg.app_id)
-    }
-}
-
 impl ScalarHandler<RemoveApp> for AppManagerServer {
     fn handle(&mut self, RemoveApp(app_id): RemoveApp, sender: PID, _context: &mut ServerContext<Self>) {
         info!("PID {sender} is asynchronously removing app 0x{app_id}");
@@ -265,48 +264,49 @@ impl ScalarHandler<RemoveApp> for AppManagerServer {
 }
 
 impl AppManagerServer {
-    fn remove_app(&mut self, app_id: AppId) -> RemoveInstalledAppResult {
+    fn remove_app(&mut self, app_id: AppId) {
         self.notify_app_removing(app_id);
-
-        let result = self.try_remove_app(app_id);
-        match result {
-            RemoveInstalledAppResult::Removed => {}
-            RemoveInstalledAppResult::NotFound => {
-                // The requested end state is already true. Still emit the successful terminal
-                // event so asynchronous callers can clear removal UI and stale layout entries.
-                let mut diff = registry::AppRegistryDiff::default();
-                diff.mark_removed(app_id);
-                self.notify_app_set_changed(diff);
-            }
-            _ => self.notify_removal_failed(app_id, result.clone()),
-        }
-        result
-    }
-
-    fn try_remove_app(&mut self, app_id: AppId) -> RemoveInstalledAppResult {
-        if self.app_registry.is_running(&app_id) {
-            return RemoveInstalledAppResult::Running;
-        }
 
         // Flux children are installed and removed as apps of their own, so the emulator goes
         // last: removing it first would strand children nothing can run or remove.
         if self.app_registry.provides_flux_emulator(&app_id)
             && !self.app_registry.flux_child_app_ids().is_empty()
         {
-            return RemoveInstalledAppResult::FluxAppsInstalled;
+            self.notify_removal_failed(app_id, RemoveInstalledAppResult::FluxAppsInstalled);
+            return;
         }
 
         let Some(app_dir) = self.app_registry.removable_bundle_dir(app_id) else {
-            return if self.app_registry.contains_app(app_id) {
-                RemoveInstalledAppResult::NotSideloaded
+            if self.app_registry.contains_app(app_id) {
+                self.notify_removal_failed(app_id, RemoveInstalledAppResult::NotSideloaded);
             } else {
-                RemoveInstalledAppResult::NotFound
-            };
+                // The requested end state is already true. Still emit the successful terminal
+                // event so asynchronous callers can clear removal UI and stale layout entries.
+                let mut diff = registry::AppRegistryDiff::default();
+                diff.mark_removed(app_id);
+                self.notify_app_set_changed(diff);
+            }
+            return;
         };
+
+        // A running app is gracefully closed first; the removal resumes in the
+        // child-terminated handler.
+        if let Some(pid) = self.app_registry.running_pid(&app_id) {
+            info!("closing app 0x{app_id} (pid {pid}) before removing it");
+            self.pending_close_removals.insert(app_id);
+            let gui_server = self.gui_server.get_or_init(GuiApiLight::connect);
+            if let Err(e) = gui_server.request_app_close(pid) {
+                error!("failed to request closing app 0x{app_id} (pid {pid}): {e:?}");
+            }
+            return;
+        }
 
         info!("removing app 0x{} from {app_dir}", hex::encode(app_id.0));
 
-        self.remove_app_bundle(app_id, &app_dir)
+        match self.remove_app_bundle(app_id, &app_dir) {
+            RemoveInstalledAppResult::Removed => {}
+            result => self.notify_removal_failed(app_id, result),
+        }
     }
 
     fn remove_app_bundle(&mut self, app_id: AppId, app_dir: &str) -> RemoveInstalledAppResult {
@@ -578,18 +578,18 @@ impl ScalarHandler<ChildCrashed> for AppManagerServer {
         sender: PID,
         _context: &mut ServerContext<Self>,
     ) {
-        let Some(app_id) = self.app_registry.app_id_by_pid(sender) else {
+        let Some(&app_id) = self.app_registry.app_id_by_pid(sender) else {
             error!("Failed to get app ID for PID {sender}");
             return;
         };
 
-        let Some(launched_by) = self.app_registry.launched_by(app_id) else {
+        let Some(launched_by) = self.app_registry.launched_by(&app_id) else {
             error!("Failed to find launched_by PID for app ID 0x{app_id}");
             return;
         };
 
         let event = AppEvent::AppCrashed {
-            app_id: *app_id,
+            app_id,
             pid: sender,
             launched_by,
             exit_code,
@@ -598,6 +598,10 @@ impl ScalarHandler<ChildCrashed> for AppManagerServer {
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
 
         self.app_registry.terminate_app(sender);
+
+        if self.pending_close_removals.remove(&app_id) {
+            self.remove_app(app_id);
+        }
     }
 }
 

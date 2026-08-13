@@ -534,6 +534,13 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
+    ui.global::<LauncherCallbacks>().on_remove_blocked_go_to_settings(move || {
+        let gui = state.borrow().gui.clone();
+        if let Err(e) = gui.navigate_to(SETTINGS_APP_ID, b"/settings/apps") {
+            log::error!("failed to navigate to the Settings apps page: {e:?}");
+        }
+    });
+
     ui.global::<LauncherCallbacks>().on_item_clicked({
         move |x: f32, y: f32, item_id| {
             let x = x as usize;
@@ -657,7 +664,17 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     ui.global::<LauncherCallbacks>().on_remove_item_requested({
         move |item_id| {
-            confirm_and_remove_launcher_item(state, item_id.as_str());
+            open_remove_confirmation(state, item_id.as_str());
+        }
+    });
+
+    ui.global::<LauncherCallbacks>().on_remove_item_confirmed({
+        move |item_id| {
+            let Some(item) = state.borrow().launcher_item_by_id(item_id.as_str()).cloned() else {
+                log::warn!("Unknown launcher item remove confirmed: {item_id}");
+                return;
+            };
+            remove_launcher_item(state, &item);
         }
     });
 
@@ -1140,7 +1157,7 @@ fn invoke_fs_format_alert(state: StoredValue<AppState>) {
     }
 }
 
-fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str) {
+fn open_remove_confirmation(state: StoredValue<AppState>, item_id: &str) {
     let Some(item) = state.borrow().launcher_item_by_id(item_id).cloned() else {
         log::warn!("Unknown launcher item remove requested: {item_id}");
         return;
@@ -1156,31 +1173,12 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
         return;
     }
 
-    {
-        let ui = state.borrow().ui();
-        clear_rearrange_state(&ui);
-    }
+    let ui = state.borrow().ui();
+    clear_rearrange_state(&ui);
 
-    let result = {
-        let gui = state.borrow().gui.clone();
-        gui.invoke_alert(InvokeAlert {
-            app_title: None,
-            title: tr::lookup_id(TrId::RemoveAppHeader).to_string(),
-            icon: "alert".to_string(),
-            line1: i18n::replace_placeholders(tr::lookup_id(TrId::RemoveAppContent), &[item.label.as_str()]),
-            line2: None,
-            button1_title: tr::lookup_id(TrId::CommonButtonDelete).to_string(),
-            button2_title: Some(tr::lookup_id(TrId::CommonButtonCancel).to_string()),
-            button3_title: None,
-        })
-        .unwrap_or(AlertResult::Canceled)
-    };
-
-    if !matches!(result, AlertResult::Button1Pressed) {
-        return;
-    }
-
-    remove_launcher_item(state, &item);
+    let ui_state = ui.global::<State>();
+    ui_state.set_remove_confirm_item_label(item.label.as_str().into());
+    ui_state.set_remove_confirm_item_id(item.id.as_str().into());
 }
 
 fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
@@ -1222,31 +1220,8 @@ fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
 }
 
 fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {
-    let gui = state.borrow().gui.clone();
-    let _ = gui.invoke_alert(InvokeAlert {
-        app_title: None,
-        title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
-        icon: "alert".to_string(),
-        line1: i18n::replace_placeholders(tr::lookup_id(TrId::RemoveAppFailedContent), &[app_label]),
-        line2: None,
-        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
-        button2_title: None,
-        button3_title: None,
-    });
-}
-
-fn show_remove_running_app_error(state: StoredValue<AppState>) {
-    let gui = state.borrow().gui.clone();
-    let _ = gui.invoke_alert(InvokeAlert {
-        app_title: None,
-        title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
-        icon: "alert".to_string(),
-        line1: tr::lookup_id(TrId::SettingsAppsRemoveAppRunning).to_string(),
-        line2: None,
-        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
-        button2_title: None,
-        button3_title: None,
-    });
+    let message = i18n::replace_placeholders(tr::lookup_id(TrId::RemoveAppFailedContent), &[app_label]);
+    state.borrow().ui().global::<State>().set_remove_error_message(message.into());
 }
 
 fn clear_launching_state(ui: &AppWindow) { ui.global::<State>().set_loading_item_id("".into()); }
@@ -1278,6 +1253,15 @@ fn clear_transient_state(state: &mut AppState) {
     clear_removing_state(&ui);
     clear_rearrange_state(&ui);
     clear_bitcoin_scrub(&ui);
+    clear_remove_dialogs(&ui);
+}
+
+fn clear_remove_dialogs(ui: &AppWindow) {
+    let ui_state = ui.global::<State>();
+    ui_state.set_remove_confirm_item_id("".into());
+    ui_state.set_remove_confirm_item_label("".into());
+    ui_state.set_remove_error_message("".into());
+    ui_state.set_remove_blocked_by_legacy_apps(false);
 }
 
 fn clear_dropdown_model(ui: &AppWindow) {
@@ -1436,22 +1420,8 @@ fn handle_app_event(
             if is_ours {
                 let label = state.borrow_mut().pending_removal.take().unwrap().1;
                 match result {
-                    app_manager::RemoveInstalledAppResult::Running => show_remove_running_app_error(state),
                     app_manager::RemoveInstalledAppResult::FluxAppsInstalled => {
-                        let gui = state.borrow().gui.clone();
-                        let _ = gui.invoke_alert(InvokeAlert {
-                            app_title: None,
-                            title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
-                            icon: "alert".to_string(),
-                            // TODO: localize
-                            line1:
-                                "Remove the installed Legacy apps in Settings > Apps first, then try again."
-                                    .to_string(),
-                            line2: None,
-                            button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
-                            button2_title: None,
-                            button3_title: None,
-                        });
+                        ui.global::<State>().set_remove_blocked_by_legacy_apps(true);
                     }
                     _ => show_remove_app_error(state, &label),
                 }

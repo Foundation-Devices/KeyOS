@@ -117,6 +117,21 @@ impl AsScalar<1> for CloseApp {
     fn as_scalar(&self) -> [u32; 1] { [self.pid as u32] }
 }
 
+/// Fire-and-forget variant of [`CloseApp`], for senders gui-server itself may block on,
+/// where waiting for the response could deadlock the two server loops.
+#[derive(Debug, server::Message)]
+pub struct RequestAppClose {
+    pub pid: usize,
+}
+
+impl FromScalar<1> for RequestAppClose {
+    fn from_scalar([pid]: [u32; 1]) -> Self { Self { pid: pid as usize } }
+}
+
+impl AsScalar<1> for RequestAppClose {
+    fn as_scalar(&self) -> [u32; 1] { [self.pid as u32] }
+}
+
 #[derive(Debug, server::Message)]
 pub struct AnimateNextFrame {
     pub animation_kind: NextFrameAnimationKind,

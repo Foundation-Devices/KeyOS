@@ -144,6 +144,16 @@ impl<P: CheckedPermissions> GuiApiLight<P> {
         Ok(self.conn.try_send_blocking_scalar(msg::CloseApp { pid: pid.get() as usize })??)
     }
 
+    /// Requests closing the app window of the given PID, without waiting for the outcome.
+    /// Callers gui-server itself may block on must use this instead of [`Self::close_app`].
+    pub fn request_app_close(&self, pid: PID) -> Result<(), GuiServerError>
+    where
+        P: MessageAllowed<msg::RequestAppClose>,
+    {
+        self.conn.try_send_scalar(msg::RequestAppClose { pid: pid.get() as usize })?;
+        Ok(())
+    }
+
     /// Captures the current composited screen as raw pixel data.
     /// Returns a `DropDeallocate` of length `FB_SIZE` (SCREEN_WIDTH * SCREEN_HEIGHT * 4)
     /// that auto-unmaps on drop. Dereferences to `MemoryRange` / `&[u8]`.
