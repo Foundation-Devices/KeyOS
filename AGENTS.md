@@ -4,6 +4,22 @@
 around them takes for granted. Read it before concluding that something is
 broken.
 
+## Build verification
+
+KeyOS uses a custom target `armv7a-unknown-xous-elf` for builds for the actual device.
+
+If the custom target is not available in the host Rust toolchain
+(check with `rustc --target armv7a-unknown-xous-elf -Zunstable-options --print cfg`),
+then this target can be provided by the Nix build shell:
+
+```sh
+nix develop .#build --command cargo xtask check <crate>...
+```
+
+This checks the requested crates for both the ARM target and the hosted
+simulator. Do not conclude that the ARM target is unavailable based on the host
+`rustc` or `rustup target list`; try the Nix build shell first.
+
 ## Localization
 
 Translation string IDs come from Figma in dot-notation form, e.g. `"camera.qrModalUnknown.title"`.
