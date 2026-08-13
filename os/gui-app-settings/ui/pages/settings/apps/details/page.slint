@@ -17,7 +17,14 @@ import {
     TextMd,
     TextSm,
 } from "@ui/widgets.slint";
-import { CurrentTheme, Font, Importance, Palette, Size } from "@ui/theme.slint";
+import {
+    CurrentTheme,
+    Font,
+    IconSize,
+    Importance,
+    Palette,
+    Size,
+} from "@ui/theme.slint";
 
 import { Navigate } from "../../../../gen/navigate.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
@@ -404,11 +411,26 @@ export component AppDetailsPage inherits BasePage {
 
             // Same condition as the button above: a Flux child has no Open App button for this to
             // explain.
-            if !AppManagementGlobal.selected-app.is_flux && AppManagementGlobal.selected-app.launch_blocked_reason != "": TextSm {
-                text: AppManagementGlobal.selected-app.launch_blocked_reason;
-                color: Palette.content-secondary;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+            if !AppManagementGlobal.selected-app.is_flux && AppManagementGlobal.selected-app.launch_blocked_reason != "": VerticalLayout {
+                spacing: Size.sz1;
+
+                HorizontalLayout {
+                    alignment: center;
+
+                    Icon {
+                        name: "alert";
+                        size: IconSize.px32;
+                        color: Palette.content-notice;
+                    }
+                }
+
+                TextSm {
+                    text: AppManagementGlobal.selected-app.launch_blocked_reason;
+                    color: Palette.content-notice;
+                    bold: true;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
             }
 
             Button {

@@ -140,8 +140,18 @@ fn setup_navigation_input(cx: &AppContext, state: StoredValue<AppState>) {
             }
 
             let ui = state.borrow().ui();
-            ui.global::<Navigate>()
-                .invoke_navigate(route.into(), NavigateOptions { replace: true, animate: Animate::None });
+            let nav = ui.global::<Navigate>();
+            // Land as if the user had walked there, so the back button walks out of the
+            // deep link instead of dead-ending: home, the parent Apps page for routes
+            // under it, then the leaf.
+            nav.invoke_return_home_animate(Animate::None);
+            if route.starts_with("/settings/apps/") {
+                nav.invoke_navigate(
+                    "/settings/apps".into(),
+                    NavigateOptions { replace: false, animate: Animate::None },
+                );
+            }
+            nav.invoke_navigate(route.into(), NavigateOptions { replace: false, animate: Animate::None });
         }
     });
 }
@@ -764,10 +774,7 @@ fn certificate_window_text(state: &AppState, error: ThirdPartyCertificateError) 
 // TODO: localize
 fn launch_blocked_reason(state: &AppState, error: Option<LaunchError>) -> String {
     match error {
-        Some(LaunchError::NoCertificate) => {
-            "This app's publisher is not allowed. Import their certificate under Allowed Publishers."
-                .to_string()
-        }
+        Some(LaunchError::NoCertificate) => tr::lookup_id(TrId::AppsPublisherProblemNotAllowed).to_string(),
         Some(LaunchError::PublisherCertificateExpired) => format!(
             "This app's publisher certificate expired, and Passport's date is {}. Compare it with \
              the certificate's dates under Allowed Publishers.",

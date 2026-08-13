@@ -12,6 +12,7 @@ import {
     TimerLoader,
     HeadingMd,
     TextSm,
+    ConfirmationModal,
 } from "@ui/widgets.slint";
 
 export component AppWindow inherits BaseWindow {
@@ -68,6 +69,24 @@ export component AppWindow inherits BaseWindow {
         }
 
         TouchArea { }
+    }
+
+    // Centered pop-up for a blocked launch (matches the Figma pop-up): Go to Settings above
+    // Dismiss, where the certificate fix lives.
+    if State.app-blocked-reason != "": ConfirmationModal {
+        width: parent.width;
+        height: parent.height;
+        z: 1000;
+        title: TR2.lookup(TrId.AppBlockedModalHeader);
+        text: State.app-blocked-reason;
+        cancel-button-label: TR2.lookup(TrId.ButtonGoToSettings);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonDismiss);
+        cancel-clicked => {
+            LauncherCallbacks.app-blocked-go-to-settings();
+        }
+        confirm-clicked => {
+            State.app-blocked-reason = "";
+        }
     }
 }
 

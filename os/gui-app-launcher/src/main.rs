@@ -222,27 +222,16 @@ impl AppState {
 
 app!("Launcher", role = ClaimLauncherRole);
 
-/// Why the launch was refused, in terms of what the user can go and change; `None` for failures
-/// with nothing to act on, which fall back to the crash message and its details.
-// TODO: localize
-fn launch_error_reason(error: &app_manager::LaunchError) -> Option<&'static str> {
+/// Why the launch was refused for a publisher-certificate reason, which the blocked-app pop-up's
+/// Go to Settings shortcut can fix under Allowed Publishers; `None` for everything else.
+fn publisher_blocked_reason(error: &app_manager::LaunchError) -> Option<&'static str> {
     use app_manager::LaunchError;
 
     match error {
-        LaunchError::NoCertificate => Some(
-            "This app's publisher is not allowed. Import their certificate in Settings > Apps > \
-             Allowed Publishers.",
-        ),
-        LaunchError::PublisherCertificateExpired => Some(
-            "This app's publisher certificate expired. Compare Passport's date in Settings > Date & \
-             Time with the certificate's expiry date in Settings > Apps > Allowed Publishers.",
-        ),
-        LaunchError::PublisherCertificateNotYetActive => Some(
-            "This app's publisher certificate is not valid yet. Compare Passport's date in Settings \
-             > Date & Time with the certificate's start date in Settings > Apps > Allowed Publishers.",
-        ),
-        LaunchError::Verification(_) => {
-            Some("This app's files do not match what its publisher signed. Install it again.")
+        LaunchError::NoCertificate => Some(tr::lookup_id(TrId::AppBlockedModalContent)),
+        LaunchError::PublisherCertificateExpired => Some(tr::lookup_id(TrId::AppBlockedPublisherExpired)),
+        LaunchError::PublisherCertificateNotYetActive => {
+            Some(tr::lookup_id(TrId::AppBlockedPublisherNotYetActive))
         }
         _ => None,
     }
@@ -669,6 +658,12 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     ui.global::<LauncherCallbacks>().on_remove_item_requested({
         move |item_id| {
             confirm_and_remove_launcher_item(state, item_id.as_str());
+        }
+    });
+
+    ui.global::<LauncherCallbacks>().on_app_blocked_go_to_settings({
+        move || {
+            app_blocked_go_to_settings(state);
         }
     });
 
@@ -1384,6 +1379,20 @@ fn error_message(
     );
 }
 
+/// Close the blocked-app pop-up and open Settings on Allowed Publishers, where the certificate
+/// fix lives. `navigate_to` blocks this callback until the navigation resolves.
+fn app_blocked_go_to_settings(state: StoredValue<AppState>) {
+    let (gui, ui) = {
+        let state = state.borrow();
+        (state.gui.clone(), state.ui())
+    };
+    ui.global::<State>().set_app_blocked_reason("".into());
+
+    if let Err(e) = gui.navigate_to(SETTINGS_APP_ID, b"/settings/apps/allowed-publishers") {
+        log::error!("Failed to open Allowed Publishers: {e:?}");
+    }
+}
+
 fn handle_app_event(
     state: StoredValue<AppState>,
     event: app_manager::AppEvent,
@@ -1482,10 +1491,21 @@ fn handle_app_event(
 
             log::error!("App launch error: {error:?}");
             clear_update_settings_crash(state, app_id);
-            match launch_error_reason(&error) {
-                // TODO: localize
-                Some(reason) => error_message(&ui, "Can't open this app", reason, None, None, None),
-                None => launcher_crash_error(&ui, format!("{error:?}")),
+            if let Some(reason) = publisher_blocked_reason(&error) {
+                clear_launching_state(&ui);
+                ui.global::<State>().set_app_blocked_reason(reason.into());
+            } else if matches!(error, app_manager::LaunchError::Verification(_)) {
+                error_message(
+                    &ui,
+                    tr::lookup_id(TrId::AppBlockedModalHeader),
+                    // TODO: localize
+                    "This app's files do not match what its publisher signed. Install it again.",
+                    None,
+                    None,
+                    None,
+                );
+            } else {
+                launcher_crash_error(&ui, format!("{error:?}"));
             }
         }
 

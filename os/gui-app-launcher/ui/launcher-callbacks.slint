@@ -22,6 +22,7 @@ export global LauncherCallbacks {
     callback item-clicked(length, length, string);
     callback move-item(string, int, string, int);
     callback remove-item-requested(string);
+    callback app-blocked-go-to-settings();
     callback scan-clicked(bool);
     callback bitcoin-scrub-update(length, length);
     callback bitcoin-scrub-end();
@@ -45,6 +46,8 @@ export global State {
     // its uninstall badge until removal completes.
     in-out property <string> removing-item-id: "";
     in property <bool> update-resume-active: false;
+    // Why the tapped app cannot launch; non-empty shows the blocked-app pop-up.
+    in-out property <string> app-blocked-reason: "";
     in-out property <bool> rearrange-mode: false;
     in-out property <int> jiggle-step: 0;
     in-out property <int> current-page: 0;
