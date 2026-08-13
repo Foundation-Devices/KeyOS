@@ -85,6 +85,8 @@ component SecurityCheckFailedView inherits ShieldSection {
             label: TR2.lookup(TrId.CommonButtonRetry);
             importance: primary;
             clicked => {
+                self.loading = true;
+                self.enabled = false;
                 OnboardingCallbacks.restart-onboarding();
             }
         }
@@ -120,6 +122,8 @@ component SecurityCheckPendingView inherits ShieldSection {
             label: TR2.lookup(TrId.CommonButtonRetry);
             importance: primary;
             clicked => {
+                self.loading = true;
+                self.enabled = false;
                 OnboardingCallbacks.restart-onboarding();
             }
         }

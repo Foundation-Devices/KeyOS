@@ -156,7 +156,10 @@ fn on_startup(state: StoredValue<AppState>) {
     } else {
         log::info!("no update state detected");
         match master_key_state {
-            MasterKeyState::Onboarding => {}
+            MasterKeyState::Onboarding => {
+                // A stale pairing makes the server reject Envoy's next pairing request.
+                spawn_local(reset_ql_pairing(state)).detach();
+            }
             _ => {
                 #[cfg(keyos)]
                 {
@@ -299,7 +302,6 @@ fn init_callbacks(state: StoredValue<AppState>) {
 
     cb.on_qr_data(move || {
         let state = state.borrow();
-        spawn_worker(async_archive::<QuantumLinkPermissions, _>(UnpairFromEnvoy)).detach();
         ql_utils::static_qr(&state.settings, &state.bt_address, false).into()
     });
 
@@ -583,11 +585,14 @@ fn init_ql_status_monitor(router: StoredValue<Router>, state: StoredValue<AppSta
             let key_state = state.borrow().security.master_key_state();
             match key_state {
                 MasterKeyState::Onboarding => {
+                    log::info!("restarting onboarding with a fresh QuantumLink pairing");
+
+                    reset_ql_pairing(state).await;
+
                     router.borrow_mut().clear_history();
                     let ui = state.borrow().ui();
                     let nav = ui.global::<Navigate>();
                     clear_slint_state(&ui, &state.borrow());
-                    start_ql_status_monitor(state);
                     nav.invoke_welcome(NavigateOptions { animate: Animate::None, replace: false });
                 }
                 _ => {
@@ -605,6 +610,23 @@ fn init_ql_status_monitor(router: StoredValue<Router>, state: StoredValue<AppSta
         })
         .detach()
     });
+}
+
+/// Drops the QuantumLink pairing and restarts the status monitor.
+async fn reset_ql_pairing(state: StoredValue<AppState>) {
+    const UNPAIR_TIMEOUT: Duration = Duration::from_secs(1);
+
+    state.borrow_mut().ql_status_monitor = None;
+
+    // Arming the monitor before the server drops the pairing makes it read that as a fatal loss. The
+    // pairing is dropped when the request is handled, so a send error or timeout is still a success.
+    match timeout(async_archive::<QuantumLinkPermissions, _>(UnpairFromEnvoy), UNPAIR_TIMEOUT).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => log::warn!("failed to notify Envoy of unpair: {e:?}"),
+        Err(_) => log::warn!("timed out notifying Envoy of unpair"),
+    }
+
+    start_ql_status_monitor(state);
 }
 
 fn start_ql_status_monitor(state: StoredValue<AppState>) {
