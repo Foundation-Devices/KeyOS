@@ -544,14 +544,21 @@ pub mod verify {
         let xpriv = Xpriv::new_master(network, &master_key.key.0).context("get xpriv from master key")?;
         let secp = state.borrow().store.secp.clone();
 
-        let (psbt, details) = spawn_worker(async move {
-            let res = ngwallet::psbt::validate(&secp, &xpriv, &psbt, network)?;
-            Ok::<_, VerifyPsbtError>((psbt, res))
+        // PSBT descriptors are untrusted but needed to find the account
+        // The stored account is the trust anchor for multisig inputs and change
+        // Revalidate multisig transactions with its registered configuration
+        let (psbt, discovery) = spawn_worker({
+            let secp = secp.clone();
+            let xpriv = xpriv.clone();
+            async move {
+                let res = ngwallet::psbt::validate(&secp, &xpriv, &psbt, network, None)?;
+                Ok::<_, VerifyPsbtError>((psbt, res))
+            }
         })
         .await?;
 
         let (account_id, acct) = {
-            let tx_descriptors: Vec<String> = details
+            let tx_descriptors: Vec<String> = discovery
                 .descriptors
                 .iter()
                 .map(|d| d.to_string())
@@ -562,17 +569,27 @@ pub mod verify {
                 .borrow()
                 .store
                 .active_accounts()
-                .find(|(_id, config)| can_sign(&details, &tx_descriptors, &*config))
+                .find(|(_id, config)| can_sign(&discovery, &tx_descriptors, &*config))
                 .map(|(id, config)| (id.clone(), config.clone()))
             {
                 Some(res) => res,
-                None => return Err(VerifyPsbtError::AccountNotFound { verified: psbt, details }),
+                None => return Err(VerifyPsbtError::AccountNotFound { verified: psbt, details: discovery }),
             }
         };
 
         if acct.archived {
             return Err(VerifyPsbtError::AccountArchived { account_id, verified: psbt });
         }
+
+        let (psbt, details) = if let Some(multisig) = acct.multisig.clone() {
+            spawn_worker(async move {
+                let res = ngwallet::psbt::validate(&secp, &xpriv, &psbt, network, Some(&multisig))?;
+                Ok::<_, VerifyPsbtError>((psbt, res))
+            })
+            .await?
+        } else {
+            (psbt, discovery)
+        };
 
         let psbt_view = {
             let state = state.borrow();
