@@ -1,5 +1,5 @@
 {
-  "_": "i already got my SW",
+  "_": "03b7 765b 2604 a185 7aa3 1795 2457 9138 dfff f199 4623 d88e 5806 4db9 cdb6 34d8",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -571,9 +571,20 @@
     }
   },
   "launcher": {
+    "appBlocked": {
+      "publisherExpired": "This app's publisher certificate expired. Compare Passport's time and date with the certificate's expiry date in Allowed Publishers under Settings, Apps.",
+      "publisherNotYetActive": "This app's publisher certificate is not valid yet. Compare Passport's time and the certificate's start date in Allowed Publishers under Settings, Apps."
+    },
+    "appBlockedModal": {
+      "content": "This app's publisher is not allowed. Import their certificate in Allowed Publishers under Settings, Apps.",
+      "header": "Can't Open this App"
+    },
     "appCrash": {
       "content": "{0} has crashed with the following exit code: {1}.",
       "header": "App Crashed"
+    },
+    "button": {
+      "goToSettings": "Go to Settings"
     },
     "crash": {
       "errorMessage": "Error Log"
@@ -613,8 +624,9 @@
     "removeApp": {
       "content": "Remove {0} from Passport?",
       "failedContent": "Passport could not remove {0}.",
-      "failedHeader": "Unable to remove app",
-      "header": "Remove App?"
+      "failedHeader": "Unable to Remove App",
+      "header": "Remove App?",
+      "removeLegacyAppsFirst": "Remove the installed Legacy apps in Settings under Apps first, then try again."
     },
     "removeLegacy": {
       "content": "This permanently deletes Legacy Mode. To restore access to Legacy Mode and its emulated apps, a firmware recovery is required.",
@@ -1337,7 +1349,7 @@
       "allowPublisher": "Allow this Publisher",
       "allowedPublisherAddedByYou": "Added by you · {0}",
       "allowedPublisherBasicConstraints": "Certificate basic constraints",
-      "allowedPublisherCertificates": "Certificates",
+      "allowedPublisherCertificates": "Publishers",
       "allowedPublisherClaimedContactEmail": "Claimed contact email (not verified)",
       "allowedPublisherClaimedName": "Name",
       "allowedPublisherClaimedOrganization": "Organization",
@@ -1381,12 +1393,8 @@
       "notVerified": "(not verified)",
       "openApp": "Open App",
       "publisher": "Publisher",
+      "publisherProblemNotAllowed": "This app's publisher is not allowed. Import their certificate under Allowed Publishers.",
       "removeApp": "Remove App",
-      "removeAppDialog": {
-        "content": "Are you sure you want to remove {0}?",
-        "header": "Remove App",
-        "remove": "Remove"
-      },
       "removeAppFailed": "Unable to remove this app.",
       "removeAppRunning": "Close this app before removing it.",
       "removePublisher": "Remove Publisher",
@@ -1406,7 +1414,7 @@
     "appsModalDeveloperModeRisks": {
       "content": "Developer Mode lets you install apps that Foundation has not verified. A malicious app could impersonate an existing app and access its data. Only install apps from developers you trust.",
       "enableDeveloperMode": "Enable Developer Mode",
-      "title": "Developer Mode Risks"
+      "header": "Developer Mode Risks"
     },
     "appsModalInstallAppIDExists": {
       "content": "This app has an ID that matches an existing KeyOS app. Contact the app publisher.",
@@ -1440,10 +1448,6 @@
       "content": "Install failed. Passport is unable to verify the app signature. Contact the app publisher.",
       "header": "Invalid Signature"
     },
-    "appsModalRemoveApp": {
-      "content": "Are you sure you want to remove {0}?",
-      "header": "Remove App"
-    },
     "appsModalRemoveXFirstThenRetry": {
       "content": "{0} is installed and depends on this certificate. Remove the app first, then try again.",
       "header": "Unable to remove Publisher"
@@ -1454,6 +1458,11 @@
     },
     "appsModalUnableToRemoveAllowedPublisher": {
       "header": "Unable to remove\n Publisher"
+    },
+    "appsRemoveAppDialog": {
+      "content": "Are you sure you want to remove {0}?",
+      "header": "Remove App",
+      "remove": "Remove"
     },
     "appsUnableToRemoveApp": {
       "closeThisApp": "Close this app before removing it.",
@@ -1491,8 +1500,10 @@
       "erasingKeycard": "Erasing Keycard",
       "header": "Erasing Keycard"
     },
-    "backupMagic2Of3KeycardWipingModalTapAnotherCardContent": "The Keycard is part of the recently created Magic Backup. Hold the redundant Keycard to Passport.",
-    "backupMagic2Of3KeycardWipingModalTapAnotherCardHeader": "Hold Another Keycard",
+    "backupMagic2Of3KeycardWipingModalTapAnotherCard": {
+      "content": "The Keycard is part of the recently created Magic Backup. Hold the redundant Keycard to Passport.",
+      "header": "Hold Another Keycard"
+    },
     "backupMagic2Of3KeycardWipingSuccess": {
       "content": "This Keycard can be reused for additional backups any time in the future. ",
       "header": "Keycard Erased Successfully",
@@ -1627,7 +1638,7 @@
       "title": "Device Name"
     },
     "disableMagicBackup": {
-      "content": "If Magic Backup with two Keycards and one Apple/Google Cloud is currently the only backup, you need to save your seed words and disable Magic Backups to be able to proceed. ",
+      "content": "If Magic Backup with two Keycards and one Apple/Google Cloud is currently the only backup, you need to save your seed words and disable Magic Backups to be able to proceed.",
       "header": "Proceed with Seed Words",
       "showSeedWords": "Show Seed Words",
       "title": "Disable Magic Backup"
