@@ -293,11 +293,11 @@ thiserror = "2.0"
 rfal = { version = "4.0.0", git = "https://github.com/Foundation-Devices/rfal-sys", rev = "1a5ba4ee2fd47b41f1788ae2068d9f4a2602b892" }
 st25r95 = "0.4"
 
-backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.8.0", features = [
+backup-shard = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0", features = [
     "keyos",
 ] }
-btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.8.0" }
-foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.8.0", features = [
+btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0" }
+foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0", features = [
     "keyos",
 ] }
 ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.7.0", features = [
