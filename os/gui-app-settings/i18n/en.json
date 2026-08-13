@@ -55,6 +55,7 @@
   "apps.allowedPublisherStatusNotActiveYet": "Not active yet",
   "apps.allowedPublishers": "Allowed Publishers",
   "apps.allowedPublishersIntro": "Add an app publisher by importing their certificate. Verify each fingerprint before allowing it.",
+  "apps.appHash": "App Hash",
   "apps.appId": "App ID",
   "apps.automaticallyGranted": "Automatically Granted",
   "apps.certificate": "Certificate",
