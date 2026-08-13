@@ -300,7 +300,7 @@ btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9
 foundation-api = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.9.0", features = [
     "keyos",
 ] }
-ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.7.0", features = [
+ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.8.0", features = [
     "rkyv",
     "sha2",
 ] }
