@@ -12,7 +12,7 @@ template = ["gui-app", "fs-generic"]
     "LaunchApp",
     "ListApps",
     "GetAppIcon",
-    "RemoveInstalledApp",
+    "RemoveApp",
 ]
 "os/fs" = [
     "FormatEncryptedVolume",

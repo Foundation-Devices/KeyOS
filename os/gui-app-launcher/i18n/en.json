@@ -103,5 +103,6 @@
   "selectApp.keys": "Keys",
   "selectApp.selectAnApp": "Select an app",
   "selectApp.vault": "Vault",
-  "selectApp.wallet": "Wallet"
+  "selectApp.wallet": "Wallet",
+  "settings.apps.removeAppRunning": "Close this app before removing it."
 }

@@ -40,6 +40,10 @@ export global LauncherCallbacks {
 
 export global State {
     in-out property <string> loading-item-id: "";
+    // Set while an app is being uninstalled (whether requested by this launcher or
+    // elsewhere, e.g. a usb-debug sideload removal); grays out its tile and hides
+    // its uninstall badge until removal completes.
+    in-out property <string> removing-item-id: "";
     in property <bool> update-resume-active: false;
     in-out property <bool> rearrange-mode: false;
     in-out property <int> jiggle-step: 0;

@@ -132,6 +132,7 @@ export global AppManagementGlobal {
     pure callback app-icon(string, bool) -> image;
 
     in property <[AllowedPublisher]> allowed-publishers: [];
+    in property <int> allowed-publisher-count;
     in-out property <AllowedPublisher> selected-allowed-publisher;
     in property <AllowedPublisher> pending-allowed-publisher;
     /// Why the certificate the user just picked cannot be used, ready to show.

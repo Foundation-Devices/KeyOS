@@ -140,6 +140,20 @@ impl AppRegistryDiff {
 
         Self { installed, removed }
     }
+
+    pub(crate) fn mark_installed(&mut self, app_id: AppId) {
+        if !self.installed.contains(&app_id) {
+            self.installed.push(app_id);
+            self.installed.sort_by_key(|id| id.0);
+        }
+    }
+
+    pub(crate) fn mark_removed(&mut self, app_id: AppId) {
+        if !self.removed.contains(&app_id) {
+            self.removed.push(app_id);
+            self.removed.sort_by_key(|id| id.0);
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -419,6 +433,12 @@ impl AppRegistry {
     }
 
     pub(crate) fn contains_app(&self, app_id: AppId) -> bool { self.installed_apps.contains_key(&app_id) }
+
+    /// Whether a freshly scanned app is the sideloaded bundle expected by the uploader. A built-in
+    /// that shares the id must not make a sideload completion look successful.
+    pub(crate) fn is_sideloaded_app(&self, app_id: AppId) -> bool {
+        self.installed_apps.get(&app_id).is_some_and(AppInfo::is_sideloaded)
+    }
 
     /// The key that signed the bundle installed under this app id, `None` when no app is installed
     /// under it. The key is itself optional: a hosted build's manifests are unsigned.
@@ -1572,6 +1592,32 @@ mod tests {
 
         assert!(diff.installed.is_empty());
         assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn diff_can_report_a_successful_same_manifest_reinstall() {
+        let app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
+        let before = as_map(vec![app.clone()]);
+        let after = as_map(vec![app]);
+
+        let mut diff = AppRegistryDiff::new(&before, &after);
+        diff.mark_installed(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap());
+        diff.mark_installed(decode_app_id_str(THIRD_PARTY_APP_ID).unwrap());
+
+        assert_eq!(diff.installed, vec![decode_app_id_str(THIRD_PARTY_APP_ID).unwrap()]);
+        assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn diff_can_report_an_already_absent_removal() {
+        let app_id = decode_app_id_str(THIRD_PARTY_APP_ID).unwrap();
+        let mut diff = AppRegistryDiff::default();
+
+        diff.mark_removed(app_id);
+        diff.mark_removed(app_id);
+
+        assert!(diff.installed.is_empty());
+        assert_eq!(diff.removed, vec![app_id]);
     }
 
     /// A sideload that overwrites an existing bundle in place (an app update) keeps the same app

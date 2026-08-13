@@ -93,7 +93,7 @@ impl PassportDriveMcpClient {
     pub fn allowed_publisher_count(&mut self) -> Result<u16> {
         let result = self.call_tool("get_allowed_publisher_count", json!({}))?;
         let text = tool_text(&result).context("publisher-count query returned an empty reply")?;
-        text.trim().parse::<u16>().with_context(|| format!("unexpected publisher-count reply: {text:?}"))
+        parse_allowed_publisher_count(&text)
     }
 
     pub fn ensure_allowed_publisher_installed(&mut self) -> Result<()> {
@@ -260,6 +260,14 @@ fn tool_text(result: &Value) -> Option<String> {
     }
 }
 
+fn parse_allowed_publisher_count(text: &str) -> Result<u16> {
+    text.split_whitespace()
+        .next()
+        .context("publisher-count query returned an empty reply")?
+        .parse::<u16>()
+        .with_context(|| format!("unexpected publisher-count reply: {text:?}"))
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -268,4 +276,19 @@ fn encode_hex(bytes: &[u8]) -> String {
         out.push(HEX[(byte & 0x0f) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_allowed_publisher_count;
+
+    #[test]
+    fn parses_legacy_publisher_count_reply() {
+        assert_eq!(parse_allowed_publisher_count("1").unwrap(), 1);
+    }
+
+    #[test]
+    fn parses_publisher_count_with_installation_status() {
+        assert_eq!(parse_allowed_publisher_count("1 usable of 2 installed").unwrap(), 1);
+    }
 }

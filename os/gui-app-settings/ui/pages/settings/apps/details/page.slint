@@ -79,6 +79,7 @@ component AppSummaryCard inherits Rectangle {
 component InfoRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
+    in property <length> value-width: 260px;
 
     height: value-text.preferred-height + Size.sz8 < 64px ? 64px : value-text.preferred-height + Size.sz8;
 
@@ -101,7 +102,7 @@ component InfoRow inherits Rectangle {
             alignment: center;
 
             value-text := TextMd {
-                width: 260px;
+                width: root.value-width;
                 text: root.value;
                 color: Palette.content-primary;
                 horizontal-alignment: right;
@@ -319,6 +320,7 @@ export component AppDetailsPage inherits BasePage {
                     InfoRow {
                         label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
                         value: AppManagementGlobal.selected-app.publisher;
+                        value-width: 120px;
                     }
 
                     HLine { }

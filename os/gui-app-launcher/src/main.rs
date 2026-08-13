@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -46,7 +47,6 @@ use crate::{fs_permissions::FileSystemPermissions, gui_permissions::GuiPermissio
 
 mod layout;
 
-const LAUNCH_ANIMATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STALE_TIME: Duration = Duration::from_secs(60 * 2); // 2 minutes
 const EXPIRE_TIME_MINUTES: u64 = 60;
 const EXPIRE_TIME: Duration = Duration::from_secs(EXPIRE_TIME_MINUTES * 60); // 1 hour
@@ -118,7 +118,6 @@ pub struct AppState {
     pub ui: slint::Weak<AppWindow>,
     pub ql_status: QlStatus,
     pub haptics_api: HapticsApi,
-    pub loading_state_timer: Timer,
     pub is_fs_unavailable: bool,
     pub is_visible: bool,
     pub persistent: JsonBacked<PersistentState, FileSystemPermissions>,
@@ -134,6 +133,7 @@ pub struct AppState {
     pub last_draw_time_secs: u64,
     pub pending_universal_scan: Option<ScanQrResult>,
     pub universal_qr_matches: Vec<UniversalQrMatch>,
+    pub pending_removal: Option<(AppId, String)>,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -173,7 +173,6 @@ impl AppState {
             ui,
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
             haptics_api: HapticsApi::default(),
-            loading_state_timer: Timer::default(),
             is_fs_unavailable: false,
             is_visible: false,
             persistent,
@@ -189,6 +188,7 @@ impl AppState {
             last_draw_time_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             pending_universal_scan: None,
             universal_qr_matches: Vec::new(),
+            pending_removal: None,
         }
     }
 
@@ -196,6 +196,10 @@ impl AppState {
 
     fn launcher_item_by_id(&self, item_id: &str) -> Option<&LauncherItem> {
         self.launcher.item_by_id(item_id)
+    }
+
+    fn launcher_item_by_app_id(&self, app_id: &AppId) -> Option<&LauncherItem> {
+        self.launcher.item_by_app_id(app_id)
     }
 
     fn move_item(
@@ -354,6 +358,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     let state = StoredValue::new(AppState::new(cx.gui.clone(), ui.as_weak()));
 
+    let app_icon_cache: Rc<RefCell<lru::LruCache<String, Image>>> =
+        Rc::new(RefCell::new(lru::LruCache::new(NonZeroUsize::new(32).expect("cache cap is non-zero"))));
+
     cx.set_input_handler({
         move |app_input| match app_input.msg {
             InputMessage::Hidden => {
@@ -421,12 +428,13 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     spawn_local({
+        let app_icon_cache = app_icon_cache.clone();
         async move {
             let mut sub = subscribe_archive::<app_manager_permissions::AppManagerPermissions, _>(
                 app_manager::messages::SubscribeAppEvents,
             );
             while let Some(event) = sub.next().await {
-                handle_app_event(state, event);
+                handle_app_event(state, event, &app_icon_cache);
             }
         }
     })
@@ -596,9 +604,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     {
         let app_manager = state.borrow().app_manager.clone();
-        let app_icon_cache = RefCell::new(lru::LruCache::<String, Image>::new(
-            NonZeroUsize::new(32).expect("cache cap is non-zero"),
-        ));
+        let app_icon_cache = app_icon_cache.clone();
         ui.global::<LauncherCallbacks>().on_app_icon(move |icon_key, is_dark| {
             let (variant, theme_key) =
                 if is_dark { (IconVariant::Dark, "dark") } else { (IconVariant::Light, "light") };
@@ -1182,9 +1188,17 @@ fn confirm_and_remove_launcher_item(state: StoredValue<AppState>, item_id: &str)
     remove_launcher_item(state, &item);
 }
 
-/// Decode a removable launcher item's AppId and ask app-manager to remove it, refreshing the
-/// launcher on success and surfacing an error modal on failure. The item must be a removable app.
 fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
+    let removal_in_progress = {
+        let state = state.borrow();
+        state.pending_removal.is_some() || !state.ui().global::<State>().get_removing_item_id().is_empty()
+    };
+    if removal_in_progress {
+        log::warn!("Ignoring removal of {} while another app removal is pending", item.id);
+        show_remove_app_error(state, &item.label);
+        return;
+    }
+
     let LauncherTarget::App { app_id } = item.target.clone() else {
         log::warn!("Ignoring removal for non-app launcher item: {}", item.id);
         return;
@@ -1199,50 +1213,16 @@ fn remove_launcher_item(state: StoredValue<AppState>, item: &LauncherItem) {
         }
     };
 
-    log::info!("Requesting removal of launcher item {} (app_id={app_id})", item.id);
-    let remove_result = state.borrow().app_manager.remove_installed_app(&app_id);
+    let ui = state.borrow().ui();
+    ui.global::<State>().set_removing_item_id(item.id.clone().into());
+    state.borrow_mut().pending_removal = Some((app_id, item.label.clone()));
 
-    match remove_result {
-        Ok(app_manager::RemoveInstalledAppResult::Removed)
-        | Ok(app_manager::RemoveInstalledAppResult::NotFound) => {
-            let ui = state.borrow().ui();
-            clear_rearrange_state(&ui);
-            refresh_launcher_apps(state);
-            let mut state = state.borrow_mut();
-            state.sync_layout_orders();
-        }
-        Ok(app_manager::RemoveInstalledAppResult::Running) => {
-            log::warn!("failed to remove launcher item {}: app is still running", item.id);
-            show_remove_app_error(state, &item.label);
-        }
-        Ok(app_manager::RemoveInstalledAppResult::FluxAppsInstalled) => {
-            log::warn!("failed to remove launcher item {}: Legacy apps are still installed", item.id);
-            let gui = state.borrow().gui.clone();
-            let _ = gui.invoke_alert(InvokeAlert {
-                app_title: None,
-                title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
-                icon: "alert".to_string(),
-                // TODO: localize
-                line1: "Remove the installed Legacy apps in Settings > Apps first, then try again."
-                    .to_string(),
-                line2: None,
-                button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
-                button2_title: None,
-                button3_title: None,
-            });
-        }
-        Ok(app_manager::RemoveInstalledAppResult::NotSideloaded) => {
-            log::warn!("failed to remove launcher item {}: app is not sideloaded", item.id);
-            show_remove_app_error(state, &item.label);
-        }
-        Ok(app_manager::RemoveInstalledAppResult::InternalError) => {
-            log::error!("failed to remove launcher item {}: app-manager internal error", item.id);
-            show_remove_app_error(state, &item.label);
-        }
-        Err(e) => {
-            log::error!("failed to request launcher item removal {}: {e:?}", item.id);
-            show_remove_app_error(state, &item.label);
-        }
+    log::info!("Requesting removal of launcher item {} (app_id={app_id})", item.id);
+    if let Err(e) = state.borrow().app_manager.remove_app(&app_id) {
+        log::error!("failed to request launcher item removal {}: {e:?}", item.id);
+        clear_removing_state(&ui);
+        state.borrow_mut().pending_removal = None;
+        show_remove_app_error(state, &item.label);
     }
 }
 
@@ -1260,7 +1240,39 @@ fn show_remove_app_error(state: StoredValue<AppState>, app_label: &str) {
     });
 }
 
+fn show_remove_running_app_error(state: StoredValue<AppState>) {
+    let gui = state.borrow().gui.clone();
+    let _ = gui.invoke_alert(InvokeAlert {
+        app_title: None,
+        title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
+        icon: "alert".to_string(),
+        line1: tr::lookup_id(TrId::SettingsAppsRemoveAppRunning).to_string(),
+        line2: None,
+        button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
+        button2_title: None,
+        button3_title: None,
+    });
+}
+
 fn clear_launching_state(ui: &AppWindow) { ui.global::<State>().set_loading_item_id("".into()); }
+
+fn clear_removing_state(ui: &AppWindow) { ui.global::<State>().set_removing_item_id("".into()); }
+
+/// Returns the ID used by the launcher UI for an app tile. The fallback deliberately uses the
+/// same canonical `0x…` form as `discover_launcher_items`, so terminal lifecycle events can clear
+/// state even after the corresponding tile has disappeared.
+fn launcher_item_id_for_app(state: &AppState, app_id: &AppId) -> String {
+    state.launcher_item_by_app_id(app_id).map(|item| item.id.clone()).unwrap_or_else(|| format!("0x{app_id}"))
+}
+
+/// Drops both theme variants' cached icon for `icon_key` (see `on_app_icon` for the cache key
+/// format), so the next tile render for it re-fetches instead of reusing a stale answer.
+fn invalidate_app_icon_cache(cache: &RefCell<lru::LruCache<String, Image>>, icon_key: &str) {
+    let mut cache = cache.borrow_mut();
+    for theme_key in ["light", "dark"] {
+        cache.pop(&format!("{icon_key}@{APP_ICON_SIZE}x{APP_ICON_SIZE}:smooth:{theme_key}"));
+    }
+}
 
 fn clear_transient_state(state: &mut AppState) {
     state.last_scrubbed_point = None;
@@ -1268,9 +1280,9 @@ fn clear_transient_state(state: &mut AppState) {
     state.last_scrub_x = None;
     let ui = state.ui();
     clear_launching_state(&ui);
+    clear_removing_state(&ui);
     clear_rearrange_state(&ui);
     clear_bitcoin_scrub(&ui);
-    state.loading_state_timer.stop();
 }
 
 fn clear_dropdown_model(ui: &AppWindow) {
@@ -1372,42 +1384,102 @@ fn error_message(
     );
 }
 
-fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) {
+fn handle_app_event(
+    state: StoredValue<AppState>,
+    event: app_manager::AppEvent,
+    app_icon_cache: &RefCell<lru::LruCache<String, Image>>,
+) {
     let (ui, gui_api, app_manager) = {
         let state_borrow = state.borrow();
         (state_borrow.ui(), state_borrow.gui.clone(), state_borrow.app_manager.clone())
     };
     match event {
-        app_manager::AppEvent::AppLaunched { app_id, pid, launched_by } => {
-            // Ignore launch events that are not initiated by the launcher itself
-            if launched_by != current_pid().expect("current pid") {
+        app_manager::AppEvent::AppLaunching { app_id, .. } => {
+            // App-manager also announces launches of modal helpers, which do not have launcher
+            // tiles and do not hide the launcher. Only show a spinner for an actual launcher app.
+            if let Some(item_id) = state.borrow().launcher_item_by_app_id(&app_id).map(|item| item.id.clone())
+            {
+                ui.global::<State>().set_loading_item_id(item_id.into());
+            }
+        }
+
+        app_manager::AppEvent::AppRemoving { app_id } => {
+            if state
+                .borrow()
+                .pending_removal
+                .as_ref()
+                .is_some_and(|(pending_app_id, _)| *pending_app_id != app_id)
+            {
                 return;
             }
+            let removing_id = launcher_item_id_for_app(&state.borrow(), &app_id);
+            ui.global::<State>().set_removing_item_id(removing_id.into());
+        }
 
+        app_manager::AppEvent::AppRemovalFailed { app_id, result } => {
+            log::warn!("App removal failed: app_id={app_id} result={result:?}");
+            let removing_id = launcher_item_id_for_app(&state.borrow(), &app_id);
+            if ui.global::<State>().get_removing_item_id() == removing_id {
+                clear_removing_state(&ui);
+            }
+
+            let is_ours = state.borrow().pending_removal.as_ref().is_some_and(|(id, _)| *id == app_id);
+            if is_ours {
+                let label = state.borrow_mut().pending_removal.take().unwrap().1;
+                match result {
+                    app_manager::RemoveInstalledAppResult::Running => show_remove_running_app_error(state),
+                    app_manager::RemoveInstalledAppResult::FluxAppsInstalled => {
+                        let gui = state.borrow().gui.clone();
+                        let _ = gui.invoke_alert(InvokeAlert {
+                            app_title: None,
+                            title: tr::lookup_id(TrId::RemoveAppFailedHeader).to_string(),
+                            icon: "alert".to_string(),
+                            // TODO: localize
+                            line1:
+                                "Remove the installed Legacy apps in Settings > Apps first, then try again."
+                                    .to_string(),
+                            line2: None,
+                            button1_title: tr::lookup_id(TrId::CommonButtonDone).to_string(),
+                            button2_title: None,
+                            button3_title: None,
+                        });
+                    }
+                    _ => show_remove_app_error(state, &label),
+                }
+            }
+        }
+
+        app_manager::AppEvent::AppLaunched { app_id, pid, launched_by } => {
             log::info!("App launched: app_id={app_id}, pid={pid}");
 
-            // Start a timeout to clear the loading state as a fallback
-            // In normal cases, the Hidden event will clear it first
-            state.borrow().loading_state_timer.start(
-                slint::TimerMode::SingleShot,
-                LAUNCH_ANIMATION_TIMEOUT,
-                {
-                    let ui = ui.clone_strong();
-                    move || {
-                        log::debug!("Loading state timeout triggered, clearing state");
-                        clear_launching_state(&ui);
-                    }
-                },
-            );
+            let loading_id = launcher_item_id_for_app(&state.borrow(), &app_id);
+            let launched_by_launcher = launched_by == current_pid().expect("current pid");
+            if !state.borrow().is_visible && ui.global::<State>().get_loading_item_id() == loading_id {
+                clear_launching_state(&ui);
+            }
+
+            if !launched_by_launcher {
+                return;
+            }
 
             // Switch to an app when it's ready
             if let Err(e) = gui_api.switch_to(pid, 0, 0) {
                 log::error!("Failed to switch to launched app: {e:?}");
+                clear_launching_state(&ui);
                 launcher_crash_error(&ui, format!("{e:?}"));
             }
         }
 
-        app_manager::AppEvent::LaunchError { app_id, error } => {
+        app_manager::AppEvent::LaunchError { app_id, error, launched_by } => {
+            let loading_id = launcher_item_id_for_app(&state.borrow(), &app_id);
+            if ui.global::<State>().get_loading_item_id() == loading_id {
+                clear_launching_state(&ui);
+            }
+
+            if launched_by != current_pid().expect("current pid") {
+                return;
+            }
+
             log::error!("App launch error: {error:?}");
             clear_update_settings_crash(state, app_id);
             match launch_error_reason(&error) {
@@ -1419,6 +1491,10 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
 
         // TODO (SFT-5433): push the crash message into a log
         app_manager::AppEvent::AppCrashed { app_id, pid, exit_code, panic_message, .. } => {
+            let loading_id = launcher_item_id_for_app(&state.borrow(), &app_id);
+            if ui.global::<State>().get_loading_item_id() == loading_id {
+                clear_launching_state(&ui);
+            }
             clear_update_settings_crash(state, app_id);
 
             let app_name = app_manager
@@ -1452,7 +1528,29 @@ fn handle_app_event(state: StoredValue<AppState>, event: app_manager::AppEvent) 
 
         app_manager::AppEvent::AppSetChanged { installed, removed } => {
             log::info!("App set changed: {} installed, {} removed", installed.len(), removed.len());
+            let is_ours = state.borrow().pending_removal.as_ref().is_some_and(|(id, _)| removed.contains(id));
+            let removing_item_id = ui.global::<State>().get_removing_item_id();
+            let removed_item_is_displayed = removed
+                .iter()
+                .any(|app_id| launcher_item_id_for_app(&state.borrow(), app_id) == removing_item_id.as_str());
+            if is_ours || removed_item_is_displayed {
+                clear_removing_state(&ui);
+            }
+            if is_ours {
+                state.borrow_mut().pending_removal = None;
+                clear_rearrange_state(&ui);
+            }
+
+            for app_id in &installed {
+                invalidate_app_icon_cache(app_icon_cache, &format!("0x{app_id}"));
+            }
+
             refresh_launcher_apps(state);
+
+            if is_ours {
+                let mut state = state.borrow_mut();
+                state.sync_layout_orders();
+            }
         }
 
         app_manager::AppEvent::AllowedPublishersChanged => refresh_launcher_apps(state),

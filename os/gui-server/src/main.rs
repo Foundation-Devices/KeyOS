@@ -532,6 +532,7 @@ impl Gui {
         }
     }
 
+    #[cfg(not(feature = "recovery-os"))]
     fn notify_launcher_clear_transient_state(&self) {
         let Some(launcher_app_pid) = self.app_registry.pid(AppRole::Launcher) else {
             return;

@@ -32,7 +32,7 @@ use app_manager::{
 };
 use app_manager::{
     GetAppIcon, GetAppName, GetQrMatchRules, InstalledAppInfo, LaunchApp, LaunchAppBlocking, ListApps,
-    RefreshInstalledApps, SubscribeAppEvents,
+    RefreshInstalledApp, RefreshInstalledApps, RemoveApp, SubscribeAppEvents,
 };
 use fs::adapter::FsAdapter;
 use permission_grants::PermissionGrantStore;
@@ -123,10 +123,32 @@ impl BlockingScalarHandler<RefreshInstalledApps> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Result<(), app_manager::AppManagerError> {
-        self.rescan_and_cache().map_err(|e| {
+        self.rescan_and_notify().map_err(|e| {
             error!("failed to refresh installed apps: {e:?}");
             app_manager::AppManagerError::InternalError
         })
+    }
+}
+
+impl BlockingScalarHandler<RefreshInstalledApp> for AppManagerServer {
+    fn handle(
+        &mut self,
+        RefreshInstalledApp(app_id): RefreshInstalledApp,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<(), app_manager::AppManagerError> {
+        let mut diff = self.rescan_and_cache().map_err(|e| {
+            error!("failed to refresh installed app 0x{}: {e:?}", hex::encode(app_id.0));
+            app_manager::AppManagerError::InternalError
+        })?;
+        if !self.app_registry.is_sideloaded_app(app_id) {
+            error!("refreshed sideloaded app 0x{} did not enter the registry", hex::encode(app_id.0));
+            self.notify_app_set_changed(diff);
+            return Err(app_manager::AppManagerError::InternalError);
+        }
+        diff.mark_installed(app_id);
+        self.notify_app_set_changed(diff);
+        Ok(())
     }
 }
 
@@ -177,9 +199,18 @@ impl BlockingArchiveHandler<ImportThirdPartyCertificate> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
-        let cert = self.third_party_cert_store.import(&msg.certificate_pem, &msg.expected_fingerprint)?;
-        self.notify_allowed_publishers_changed();
-        Ok(cert)
+        match self.third_party_cert_store.import(&msg.certificate_pem, &msg.expected_fingerprint) {
+            Ok(cert) => {
+                self.notify_allowed_publishers_changed();
+                Ok(cert)
+            }
+            Err(error) => {
+                if error.publisher_set_changed {
+                    self.notify_allowed_publishers_changed();
+                }
+                Err(error.error)
+            }
+        }
     }
 }
 
@@ -222,8 +253,37 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
         _sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> RemoveInstalledAppResult {
-        let app_id = msg.app_id;
+        self.remove_app(msg.app_id)
+    }
+}
 
+impl ScalarHandler<RemoveApp> for AppManagerServer {
+    fn handle(&mut self, RemoveApp(app_id): RemoveApp, sender: PID, _context: &mut ServerContext<Self>) {
+        info!("PID {sender} is asynchronously removing app 0x{app_id}");
+        self.remove_app(app_id);
+    }
+}
+
+impl AppManagerServer {
+    fn remove_app(&mut self, app_id: AppId) -> RemoveInstalledAppResult {
+        self.notify_app_removing(app_id);
+
+        let result = self.try_remove_app(app_id);
+        match result {
+            RemoveInstalledAppResult::Removed => {}
+            RemoveInstalledAppResult::NotFound => {
+                // The requested end state is already true. Still emit the successful terminal
+                // event so asynchronous callers can clear removal UI and stale layout entries.
+                let mut diff = registry::AppRegistryDiff::default();
+                diff.mark_removed(app_id);
+                self.notify_app_set_changed(diff);
+            }
+            _ => self.notify_removal_failed(app_id, result.clone()),
+        }
+        result
+    }
+
+    fn try_remove_app(&mut self, app_id: AppId) -> RemoveInstalledAppResult {
         if self.app_registry.is_running(&app_id) {
             return RemoveInstalledAppResult::Running;
         }
@@ -246,13 +306,17 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
 
         info!("removing app 0x{} from {app_dir}", hex::encode(app_id.0));
 
+        self.remove_app_bundle(app_id, &app_dir)
+    }
+
+    fn remove_app_bundle(&mut self, app_id: AppId, app_dir: &str) -> RemoveInstalledAppResult {
         // Before the bundle, so a failure reports the removal failed rather than the app gone
         // while its data is still on disk.
         if !self.forget_app_state(app_id) {
             return RemoveInstalledAppResult::InternalError;
         }
 
-        match self.fs.remove(&app_dir, fs::Location::System) {
+        match self.fs.remove(app_dir, fs::Location::System) {
             Ok(()) | Err(fs::Error::FileNotFound) => {}
             Err(e) => {
                 error!("failed to remove app bundle {app_dir}: {e:?}");
@@ -260,7 +324,7 @@ impl BlockingArchiveHandler<RemoveInstalledApp> for AppManagerServer {
             }
         }
 
-        match self.rescan_and_cache() {
+        match self.rescan_and_notify() {
             Ok(()) => {
                 info!("removed app 0x{}", hex::encode(app_id.0));
                 RemoveInstalledAppResult::Removed
@@ -286,15 +350,23 @@ impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
         // it was replacing, so the registry every reader sees is stale either way.
         let rescanned = self.rescan_and_cache();
 
-        let install::Installed { app_id, app_dir } =
-            installed.inspect_err(|e| error!("could not install an app from {}: {e:?}", msg.path))?;
+        let install::Installed { app_id, app_dir } = match installed {
+            Ok(installed) => installed,
+            Err(error) => {
+                error!("could not install an app from {}: {error:?}", msg.path);
+                if let Ok(diff) = rescanned {
+                    self.notify_app_set_changed(diff);
+                }
+                return Err(error);
+            }
+        };
 
         // The bundle is on disk but nothing knows about it until the rescan, so a failure here
         // leaves an app the user cannot see: report it rather than claim the install worked.
-        if let Err(e) = rescanned {
+        let mut diff = rescanned.map_err(|e| {
             error!("could not refresh installed apps after installing {}: {e:?}", msg.path);
-            return Err(InstallError::Internal);
-        }
+            InstallError::Internal
+        })?;
 
         // A bundle the scan rejects (a colliding server name, say) is invisible in Settings, so
         // drop it rather than leave it eating space. An update that gets this far has already
@@ -302,6 +374,7 @@ impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
         // clears.
         let Some(app_name) = self.app_registry.display_name(&app_id, &msg.locale) else {
             error!("installed app 0x{} did not enter the registry", hex::encode(app_id.0));
+            self.notify_app_set_changed(diff);
             self.forget_app_state(app_id);
             if let Err(e) = self.fs.remove_if_exists(&app_dir, fs::Location::System) {
                 error!("could not remove the bundle that did not register: {e:?}");
@@ -309,6 +382,11 @@ impl BlockingArchiveHandler<InstallAppArchive> for AppManagerServer {
             return Err(InstallError::Internal);
         };
 
+        // The rescan diff only compares manifests
+        // A successful same-manifest re-sideload still replaces bundle resources such as icon.bin, so it is
+        // an AppSetChanged update too
+        diff.mark_installed(app_id);
+        self.notify_app_set_changed(diff);
         info!("installed app 0x{} from {}", hex::encode(app_id.0), msg.path);
         Ok(InstallAppArchiveResult { app_name })
     }
@@ -393,7 +471,7 @@ impl BlockingArchiveHandler<GetPermissionRequestInfo> for AppManagerServer {
 impl Server for AppManagerServer {
     fn on_start(&mut self, context: &mut ServerContext<Self>) {
         install::sweep_staged_bundles(&self.fs);
-        self.rescan_and_cache().expect("Failed to scan installed apps");
+        self.rescan_and_notify().expect("Failed to scan installed apps");
         self.fs.subscribe_filesystem_events(context, fs::Location::AppData);
 
         xous::register_system_event_handler(SystemEvent::ChildTerminated, context.sid(), ChildCrashed::ID)
@@ -406,11 +484,17 @@ impl Server for AppManagerServer {
 impl AppManagerServer {
     pub fn new() -> anyhow::Result<Self> { Ok(Self::default()) }
 
-    /// Rescan installed apps, install the per-server permission cache the scan built so it never
-    /// lags the installed app set, and notify subscribers of any app the scan added or dropped
-    fn rescan_and_cache(&mut self) -> anyhow::Result<()> {
+    /// Rescan installed apps and install the per-server permission cache the scan built so it
+    /// never lags the installed app set.
+    fn rescan_and_cache(&mut self) -> anyhow::Result<registry::AppRegistryDiff> {
         let (cache, diff) = self.app_registry.scan_installed_apps(&self.fs)?;
         self.permission_grants.set_server_cache(cache);
+        Ok(diff)
+    }
+
+    /// Rescan installed apps and notify subscribers about any app bundles that changed
+    fn rescan_and_notify(&mut self) -> anyhow::Result<()> {
+        let diff = self.rescan_and_cache()?;
         self.notify_app_set_changed(diff);
         Ok(())
     }
@@ -468,12 +552,7 @@ impl ScalarHandler<LaunchApp> for AppManagerServer {
     fn handle(&mut self, LaunchApp(app_id): LaunchApp, sender: PID, _context: &mut ServerContext<Self>) {
         info!("PID {sender} is asynchronously launching app 0x{app_id}");
         if let Err(e) = self.launch_app(app_id, sender) {
-            if let Some(s) = self.app_event_subscribers.iter().find(|s| s.pid() == sender) {
-                let event = AppEvent::LaunchError { app_id, error: e };
-                if s.send(&event).is_err() {
-                    error!("Failed to send launch error to subscriber PID {sender}");
-                }
-            }
+            debug!("Async launch of app 0x{app_id} failed: {e:?}");
         }
     }
 }
@@ -532,6 +611,14 @@ impl AppManagerServer {
     fn launch_app(&mut self, app_id: AppId, sender: PID) -> Result<PID, LaunchError> {
         debug!("Launching app with ID: 0x{app_id}");
 
+        let result = self.try_launch_app(app_id, sender);
+        if let Err(error) = &result {
+            self.notify_launch_error(app_id, error.clone(), sender);
+        }
+        result
+    }
+
+    fn try_launch_app(&mut self, app_id: AppId, sender: PID) -> Result<PID, LaunchError> {
         #[cfg(keyos)]
         if let Some(pid) = xous::app_id_to_pid(&app_id)? {
             log::debug!("App 0x{app_id} already running with pid {pid}");
@@ -540,6 +627,11 @@ impl AppManagerServer {
             return Ok(pid);
         }
 
+        self.notify_app_launching(app_id, sender);
+        self.launch_new_app(app_id, sender)
+    }
+
+    fn launch_new_app(&mut self, app_id: AppId, sender: PID) -> Result<PID, LaunchError> {
         self.transient_permission_denies.remove(&app_id);
 
         // Allowance is dynamic: a third-party app launches only while its signer matches a
@@ -570,9 +662,33 @@ impl AppManagerServer {
         Ok(pid)
     }
 
+    fn notify_app_launching(&mut self, app_id: AppId, sender: PID) {
+        debug!("Notifying app launching for app ID: 0x{app_id}");
+        let event = AppEvent::AppLaunching { app_id, launched_by: sender };
+        self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
+    }
+
     fn notify_app_launched(&mut self, app_id: AppId, pid: PID, sender: PID) {
         debug!("Notifying app launch for app ID: 0x{app_id}");
         let event = AppEvent::AppLaunched { app_id, pid, launched_by: sender };
+        self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
+    }
+
+    fn notify_launch_error(&mut self, app_id: AppId, error: LaunchError, sender: PID) {
+        debug!("Notifying launch error for app ID: 0x{app_id}: {error:?}");
+        let event = AppEvent::LaunchError { app_id, error, launched_by: sender };
+        self.app_event_subscribers.retain(|subscriber| subscriber.send(&event).is_ok());
+    }
+
+    fn notify_app_removing(&mut self, app_id: AppId) {
+        debug!("Notifying app removing for app ID: 0x{app_id}");
+        let event = AppEvent::AppRemoving { app_id };
+        self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
+    }
+
+    fn notify_removal_failed(&mut self, app_id: AppId, result: RemoveInstalledAppResult) {
+        debug!("Notifying removal failed for app ID: 0x{app_id}: {result:?}");
+        let event = AppEvent::AppRemovalFailed { app_id, result };
         self.app_event_subscribers.retain(|s| s.send(&event).is_ok());
     }
 

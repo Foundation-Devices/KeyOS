@@ -54,6 +54,17 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         self.0.try_send_blocking_scalar(RefreshInstalledApps).map_err(|_| AppManagerError::InternalError)?
     }
 
+    /// Rescan after an app bundle has been completely replaced, forcing subscribers to refresh
+    /// that app's resources even when its manifest is unchanged
+    pub fn refresh_installed_app(&self, app_id: AppId) -> Result<(), AppManagerError>
+    where
+        P: MessageAllowed<RefreshInstalledApp>,
+    {
+        self.0
+            .try_send_blocking_scalar(RefreshInstalledApp(app_id))
+            .map_err(|_| AppManagerError::InternalError)?
+    }
+
     pub fn app_name_by_app_id(&self, id: &AppId, locale: &str) -> Option<String>
     where
         P: MessageAllowed<GetAppName>,
@@ -175,6 +186,14 @@ impl<P: CheckedPermissions> AppManagerApi<P> {
         P: MessageAllowed<RemoveInstalledApp>,
     {
         self.0.try_send_blocking_archive(RemoveInstalledApp { app_id: *app_id })
+    }
+
+    /// Sends a non-blocking app removal request
+    pub fn remove_app(&self, app_id: &AppId) -> Result<(), xous::Error>
+    where
+        P: MessageAllowed<RemoveApp>,
+    {
+        self.0.try_send_scalar(RemoveApp(*app_id))
     }
 
     pub fn install_app_archive(

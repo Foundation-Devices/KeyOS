@@ -3,6 +3,9 @@
 
 use std::collections::BTreeSet;
 
+use app_manager::decode_app_id_str;
+use xous::AppId;
+
 use super::PersistentState;
 
 pub const BITCOIN_APP_ID: &str = "0x426974636f696e2057616c6c65740000";
@@ -266,6 +269,19 @@ impl LauncherConfig {
             .chain(std::iter::once(&self.dock))
             .flat_map(|collection| collection.items.iter().map(|slot_item| &slot_item.item))
             .find(|item| item.id == item_id)
+    }
+
+    pub fn item_by_app_id(&self, app_id: &AppId) -> Option<&LauncherItem> {
+        self.pages
+            .iter()
+            .chain(std::iter::once(&self.dock))
+            .flat_map(|collection| collection.items.iter().map(|slot_item| &slot_item.item))
+            .find(|item| match &item.target {
+                LauncherTarget::App { app_id: id_str } => {
+                    decode_app_id_str(id_str).is_ok_and(|id| id == *app_id)
+                }
+                LauncherTarget::Action { .. } => false,
+            })
     }
 
     pub fn move_item(

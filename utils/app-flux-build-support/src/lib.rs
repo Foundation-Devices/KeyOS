@@ -459,6 +459,7 @@ pub fn prepare_ledger_sdk(
 
     let nbgl_restored = restore_nbgl_engine_sources(&sdk_path);
     (options.patch_sdk)(&sdk_path);
+    ensure_sdk_makefile_portability(&sdk_path);
     ensure_common_sdk_c_fixes(&sdk_path);
     // The restored (v25) NBGL sources need the same font-data and draw-text
     // patches as a natively shipped v25 tree, so apply them whenever the swap
@@ -1488,6 +1489,29 @@ pub fn ensure_common_sdk_c_fixes(sdk_path: &Path) {
     let _ = ensure_sdk_string_c_includes(sdk_path);
     let _ = ensure_sdk_sprintf_no_vsnprintf(sdk_path);
     let _ = ensure_sdk_vsnprintf(sdk_path);
+}
+
+/// Keep the upstream SDK Makefiles portable across the GNU/Linux and macOS
+/// build hosts supported by KeyOS.
+fn ensure_sdk_makefile_portability(sdk_path: &Path) {
+    let standard_app = sdk_path.join("Makefile.standard_app");
+    replace_in_file(
+        &standard_app,
+        "WEBUSB_URL_SIZE_B = $(shell echo -n $(APP_WEBUSB_URL) | wc -c)",
+        "WEBUSB_URL_SIZE_B = $(strip $(shell echo -n $(APP_WEBUSB_URL) | wc -c))",
+    );
+
+    let target = sdk_path.join("Makefile.target");
+    replace_in_file(
+        &target,
+        r#"grep -E "^\#define\s*TARGET_ID""#,
+        r#"grep -E "^#define[[:space:]]*TARGET_ID""#,
+    );
+    replace_in_file(
+        &target,
+        r#"grep -E "^\#define\s*TARGET_[^I]""#,
+        r#"grep -E "^#define[[:space:]]*TARGET_[^I]""#,
+    );
 }
 
 pub fn ensure_nbgl_draw_text_override(sdk_path: &Path) -> Result<(), String> {

@@ -246,6 +246,7 @@ export component AppsPage inherits BasePage {
                     first: row.first;
                     last: row.last;
                     label: TR2.lookup(TrId.AppsAllowedPublishers);
+                    text: AppManagementGlobal.allowed-publisher-count;
                     clicked => {
                         if row.action_id == 0 {
                             Navigate.allowed-publishers({ });

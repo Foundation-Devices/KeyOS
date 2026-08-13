@@ -48,7 +48,11 @@ pub struct DebugProtocol {
 }
 
 struct UploadSession {
+    app_id: xous::AppId,
+    /// The currently installed bundle. It remains intact until the replacement upload completes.
     app_dir: String,
+    /// The untrusted replacement bundle, invisible to app-manager until `LOAD_APP_END` swaps it in.
+    staging_dir: String,
     current_file: Option<UploadFile>,
 }
 
@@ -267,6 +271,10 @@ impl DebugProtocol {
                 Ok(()) | Err(FsError::FileNotFound) => {}
                 Err(e) => log::warn!("{reason}: remove temp file {temp_path} failed: {e:?}"),
             }
+        }
+        match self.fs.remove(&session.staging_dir, Location::System) {
+            Ok(()) | Err(FsError::FileNotFound) => {}
+            Err(e) => log::warn!("{reason}: remove staged app {} failed: {e:?}", session.staging_dir),
         }
     }
 
@@ -498,15 +506,21 @@ impl DebugProtocol {
 
         let app_id_dir = app_id_dir_name(&app_id);
         let app_dir = format!("{sideload_root}/{app_id_dir}");
-        match self.fs.remove(&app_dir, Location::System) {
+        let staging_dir = format!("{app_dir}.part");
+        match self.fs.remove(&staging_dir, Location::System) {
             Ok(()) | Err(FsError::FileNotFound) => {}
             Err(e) => {
-                log::error!("LOAD_APP_BEGIN: remove existing app dir {app_dir} failed: {e:?}");
+                log::error!("LOAD_APP_BEGIN: remove stale staged app {staging_dir} failed: {e:?}");
                 return Response::Err;
             }
         }
 
-        self.upload = Some(UploadSession { app_dir: app_dir.clone(), current_file: None });
+        self.upload = Some(UploadSession {
+            app_id: xous::AppId(app_id),
+            app_dir: app_dir.clone(),
+            staging_dir,
+            current_file: None,
+        });
         log::info!("debug: load_app begin {app_dir}");
         Response::Ack
     }
@@ -521,7 +535,7 @@ impl DebugProtocol {
         }
 
         let app_dir = match self.upload.as_ref() {
-            Some(session) if session.current_file.is_none() => session.app_dir.clone(),
+            Some(session) if session.current_file.is_none() => session.staging_dir.clone(),
             Some(_) => {
                 log::warn!("LOAD_APP_FILE_BEGIN: previous file still open");
                 return Response::Err;
@@ -664,7 +678,7 @@ impl DebugProtocol {
         if let Some(response) = self.reject_load_app_if_locked("LOAD_APP_END") {
             return response;
         }
-        let app_dir = {
+        let (app_id, app_dir, staging_dir) = {
             let Some(session) = self.upload.as_ref() else {
                 log::warn!("LOAD_APP_END: no active load_app session");
                 return Response::Err;
@@ -673,10 +687,24 @@ impl DebugProtocol {
                 log::warn!("LOAD_APP_END: incomplete session current_file=true");
                 return Response::Err;
             }
-            session.app_dir.clone()
+            (session.app_id, session.app_dir.clone(), session.staging_dir.clone())
         };
 
-        if let Err(e) = self.app_manager.refresh_installed_apps() {
+        match self.fs.remove(&app_dir, Location::System) {
+            Ok(()) | Err(FsError::FileNotFound) => {}
+            Err(e) => {
+                log::error!("LOAD_APP_END: remove existing app {app_dir} failed: {e:?}");
+                self.upload = None;
+                return Response::Err;
+            }
+        }
+        if let Err(e) = self.fs.rename(&staging_dir, &app_dir, Location::System) {
+            log::error!("LOAD_APP_END: rename staged app {staging_dir} to {app_dir} failed: {e:?}");
+            self.upload = None;
+            return Response::Err;
+        }
+
+        if let Err(e) = self.app_manager.refresh_installed_app(app_id) {
             log::error!("LOAD_APP_END: refresh installed apps after {app_dir} failed: {e:?}");
             self.upload = None;
             return Response::Err;

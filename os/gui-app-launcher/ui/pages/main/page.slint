@@ -301,9 +301,10 @@ component LauncherCollectionItem inherits Rectangle {
 
     width: 128px;
     height: show-label ? 160px : 128px;
-    opacity: is-leaving ? 0% : (item.enabled ? 100% : 55%);
+    opacity: is-leaving ? 0% : ((item.enabled && !is-removing) ? 100% : 55%);
     clip: false;
     private property <bool> ignore-release-click: false;
+    private property <bool> is-removing: State.removing-item-id == item.id;
     private property <brush> icon-foreground-color: CurrentTheme.is-dark ? #e0e0e0 : #404040;
     private property <length> visual-offset-x: State.rearrange-mode && !is-dragging ? jiggle-x : 0px;
     private property <length> visual-offset-y: State.rearrange-mode && !is-dragging ? jiggle-y : 0px;
@@ -430,7 +431,7 @@ component LauncherCollectionItem inherits Rectangle {
             }
             // A dimmed tile still reports its tap: the launch is attempted, and Rust shows why it
             // was refused. `enabled` only dims the tile.
-            if (!State.rearrange-mode) {
+            if (!State.rearrange-mode && !root.is-removing) {
                 root.activate(shell.absolute-position.x + shell.width / 2, shell.absolute-position.y + shell.height / 2, root.item.id);
             }
         }
@@ -469,7 +470,9 @@ component LauncherCollectionItem inherits Rectangle {
         }
     }
 
-    if State.rearrange-mode && root.item.can-remove: RemoveBadge {
+    // The launcher keeps one pending removal label/id, so serialize uninstall requests instead
+    // of allowing another badge to overwrite the operation whose result is still outstanding.
+    if State.rearrange-mode && root.item.can-remove && State.removing-item-id == "": RemoveBadge {
         x: root.visual-offset-x - 4px;
         y: root.visual-offset-y - 4px;
         z: 100;

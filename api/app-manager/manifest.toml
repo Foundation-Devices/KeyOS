@@ -19,3 +19,5 @@ InstallAppArchive = { id = 13, type = "blockingArchive", approval = "autoAllow" 
 SetAppPermissionGrant = { id = 14, type = "blockingArchive", approval = "autoAllow" }
 GetPermissionRequestInfo = { id = 15, type = "blockingArchive" }
 PreviewThirdPartyCertificate = { id = 16, type = "blockingArchive", approval = "autoAllow" }
+RemoveApp = { id = 17, type = "scalar", approval = "autoAllow" }
+RefreshInstalledApp = { id = 18, type = "blockingScalar" }

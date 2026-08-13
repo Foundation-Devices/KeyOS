@@ -32,7 +32,7 @@ pub const ADDITIONAL_ICON_SIZES: &[(&str, &[usize])] = &[
     ("lock", &[64, 96]),
     ("unlock", &[64, 96]),
     ("check", &[96]),
-    ("close", &[96]),
+    ("close", &[36, 96]),
     ("cog", &[64]),
     ("arrow-down", &[96]),
     ("arrow-up", &[96]),
@@ -218,6 +218,8 @@ pub fn ui_icons(icons_dir: &Path) -> Vec<(PathBuf, Vec<usize>)> {
                     sizes.extend_from_slice(additional_sizes);
                 }
             }
+            sizes.sort_unstable();
+            sizes.dedup();
             (path, sizes)
         })
         .collect()

@@ -44,6 +44,30 @@ pub(crate) struct ThirdPartyCertificateStore {
     certs: BTreeMap<String, ThirdPartyCertificateInfo>,
 }
 
+#[derive(Debug)]
+pub(crate) struct ImportError {
+    pub(crate) error: ThirdPartyCertificateError,
+    pub(crate) publisher_set_changed: bool,
+}
+
+impl ImportError {
+    fn unchanged(error: ThirdPartyCertificateError) -> Self { Self { error, publisher_set_changed: false } }
+}
+
+#[derive(Debug)]
+struct StoreCertificateError {
+    error: anyhow::Error,
+    previous_certificate_lost: bool,
+}
+
+#[derive(Debug)]
+enum CandidateWriteError {
+    /// Opening failed before the previous file could be changed.
+    Unmodified(anyhow::Error),
+    /// Writing or truncating failed after the previous file may have changed.
+    Modified(anyhow::Error),
+}
+
 impl ThirdPartyCertificateStore {
     pub(crate) fn new(fs: FileSystem) -> Self {
         match fs.create_dir(THIRD_PARTY_CERTS_DIR, Location::SystemAppData) {
@@ -96,18 +120,42 @@ impl ThirdPartyCertificateStore {
         &mut self,
         certificate_bytes: &[u8],
         expected_fingerprint: &str,
-    ) -> Result<ThirdPartyCertificateInfo, ThirdPartyCertificateError> {
-        let mut cert = self.preview(certificate_bytes)?;
+    ) -> Result<ThirdPartyCertificateInfo, ImportError> {
+        let mut cert = self.preview(certificate_bytes).map_err(ImportError::unchanged)?;
         if cert.fingerprint != expected_fingerprint {
             log::warn!("third-party certificate holds {}, not the confirmed key", cert.fingerprint);
-            return Err(ThirdPartyCertificateError::FingerprintMismatch);
+            return Err(ImportError::unchanged(ThirdPartyCertificateError::FingerprintMismatch));
         }
 
-        cert.added_unix_seconds =
-            store_certificate(&self.fs, &cert.fingerprint, certificate_bytes).map_err(|e| {
-                log::error!("failed to store third-party certificate: {e:#}");
-                ThirdPartyCertificateError::Internal
-            })?;
+        let had_previous_certificate = self.certs.contains_key(&cert.fingerprint);
+        let previous_certificate = if had_previous_certificate {
+            let path = certificate_path(&cert.fingerprint);
+            match read_certificate(&self.fs, &path) {
+                Ok(certificate) => Some(certificate),
+                Err(error) => {
+                    // This is only a rollback copy. A missing or unreadable old file must not
+                    // prevent a valid renewal from repairing persistent state.
+                    log::warn!("failed to read existing third-party certificate {path}: {error:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        cert.added_unix_seconds = store_certificate(
+            &mut self.fs,
+            &cert.fingerprint,
+            certificate_bytes,
+            previous_certificate.as_deref(),
+            had_previous_certificate,
+        )
+        .map_err(|store_error| {
+            log::error!("failed to store third-party certificate: {:#}", store_error.error);
+            let publisher_set_changed =
+                store_error.previous_certificate_lost && self.certs.remove(&cert.fingerprint).is_some();
+            ImportError { error: ThirdPartyCertificateError::Internal, publisher_set_changed }
+        })?;
 
         // Same fingerprint means the same key, so this renews a publisher rather than adding one.
         self.certs.insert(cert.fingerprint.clone(), cert.clone());
@@ -120,7 +168,10 @@ impl ThirdPartyCertificateStore {
             return Ok(false);
         }
 
-        self.fs.remove(certificate_path(fingerprint), Location::SystemAppData)?;
+        match self.fs.remove(certificate_path(fingerprint), Location::SystemAppData) {
+            Ok(()) | Err(fs::Error::FileNotFound) => {}
+            Err(error) => return Err(error),
+        }
         self.certs.remove(fingerprint);
 
         Ok(true)
@@ -178,21 +229,113 @@ fn load_certificate(fs: &FileSystem, entry: &fs::DirEntry) -> anyhow::Result<Thi
 /// An interrupted write leaves one that no longer parses, so the publisher goes missing until it is
 /// imported again rather than turning into another one.
 fn store_certificate(
-    fs: &FileSystem,
+    fs: &mut FileSystem,
     fingerprint: &str,
     certificate_bytes: &[u8],
-) -> anyhow::Result<Option<u64>> {
+    previous_certificate: Option<&[u8]>,
+    had_previous_certificate: bool,
+) -> Result<Option<u64>, StoreCertificateError> {
     let path = certificate_path(fingerprint);
+    let certificate_der = certificate_der(certificate_bytes).map_err(StoreCertificateError::unchanged)?;
 
-    let mut file = fs.open_file(&path, Location::SystemAppData, fs::OpenFlags::CREATE)?;
-    file.write_all(&certificate_der(certificate_bytes)?)?;
+    if let Err(error) = write_candidate_certificate(fs, &path, &certificate_der) {
+        return Err(match error {
+            CandidateWriteError::Unmodified(error) => StoreCertificateError::unchanged(error),
+            CandidateWriteError::Modified(error) => recover_failed_certificate_write(
+                fs,
+                &path,
+                previous_certificate,
+                had_previous_certificate,
+                error,
+            ),
+        });
+    }
+    if let Err(error) = fs.flush(Location::SystemAppData) {
+        return Err(recover_failed_certificate_write(
+            fs,
+            &path,
+            previous_certificate,
+            had_previous_certificate,
+            error.into(),
+        ));
+    }
+
+    Ok(created_unix_seconds(fs, &path))
+}
+
+impl StoreCertificateError {
+    fn unchanged(error: impl Into<anyhow::Error>) -> Self {
+        Self { error: error.into(), previous_certificate_lost: false }
+    }
+}
+
+/// Remove a candidate whose persistence failed, then restore the previous certificate when one
+/// was safely read. `remove` is itself durable, so a failed restore must also remove the
+/// corresponding in-memory publisher entry before the caller returns.
+fn recover_failed_certificate_write(
+    fs: &mut FileSystem,
+    path: &str,
+    previous_certificate: Option<&[u8]>,
+    had_previous_certificate: bool,
+    error: anyhow::Error,
+) -> StoreCertificateError {
+    let removed = match fs.remove(path, Location::SystemAppData) {
+        Ok(()) | Err(fs::Error::FileNotFound) => true,
+        Err(cleanup_error) => {
+            log::error!("failed to clean up certificate after persistence error: {cleanup_error:?}");
+            false
+        }
+    };
+    let previous_certificate_lost = removed
+        && match previous_certificate {
+            Some(previous_certificate) => {
+                match write_certificate(fs, path, previous_certificate)
+                    .and_then(|()| fs.flush(Location::SystemAppData))
+                {
+                    Ok(()) => false,
+                    Err(restore_error) => {
+                        log::error!("failed to restore previous third-party certificate: {restore_error:?}");
+                        true
+                    }
+                }
+            }
+            None => had_previous_certificate,
+        };
+    StoreCertificateError { error, previous_certificate_lost }
+}
+
+fn write_certificate(fs: &mut FileSystem, path: &str, certificate_der: &[u8]) -> Result<(), fs::Error> {
+    let mut file = fs.open_file(path, Location::SystemAppData, fs::OpenFlags::CREATE)?;
+    file.write_all(certificate_der)?;
     // Creating does not truncate, so a renewal shorter than the certificate it replaces would keep
     // the old tail.
     file.truncate()?;
     // The directory entry only catches up once the file is closed.
     drop(file);
+    Ok(())
+}
 
-    Ok(created_unix_seconds(fs, &path))
+fn write_candidate_certificate(
+    fs: &mut FileSystem,
+    path: &str,
+    certificate_der: &[u8],
+) -> Result<(), CandidateWriteError> {
+    let mut file = fs
+        .open_file(path, Location::SystemAppData, fs::OpenFlags::CREATE)
+        .map_err(|error| CandidateWriteError::Unmodified(error.into()))?;
+    file.write_all(certificate_der).map_err(|error| CandidateWriteError::Modified(error.into()))?;
+    // Creating does not truncate, so a renewal shorter than the certificate it replaces would keep
+    // the old tail.
+    file.truncate().map_err(|error| CandidateWriteError::Modified(error.into()))?;
+    // The directory entry only catches up once the file is closed.
+    drop(file);
+    Ok(())
+}
+
+fn read_certificate(fs: &FileSystem, path: &str) -> anyhow::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fs.open_file(path, Location::SystemAppData, fs::OpenFlags::READ_ONLY)?.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// When the file was first written. Renewing a publisher rewrites its file in place, which keeps the

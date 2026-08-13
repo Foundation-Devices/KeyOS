@@ -67,6 +67,7 @@ const PERIODIC_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 /// Maximum number of decoded app icons kept resident at once. Icons are fetched
 /// one per app over IPC, so an unbounded set would grow with the install count.
 const APP_ICON_CACHE_CAP: usize = 32;
+type AppIconCache = Rc<RefCell<lru::LruCache<(SharedString, bool), Image>>>;
 
 app!("Settings", role = ClaimSettingsRole);
 
@@ -90,7 +91,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     });
 
     setup_settings_global(state);
-    setup_app_management_global(state);
+    let app_icon_cache = setup_app_management_global(state);
+    setup_app_manager_event_updates(state, app_icon_cache);
     setup_datetime_globals(state);
     setup_about_global(state);
     setup_pin_global(state);
@@ -312,25 +314,26 @@ fn setup_settings_global(state: StoredValue<AppState>) {
     globals.set_current_keyos_version(SharedString::from(version));
 }
 
-fn setup_app_management_global(state: StoredValue<AppState>) {
+fn setup_app_management_global(state: StoredValue<AppState>) -> AppIconCache {
     let ui = state.borrow().ui();
     let globals = ui.global::<AppManagementGlobal>();
 
     // Icon bytes are fetched on demand by app id and decoded here; the LRU caps
     // how many decoded icons stay resident so the listing never carries them.
     // Keying by theme too keeps a themed app's two icons from evicting each other.
-    let icon_cache: Rc<RefCell<lru::LruCache<(SharedString, bool), Image>>> = Rc::new(RefCell::new(
-        lru::LruCache::new(NonZeroUsize::new(APP_ICON_CACHE_CAP).expect("cache cap is non-zero")),
-    ));
+    let icon_cache: AppIconCache = Rc::new(RefCell::new(lru::LruCache::new(
+        NonZeroUsize::new(APP_ICON_CACHE_CAP).expect("cache cap is non-zero"),
+    )));
+    let callback_icon_cache = icon_cache.clone();
     globals.on_app_icon(move |app_id, is_dark| {
         let cache_key = (app_id.clone(), is_dark);
-        if let Some(image) = icon_cache.borrow_mut().get(&cache_key).cloned() {
+        if let Some(image) = callback_icon_cache.borrow_mut().get(&cache_key).cloned() {
             return image;
         }
         let variant = if is_dark { app_manager::IconVariant::Dark } else { app_manager::IconVariant::Light };
         let bytes = state.borrow().app_manager.get_app_icon(app_id.as_str(), variant).unwrap_or_default();
         let image = slint_keyos_platform::raw_image::raw_image_from_bytes(&bytes);
-        icon_cache.borrow_mut().put(cache_key, image.clone());
+        callback_icon_cache.borrow_mut().put(cache_key, image.clone());
         image
     });
 
@@ -376,6 +379,73 @@ fn setup_app_management_global(state: StoredValue<AppState>) {
     });
     globals.on_remove_installed_app(move |app_id| remove_installed_app(state, app_id.as_str()));
     globals.on_install_app(move || install_app(state.clone()));
+
+    icon_cache
+}
+
+/// Keeps track of Apps and Publisher list changes made outside of Settings app UI (such as CLIs, MCPs)
+fn setup_app_manager_event_updates(state: StoredValue<AppState>, app_icon_cache: AppIconCache) {
+    spawn_local(async move {
+        let mut sub = subscribe_archive::<app_manager_permissions::AppManagerPermissions, _>(
+            app_manager::messages::SubscribeAppEvents,
+        );
+        while let Some(event) = sub.next().await {
+            match event {
+                app_manager::AppEvent::AppSetChanged { installed, .. } => {
+                    invalidate_settings_app_icons(&app_icon_cache, &installed);
+                    refresh_installed_apps_and_selection(state);
+                }
+                app_manager::AppEvent::AllowedPublishersChanged => {
+                    // A certificate changes both the Publisher list and whether every sideloaded app
+                    // is eligible to launch, so refresh both
+                    refresh_allowed_publishers_and_selection(state);
+                    refresh_installed_apps_and_selection(state);
+                }
+                _ => {}
+            }
+        }
+    })
+    .detach();
+}
+
+fn invalidate_settings_app_icons(cache: &AppIconCache, app_ids: &[server::xous::AppId]) {
+    let mut cache = cache.borrow_mut();
+    for app_id in app_ids {
+        let app_id: SharedString = format!("0x{app_id}").into();
+        cache.pop(&(app_id.clone(), false));
+        cache.pop(&(app_id, true));
+    }
+}
+
+fn refresh_installed_apps_and_selection(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    let selected_app_id = ui.global::<AppManagementGlobal>().get_selected_app().app_id;
+
+    refresh_installed_apps(state);
+    if selected_app_id.is_empty() || select_installed_app(state, selected_app_id.as_str()) {
+        return;
+    }
+
+    ui.global::<AppManagementGlobal>().set_selected_app(InstalledApp::default());
+    if ui.global::<RouteState>().get_active() == RouteOption::AppDetails {
+        ui.global::<Navigate>().invoke_backward();
+    }
+}
+
+fn refresh_allowed_publishers_and_selection(state: StoredValue<AppState>) {
+    let ui = state.borrow().ui();
+    let selected_fingerprint =
+        ui.global::<AppManagementGlobal>().get_selected_allowed_publisher().fingerprint;
+
+    refresh_allowed_publishers(state);
+    if selected_fingerprint.is_empty() || select_allowed_publisher(state, selected_fingerprint.as_str()) {
+        return;
+    }
+
+    ui.global::<AppManagementGlobal>().set_selected_allowed_publisher(AllowedPublisher::default());
+    if ui.global::<RouteState>().get_active() == RouteOption::AllowedPublisherDetails {
+        ui.global::<Navigate>().invoke_backward();
+    }
 }
 
 fn refresh_installed_apps(state: StoredValue<AppState>) {
@@ -567,14 +637,16 @@ fn app_permission_groups(
 
 fn refresh_allowed_publishers(state: StoredValue<AppState>) {
     let certs = state.borrow().app_manager.get_third_party_certificates();
+    let allowed_publisher_count = certs.iter().filter(|cert| cert.is_usable()).count() as i32;
     let allowed_publishers =
         certs.iter().map(|cert| allowed_publisher(&state.borrow(), cert.clone())).collect::<Vec<_>>();
     // Cache the certificates so the details page can resolve a fingerprint without asking again.
     *state.borrow().allowed_publishers.borrow_mut() = certs;
 
     let ui = state.borrow().ui();
-    ui.global::<AppManagementGlobal>()
-        .set_allowed_publishers(ModelRc::new(VecModel::from(allowed_publishers)));
+    let globals = ui.global::<AppManagementGlobal>();
+    globals.set_allowed_publishers(ModelRc::new(VecModel::from(allowed_publishers)));
+    globals.set_allowed_publisher_count(allowed_publisher_count);
 }
 
 fn select_allowed_publisher(state: StoredValue<AppState>, fingerprint: &str) -> bool {

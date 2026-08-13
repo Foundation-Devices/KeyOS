@@ -15,6 +15,13 @@ pub struct LaunchAppBlocking(pub AppId);
 #[response(Result<(), AppManagerError>)]
 pub struct RefreshInstalledApps;
 
+/// Rescan the app set after a completed in-place replacement. The supplied app is reported as
+/// installed even when its manifest is unchanged, so subscribers also refresh resources such as
+/// icons that are not part of the manifest.
+#[derive(Debug, server::Message)]
+#[response(Result<(), AppManagerError>)]
+pub struct RefreshInstalledApp(pub AppId);
+
 impl AsScalar<3> for AppManagerError {
     fn as_scalar(&self) -> [u32; 3] { [self.to_u32().unwrap(), 0, 0] }
 }
@@ -31,6 +38,12 @@ pub struct SubscribeAppEvents;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AppEvent {
+    AppLaunching {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+        launched_by: PID,
+    },
+
     AppLaunched {
         #[rkyv(with = WithAppId)]
         app_id: AppId,
@@ -51,13 +64,24 @@ pub enum AppEvent {
         #[rkyv(with = WithAppId)]
         app_id: AppId,
         error: LaunchError,
+        launched_by: PID,
     },
 
-    /// A rescan (triggered by `RefreshInstalledApps` or `RemoveInstalledApp`) added, removed, or
-    /// updated apps
+    AppRemoving {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+    },
+
+    AppRemovalFailed {
+        #[rkyv(with = WithAppId)]
+        app_id: AppId,
+        result: RemoveInstalledAppResult,
+    },
+
+    /// A rescan or successful install added, removed, or updated app bundles.
     ///
     /// `installed`: covers both app ids that weren't in the registry before and app
-    /// ids that were already registered but whose manifest changed
+    /// ids whose bundle changed
     /// `removed` covers app ids no longer found
     AppSetChanged {
         #[rkyv(with = rkyv::with::Map<WithAppId>)]
@@ -71,6 +95,10 @@ pub enum AppEvent {
 
 #[derive(Debug, server::Message)]
 pub struct LaunchApp(pub AppId);
+
+#[derive(Debug, server::Message)]
+pub struct RemoveApp(pub AppId);
+
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AppQrMatchRules {
     #[rkyv(with = WithAppId)]
