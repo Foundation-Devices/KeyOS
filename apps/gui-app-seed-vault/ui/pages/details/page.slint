@@ -302,11 +302,14 @@ export component DetailsPage inherits BasePage {
         icon: "alert";
         icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.PasswordDeleteModalHeader);
-        text: TR2.format(TrId.PasswordDeleteModalContent1, [
-            seed.label,
-        ]);
-        extra-warning: TR2.lookup(TrId.SeedDeleteModalContent2);
-        extra-warning-color: Palette.content-notice;
+        lines: [
+            { text: TR2.format(TrId.PasswordDeleteModalContent1, [seed.label]) },
+            {
+                text: TR2.lookup(TrId.SeedDeleteModalContent2),
+                color: Palette.content-notice,
+                bold: true
+            },
+        ];
         confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
         cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
 
@@ -325,8 +328,15 @@ export component DetailsPage inherits BasePage {
         icon: "alert";
         icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.ArchivedItemSeedModalRevealHeader);
-        text: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent1) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent1);
-        extra-warning: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent2) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent2);
+        lines: [
+            {
+                text: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent1) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent1)
+            },
+            {
+                text: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ArchivedItemNostrKeyModalRevealContent2) : TR2.lookup(TrId.ArchivedItemSeedModalRevealContent2),
+                bold: true
+            },
+        ];
         confirm-button-label: TR2.lookup(TrId.CommonButtonConfirm);
         cancel-button-label: TR2.lookup(TrId.CommonButtonCancel);
 

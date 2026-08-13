@@ -5082,7 +5082,6 @@ dependencies = [
  "hex",
  "legacy-hid",
  "log 0.4.27",
- "rand 0.8.7",
  "rkyv",
  "security",
  "seed-quiz",
@@ -5240,7 +5239,6 @@ dependencies = [
  "power-manager",
  "ql-utils",
  "quantum-link",
- "rand 0.8.7",
  "security",
  "seed-quiz",
  "serde",
@@ -5383,6 +5381,7 @@ dependencies = [
  "nostr",
  "ordered-table",
  "security",
+ "seed-quiz",
  "serde",
  "serde_json",
  "server",
@@ -12260,7 +12259,7 @@ name = "seed-quiz"
 version = "0.1.0"
 dependencies = [
  "bip39",
- "rand 0.8.7",
+ "getrandom 0.2.10",
 ]
 
 [[package]]

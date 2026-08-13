@@ -21,12 +21,6 @@ export component SeedImportPage inherits BasePage {
         placeholder-for(i) => {
             return TR2.format(TrId.OnboardingRecoverWordsFillerText, ["\{i + 1}"]);
         }
-        validate-word(w) => {
-            return Callbacks.validate-seed-word(w);
-        }
-        validate-seed(ws) => {
-            return Callbacks.validate-full-seed(ws);
-        }
         submit(ws) => {
             if (Callbacks.confirm-seed-import(ws)) {
                 Navigate.main({ replace: true });

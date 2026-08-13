@@ -31,6 +31,7 @@
       "path": "apps/gui-app-emu-flux",
       "include": [
         "common.button",
+        "common.keyboard",
         "common.recoverWords",
         "launcher.appCrash",
         "settings.viewSeedWords",
@@ -50,7 +51,14 @@
     {
       "name": "onboarding",
       "path": "os/gui-app-onboarding",
-      "include": ["common.button", "common.update", "keycardBackup", "common.recoverRestoreCardKeycard", "common.recoverWords"]
+      "include": [
+        "common.button",
+        "common.keyboard",
+        "common.update",
+        "keycardBackup",
+        "common.recoverRestoreCardKeycard",
+        "common.recoverWords"
+      ]
     },
     {
       "name": "recovery",

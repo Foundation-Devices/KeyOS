@@ -9,7 +9,4 @@ publish = false
 
 [dependencies]
 bip39 = "2.2"
-rand = { workspace = true }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }
+getrandom = { workspace = true }

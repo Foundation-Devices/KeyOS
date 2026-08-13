@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Word-position challenge shared with onboarding's verify quiz.
-import { SeedWordChallenge } from "@ui/pages.slint";
-export { SeedWordChallenge }
+// Seed-entry types shared with onboarding and Seed Vault.
+import { SeedStatus, SeedWordChallenge } from "@ui/pages.slint";
+export { SeedStatus, SeedWordChallenge }
 export struct AppEntryValue {
     name: string,
     app-id: string,
@@ -23,8 +23,6 @@ export global Callbacks {
     callback theme-changed();
     callback back-from-running();
     callback confirm-seed-import([string]) -> bool;
-    pure callback validate-seed-word(string) -> bool;
-    pure callback validate-full-seed([string]) -> bool;
     callback derive-new-seed();
     callback confirm-seed-derive() -> bool;
     /// Returns the seed words (12 or 24) for the currently-configured seed.

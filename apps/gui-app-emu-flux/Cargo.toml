@@ -25,7 +25,6 @@ hex = { workspace = true }
 legacy-hid = { path = "../../os/legacy-hid" }
 log = { workspace = true }
 log-server = { workspace = true }
-rand = { workspace = true }
 rkyv = { workspace = true }
 security = { workspace = true }
 seed-quiz = { path = "../../utils/seed-quiz" }

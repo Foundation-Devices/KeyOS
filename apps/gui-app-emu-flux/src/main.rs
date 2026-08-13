@@ -357,15 +357,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         crate::flux::display::reset();
     });
 
-    ui.global::<Callbacks>()
-        .on_validate_seed_word(|word| bip39::Language::English.word_list().contains(&word.as_str()));
-
-    ui.global::<Callbacks>().on_validate_full_seed(|words| {
-        // The UI only ever submits a 12- or 24-length array, and parse_normalized rejects
-        // any array still holding empty words, so this accepts a complete 12- or 24-word seed.
-        let mnemonic_str = words.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(" ");
-        bip39::Mnemonic::parse_normalized(&mnemonic_str).is_ok()
-    });
+    seed_quiz::init_seed_callbacks!(ui);
 
     // Seed-import flow: parse the entered mnemonic (12 or 24 words), derive the 64-byte BIP39
     // seed, persist it as ManuallyEntered, and update the in-memory APP_SEED.
@@ -510,7 +502,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             let Some(mnemonic) = resolve_mnemonic(&settings.borrow(), &*security_api) else {
                 return slint::ModelRc::new(model);
             };
-            for challenge in seed_quiz::shuffled_challenges(&mnemonic, &mut rand::thread_rng()) {
+            for challenge in seed_quiz::shuffled_challenges(&mnemonic) {
                 let options_model = slint::VecModel::default();
                 for opt in &challenge.options {
                     options_model.push(slint::SharedString::from(opt.as_str()));
@@ -542,9 +534,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 log::error!("no mnemonic available to regenerate a seed word challenge");
                 return empty();
             };
-            let Some(challenge) =
-                seed_quiz::word_challenge(&mnemonic, word_index as usize, &mut rand::thread_rng())
-            else {
+            let Some(challenge) = seed_quiz::word_challenge(&mnemonic, word_index as usize) else {
                 log::error!("word index {word_index} out of range for regenerated challenge");
                 return empty();
             };

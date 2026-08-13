@@ -29,7 +29,7 @@ use slint_keyos_platform::{
     router::Router,
     settings::global::{OnboardingStatus, SystemTheme},
     sleep,
-    slint::{ComponentHandle, Model, ModelRc, SharedString, ToSharedString},
+    slint::{ComponentHandle, ModelRc, SharedString, ToSharedString},
     spawn_local, spawn_worker, subscribe_archive, timeout, StoredValue,
 };
 use update::messages::ProgressUpdate;
@@ -701,15 +701,7 @@ fn init_seed_global(state: StoredValue<AppState>) {
         .detach()
     });
 
-    seed_global.on_validate_seed_word(move |word: SharedString| {
-        let word = word.as_str();
-        bip39::Language::English.word_list().contains(&word)
-    });
-
-    seed_global.on_validate_full_seed(move |words: slint::ModelRc<SharedString>| {
-        let mnemonic_str = words.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(" ");
-        bip39::Mnemonic::parse_normalized(&mnemonic_str).is_ok()
-    });
+    seed_quiz::init_seed_callbacks!(ui);
 
     seed_global.on_restore_from_seed_words(move |words| {
         spawn_local(state::setup_seed::restore_from_seed_words(state, words)).detach();

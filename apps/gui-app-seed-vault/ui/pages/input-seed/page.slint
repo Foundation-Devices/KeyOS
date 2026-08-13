@@ -21,12 +21,6 @@ export component InputSeedPage inherits BasePage {
         placeholder-for(_i) => {
             return "";
         }
-        validate-word(word) => {
-            return CB.validate-seed-word(word);
-        }
-        validate-seed(words) => {
-            return CB.validate-full-seed(words);
-        }
         submit(words) => {
             CB.set-pending-imported-seed(
                 CB.words-to-entropy(words),

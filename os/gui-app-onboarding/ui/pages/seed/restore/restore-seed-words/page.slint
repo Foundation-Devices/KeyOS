@@ -48,12 +48,6 @@ export component RestoreSeedWordsPage inherits OnboardingBasePage {
         placeholder-for(i) => {
             return TR2.format(TrId.RecoverWordsFillerText, ["\{i + 1}"]);
         }
-        validate-word(w) => {
-            return SeedGlobal.validate-seed-word(w);
-        }
-        validate-seed(ws) => {
-            return SeedGlobal.validate-full-seed(ws);
-        }
         submit(ws) => {
             SeedGlobal.restore-from-seed-words(ws);
         }

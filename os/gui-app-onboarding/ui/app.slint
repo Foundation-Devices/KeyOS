@@ -22,6 +22,7 @@ import {
     TextSm,
     Modal,
 } from "@ui/widgets.slint";
+import { SeedCallbacks } from "@ui/pages.slint";
 import { StepModel } from "@ui/widgets/step-list.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Navigate } from "./gen/navigate.slint";
@@ -148,7 +149,7 @@ export component AppWindow inherits BaseWindow {
 }
 
 export * from "gen/exports.slint";
-export { Utils, Images, TR, CurrentTheme, StepModel }
+export { Utils, Images, TR, CurrentTheme, StepModel, SeedCallbacks }
 import {
     OnboardingCallbacks,
     SeedGlobal,

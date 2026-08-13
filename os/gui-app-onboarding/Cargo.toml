@@ -32,7 +32,6 @@ oneshot = { workspace = true }
 power-manager = { workspace = true }
 ql-utils = { workspace = true }
 quantum-link = { workspace = true }
-rand = { workspace = true }
 security = { workspace = true }
 seed-quiz = { path = "../../utils/seed-quiz" }
 serde = { workspace = true }

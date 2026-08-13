@@ -8,7 +8,7 @@ impl AppState {
     /// The quiz itself lives in `seed-quiz`, shared with the Legacy remove-seed flow.
     pub fn seed_verify_challenges(&self) -> anyhow::Result<Vec<seed_quiz::SeedWordChallenge>> {
         let mnemonic = self.try_get_seed()?.to_mnemonic()?;
-        Ok(seed_quiz::shuffled_challenges(&mnemonic, &mut rand::thread_rng()))
+        Ok(seed_quiz::shuffled_challenges(&mnemonic))
     }
 
     /// A fresh challenge for a single `word_index` (new decoys, reshuffled order), for
@@ -19,6 +19,6 @@ impl AppState {
         word_index: usize,
     ) -> anyhow::Result<Option<seed_quiz::SeedWordChallenge>> {
         let mnemonic = self.try_get_seed()?.to_mnemonic()?;
-        Ok(seed_quiz::word_challenge(&mnemonic, word_index, &mut rand::thread_rng()))
+        Ok(seed_quiz::word_challenge(&mnemonic, word_index))
     }
 }

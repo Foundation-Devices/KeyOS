@@ -7,8 +7,8 @@ import { FwUpdateState, FwUpdateError } from "@ui/pages/fw-update-page.slint";
 import {
     KeycardBackupError,
 } from "@ui/pages/keycard-backup/keycard-backup-error.slint";
-import { SeedWordChallenge } from "@ui/pages.slint";
-export { SeedWordChallenge }
+import { SeedStatus, SeedWordChallenge } from "@ui/pages.slint";
+export { SeedStatus, SeedWordChallenge }
 export enum SecurityCheckState { Idle, Loading, Passed, Failed, Error }
 
 export enum FirmwareCheckState { Idle, Loading, NoUpdateAvailable, UpdateAvailable, Failed }
@@ -91,10 +91,6 @@ export global SeedGlobal {
     callback restore-from-seed-qr();
     callback restore-from-seed-words([string]);
     callback retry-restore-magic-backup();
-
-    // BIP39 seed word validation callbacks
-    pure callback validate-seed-word(string) -> bool;
-    pure callback validate-full-seed([string]) -> bool;
 
     // ========== Manual seed Backup ==========
     // Get the seed words for display

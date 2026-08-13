@@ -2,24 +2,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-    Palette,
     Importance,
     Size,
-    Font,
     FontSize,
-    Utils,
     ColorHelpers,
 } from "@ui/theme.slint";
 
 import { Icon } from "./icon.slint";
-import { TextLg } from "./txt.slint";
+import { DynamicText } from "./txt.slint";
 import { TimerLoader } from "./loader.slint";
 
 export component Button inherits Rectangle {
     // Override inherited properties
     background: bg-color;
-    border-radius: Size.sz6;
-    height: Size.sz15;
+    border-radius: compact ? Size.sz4 : Size.sz6;
+    height: compact ? Size.sz10 : Size.sz15;
     clip: true;
 
     // Private properties
@@ -35,6 +32,7 @@ export component Button inherits Rectangle {
     in property <string> icon;
     in property <bool> loading: false;
     in property <bool> force-pressed: false;
+    in property <bool> compact: false;
 
     // Callbacks
     callback clicked(string);
@@ -62,12 +60,13 @@ export component Button inherits Rectangle {
                 color: label-color;
             }
         }
-        if label != "": TextLg {
+        if label != "": DynamicText {
             horizontal-alignment: center;
             vertical-alignment: center;
             text: root.label;
             color: label-color;
             bold: true;
+            size: root.compact ? FontSize.md : FontSize.lg;
             horizontal-stretch: 0;
         }
     }
