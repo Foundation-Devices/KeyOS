@@ -79,7 +79,8 @@ impl Adc {
     pub fn reset(&self) {
         let mut adc_csr = CSR::new(self.base_addr as *mut u32);
         adc_csr.wfo(CR_SWRST, 1);
-        adc_csr.wo(MR, 0);
+        // The datasheet requires TRANSFER=2; this is also ADC_MR's reset value.
+        adc_csr.wfo(MR_TRANSFER, 2);
     }
 
     #[inline]
