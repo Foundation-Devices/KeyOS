@@ -2,19 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    io::{BufReader, Seek, SeekFrom, Write},
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
 use fs::{
-    messages::{
-        CloseDir, CloseFile, CreateDirMessage, Flush, OpenFileMessage, ReadFile, Remove, Rename, SeekFile,
-        TruncateFile, WriteFile,
-    },
-    File, FileSystem,
+    messages::{CloseDir, CreateDirMessage},
+    DurableFilePermissions, FileSystem,
 };
-use server::MessageAllowed;
+use server::permission_set;
 
 pub trait ByteCodec: Default + Sized {
     type Error: From<fs::Error> + From<std::io::Error> + std::fmt::Display;
@@ -73,37 +69,9 @@ where
     _marker: PhantomData<fn() -> P>,
 }
 
-pub trait FileBackedPermissions:
-    server::CheckedPermissions
-    + MessageAllowed<CreateDirMessage>
-    + MessageAllowed<CloseDir>
-    + MessageAllowed<OpenFileMessage>
-    + MessageAllowed<CloseFile>
-    + MessageAllowed<ReadFile>
-    + MessageAllowed<SeekFile>
-    + MessageAllowed<WriteFile>
-    + MessageAllowed<TruncateFile>
-    + MessageAllowed<Flush>
-    + MessageAllowed<Rename>
-    + MessageAllowed<Remove>
-{
-}
-
-impl<T> FileBackedPermissions for T where
-    T: server::CheckedPermissions
-        + MessageAllowed<CreateDirMessage>
-        + MessageAllowed<CloseDir>
-        + MessageAllowed<OpenFileMessage>
-        + MessageAllowed<CloseFile>
-        + MessageAllowed<ReadFile>
-        + MessageAllowed<SeekFile>
-        + MessageAllowed<WriteFile>
-        + MessageAllowed<TruncateFile>
-        + MessageAllowed<Flush>
-        + MessageAllowed<Rename>
-        + MessageAllowed<Remove>
-{
-}
+permission_set!(pub trait FileBackedPermissions: DurableFilePermissions {
+    CreateDirMessage, CloseDir
+});
 
 impl<T, P> FileBacked<T, P>
 where
@@ -148,10 +116,8 @@ where
         );
         let fs = FileSystem::<P>::default();
         let path = path.into();
-        let old_path = format!("{}.old", path);
 
-        let value = Self::try_restore(&fs, &path, location)
-            .or_else(|_| Self::try_restore(&fs, &old_path, location))?;
+        let value = T::from_reader(fs.durable_file_read(&path, location)?.as_slice())?;
 
         Ok(Self { value, path, location, dirty: false, _marker: PhantomData::default() })
     }
@@ -162,22 +128,9 @@ where
         }
 
         let fs = FileSystem::<P>::default();
-        let new_path = format!("{}.new", self.path);
-        let old_path = format!("{}.old", self.path);
-
-        {
-            let mut file = Self::try_open(&fs, &new_path, self.location, true)?;
-            let data = self.value.to_bytes()?;
-            file.seek(SeekFrom::Start(0))?;
-            file.write_all(&data)?;
-            file.truncate()?;
-            file.flush()?;
-        }
-
-        let _ = fs.remove(&old_path, self.location);
-        let _ = fs.rename(&self.path, &old_path, self.location);
-        fs.rename(&new_path, &self.path, self.location)?;
-        let _ = fs.remove(&old_path, self.location);
+        fs.ensure_parent_dir_exists(&self.path, self.location)
+            .inspect_err(|e| log::warn!("Could not create parent dir: {e:?}"))?;
+        fs.durable_file_write(&self.path, self.location, &self.value.to_bytes()?)?;
 
         self.dirty = false;
         Ok(())
@@ -194,34 +147,6 @@ where
     }
 
     pub fn guard(&mut self) -> FileBackedGuard<'_, T, P> { FileBackedGuard { inner: self } }
-
-    fn try_restore(
-        fs: &FileSystem<P>,
-        path: impl Into<String>,
-        location: fs::Location,
-    ) -> Result<T, T::Error> {
-        let file = Self::try_open(fs, path, location, false)?;
-        let mut reader = BufReader::with_capacity(fs::FILE_BUFFER_SIZE, file);
-        let value = T::from_reader(&mut reader)?;
-        Ok(value)
-    }
-
-    fn try_open(
-        fs: &FileSystem<P>,
-        path: impl Into<String>,
-        location: fs::Location,
-        create: bool,
-    ) -> Result<File<P>, T::Error> {
-        let path = path.into();
-        if create {
-            fs.ensure_parent_dir_exists(&path, location)
-                .inspect_err(|e| log::warn!("Could not create parent dir: {e:?}"))?;
-        }
-        let file = fs
-            .open_file(&path, location, fs::OpenFlags { read: true, write: true, create })
-            .inspect_err(|e| log::warn!("Could not open file: {e:?}"))?;
-        Ok(file)
-    }
 }
 
 impl<T, P> Drop for FileBacked<T, P>

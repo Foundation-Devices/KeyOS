@@ -5,15 +5,15 @@ use {
     crate::{MainWindow, Settings, DEP_SETTINGS_FILE, SETTINGS_FILE},
     anyhow::Context,
     gui_server_api::{msg, simulator::SimulatorApi},
-    server::{CheckedPermissions, MessageAllowed},
+    server::permission_set,
     slint::{winit_030::WinitWindowAccessor, ComponentHandle},
     std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration},
 };
 
-/// Permission to set the simulator's display scale factor.
-pub trait ScalePermissions: CheckedPermissions + MessageAllowed<msg::SetScaleFactor> {}
-
-impl<P> ScalePermissions for P where P: CheckedPermissions + MessageAllowed<msg::SetScaleFactor> {}
+permission_set!(
+    /// Permission to set the simulator's display scale factor.
+    pub trait ScalePermissions { msg::SetScaleFactor }
+);
 
 pub fn setup<P: ScalePermissions>(window: &MainWindow, sim: SimulatorApi<P>) {
     let settings = match read_settings_file() {

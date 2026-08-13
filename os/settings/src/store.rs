@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{
-    io::{BufReader, BufWriter},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use crate::sys::{EncryptedSettings, SystemSettings};
 
@@ -91,20 +88,21 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned + Default,
 {
     pub fn new(fs: &FileSystem, path: String, location: fs::Location) -> Result<Self, fs::Error> {
-        let file = fs.open_file(&path, location, fs::OpenFlags { read: true, write: true, create: true })?;
-        let mut reader = BufReader::with_capacity(fs::FILE_BUFFER_SIZE, file);
-        let settings: T = serde_json::from_reader(&mut reader).unwrap_or_default();
+        let settings = match fs.durable_file_read(&path, location) {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            // Nothing has been saved yet. Any other error means the volume is not usable,
+            // which is how `try_mount_encrypted` learns the encrypted one is still locked.
+            Err(fs::Error::FileNotFound) => T::default(),
+            Err(e) => return Err(e),
+        };
         Ok(Self { path, location, settings, dirty: None })
     }
 }
 
 impl<T: serde::Serialize> SettingFile<T> {
     pub fn flush_settings(&mut self, fs: &FileSystem) -> Result<(), fs::Error> {
-        let file =
-            fs.open_file(&self.path, self.location, fs::OpenFlags { read: true, write: true, create: true })?;
-        let mut writer = BufWriter::with_capacity(fs::FILE_BUFFER_SIZE, file);
-        serde_json::to_writer(&mut writer, &self.settings).map_err(|_| fs::Error::Io)?;
-        writer.into_inner().map_err(|e| e.into_error())?.truncate()?;
+        let data = serde_json::to_vec(&self.settings).map_err(|_| fs::Error::Io)?;
+        fs.durable_file_write(&self.path, self.location, &data)?;
         self.dirty = None;
         Ok(())
     }

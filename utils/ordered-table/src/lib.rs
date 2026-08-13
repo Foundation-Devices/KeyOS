@@ -45,10 +45,7 @@
 //! }
 //! ```
 
-use {
-    serde::{Deserialize, Serialize},
-    std::io::{Read, Seek, Write},
-};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrderedTableError<T: TableEntry> {
@@ -174,65 +171,39 @@ pub struct FilePersistence<P: server::CheckedPermissions> {
     _permission: core::marker::PhantomData<fn() -> P>,
 }
 
-impl<P: server::CheckedPermissions> FilePersistence<P>
-where
-    P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
-    P: server::MessageAllowed<fs::messages::CloseFile>,
-    P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::SeekFile>,
-    P: server::MessageAllowed<fs::messages::TruncateFile>,
-    P: server::MessageAllowed<fs::messages::WriteFile>,
-    P: server::MessageAllowed<fs::messages::Flush>,
-{
+impl<P: server::CheckedPermissions> FilePersistence<P> {
     pub fn new(path: String, location: fs::Location) -> Self {
+        // A save failure panics, so the table may only live somewhere that stays mounted
+        // for as long as the app does.
+        assert!(
+            !matches!(location, fs::Location::Usb | fs::Location::Airlock),
+            "FilePersistence: {location:?} can go away at runtime"
+        );
         Self { path, location, _permission: Default::default() }
-    }
-
-    fn open(&self, write: bool) -> Result<fs::File<P>, fs::Error> {
-        let file_system = fs::FileSystem::default();
-        file_system.open_file(
-            self.path.as_str(),
-            self.location,
-            fs::OpenFlags { read: true, write, create: true },
-        )
-    }
-
-    fn read_file(&mut self) -> Result<String, std::io::Error> {
-        let mut file = self.open(true)?;
-        let mut table_string = String::new();
-        file.read_to_string(&mut table_string)?;
-        Ok(table_string)
-    }
-
-    fn overwrite_file(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
-        let mut file = self.open(true)?;
-        // TODO: replace with file.overwite(), test thoroughly
-        file.seek(std::io::SeekFrom::Start(0))?;
-        file.write_all(data)?;
-        file.truncate()?;
-        file.flush()?;
-        Ok(())
     }
 }
 
 impl<P> Persistence for FilePersistence<P>
 where
-    P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
-    P: server::MessageAllowed<fs::messages::CloseFile>,
-    P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::SeekFile>,
-    P: server::MessageAllowed<fs::messages::TruncateFile>,
-    P: server::MessageAllowed<fs::messages::WriteFile>,
-    P: server::MessageAllowed<fs::messages::Flush>,
+    P: server::CheckedPermissions + fs::DurableFilePermissions,
 {
     fn load(&mut self) -> Result<String, PersistenceError> {
-        Ok(self.read_file().map_err(|e| PersistenceError::LoadError(e.to_string()))?)
+        let file_system = fs::FileSystem::<P>::default();
+        let table = match file_system.durable_file_read(&self.path, self.location) {
+            Ok(table) => table,
+            // The file only appears on the first save, so an absent one is an empty table.
+            Err(fs::Error::FileNotFound) => return Ok(String::new()),
+            Err(e) => return Err(PersistenceError::LoadError(e.to_string())),
+        };
+
+        String::from_utf8(table).map_err(|e| PersistenceError::LoadError(e.to_string()))
     }
 
     fn save(&mut self, table: &String) -> Result<(), PersistenceError> {
-        Ok(self.overwrite_file(table.as_bytes()).map_err(|e| PersistenceError::SaveError(e.to_string()))?)
+        let file_system = fs::FileSystem::<P>::default();
+        file_system
+            .durable_file_write(&self.path, self.location, table.as_bytes())
+            .map_err(|e| PersistenceError::SaveError(e.to_string()))
     }
 }
 
@@ -283,19 +254,23 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         Ok(self)
     }
 
-    fn save(&mut self) -> Result<(), OrderedTableError<T>> {
-        match &mut self.persistence {
-            Some(p) => {
-                let table_string = serde_json::to_string(&self.table)
-                    .map_err(|e| PersistenceError::SaveError(e.to_string()))?;
-                p.save(&table_string)?;
-                Ok(())
-            }
-            None => Err(PersistenceError::SaveError(String::from("No saved persistence handler")))?,
+    /// Persist the table, panicking on failure.
+    ///
+    /// Construction already loaded through the same handler and nothing else writes the
+    /// table behind our back, so a save that fails is a bug or a dead filesystem, not a
+    /// fault a caller could do anything about. Dying here also stops the mutated in-memory
+    /// table from outliving the contents it failed to reach.
+    fn save(&mut self) {
+        let Some(persistence) = &mut self.persistence else {
+            return;
+        };
+
+        let table_string =
+            serde_json::to_string(&self.table).expect("OrderedTable: entries failed to serialize");
+        if let Err(e) = persistence.save(&table_string) {
+            panic!("OrderedTable: failed to persist the table: {e}");
         }
     }
-
-    fn save_unchecked(&mut self) { let _ = self.save(); }
 
     fn find_exclude_index(
         &self,
@@ -352,7 +327,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
     pub fn push(&mut self, entry: T) -> Result<(), OrderedTableError<T>> {
         self.validate_push(&entry)?;
         self.table.push(entry);
-        self.save_unchecked();
+        self.save();
         Ok(())
     }
 
@@ -372,7 +347,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
 
         self.validate_push(&entry)?;
         self.table.insert(index, entry);
-        self.save_unchecked();
+        self.save();
         Ok(())
     }
 
@@ -389,18 +364,9 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         self.check_bounds(index)?;
 
         let entry = self.table.remove(index);
-        self.save_unchecked();
+        self.save();
         Ok(entry)
     }
-
-    // TODO: nice to have, not used anywhere yet
-    // pub fn retain<F>(&mut self, f: F)
-    // where
-    //     F: FnMut(&T) -> bool,
-    // {
-    //     self.table.retain(f);
-    //     self.save_unchecked();
-    // }
 
     pub fn get(&self, index: usize) -> Result<&T, OrderedTableError<T>> {
         self.check_bounds(index)?;
@@ -434,7 +400,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         F: FnMut(&mut T) -> Result<(), T::ValidationError>,
     {
         self.table[index] = self.validate_edit(index, edit_fn)?;
-        self.save_unchecked();
+        self.save();
         Ok(())
     }
 
@@ -464,7 +430,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         }
 
         self.table = updated.table.clone();
-        self.save_unchecked();
+        self.save();
         Ok(())
     }
 
@@ -478,7 +444,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
 
         let entry = self.table.remove(index);
         self.table.insert(destination, entry);
-        self.save_unchecked();
+        self.save();
         Ok(())
     }
 
@@ -533,7 +499,7 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         F: FnMut(&T) -> u32,
     {
         self.table.sort_by(|a, b| category_fn(a).cmp(&category_fn(b)));
-        self.save_unchecked();
+        self.save();
     }
 
     pub fn check_categories<F>(&self, mut category_fn: F) -> Result<(), OrderedTableError<T>>

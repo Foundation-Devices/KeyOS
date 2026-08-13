@@ -18,20 +18,14 @@ use image::{
     codecs::{gif::GifEncoder, png::PngEncoder},
     ExtendedColorType, ImageEncoder, RgbaImage,
 };
-use server::{CheckedPermissions, MessageAllowed};
+use server::permission_set;
 
 use crate::{MainWindow, GIF_DELAY_MS, SCREENSHOTS_DIR, SCREENSHOTS_DIR_ENV};
 
-/// Permissions for capturing the device frame and the composited screen.
-pub trait ScreenshotPermissions:
-    CheckedPermissions + MessageAllowed<msg::GetDeviceFrame> + MessageAllowed<msg::CaptureScreen>
-{
-}
-
-impl<P> ScreenshotPermissions for P where
-    P: CheckedPermissions + MessageAllowed<msg::GetDeviceFrame> + MessageAllowed<msg::CaptureScreen>
-{
-}
+permission_set!(
+    /// Permissions for capturing the device frame and the composited screen.
+    pub trait ScreenshotPermissions { msg::GetDeviceFrame, msg::CaptureScreen }
+);
 
 pub fn setup<P: ScreenshotPermissions>(window: &MainWindow, gui: GuiApiLight<P>, sim: SimulatorApi<P>) {
     window.on_screenshot({

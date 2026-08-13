@@ -22,7 +22,7 @@ use std::io::{Read, Seek, Write};
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use server::{wrapped_scalar, CheckedConn, CheckedPermissions, MessageAllowed};
+use server::{permission_set, wrapped_scalar, CheckedConn, CheckedPermissions, MessageAllowed};
 use xous::{DropDeallocate, MemoryRange};
 
 pub mod adapter;
@@ -39,6 +39,9 @@ pub const FILE_BUFFER_SIZE: usize = 64 * 512;
 pub const MAX_ASYNC_LEN: usize = 1024 * 1024;
 pub const BLOCK_SIZE: u64 = 512;
 pub const SYSTEM_STATE_ROOT: &str = "state";
+// Staging names durable_file_write appends to the path it is given.
+const DURABLE_SCRATCH_SUFFIX: &str = ".tmp";
+const DURABLE_STAGED_SUFFIX: &str = ".new";
 
 /// Defines local filesystem API aliases with generated permissions.
 ///
@@ -81,24 +84,24 @@ pub struct FileSystem<P: CheckedPermissions> {
     write_access_granted: flags::AccessFlags,
 }
 
-/// Permissions [`FileSystem::map_file`] requires. The device sends one map
-/// message; the hosted build has no page-mirroring syscall and reads the file
-/// instead, so there it needs the file read messages.
 #[cfg(keyos)]
-pub trait MapFilePermissions: MessageAllowed<MapFileMessage> {}
-#[cfg(keyos)]
-impl<P: MessageAllowed<MapFileMessage>> MapFilePermissions for P {}
+permission_set!(
+    /// Permissions [`FileSystem::map_file`] requires. The device sends one map
+    /// message; the hosted build has no page-mirroring syscall and reads the file
+    /// instead, so there it needs the file read messages.
+    pub trait MapFilePermissions { MapFileMessage }
+);
 
 #[cfg(not(keyos))]
-pub trait MapFilePermissions:
-    MessageAllowed<OpenFileMessage> + MessageAllowed<CloseFile> + MessageAllowed<ReadFile>
-{
-}
-#[cfg(not(keyos))]
-impl<P> MapFilePermissions for P where
-    P: MessageAllowed<OpenFileMessage> + MessageAllowed<CloseFile> + MessageAllowed<ReadFile>
-{
-}
+permission_set!(pub trait MapFilePermissions { OpenFileMessage, CloseFile, ReadFile });
+
+permission_set!(
+    /// Permissions [`FileSystem::durable_file_write`] and [`FileSystem::durable_file_read`] require.
+    pub trait DurableFilePermissions {
+        OpenFileMessage, CloseFile, ReadFile, SeekFile, WriteFile, TruncateFile, Flush, Rename,
+        Remove
+    }
+);
 
 impl<P: CheckedPermissions> FileSystem<P> {
     pub fn open_file(
@@ -252,6 +255,61 @@ impl<P: CheckedPermissions> FileSystem<P> {
     {
         self.ensure_write_access(location)?;
         Ok(Rename { from: from.into(), to: to.into(), location })
+    }
+
+    /// Replace the contents of `path` with `data`, so that a crash at any point during the
+    /// write leaves [`FileSystem::durable_file_read`] either the complete old contents or
+    /// the complete new ones.
+    ///
+    /// `<path>.tmp` and `<path>.new` belong to this file and must not be used for anything
+    /// else. Parent directories must already exist.
+    pub fn durable_file_write(&self, path: &str, location: Location, data: &[u8]) -> Result<(), Error>
+    where
+        P: DurableFilePermissions,
+    {
+        let scratch = format!("{path}{DURABLE_SCRATCH_SUFFIX}");
+        let staged = format!("{path}{DURABLE_STAGED_SUFFIX}");
+
+        // Settle what a crash left staged: adopt it if `path` is gone, drop it otherwise.
+        // Either way `staged` ends up free for the rename below.
+        let _ = self.rename(&staged, path, location);
+        let _ = self.remove(&staged, location);
+
+        {
+            let mut file = self.open_file(&scratch, location, OpenFlags::CREATE)?;
+            file.overwrite(data)?;
+            file.flush().map_err(|_| Error::Io)?;
+        }
+        // The rename is the commit: `staged` can only exist as a whole file, while `scratch`
+        // may be a half-written one that nothing in the bytes marks as incomplete.
+        self.rename(&scratch, &staged, location)?;
+        let _ = self.remove(path, location);
+        self.rename(&staged, path, location)
+    }
+
+    /// Read a file written by [`FileSystem::durable_file_write`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::FileNotFound`] if no generation of the file exists.
+    pub fn durable_file_read(&self, path: &str, location: Location) -> Result<Vec<u8>, Error>
+    where
+        P: DurableFilePermissions,
+    {
+        let read = |path: &str| -> Result<Vec<u8>, Error> {
+            let mut file = self.open_file(path, location, OpenFlags::READ_ONLY)?;
+            let mut data = Vec::new();
+            file.read_to_end(&mut data).map_err(|_| Error::Io)?;
+            Ok(data)
+        };
+
+        match read(path) {
+            // `path` is missing only while a write is between removing it and renaming the
+            // staged copy over it. Any other failure is about `path` itself, and answering it
+            // with a FileNotFound from the staged name would read as "never written".
+            Err(Error::FileNotFound) => read(&format!("{path}{DURABLE_STAGED_SUFFIX}")),
+            result => result,
+        }
     }
 
     pub fn map_file(&self, location: Location, path: impl Into<String>) -> Result<xous::MemoryRange, Error>

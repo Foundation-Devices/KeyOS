@@ -3,29 +3,13 @@
 
 #[cfg(keyos)]
 use server::xous::MemoryRange;
-use server::{CheckedConn, CheckedPermissions, MessageAllowed};
+use server::{permission_set, CheckedConn};
 
 use crate::error::CryptoError;
 use crate::messages::{ShaDrop, ShaGetContext, ShaSetContext, ShaUpdate};
 use crate::CryptoApi;
 
-pub trait ShaPermissions:
-    CheckedPermissions
-    + MessageAllowed<ShaSetContext>
-    + MessageAllowed<ShaUpdate>
-    + MessageAllowed<ShaGetContext>
-    + MessageAllowed<ShaDrop>
-{
-}
-
-impl<P> ShaPermissions for P where
-    P: CheckedPermissions
-        + MessageAllowed<ShaSetContext>
-        + MessageAllowed<ShaUpdate>
-        + MessageAllowed<ShaGetContext>
-        + MessageAllowed<ShaDrop>
-{
-}
+permission_set!(pub trait ShaPermissions { ShaSetContext, ShaUpdate, ShaGetContext, ShaDrop });
 
 pub const SHA224_HASH_SIZE: usize = 28;
 pub const SHA256_HASH_SIZE: usize = 32;

@@ -103,52 +103,17 @@ struct AppHandlers<PG: GuiAppGuiPermissions> {
     input_handler: Rc<RefCell<Option<Box<dyn InputHandler<PG>>>>>,
 }
 
-pub trait GuiAppFsPermissions:
-    server::CheckedPermissions
-    + server::MessageAllowed<fs::messages::OpenDirMessage>
-    + server::MessageAllowed<fs::messages::OpenFileMessage>
-    + server::MessageAllowed<fs::messages::CloseFile>
-    + server::MessageAllowed<fs::messages::CloseDir>
-    + server::MessageAllowed<fs::messages::NextEntry>
-    + server::MessageAllowed<fs::messages::ReadFile>
-    + server::MessageAllowed<fs::messages::MapFileMessage>
-{
-}
+server::permission_set!(pub trait GuiAppFsPermissions {
+    fs::messages::OpenDirMessage, fs::messages::OpenFileMessage, fs::messages::CloseFile,
+    fs::messages::CloseDir, fs::messages::NextEntry, fs::messages::ReadFile,
+    fs::messages::MapFileMessage
+});
 
-impl<P> GuiAppFsPermissions for P
-where
-    P: server::CheckedPermissions,
-    P: server::MessageAllowed<fs::messages::OpenDirMessage>,
-    P: server::MessageAllowed<fs::messages::OpenFileMessage>,
-    P: server::MessageAllowed<fs::messages::CloseFile>,
-    P: server::MessageAllowed<fs::messages::CloseDir>,
-    P: server::MessageAllowed<fs::messages::NextEntry>,
-    P: server::MessageAllowed<fs::messages::ReadFile>,
-    P: server::MessageAllowed<fs::messages::MapFileMessage>,
-{
-}
-
-pub trait GuiAppGuiPermissions:
-    server::CheckedPermissions
-    + 'static
-    + server::MessageAllowed<gui_server_api::msg::SubmitFrame>
-    + server::MessageAllowed<gui_server_api::msg::UpdateKeyboard>
-    + server::MessageAllowed<gui_server_api::msg::HideKeyboard>
-    + server::MessageAllowed<gui_server_api::msg::AnimateNextFrame>
-    + server::MessageAllowed<gui_server_api::msg::RequestRedraw>
-{
-}
-
-impl<P> GuiAppGuiPermissions for P
-where
-    P: server::CheckedPermissions + 'static,
-    P: server::MessageAllowed<gui_server_api::msg::SubmitFrame>,
-    P: server::MessageAllowed<gui_server_api::msg::HideKeyboard>,
-    P: server::MessageAllowed<gui_server_api::msg::UpdateKeyboard>,
-    P: server::MessageAllowed<gui_server_api::msg::AnimateNextFrame>,
-    P: server::MessageAllowed<gui_server_api::msg::RequestRedraw>,
-{
-}
+server::permission_set!(pub trait GuiAppGuiPermissions {
+    gui_server_api::msg::SubmitFrame, gui_server_api::msg::UpdateKeyboard,
+    gui_server_api::msg::HideKeyboard, gui_server_api::msg::AnimateNextFrame,
+    gui_server_api::msg::RequestRedraw
+});
 
 pub struct KeyOsPlatform<const WIDTH: usize, const HEIGHT: usize, PG: GuiAppGuiPermissions> {
     start: Instant,

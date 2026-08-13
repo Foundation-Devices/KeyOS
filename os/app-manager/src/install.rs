@@ -18,7 +18,7 @@ use fs::messages::{
     CloseDir, CloseFile, CreateDirMessage, Flush, GetMetadata, NextEntry, OpenDirMessage, OpenFileMessage,
     ReadFile, Remove, Rename, SeekFile, WriteFile,
 };
-use server::{CheckedPermissions, MessageAllowed};
+use server::permission_set;
 use xous::AppId;
 
 use crate::registry::{AppRegistry, FLUX_EMULATOR_SERVER};
@@ -27,43 +27,14 @@ use crate::registry::{AppRegistry, FLUX_EMULATOR_SERVER};
 /// scans such a name as an app.
 const STAGING_SUFFIX: &str = ".part";
 
-/// The fs messages an install sends. Narrower than `BasicFsPermissions`, which would oblige
-/// app-manager to hold permissions it has no reason to.
-pub(crate) trait InstallFsPermissions:
-    CheckedPermissions
-    + MessageAllowed<OpenFileMessage>
-    + MessageAllowed<CloseFile>
-    + MessageAllowed<CreateDirMessage>
-    + MessageAllowed<OpenDirMessage>
-    + MessageAllowed<NextEntry>
-    + MessageAllowed<CloseDir>
-    + MessageAllowed<ReadFile>
-    + MessageAllowed<SeekFile>
-    + MessageAllowed<WriteFile>
-    + MessageAllowed<Flush>
-    + MessageAllowed<GetMetadata>
-    + MessageAllowed<Remove>
-    + MessageAllowed<Rename>
-{
-}
-
-impl<P> InstallFsPermissions for P where
-    P: CheckedPermissions
-        + MessageAllowed<OpenFileMessage>
-        + MessageAllowed<CloseFile>
-        + MessageAllowed<CreateDirMessage>
-        + MessageAllowed<OpenDirMessage>
-        + MessageAllowed<NextEntry>
-        + MessageAllowed<CloseDir>
-        + MessageAllowed<ReadFile>
-        + MessageAllowed<SeekFile>
-        + MessageAllowed<WriteFile>
-        + MessageAllowed<Flush>
-        + MessageAllowed<GetMetadata>
-        + MessageAllowed<Remove>
-        + MessageAllowed<Rename>
-{
-}
+permission_set!(
+    /// The fs messages an install sends. Narrower than `BasicFsPermissions`, which would oblige
+    /// app-manager to hold permissions it has no reason to.
+    pub(crate) trait InstallFsPermissions {
+        OpenFileMessage, CloseFile, CreateDirMessage, OpenDirMessage, NextEntry, CloseDir, ReadFile,
+        SeekFile, WriteFile, Flush, GetMetadata, Remove, Rename
+    }
+);
 
 /// Everything an install needs of the filesystem, so a signature naming it stays one line.
 pub(crate) trait InstallFs: FsAdapter<Permissions: InstallFsPermissions, File: 'static> {}

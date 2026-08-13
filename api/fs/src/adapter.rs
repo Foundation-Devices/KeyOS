@@ -3,63 +3,19 @@
 
 use std::io::{Read, Seek, Write};
 
-use server::{CheckedPermissions, MessageAllowed};
+use server::{permission_set, CheckedPermissions, MessageAllowed};
 
 use crate::{messages::*, DirEntry, Error, FileSystem, Location, Metadata, OpenFlags};
 
-/// Marker trait that bundles all basic filesystem permissions.
-/// Corresponds to the `fs-generic` permission template in `permission_templates.toml`.
-pub trait BasicFsPermissions:
-    CheckedPermissions
-    + MessageAllowed<OpenDirMessage>
-    + MessageAllowed<OpenFileMessage>
-    + MessageAllowed<CloseFile>
-    + MessageAllowed<CloseDir>
-    + MessageAllowed<CreateDirMessage>
-    + MessageAllowed<ReadFile>
-    + MessageAllowed<SeekFile>
-    + MessageAllowed<WriteFile>
-    + MessageAllowed<TruncateFile>
-    + MessageAllowed<SetLen>
-    + MessageAllowed<GetMetadata>
-    + MessageAllowed<NextEntry>
-    + MessageAllowed<Flush>
-    + MessageAllowed<FlushFs>
-    + MessageAllowed<Remove>
-    + MessageAllowed<Rename>
-    + MessageAllowed<AtomicCopy>
-    + MessageAllowed<AsyncRead>
-    + MessageAllowed<AsyncWrite>
-    + MessageAllowed<AsyncCopyBlock>
-    + MessageAllowed<SubscribeFilesystemEvent>
-{
-}
-
-impl<P> BasicFsPermissions for P where
-    P: CheckedPermissions
-        + MessageAllowed<OpenDirMessage>
-        + MessageAllowed<OpenFileMessage>
-        + MessageAllowed<CloseFile>
-        + MessageAllowed<CloseDir>
-        + MessageAllowed<CreateDirMessage>
-        + MessageAllowed<ReadFile>
-        + MessageAllowed<SeekFile>
-        + MessageAllowed<WriteFile>
-        + MessageAllowed<TruncateFile>
-        + MessageAllowed<SetLen>
-        + MessageAllowed<GetMetadata>
-        + MessageAllowed<NextEntry>
-        + MessageAllowed<Flush>
-        + MessageAllowed<FlushFs>
-        + MessageAllowed<Remove>
-        + MessageAllowed<Rename>
-        + MessageAllowed<AtomicCopy>
-        + MessageAllowed<AsyncRead>
-        + MessageAllowed<AsyncWrite>
-        + MessageAllowed<AsyncCopyBlock>
-        + MessageAllowed<SubscribeFilesystemEvent>
-{
-}
+permission_set!(
+    /// Marker trait that bundles all basic filesystem permissions.
+    /// Corresponds to the `fs-generic` permission template in `permission_templates.toml`.
+    pub trait BasicFsPermissions {
+        OpenDirMessage, OpenFileMessage, CloseFile, CloseDir, CreateDirMessage, ReadFile, SeekFile,
+        WriteFile, TruncateFile, SetLen, GetMetadata, NextEntry, Flush, FlushFs, Remove, Rename,
+        AtomicCopy, AsyncRead, AsyncWrite, AsyncCopyBlock, SubscribeFilesystemEvent
+    }
+);
 
 /// Abstraction over filesystem operations for testing and generic code.
 ///

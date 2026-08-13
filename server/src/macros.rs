@@ -13,3 +13,42 @@ macro_rules! wrapped_scalar {
         }
     };
 }
+
+/// Define a named set of message permissions, plus the blanket impl that makes every
+/// permissions type granting those messages a member of it.
+///
+/// The set always requires [`CheckedPermissions`](crate::CheckedPermissions); listing other
+/// sets after the colon composes them.
+///
+/// ```rust,ignore
+/// permission_set!(pub trait ThemePermissions { GetSystemTheme, SetSystemTheme });
+///
+/// permission_set!(pub trait FileBackedPermissions: DurableFilePermissions {
+///     CreateDirMessage, CloseDir
+/// });
+/// ```
+#[macro_export]
+macro_rules! permission_set {
+    (
+        $(#[doc = $doc:expr])*
+        $vis:vis trait $name:ident $(: $($set:path),+)? {
+            $($msg:path),+ $(,)?
+        }
+    ) => {
+        $(#[doc = $doc])*
+        $vis trait $name:
+            $crate::CheckedPermissions
+            $($(+ $set)+)?
+            $(+ $crate::MessageAllowed<$msg>)+
+        {
+        }
+
+        impl<P> $name for P
+        where
+            P: $crate::CheckedPermissions
+                $($(+ $set)+)?
+                $(+ $crate::MessageAllowed<$msg>)+,
+        {
+        }
+    };
+}

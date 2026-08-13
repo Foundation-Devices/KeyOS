@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use server::{CheckedPermissions, MessageAllowed, ScalarEventHandler, Server, ServerContext, ServerMessages};
+use server::{
+    permission_set, CheckedPermissions, MessageAllowed, ScalarEventHandler, Server, ServerContext,
+    ServerMessages,
+};
 use settings::{
     global::SystemTheme,
     messages::{GetSystemTheme, SetSystemTheme, SubscribeSystemTheme},
@@ -11,16 +14,10 @@ use slint::ComponentHandle;
 
 use crate::MainWindow;
 
-/// Permissions for reading and writing the system light/dark theme.
-pub trait ThemePermissions:
-    CheckedPermissions + MessageAllowed<GetSystemTheme> + MessageAllowed<SetSystemTheme>
-{
-}
-
-impl<P> ThemePermissions for P where
-    P: CheckedPermissions + MessageAllowed<GetSystemTheme> + MessageAllowed<SetSystemTheme>
-{
-}
+permission_set!(
+    /// Permissions for reading and writing the system light/dark theme.
+    pub trait ThemePermissions { GetSystemTheme, SetSystemTheme }
+);
 
 /// Set the system theme
 pub fn set_system_theme<P: ThemePermissions>(api: &SettingsApi<P>, is_dark: bool) {
