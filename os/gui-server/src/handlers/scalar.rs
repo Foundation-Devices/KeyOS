@@ -73,7 +73,7 @@ impl BlockingScalarHandler<IsLocked> for Gui {
 
 impl ScalarHandler<UpdateKioskPolicy> for Gui {
     fn handle(&mut self, update: UpdateKioskPolicy, sender: PID, _context: &mut ServerContext<Self>) {
-        info!("Kiosk policy set to {update:?} by PID={sender}");
+        log::debug!("Kiosk policy set to {update:?} by PID={sender}");
         let Some(window) = self.windows.get_mut(&sender) else {
             warn!("Ignoring kiosk policy update from unknown PID={sender}");
             return;

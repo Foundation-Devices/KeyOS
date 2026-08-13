@@ -278,8 +278,13 @@ impl ScalarHandler<FrameCaptured> for CameraServer {
         self.frame_in_dma = (self.frame_in_dma + 1) % 3;
         match self.hw_state {
             HwState::Enabled => {
-                xous::syscall::flush_cache(self.bufs[newest_frame], xous::CacheOperation::Invalidate)
-                    .expect("invalidate cache");
+                // ISC only writes the centre; invalidating the margins would discard the
+                // zeroes filled into them before they reach DRAM.
+                xous::syscall::flush_cache(
+                    Frame::new(self.bufs[newest_frame]).content(),
+                    xous::CacheOperation::Invalidate,
+                )
+                .expect("invalidate cache");
                 self.subscribers.retain(|s| s.subscriber.send(&Frame::new(s.buffers[newest_frame])).is_ok());
             }
             HwState::DisableAfterNextFrame => {

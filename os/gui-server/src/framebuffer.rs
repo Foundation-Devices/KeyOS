@@ -99,6 +99,18 @@ impl BufferChain {
         }
     }
 
+    /// Whether `show` was called and `hide` was not, so the window keeps a framebuffer.
+    pub fn is_shown(&self) -> bool {
+        match &self.state {
+            BufferChainState::Hidden | BufferChainState::ToBeHidden { .. } => false,
+            BufferChainState::ToBeShown
+            | BufferChainState::ShownFrontOnly { .. }
+            | BufferChainState::Shown { .. }
+            | BufferChainState::ShownUpdatePending { .. } => true,
+            BufferChainState::Invalid => unreachable!(),
+        }
+    }
+
     pub fn most_recent_buffer(&self) -> Option<MemoryRange> {
         match &self.state {
             BufferChainState::Hidden { .. } => None,

@@ -243,15 +243,21 @@ impl Gui {
             );
 
             self.display.set_backlight_level_pct(pct.min(100));
-        } else {
-            // Animation is done
-            match state.complete_action {
-                AnimationCompleteAction::None => {}
-                #[cfg(all(keyos, not(feature = "recovery-os")))]
-                AnimationCompleteAction::LcdDim => self.display.dim(),
-                AnimationCompleteAction::LcdOff => self.display.turn_lcd_off(),
+            return;
+        }
+
+        // Animation is done
+        let Some(state) = self.backlight_animation.take() else {
+            return;
+        };
+        match state.complete_action {
+            AnimationCompleteAction::None => {}
+            #[cfg(all(keyos, not(feature = "recovery-os")))]
+            AnimationCompleteAction::LcdDim => self.display.dim(),
+            AnimationCompleteAction::LcdOff => {
+                self.display.turn_lcd_off();
+                self.on_lcd_turned_off();
             }
-            self.backlight_animation = None;
         }
     }
 

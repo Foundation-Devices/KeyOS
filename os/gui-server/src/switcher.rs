@@ -86,9 +86,10 @@ pub(crate) fn process_touch(gui: &mut Gui, touch: Touch) {
                 gui.touch_state.switcher_gesture_state.started = true;
                 gui.touch_state.origin = TouchGestureOrigin::AppSwitcherGesture;
 
+                let switched_from = gui.switch_source_pid();
                 // After this, the animation is controlled by the user dragging up or down
                 gui.switch_to_app_switcher();
-                if let Some(switched_from) = gui.background_pid() {
+                if let Some(switched_from) = switched_from {
                     gui.notify_switcher_update_app_fb(switched_from);
                 }
             } else {

@@ -693,18 +693,12 @@ impl Gui {
             log::error!("Trying to switch to closing app pid={pid}");
             return;
         }
-        let from = match &self.state {
-            GuiState::Splash => {
-                log::info!("Switching to initial window, PID={pid}");
-                self.rgb_led.turn_on();
-                self.change_state(GuiState::SplashFade { to: pid, progress: 0 });
-                self.reset_auto_lock();
-                return;
-            }
-            GuiState::SplashFade { to, .. } => *to,
-            GuiState::SingleWindow { pid, .. } => *pid,
-            GuiState::Switching { to, .. } => *to,
-            GuiState::Modal(modal_state) => modal_state.background_pid(),
+        let Some(from) = self.switch_source_pid() else {
+            log::info!("Switching to initial window, PID={pid}");
+            self.rgb_led.turn_on();
+            self.change_state(GuiState::SplashFade { to: pid, progress: 0 });
+            self.reset_auto_lock();
+            return;
         };
         if pid == from {
             if navigation_request.is_some() {
@@ -743,35 +737,57 @@ impl Gui {
     }
 
     fn update_window_visibility(&mut self) {
-        let visible_pids = [
-            self.active_app_pid(),
-            self.background_pid(),
-            self.waiting_for_pid.as_ref().map(|wfp| wfp.0),
-            #[cfg(not(feature = "recovery-os"))]
-            if self.is_locked() {
-                // Not strictly visible, but let it pre-render so unlock is quicker.
-                self.app_registry.pre_lock_app_id().or(self.app_registry.pid(AppRole::Launcher))
-            } else {
-                None
-            },
-            // Also not visible but needed for quick reaction to locking
-            self.app_registry.pid(AppRole::LockScreen),
-        ];
+        // Nothing is on screen with the display off, but keep the buffers so that turning
+        // it back on shows the last frame right away.
+        let lcd_on = self.display.is_lcd_on();
+
+        let mut visible_pids = Vec::new();
+        visible_pids.extend(self.active_app_pid());
+        visible_pids.extend(self.waiting_for_pid.as_ref().map(|wfp| wfp.0));
+        match &self.state {
+            GuiState::Switching { from, .. } => visible_pids.push(*from),
+            GuiState::Modal(modal_state) => {
+                // Off screen once the modal covers it, except while the modal has no
+                // window and `update_layers` still shows the background on its own.
+                if modal_state.y() > 0 || !self.windows.contains_key(&modal_state.modal_pid()) {
+                    visible_pids.push(modal_state.background_pid());
+                }
+            }
+            GuiState::SplashFade { .. } | GuiState::SingleWindow { .. } | GuiState::Splash => {}
+        }
+
+        // Off screen, but kept framebuffer-backed so that whatever gets composited always
+        // has pixels, and a switch to them does not have to wait for a first frame.
+        let mut pids_that_need_buffers = Vec::new();
+        pids_that_need_buffers.extend(self.modal_background_pid());
+        pids_that_need_buffers.extend(self.app_registry.pid(AppRole::LockScreen));
+        #[cfg(not(feature = "recovery-os"))]
+        if self.is_locked() {
+            pids_that_need_buffers
+                .extend(self.app_registry.pre_lock_app_id().or(self.app_registry.pid(AppRole::Launcher)));
+        }
 
         let mut update_switcher_fb_pids = Vec::new();
 
         for (pid, window) in &mut self.windows {
-            if visible_pids.iter().any(|vp| *vp == Some(*pid)) {
-                if !window.notified_shown {
+            let on_screen = visible_pids.contains(pid);
+            let shown = lcd_on && on_screen;
+            let buffers_kept = on_screen || pids_that_need_buffers.contains(pid);
+
+            if shown != window.notified_shown {
+                if shown {
                     Self::send_visible_event(*pid, window.input_cid);
-                    window.buffers.show();
-                    window.notified_shown = true;
-                }
-            } else {
-                if window.notified_shown {
-                    window.buffers.hide();
+                } else {
                     Self::send_hidden_event(*pid, window.input_cid);
-                    window.notified_shown = false;
+                }
+                window.notified_shown = shown;
+            }
+
+            if buffers_kept != window.buffers.is_shown() {
+                if buffers_kept {
+                    window.buffers.show();
+                } else {
+                    window.buffers.hide();
                     update_switcher_fb_pids.push(*pid);
                 }
             }
@@ -867,7 +883,13 @@ impl Gui {
         }
     }
 
-    fn turn_off_lcd(&mut self) {
+    fn start_turning_off_lcd(&mut self) {
+        self.rgb_led.turn_off();
+        self.touch_off();
+        self.animate_backlight_to(0, AnimationCompleteAction::LcdOff);
+    }
+
+    pub(crate) fn on_lcd_turned_off(&mut self) {
         if let Some(control_center) = &self.control_center_window {
             xous::send_message(
                 control_center.input_cid,
@@ -879,9 +901,7 @@ impl Gui {
         #[cfg(not(feature = "recovery-os"))]
         self.camera_window_notify_hidden();
 
-        self.rgb_led.turn_off();
-        self.touch_off();
-        self.animate_backlight_to(0, AnimationCompleteAction::LcdOff);
+        self.update_window_visibility();
     }
 
     fn turn_on_lcd(&mut self) {
@@ -898,6 +918,7 @@ impl Gui {
             .map_err(|e| error!("Failed to notify control center of LCD turning on: {e:?}"))
             .ok();
         }
+        self.update_window_visibility();
 
         #[cfg(not(feature = "recovery-os"))]
         self.update_camera_window();
@@ -920,11 +941,12 @@ impl Gui {
         self.active_app_pid().and_then(|pid| self.app_registry.role(pid))
     }
 
-    fn background_pid(&self) -> Option<PID> {
+    /// The window a switch moves away from, or `None` on the splash screen.
+    fn switch_source_pid(&self) -> Option<PID> {
         match &self.state {
-            GuiState::Switching { from, .. } => Some(*from),
+            // Switching dismisses the modal, so the window left behind is its background.
             GuiState::Modal(modal_state) => Some(modal_state.background_pid()),
-            GuiState::SplashFade { .. } | GuiState::SingleWindow { .. } | GuiState::Splash => None,
+            _ => self.active_app_pid(),
         }
     }
 
@@ -932,7 +954,7 @@ impl Gui {
         let onboarding_pid = self.app_registry.pid(AppRole::Onboarding);
 
         onboarding_pid.is_some()
-            && (self.active_app_pid() == onboarding_pid || self.background_pid() == onboarding_pid)
+            && (self.active_app_pid() == onboarding_pid || self.modal_background_pid() == onboarding_pid)
     }
 
     #[cfg(not(feature = "recovery-os"))]
@@ -944,7 +966,7 @@ impl Gui {
         // When locked in a midst of opening an app, prefer `to` over `from`
         let current_app = match &self.state {
             GuiState::Switching { to, .. } => Some(*to),
-            _ => self.background_pid().or_else(|| self.active_app_pid()),
+            _ => self.modal_background_pid().or_else(|| self.active_app_pid()),
         };
         if current_app == self.app_registry.pid(AppRole::Onboarding) {
             debug!("Not locking during onboarding");
@@ -964,7 +986,6 @@ impl Gui {
         self.control_center_collapse();
         self.notify_launcher_clear_transient_state();
         self.security.log_out();
-        self.notify_lockscreen_locked();
         self.switch_to_window(lock_screen_pid);
     }
 
@@ -973,44 +994,12 @@ impl Gui {
             // This is the initial unlock. Wait for onboarding status.
             return;
         }
-        self.notify_lockscreen_unlocked();
         let app_id = self.app_registry.pre_lock_app_id().or(self.app_registry.pid(AppRole::Launcher));
         self.app_registry.set_pre_lock_app_pid(None);
         if let Some(pid) = app_id {
             self.switch_to_window(pid);
         } else {
             error!("No launcher app PID found");
-        }
-    }
-
-    fn notify_lockscreen_unlocked(&self) {
-        let Some(lock_screen_pid) = self.app_registry.pid(AppRole::LockScreen) else {
-            error!("No lock screen app PID found");
-            return;
-        };
-        if let Some(lock_screen_window) = self.windows.get(&lock_screen_pid) {
-            if let Err(e) = xous::send_message(
-                lock_screen_window.input_cid,
-                xous::Message::new_scalar(InputMessage::Custom1 as usize, 0, 0, 0, 0),
-            ) {
-                error!("Failed to notify lock screen about unlocking: {e:?}");
-            }
-        }
-    }
-
-    #[cfg(not(feature = "recovery-os"))]
-    fn notify_lockscreen_locked(&self) {
-        let Some(lock_screen_pid) = self.app_registry.pid(AppRole::LockScreen) else {
-            error!("No lock screen app PID found");
-            return;
-        };
-        if let Some(lock_screen_window) = self.windows.get(&lock_screen_pid) {
-            if let Err(e) = xous::send_message(
-                lock_screen_window.input_cid,
-                xous::Message::new_scalar(InputMessage::Custom2 as usize, 0, 0, 0, 0),
-            ) {
-                error!("Failed to notify lock screen about locking: {e:?}");
-            }
         }
     }
 
@@ -1114,10 +1103,16 @@ impl Gui {
                 }
             }
             GuiState::Modal(modal_state) => {
-                if modal_state.animation_tick() {
-                    let pid = modal_state.background_pid();
+                let was_covered = modal_state.y() == 0;
+                let collapsed = modal_state.animation_tick();
+                let pid = modal_state.background_pid();
+                let now_covered = modal_state.y() == 0;
+                if collapsed {
                     // Modal was collapsed
                     self.change_state_single_window(pid, None);
+                } else if now_covered != was_covered {
+                    // Nothing else reruns this while the modal animates.
+                    self.update_window_visibility();
                 }
             }
         }

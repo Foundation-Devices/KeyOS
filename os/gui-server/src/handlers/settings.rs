@@ -65,7 +65,6 @@ impl ArchiveEventHandler<settings::global::OnboardingStatus> for Gui {
                 if let Some(pid) = self.app_registry.pid(AppRole::Launcher) {
                     self.switch_to_window(pid);
                     self.reset_auto_lock();
-                    self.notify_lockscreen_unlocked();
                     self.startup_state = StartupState::Started;
                 } else {
                     self.startup_state = StartupState::WaitingForLauncherPID;

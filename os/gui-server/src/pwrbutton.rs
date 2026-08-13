@@ -70,7 +70,7 @@ impl Gui {
             if !self.power_button_state.had_long_press {
                 #[cfg(not(feature = "recovery-os"))]
                 self.lock();
-                self.turn_off_lcd();
+                self.start_turning_off_lcd();
             }
         }
     }

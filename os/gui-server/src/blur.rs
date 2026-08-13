@@ -37,7 +37,7 @@ impl Gui {
             return;
         };
         let active_pid = self.active_app_pid();
-        let modal_bg_pid = self.modal_background_pid();
+        let modal_bg_pid = self.blurred_modal_background_pid();
         let control_center_blur = self.is_control_center_blur_active();
         for (pid, window) in &mut self.windows {
             if let Some(buffer) = window.buffers.most_recent_buffer() {

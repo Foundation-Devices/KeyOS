@@ -257,4 +257,17 @@ impl Gui {
             None
         }
     }
+
+    /// The modal background window, when the modal leaves part of it on screen.
+    ///
+    /// A fullscreen modal covers the background once settled, and slides over it too
+    /// briefly on the way in to be worth a full-screen blur.
+    pub(crate) fn blurred_modal_background_pid(&self) -> Option<PID> {
+        match &self.state {
+            GuiState::Modal(modal_state) if !modal_state.is_fullscreen() => {
+                Some(modal_state.background_pid())
+            }
+            _ => None,
+        }
+    }
 }

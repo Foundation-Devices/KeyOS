@@ -150,14 +150,14 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
                 reset_input_state(&ui_state, ui_state.get_remaining_attempts() as _);
                 log::info!("Navigation cancelled");
             }
-            InputMessage::Custom1 => {
-                ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
-            }
-            InputMessage::Custom2 => {
-                ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
+            InputMessage::Hidden => {
                 reset_input_state(&ui_state, ui_state.get_remaining_attempts() as _);
                 ui_state.set_show_login(false);
                 gui.hide_keyboard().ok();
+            }
+            // The mode can be changed from settings while the lock screen is off screen.
+            InputMessage::Visible => {
+                ui_state.set_is_pin_entry(state.security.get_pin_entry_mode() == security::PinEntryMode::Pin);
             }
             _ => {}
         };

@@ -136,7 +136,7 @@ impl ScalarHandler<AutoLockTimerCallback> for Gui {
                 } else if self.display.is_lcd_on() {
                     log::info!("Turning LCD off (no activity)");
                     self.lock();
-                    self.turn_off_lcd();
+                    self.start_turning_off_lcd();
                 }
                 self.auto_lock.request_callback(
                     self.auto_lock.lock_timeout.saturating_mul(POWEROFF_MULTIPLIER - 1),
