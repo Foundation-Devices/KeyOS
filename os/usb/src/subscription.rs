@@ -93,18 +93,10 @@ impl SubscriptionServer {
 
     #[cfg(not(feature = "recovery-os"))]
     fn set_usb_device_enabled(&mut self, enabled: bool) {
-        self.device
-            .try_send_scalar(SetDeviceEmulationEnabled(enabled))
-            .inspect_err(|e| log::warn!("failed to set usb device enabled {enabled:?} {e:?}"))
-            .ok();
+        self.device.send_scalar(SetDeviceEmulationEnabled(enabled));
     }
 
-    fn set_usb_host_enabled(&mut self, enabled: bool) {
-        self.host
-            .try_send_scalar(SetEnabled(enabled))
-            .inspect_err(|e| log::warn!("failed to set usb host enabled {enabled:?} {e:?}"))
-            .ok();
-    }
+    fn set_usb_host_enabled(&mut self, enabled: bool) { self.host.send_scalar(SetEnabled(enabled)); }
 }
 
 #[cfg(not(feature = "recovery-os"))]
