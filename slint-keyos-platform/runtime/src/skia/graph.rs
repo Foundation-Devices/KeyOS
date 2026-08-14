@@ -335,7 +335,7 @@ fn draw_graph_border(pixmap: &mut tiny_skia::PixmapMut, w: u32, h: u32) {
     let stops = vec![
         GradientStop::new(0.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
         GradientStop::new(0.25, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
-        GradientStop::new(1.0, Color::from_rgba8(0xbf, 0xaf, 0xa9, 0xff)),
+        GradientStop::new(1.0, Color::from_rgba8(0x73, 0x50, 0x45, 0xff)),
     ];
     let paint = Paint {
         shader: LinearGradient::new(
