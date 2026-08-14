@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Args, Command, CommandFactory};
@@ -21,8 +21,12 @@ pub struct CompletionsArgs {
     #[arg(value_parser = clap::builder::PossibleValuesParser::new(["bash", "zsh", "fish", "powershell"]))]
     pub shell: String,
 
-    /// Install completions to the standard location for the shell
-    #[arg(long)]
+    /// Print completions to stdout instead of installing them
+    #[arg(long, conflicts_with = "install")]
+    pub stdout: bool,
+
+    /// Retained for compatibility now that installation is the default
+    #[arg(long, hide = true)]
     pub install: bool,
 }
 
@@ -30,10 +34,10 @@ pub struct CompletionsArgs {
 pub fn execute(args: &CompletionsArgs) -> Result<()> {
     let shell_type = parse_shell(&args.shell)?;
 
-    if args.install {
-        install_completions(shell_type)?;
-    } else {
+    if args.stdout {
         generate_completions(shell_type)?;
+    } else {
+        install_completions(shell_type)?;
     }
 
     Ok(())
@@ -100,9 +104,14 @@ fn install_completions(shell: Shell) -> Result<()> {
     }
 
     // For zsh, add fpath configuration to ~/.zshrc
-    if shell == Shell::Zsh {
-        setup_zsh()?;
-    }
+    let zsh_configured = shell == Shell::Zsh
+        && match setup_zsh() {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("Could not update ~/.zshrc automatically: {error:#}");
+                false
+            }
+        };
 
     // Print shell-specific instructions
     let instructions = match shell {
@@ -111,18 +120,37 @@ fn install_completions(shell: Shell) -> Result<()> {
             #[cfg(target_os = "macos")]
             {
                 "Completions have been enabled in ~/.bash_profile.\nRestart your shell or run: source ~/.bash_profile"
+                    .to_string()
             }
             #[cfg(not(target_os = "macos"))]
             {
-                "To enable completions, restart your shell or run: source ~/.bashrc"
+                if completion_dir.ends_with(".bash_completion.d") {
+                    format!(
+                        "Add this line to ~/.bashrc, then restart your shell:\nsource {}",
+                        shell_quote(&completion_file)
+                    )
+                } else {
+                    "To enable completions, restart your shell".to_string()
+                }
             }
         }
         Shell::Zsh => {
-            "Completions have been enabled in ~/.zshrc.\nRestart your shell or run: source ~/.zshrc"
+            if zsh_configured {
+                "Completions have been enabled in ~/.zshrc.\nRestart your shell or run: source ~/.zshrc"
+                    .to_string()
+            } else {
+                "Add these lines to ~/.zshrc, then restart your shell:\n\
+                 fpath=(~/.zsh/completions $fpath)\n\
+                 autoload -Uz compinit && compinit"
+                    .to_string()
+            }
         }
-        Shell::Fish => "To enable completions, restart your shell",
-        Shell::PowerShell => "To enable completions, restart your shell",
-        _ => "To enable completions, restart your shell",
+        Shell::Fish => "To enable completions, restart your shell".to_string(),
+        Shell::PowerShell => format!(
+            "Add this line to your PowerShell profile, then restart your shell:\n. {}",
+            powershell_quote(&completion_file)
+        ),
+        _ => "To enable completions, restart your shell".to_string(),
     };
     eprintln!("{}", instructions);
 
@@ -202,6 +230,10 @@ fn get_completion_filename(shell: Shell) -> &'static str {
     }
 }
 
+fn shell_quote(path: &Path) -> String { format!("'{}'", path.display().to_string().replace('\'', "'\\''")) }
+
+fn powershell_quote(path: &Path) -> String { format!("'{}'", path.display().to_string().replace('\'', "''")) }
+
 /// Set up bash completions on macOS by adding source line to ~/.bash_profile
 #[cfg(target_os = "macos")]
 fn setup_bash_macos(completion_file: &std::path::Path) -> Result<()> {
@@ -210,7 +242,7 @@ fn setup_bash_macos(completion_file: &std::path::Path) -> Result<()> {
     let home = dirs::home_dir().context("Could not determine home directory")?;
 
     let bash_profile = home.join(".bash_profile");
-    let source_line = format!("source {}", completion_file.display());
+    let source_line = format!("source {}", shell_quote(completion_file));
 
     // Check if the source line already exists
     if bash_profile.exists() {
@@ -248,13 +280,38 @@ fn setup_zsh() -> Result<()> {
     let fpath_line = "fpath=(~/.zsh/completions $fpath)";
     let compinit_line = "autoload -Uz compinit && compinit";
 
-    // Check if already configured
     let mut content = String::new();
     if zshrc.exists() {
         fs::File::open(&zshrc)?.read_to_string(&mut content)?;
 
-        if content.contains(fpath_line) && content.contains(compinit_line) {
-            // Already configured
+        let fpath_position = uncommented_position(&content, fpath_line);
+        let compinit_position = uncommented_position(&content, compinit_line);
+        if matches!((fpath_position, compinit_position), (Some(fpath), Some(compinit)) if fpath < compinit) {
+            return Ok(());
+        }
+
+        // compinit only discovers completion directories already in fpath. If a
+        // shell framework configured it first, move or insert our entry before it.
+        if compinit_position.is_some() {
+            if let Some(fpath_position) = fpath_position {
+                if let Some(mut removal_range) = standalone_line_range(&content, fpath_position, fpath_line) {
+                    if removal_range.start > 0 {
+                        let previous_line = containing_line_range(&content, removal_range.start - 1);
+                        if content[previous_line.clone()].trim() == "# Foundation CLI completions" {
+                            removal_range.start = previous_line.start;
+                        }
+                    }
+                    content.replace_range(removal_range, "");
+                }
+            }
+
+            let compinit_position = uncommented_position(&content, compinit_line)
+                .context("Could not relocate compinit while updating ~/.zshrc")?;
+            let line_start = containing_line_range(&content, compinit_position).start;
+            let configuration = format!("# Foundation CLI completions\n{fpath_line}\n");
+            content.insert_str(line_start, &configuration);
+            atomic_write(&zshrc, content.as_bytes())?;
+            eprintln!("Added completion configuration to {}", zshrc.display());
             return Ok(());
         }
     }
@@ -267,14 +324,49 @@ fn setup_zsh() -> Result<()> {
         .with_context(|| format!("Failed to open {}", zshrc.display()))?;
 
     writeln!(file, "\n# Foundation CLI completions")?;
-    if !content.contains(fpath_line) {
+    if uncommented_position(&content, fpath_line).is_none() {
         writeln!(file, "{}", fpath_line)?;
     }
-    if !content.contains(compinit_line) {
+    if uncommented_position(&content, compinit_line).is_none() {
         writeln!(file, "{}", compinit_line)?;
     }
 
     eprintln!("Added completion configuration to {}", zshrc.display());
 
+    Ok(())
+}
+
+fn containing_line_range(content: &str, position: usize) -> std::ops::Range<usize> {
+    let start = content[..position].rfind('\n').map_or(0, |position| position + 1);
+    let end = content[position..].find('\n').map_or(content.len(), |offset| position + offset + 1);
+    start..end
+}
+
+fn uncommented_position(content: &str, expected: &str) -> Option<usize> {
+    content.match_indices(expected).find_map(|(position, _)| {
+        let line_start = content[..position].rfind('\n').map_or(0, |position| position + 1);
+        (!content[line_start..position].trim_start().starts_with('#')).then_some(position)
+    })
+}
+
+fn standalone_line_range(content: &str, position: usize, expected: &str) -> Option<std::ops::Range<usize>> {
+    let range = containing_line_range(content, position);
+    (content[range.clone()].trim() == expected).then_some(range)
+}
+
+fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+    use std::io::Write;
+
+    let path = fs::canonicalize(path).with_context(|| format!("Failed to resolve {}", path.display()))?;
+    let parent = path.parent().context("Could not determine shell config directory")?;
+    let permissions = fs::metadata(&path)?.permissions();
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("Failed to create temporary file in {}", parent.display()))?;
+    temp.as_file().set_permissions(permissions)?;
+    temp.write_all(content)?;
+    temp.as_file().sync_all()?;
+    temp.persist(&path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("Failed to update {}", path.display()))?;
     Ok(())
 }

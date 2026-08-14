@@ -199,7 +199,7 @@ Each app includes a manifest defining:
 - `foundation preview` — preview UI in the bundled Slint viewer
 - `foundation genkey` — generate a signing keypair for a developer key
 - `foundation doctor` — verify Nix, SDK install, targets, and device prerequisites
-- `foundation completions` — generate shell completions
+- `foundation completions` — install or generate shell completions
 
 ### Simulator
 

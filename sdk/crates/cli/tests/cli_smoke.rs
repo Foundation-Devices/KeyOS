@@ -86,7 +86,7 @@ fn plugin_surface_is_absent_without_the_experimental_feature() {
     let installed = env.command().arg("demo").output().unwrap();
     assert!(!installed.status.success(), "installed plugin unexpectedly executed");
 
-    let completions = env.command().arg("completions").arg("bash").output().unwrap();
+    let completions = env.command().arg("completions").arg("bash").arg("--stdout").output().unwrap();
     assert!(completions.status.success(), "completions failed: {}", stderr(&completions));
     assert!(
         !stdout(&completions).contains("plugin") && !stdout(&completions).contains("demo"),
@@ -394,17 +394,144 @@ fn plugin_and_completion_commands_work_in_smoke_env() {
     assert!(!env.home().join(".foundation").join("plugins").join("foundation-demo").exists());
 
     env.install_home_plugin("demo");
-    let completions = env.command().arg("completions").arg("bash").output().unwrap();
-    assert!(completions.status.success(), "completions failed: {}", stderr(&completions));
+    let completions = env.command().arg("completions").arg("bash").arg("--stdout").output().unwrap();
+    assert!(completions.status.success(), "completion output failed: {}", stderr(&completions));
     assert!(stdout(&completions).contains("demo"));
+}
 
-    let install_completions = env.command().arg("completions").arg("zsh").arg("--install").output().unwrap();
+#[test]
+fn completion_commands_work_in_smoke_env() {
+    let env = TestEnv::new();
+
+    let completions = env.command().arg("completions").arg("bash").arg("--stdout").output().unwrap();
+    assert!(completions.status.success(), "completion output failed: {}", stderr(&completions));
+    assert!(stdout(&completions).contains("foundation"));
+
+    let zshrc = env.home().join(".zshrc");
+    fs::write(&zshrc, "autoload -Uz compinit && compinit\n").unwrap();
+    let install_completions = env.command().arg("completions").arg("zsh").output().unwrap();
     assert!(
         install_completions.status.success(),
         "completion install failed: {}",
         stderr(&install_completions)
     );
-    assert!(env.home().join(".zsh").join("completions").join("_foundation").exists());
+    assert!(stdout(&install_completions).is_empty());
+    let completion_file = env.home().join(".zsh").join("completions").join("_foundation");
+    assert!(completion_file.exists());
+    assert!(fs::read_to_string(completion_file).unwrap().contains("foundation"));
+
+    let zshrc = fs::read_to_string(zshrc).unwrap();
+    let fpath_position = zshrc.find("fpath=(~/.zsh/completions $fpath)").unwrap();
+    let compinit_position = zshrc.find("autoload -Uz compinit && compinit").unwrap();
+    assert!(fpath_position < compinit_position, "completion fpath must be configured before compinit");
+
+    fs::write(
+        env.home().join(".zshrc"),
+        "autoload -Uz compinit && compinit\n# Foundation CLI completions\nfpath=(~/.zsh/completions $fpath)\n",
+    )
+    .unwrap();
+    let repair_completions = env.command().arg("completions").arg("zsh").output().unwrap();
+    assert!(repair_completions.status.success(), "completion repair failed: {}", stderr(&repair_completions));
+    let repaired_zshrc = fs::read_to_string(env.home().join(".zshrc")).unwrap();
+    let fpath_position = repaired_zshrc.find("fpath=(~/.zsh/completions $fpath)").unwrap();
+    let compinit_position = repaired_zshrc.find("autoload -Uz compinit && compinit").unwrap();
+    assert!(fpath_position < compinit_position, "existing completion configuration was not repaired");
+    assert_eq!(repaired_zshrc.matches("fpath=(~/.zsh/completions $fpath)").count(), 1);
+
+    fs::write(
+        env.home().join(".zshrc"),
+        "# autoload -Uz compinit && compinit\n# fpath=(~/.zsh/completions $fpath)\n",
+    )
+    .unwrap();
+    let commented = env.command().arg("completions").arg("zsh").output().unwrap();
+    assert!(commented.status.success(), "commented zsh install failed: {}", stderr(&commented));
+    let repaired = fs::read_to_string(env.home().join(".zshrc")).unwrap();
+    let fpath_position = repaired.rfind("\nfpath=(~/.zsh/completions $fpath)").unwrap();
+    let compinit_position = repaired.rfind("\nautoload -Uz compinit && compinit").unwrap();
+    assert!(fpath_position < compinit_position, "commented commands were treated as active");
+
+    for zshrc_content in [
+        "autoload -Uz compinit && compinit\n[[ -d ~/.zsh/completions ]] && fpath=(~/.zsh/completions $fpath)\n",
+        "autoload -Uz compinit && compinit; fpath=(~/.zsh/completions $fpath)\n",
+    ] {
+        fs::write(env.home().join(".zshrc"), zshrc_content).unwrap();
+        let guarded = env.command().arg("completions").arg("zsh").output().unwrap();
+        assert!(guarded.status.success(), "guarded zsh install failed: {}", stderr(&guarded));
+        let repaired = fs::read_to_string(env.home().join(".zshrc")).unwrap();
+        assert!(repaired.contains(zshrc_content.trim_end()), "custom zsh configuration was changed");
+        let fpath_position = repaired.find("# Foundation CLI completions\nfpath=(~/.zsh/completions $fpath)").unwrap();
+        let compinit_position = repaired.find("autoload -Uz compinit && compinit").unwrap();
+        assert!(fpath_position < compinit_position, "safe completion configuration was not inserted");
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let zshrc = env.home().join(".zshrc");
+        fs::remove_file(&zshrc).unwrap();
+        let dotfiles = env.home().join("dotfiles");
+        fs::create_dir(&dotfiles).unwrap();
+        let managed_zshrc = dotfiles.join("zshrc");
+        fs::write(&managed_zshrc, "autoload -Uz compinit && compinit\nfpath=(~/.zsh/completions $fpath)\n")
+            .unwrap();
+        symlink("dotfiles/zshrc", &zshrc).unwrap();
+
+        let install = env.command().arg("completions").arg("zsh").output().unwrap();
+        assert!(install.status.success(), "symlinked zsh install failed: {}", stderr(&install));
+        assert!(fs::symlink_metadata(&zshrc).unwrap().file_type().is_symlink());
+        let repaired = fs::read_to_string(&managed_zshrc).unwrap();
+        let fpath_position = repaired.find("fpath=(~/.zsh/completions $fpath)").unwrap();
+        let compinit_position = repaired.find("autoload -Uz compinit && compinit").unwrap();
+        assert!(fpath_position < compinit_position, "symlinked zsh configuration was not repaired");
+
+        let immutable_dir = env.home().join("immutable-dotfiles");
+        fs::create_dir(&immutable_dir).unwrap();
+        let immutable_zshrc = immutable_dir.join("zshrc");
+        fs::write(&immutable_zshrc, "autoload -Uz compinit && compinit\n").unwrap();
+        fs::remove_file(&zshrc).unwrap();
+        symlink("immutable-dotfiles/zshrc", &zshrc).unwrap();
+
+        use std::os::unix::fs::PermissionsExt;
+        let writable_permissions = fs::metadata(&immutable_dir).unwrap().permissions();
+        fs::set_permissions(&immutable_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let immutable = env.command().arg("completions").arg("zsh").output().unwrap();
+        fs::set_permissions(&immutable_dir, writable_permissions).unwrap();
+
+        assert!(immutable.status.success(), "immutable zsh install failed: {}", stderr(&immutable));
+        assert!(stderr(&immutable).contains("Could not update ~/.zshrc automatically"));
+        assert!(stderr(&immutable)
+            .contains("fpath=(~/.zsh/completions $fpath)\nautoload -Uz compinit && compinit"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let spaced_home = env.root.path().join("home with spaces");
+        fs::create_dir(&spaced_home).unwrap();
+        let bash = env.command().env("HOME", &spaced_home).arg("completions").arg("bash").output().unwrap();
+        assert!(bash.status.success(), "Bash install failed: {}", stderr(&bash));
+        let completion_file = spaced_home.join(".bash_completion.d").join("foundation");
+        let profile = fs::read_to_string(spaced_home.join(".bash_profile")).unwrap();
+        assert!(profile.contains(&format!("source '{}'", completion_file.display())));
+    }
+
+    let powershell = env.command().arg("completions").arg("powershell").output().unwrap();
+    assert!(powershell.status.success(), "PowerShell install failed: {}", stderr(&powershell));
+    let powershell_file =
+        env.home().join(".config").join("powershell").join("completions").join("foundation.ps1");
+    assert!(stderr(&powershell).contains(&format!(". '{}'", powershell_file.display())));
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let bash = env.command().arg("completions").arg("bash").output().unwrap();
+        assert!(bash.status.success(), "Bash install failed: {}", stderr(&bash));
+        let bash_file = env.home().join(".bash_completion.d").join("foundation");
+        assert!(stderr(&bash).contains(&format!("source '{}'", bash_file.display())));
+    }
+
+    let legacy_install = env.command().arg("completions").arg("fish").arg("--install").output().unwrap();
+    assert!(legacy_install.status.success(), "legacy --install failed: {}", stderr(&legacy_install));
+    assert!(env.home().join(".config").join("fish").join("completions").join("foundation.fish").exists());
 }
 
 #[test]

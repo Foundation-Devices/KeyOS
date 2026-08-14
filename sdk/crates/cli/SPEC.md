@@ -635,13 +635,13 @@ Behavior:
 Signature:
 
 ```text
-foundation completions <bash|zsh|fish|powershell> [--install]
+foundation completions <bash|zsh|fish|powershell> [--stdout]
 ```
 
 Behavior:
 
-- Without `--install`, writes completions to stdout
-- With `--install`, writes to the standard user-scoped location for the target shell
+- By default, writes completions to the standard user-scoped location for the target shell
+- With `--stdout`, writes completions to stdout instead of installing them
 
 ### Experimental plugin quarantine
 

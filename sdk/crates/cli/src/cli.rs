@@ -116,7 +116,9 @@ pub enum Commands {
     )]
     Plugin(commands::plugin::PluginArgs),
 
-    /// Generate shell completions
-    #[command(long_about = "Generates shell completion scripts for bash, zsh, fish, or PowerShell")]
+    /// Install shell completions
+    #[command(
+        long_about = "Installs shell completions for bash, zsh, fish, or PowerShell; use --stdout to print the script instead"
+    )]
     Completions(commands::completions::CompletionsArgs),
 }

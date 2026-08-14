@@ -41,4 +41,4 @@ Command quick reference:
 - `foundation sideload`: copy and optionally launch on connected Passport hardware.
 - `foundation logs`: open the Passport USB log viewer.
 - `foundation cert gen` / `foundation cert print`: create or inspect publisher signing certificates.
-- `foundation completions`: generate or install shell completions.
+- `foundation completions`: install shell completions by default, or generate them with `--stdout`.
