@@ -12,7 +12,13 @@ import {
     TextTime,
     SlideToButton,
 } from "@ui/widgets.slint";
-import { UISize, Size, Palette, Importance } from "@ui/theme.slint";
+import {
+    CurrentTheme,
+    UISize,
+    Size,
+    Palette,
+    Importance,
+} from "@ui/theme.slint";
 import { DarkPalette } from "@ui/palettes/dark-palette.slint";
 import { LightPalette } from "@ui/palettes/light-palette.slint";
 import { TR2, TrId } from "./gen/tr.slint";
@@ -99,7 +105,7 @@ export component ControlCenter inherits VerticalLayout {
     in property <color> custom-background-color: black;
     in property <color> custom-content-color: white;
     property <brush> content-color: use-custom-colors ? custom-content-color : Palette.content-primary;
-    property <brush> bg-color: use-custom-colors ? custom-background-color : Palette.background-primary;
+    property <brush> bg-color: use-custom-colors ? custom-background-color : (CurrentTheme.is-dark ? #272727 : #eceded);
 
     in property <string> time;
     in property <string> day-of-week;
