@@ -31,7 +31,8 @@ use crate::{
     account_id::AccountId,
     bitcoin_settings::ExchangeRate,
     quantum_link_permissions::QuantumLinkPermissions,
-    state::{AccountColor, AppState, PendingSingleSig},
+    state::{AccountColor, AppState, PendingMultiSig, PendingSingleSig},
+    store::AccountSource,
     CreateAccount, CreateAccountState, DisplayAmount, FileSaveState, MultiSigView, Navigate, NavigateOptions,
     PsbtOutputKind, PsbtOutputView, PsbtView, ShowFiatValue, SignPsbt, SignPsbtState,
 };
@@ -448,7 +449,10 @@ pub mod verify {
 
                     match inferred {
                         InferredAccountDetails::MultiSig(multisig_details) => {
-                            state.borrow_mut().pending_multisig = Some(multisig_details.clone());
+                            state.borrow_mut().pending_multisig = Some(PendingMultiSig {
+                                details: multisig_details.clone(),
+                                source: AccountSource::Generic,
+                            });
                             state.borrow_mut().pending_psbt = PendingPsbt::NotSaved { psbt, origin };
 
                             let multisig_view = MultiSigView::from(&multisig_details);

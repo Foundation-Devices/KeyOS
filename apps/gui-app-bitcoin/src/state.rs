@@ -9,7 +9,10 @@ use {
         fs_permissions::FileSystemPermissions,
         load::{self},
         psbt_signing::PendingPsbt,
-        store::{fingerprint_for_passphrase, AccountStore, CreateMultiSigAccount, CreateSingleSigAccount},
+        store::{
+            fingerprint_for_passphrase, AccountSource, AccountStore, CreateMultiSigAccount,
+            CreateSingleSigAccount,
+        },
         AccountView, AddressType, AppWindow, Callbacks, CardColor, KeychainKind, MultiSigSignerView,
         MultiSigView, Network, NetworkKind, QlStatus, SettingsApi, SingleSigView,
     },
@@ -42,6 +45,12 @@ pub struct PendingSingleSig {
     pub network: NgNetwork,
 }
 
+#[derive(Clone)]
+pub struct PendingMultiSig {
+    pub details: MultiSigDetails,
+    pub source: AccountSource,
+}
+
 pub struct AppState {
     pub ui: slint::Weak<AppWindow>,
     pub settings: JsonBacked<BitcoinSettings, FileSystemPermissions>,
@@ -52,7 +61,8 @@ pub struct AppState {
     pub system_settings: SettingsApi,
     pub ql_status: QlStatus,
 
-    pub pending_multisig: Option<MultiSigDetails>,
+    pub pending_multisig: Option<PendingMultiSig>,
+    pub pending_casa_health_qr: Option<Vec<u8>>,
     pub pending_singlesig: Option<PendingSingleSig>,
     pub pending_psbt: PendingPsbt,
     pub pending_archived_account_id: Option<AccountId>,
@@ -77,6 +87,7 @@ impl AppState {
             ql_status: QlStatus::new(slint_keyos_platform::worker().clone()),
 
             pending_multisig: None,
+            pending_casa_health_qr: None,
             pending_singlesig: None,
             pending_psbt: PendingPsbt::None,
             pending_archived_account_id: None,
@@ -106,7 +117,8 @@ impl AppState {
 
     pub fn get_account_view(&self, account_id: &AccountId) -> Option<AccountView> {
         let config = self.store.get_account_config(account_id)?;
-        let view = convert_account(account_id, &config);
+        let source = self.store.account_source(account_id);
+        let view = convert_account(account_id, &config, source);
         Some(view)
     }
 
@@ -117,7 +129,7 @@ impl AppState {
                 return None;
             }
 
-            Some(convert_account(id, &*config))
+            Some(convert_account(id, &*config, self.store.account_source(id)))
         });
         self.model.extend(accounts);
 
@@ -184,9 +196,13 @@ impl AppState {
         Ok(addresses)
     }
 
-    pub fn set_pending_multisig(&mut self, multisig: MultiSigDetails) -> anyhow::Result<()> {
+    pub fn set_pending_multisig(
+        &mut self,
+        multisig: MultiSigDetails,
+        source: AccountSource,
+    ) -> anyhow::Result<()> {
         self.store.validate_multisig_account(&multisig, None, None)?;
-        self.pending_multisig = Some(multisig);
+        self.pending_multisig = Some(PendingMultiSig { details: multisig, source });
         Ok(())
     }
 }
@@ -243,11 +259,11 @@ impl AppState {
 
         let (device_serial, master_key, secp) = {
             let state = state.borrow();
-            (
-                state.store.device_serial.clone(),
-                state.store.load_master_key(create.network)?,
-                state.store.secp.clone(),
-            )
+            let master_key = state.store.load_master_key(create.network)?;
+            if create.source == AccountSource::Casa {
+                state.store.validate_casa_multisig_account(&master_key, &create.multisig)?;
+            }
+            (state.store.device_serial.clone(), master_key, state.store.secp.clone())
         };
 
         let (account_id, account) = spawn_worker({
@@ -547,7 +563,11 @@ impl AppState {
     }
 }
 
-fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountView {
+fn convert_account(
+    account_id: &AccountId,
+    config: &NgAccountConfig,
+    source: crate::store::AccountSource,
+) -> AccountView {
     // Single-sig: derive from index so it cycles like Core/Envoy.
     let color: CardColor = match config.archived {
         true => CardColor::DarkGrey,
@@ -560,6 +580,7 @@ fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountV
             id: account_id.to_shared_string(),
             name: config.name.to_shared_string(),
             is_multisig: true,
+            is_casa: source == crate::store::AccountSource::Casa,
             network: config.network.into(),
             color,
             archived: config.archived,
@@ -573,6 +594,7 @@ fn convert_account(account_id: &AccountId, config: &NgAccountConfig) -> AccountV
                 id: account_id.to_shared_string(),
                 name: config.name.to_shared_string(),
                 is_multisig: false,
+                is_casa: false,
                 network: config.network.into(),
                 color,
                 archived: config.archived,

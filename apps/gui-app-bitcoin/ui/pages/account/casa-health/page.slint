@@ -1,0 +1,141 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import {
+    BasePage,
+    Button,
+    ButtonSection,
+    ConfirmationModal,
+    ContentSection,
+    DynamicQrCode,
+    HeadingMd,
+    JumboIconPageBody,
+    NavHeader,
+    PageBody,
+    TextMd,
+    TimerCircularProgress,
+    WrappedIcon,
+} from "@ui/widgets.slint";
+import { Importance, Palette } from "@ui/theme.slint";
+import { CasaHealth, CasaHealthState } from "../../../casa-health.slint";
+import { CasaHealthProps } from "./props.slint";
+
+// TODO: localization
+export component CasaHealthPage inherits BasePage {
+    in property <CasaHealthProps> props;
+
+    VerticalLayout {
+        NavHeader {
+            title: "Health Check";
+            clicked => { CasaHealth.done(); }
+        }
+
+        if CasaHealth.state == CasaHealthState.Idle: PageBody {
+            ContentSection {
+                TextMd {
+                    text: "Choose how to receive the health check from Casa.";
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    icon: "scan-qr";
+                    label: "Check with QR Code";
+                    clicked => { CasaHealth.check-with-qr(); }
+                }
+
+                Button {
+                    icon: "file";
+                    label: "Check from File";
+                    importance: Importance.secondary;
+                    clicked => { CasaHealth.check-with-file(); }
+                }
+            }
+        }
+
+        if CasaHealth.state == CasaHealthState.Working: PageBody {
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    TimerCircularProgress {
+                        indeterminate: true;
+                    }
+                }
+
+                HeadingMd {
+                    text: "Signing Health Check";
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    text: "Passport is completing the Casa health check.";
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        if CasaHealth.state == CasaHealthState.QrReady: PageBody {
+            ContentSection {
+                TextMd {
+                    text: "Scan this QR code with the Casa app to complete the health check.";
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                }
+
+                DynamicQrCode {
+                    get-parts(density) => { CasaHealth.qr-parts(density); }
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: "Done";
+                    clicked => { CasaHealth.done(); }
+                }
+            }
+        }
+
+        if CasaHealth.state == CasaHealthState.FileSaved: JumboIconPageBody {
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    WrappedIcon {
+                        inner-icon: "check";
+                    }
+                }
+
+                HeadingMd {
+                    text: "Health Check Signed";
+                    horizontal-alignment: center;
+                }
+
+                TextMd {
+                    text: "Saved as " + CasaHealth.saved-file-name;
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            ButtonSection {
+                Button {
+                    label: "Done";
+                    clicked => { CasaHealth.done(); }
+                }
+            }
+        }
+    }
+
+    if CasaHealth.state == CasaHealthState.Error: ConfirmationModal {
+        icon: "alert";
+        icon-color: Palette.content-notice;
+        title: "Health Check Failed";
+        text: "Passport could not validate or sign this Casa health check.\n\n" + CasaHealth.error-code;
+        cancel-button-label: "Cancel";
+        confirm-button-label: "Try Again";
+        cancel-clicked => { CasaHealth.done(); }
+        confirm-clicked => { CasaHealth.state = CasaHealthState.Idle; }
+    }
+}

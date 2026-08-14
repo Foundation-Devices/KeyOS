@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+export enum CasaHealthState {
+    Idle,
+    Working,
+    QrReady,
+    FileSaved,
+    Error,
+}
+
+export global CasaHealth {
+    in-out property <CasaHealthState> state: CasaHealthState.Idle;
+    in property <string> account-id;
+    in property <string> saved-file-name;
+    in property <string> error-code;
+
+    callback start(account-id: string);
+    callback check-with-qr();
+    callback check-with-file();
+    pure callback qr-parts(density: int) -> [string];
+    callback done();
+}

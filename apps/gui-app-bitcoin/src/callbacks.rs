@@ -7,8 +7,9 @@ use {
         gui_permissions::GuiPermissions,
         psbt_signing::{PendingPsbt, PsbtOrigin},
         state::AppState,
-        tr, AddressType, Animate, Callbacks, CreateAccount, CreateAccountState, FileSaveState, KeychainKind,
-        MultiSigView, Navigate, Network, PsbtOriginView, PsbtView, SignPsbt, SignPsbtState, TrId,
+        tr, AddressType, Animate, Callbacks, CasaHealth, CasaHealthState, CreateAccount, CreateAccountState,
+        FileSaveState, KeychainKind, MultiSigView, Navigate, Network, PsbtOriginView, PsbtView, SignPsbt,
+        SignPsbtState, TrId,
     },
     anyhow::Context,
     foundation_urtypes::value::Value as UrValue,
@@ -22,6 +23,7 @@ use {
         spawn_local, StoredValue,
     },
     std::{cell::RefCell, io::Read, rc::Rc},
+    zeroize::Zeroize,
 };
 
 pub fn init_callbacks(state: StoredValue<AppState>) {
@@ -125,10 +127,17 @@ pub fn reset_for_incoming_scan(state: StoredValue<AppState>) {
         // TODO: find a more robust way to reset CreateAccount State
         account_global.set_state(CreateAccountState::Idle);
         account_global.set_pending_multisig_account(MultiSigView::default());
+        account_global.set_pending_multisig_is_casa(false);
         account_global.set_new_account_id("".into());
         account_global.set_prefilled_mode(false);
         account_global.set_prefilled_index("".into());
         account_global.set_prefilled_network(Network::Bitcoin);
+
+        let casa_health = ui.global::<CasaHealth>();
+        casa_health.set_state(CasaHealthState::Idle);
+        casa_health.set_account_id("".into());
+        casa_health.set_saved_file_name("".into());
+        casa_health.set_error_code("".into());
 
         ui.global::<Navigate>().invoke_return_home_animate(Animate::None);
     }
@@ -140,6 +149,9 @@ pub fn reset_for_incoming_scan(state: StoredValue<AppState>) {
         state_mut.pending_singlesig = None;
         state_mut.pending_psbt = PendingPsbt::None;
         state_mut.pending_archived_account_id = None;
+        if let Some(mut payload) = state_mut.pending_casa_health_qr.take() {
+            payload.zeroize();
+        }
     }
 }
 
@@ -149,7 +161,9 @@ pub fn handle_scan_result(state: StoredValue<AppState>, scan: ScanQrResult) -> a
     }
 
     if let Ok(details) = crate::create_account::try_parse_multisig(&scan) {
-        if crate::create_account::present_multisig(state, details).is_ok() {
+        if crate::create_account::present_multisig(state, details, crate::store::AccountSource::Generic)
+            .is_ok()
+        {
             return Ok(());
         }
     }

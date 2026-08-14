@@ -21,7 +21,7 @@ use crate::{
     gui_permissions::GuiPermissions,
     psbt_signing::{verify::verify_psbt, PendingPsbt},
     state::{AccountColor, AppState},
-    store::{CreateMultiSigAccount, CreateSingleSigAccount},
+    store::{AccountSource, CreateMultiSigAccount, CreateSingleSigAccount},
     tr, Animate, CreateAccount, CreateAccountState, CreateMultiSigOptions, CreateSingleSigOptions,
     ExportAccount, MultiSigView, Navigate, NavigateOptions, RouteOption, RouteState, TrId,
 };
@@ -61,13 +61,21 @@ pub fn try_parse_multisig(scan: &ScanQrResult) -> anyhow::Result<MultiSigDetails
     }
 }
 
-pub fn present_multisig(state: StoredValue<AppState>, details: MultiSigDetails) -> anyhow::Result<()> {
+pub fn present_multisig(
+    state: StoredValue<AppState>,
+    details: MultiSigDetails,
+    source: AccountSource,
+) -> anyhow::Result<()> {
     let view = MultiSigView::from(&details);
-    state.borrow_mut().set_pending_multisig(details)?;
+    {
+        let mut state = state.borrow_mut();
+        state.set_pending_multisig(details, source)?;
+    }
     let ui = state.borrow().ui();
     let global = ui.global::<CreateAccount>();
     global.set_state(CreateAccountState::Idle);
     global.set_pending_multisig_account(view);
+    global.set_pending_multisig_is_casa(source == AccountSource::Casa);
 
     if ui.global::<RouteState>().get_active() != RouteOption::ImportMultiSig {
         ui.global::<Navigate>()
@@ -81,8 +89,16 @@ pub fn init(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let global = ui.global::<CreateAccount>();
 
-    global.on_import_multisig(move |from_connect| {
-        if let Err(e) = import_multisig(state, from_connect) {
+    global.on_import_multisig(move |connector_id| {
+        let source =
+            if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
+        let from_connect = !connector_id.is_empty();
+        state
+            .borrow()
+            .ui()
+            .global::<CreateAccount>()
+            .set_pending_multisig_is_casa(source == AccountSource::Casa);
+        if let Err(e) = import_multisig(state, from_connect, source) {
             let ui = state.borrow().ui();
             ui.global::<CreateAccount>().set_state(CreateAccountState::Error);
             ui.global::<Navigate>().invoke_import_multi_sig(Default::default());
@@ -133,7 +149,7 @@ pub fn init(state: StoredValue<AppState>) {
 }
 
 async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOptions) {
-    let Some(multisig) = state.borrow().pending_multisig.clone() else {
+    let Some(pending) = state.borrow().pending_multisig.clone() else {
         log::error!("no pending multisig found");
         return;
     };
@@ -145,9 +161,10 @@ async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOp
 
     let create = CreateMultiSigAccount {
         label: options.label.into(),
-        color: AccountColor::Pine,
+        color: if pending.source == AccountSource::Casa { AccountColor::Purple } else { AccountColor::Pine },
         network: options.network.into(),
-        multisig,
+        multisig: pending.details,
+        source: pending.source,
     };
     let result = AppState::create_multisig_account(state, create).await;
 
@@ -156,6 +173,7 @@ async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOp
             global.set_state(CreateAccountState::Success);
             global.set_new_account_id(account_id.to_shared_string());
             state.borrow_mut().pending_multisig = None;
+            global.set_pending_multisig_is_casa(false);
 
             if let PendingPsbt::NotSaved { psbt, origin } =
                 std::mem::take(&mut state.borrow_mut().pending_psbt)
@@ -221,7 +239,11 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
     }
 }
 
-fn import_multisig(state: StoredValue<AppState>, from_connect: bool) -> anyhow::Result<()> {
+fn import_multisig(
+    state: StoredValue<AppState>,
+    from_connect: bool,
+    source: AccountSource,
+) -> anyhow::Result<()> {
     let opts = ScanQrOptions {
         header_title: tr::lookup_id(TrId::ImportConfigTitle).into(),
         message: String::new(),
@@ -266,10 +288,10 @@ fn import_multisig(state: StoredValue<AppState>, from_connect: bool) -> anyhow::
             };
 
             let text = String::from_utf8(bytes).context("invalid file utf8")?;
-            present_multisig(state, parse_multisig_str(&text)?)?;
+            present_multisig(state, parse_multisig_str(&text)?, source)?;
         }
         ScanQrResult::Qr { .. } | ScanQrResult::Ur2 { .. } => {
-            present_multisig(state, try_parse_multisig(&scan)?)?
+            present_multisig(state, try_parse_multisig(&scan)?, source)?
         }
     }
 

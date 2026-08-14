@@ -43,6 +43,7 @@ import { VerifyAddress } from "../verify-address.slint";
 import { Settings } from "../settings.slint";
 import { EnterPassphrase } from "../enter-passphrase.slint";
 import { SignMessage } from "../sign-message.slint";
+import { CasaHealth } from "../casa-health.slint";
 
 component ActionItem inherits VerticalLayout {
     in property <string> icon;
@@ -186,10 +187,20 @@ component SingleSigActions inherits HorizontalLayout {
 
 component MultiSigActions inherits HorizontalLayout {
     in property <string> account-id;
+    in property <bool> is-casa;
 
     alignment: space-between;
 
-    ActionItem {
+    // TODO: localization
+    if is-casa: ActionItem {
+        icon: "heart";
+        text: "Health Check";
+        clicked => {
+            CasaHealth.start(account-id);
+        }
+    }
+
+    if !is-casa: ActionItem {
         icon: "export";
         text: TR2.lookup(TrId.AccountsExportConfig);
         clicked => {
@@ -223,6 +234,7 @@ component AccountViewCard inherits AccountCollapsible {
 
     if acct.is-multisig: MultiSigActions {
         account-id: account-id;
+        is-casa: acct.is-casa;
     }
     if !acct.is-multisig: SingleSigActions {
         account-id: account-id;
@@ -427,7 +439,7 @@ component AccountsPage inherits BasePage {
             icon: "import";
             clicked => {
                 menu-open = false;
-                CreateAccount.import-multisig(false);
+                CreateAccount.import-multisig("");
             }
         }
 

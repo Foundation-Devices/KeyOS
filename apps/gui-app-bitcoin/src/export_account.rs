@@ -27,7 +27,7 @@ mod bitcoin_safe;
 mod blue_wallet;
 mod btcpay;
 mod bull;
-// mod casa;
+mod casa;
 mod coconut_wallet;
 mod coinbits;
 mod electrum;
@@ -47,7 +47,7 @@ use {
     blue_wallet::CONNECTOR as BlueWallet,
     btcpay::CONNECTOR as BtcPay,
     bull::CONNECTOR as Bull,
-    // casa::CONNECTOR as Casa,
+    casa::CONNECTOR as Casa,
     coconut_wallet::CONNECTOR as CoconutWallet,
     coinbits::CONNECTOR as Coinbits,
     electrum::CONNECTOR as Electrum,
@@ -148,6 +148,23 @@ pub fn init(state: StoredValue<AppState>) {
                     return Default::default();
                 }
             };
+
+            if density != 0 {
+                match connector.connect_ur(&app_state, &account_id, &*ng_account_config, as_multi) {
+                    Ok(Some(export)) => {
+                        return slint_keyos_platform::qrcode::encode_qr_parts(
+                            export.ur_type,
+                            export.cbor,
+                            density,
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::error!("Could not get typed UR export for {}: {:?}", connector_id, e);
+                        return Default::default();
+                    }
+                }
+            }
 
             let content = match connector.connect(&app_state, &account_id, &*ng_account_config, as_multi) {
                 Ok(c) => c,
@@ -541,7 +558,7 @@ register_wallets! {
     BlueWallet,
     BtcPay,
     Bull,
-    // Casa,
+    Casa,
     CoconutWallet,
     Coinbits,
     Electrum,
@@ -551,6 +568,11 @@ register_wallets! {
     Specter,
     Theya,
     Zeus,
+}
+
+pub struct UrExport {
+    pub ur_type: &'static str,
+    pub cbor: Vec<u8>,
 }
 
 pub trait WalletConnector {
@@ -565,6 +587,16 @@ pub trait WalletConnector {
         cfg: &NgAccountConfig,
         as_multi: bool,
     ) -> Result<String, anyhow::Error>;
+
+    fn connect_ur(
+        &self,
+        _state: &AppState,
+        _id: &AccountId,
+        _cfg: &NgAccountConfig,
+        _as_multi: bool,
+    ) -> Result<Option<UrExport>, anyhow::Error> {
+        Ok(None)
+    }
 
     fn export_filename(&self, id: &AccountId, as_multi: bool) -> String {
         let fingerprint = id.fingerprint().map(|f| format!("{}-", f)).unwrap_or(String::new());

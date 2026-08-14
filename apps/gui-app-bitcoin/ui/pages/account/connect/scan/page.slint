@@ -108,7 +108,7 @@ export component ScanConnectPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonContinue);
                     clicked => {
                         ExportAccount.state = ExportAccountState.Idle;
-                        CreateAccount.import-multisig(true);
+                        CreateAccount.import-multisig(scan-props.connector-id);
                     }
                 }
 
@@ -183,7 +183,7 @@ export component ScanConnectPage inherits BasePage {
         confirm-clicked => {
             ExportAccount.skip-multisig-import = false;
             ExportAccount.state = ExportAccountState.Idle;
-            CreateAccount.import-multisig(true);
+            CreateAccount.import-multisig(scan-props.connector-id);
         }
     }
 }

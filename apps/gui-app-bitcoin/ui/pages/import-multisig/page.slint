@@ -35,7 +35,8 @@ export component ImportMultiSigPage inherits BasePage {
     property <Network> new-network: multisig.network-kind == NetworkKind.Main ? Network.Bitcoin : Network.Testnet4;
 
     property <bool> configuring: false;
-    property <string> new-label;
+    // TODO: localization
+    property <string> new-label: CreateAccount.pending-multisig-is-casa ? "Casa" : "";
 
     if !configuring && (CreateAccount.state == CreateAccountState.Idle): VerticalLayout {
         spacing: Size.sz6;
@@ -97,7 +98,14 @@ export component ImportMultiSigPage inherits BasePage {
                     placeholder: TR2.lookup(TrId.ConnectMultiSigImportWalletFillerText);
                     show-clear-btn: false;
                     caps-mode: sentences;
+                    text: new-label;
                     has-notice: true;
+                    init => {
+                        if (new-label != "") {
+                            self.message = CreateAccount.validate-new-label(new-label);
+                            self.has-notice = self.message != "";
+                        }
+                    }
                     edited(text) => {
                         new-label = text;
                         self.message = CreateAccount.validate-new-label(text);
@@ -211,7 +219,7 @@ export component ImportMultiSigPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonRetry);
                     importance: Importance.primary;
                     clicked => {
-                        CreateAccount.import-multisig(false);
+                        CreateAccount.import-multisig(CreateAccount.pending-multisig-is-casa ? "Casa" : "");
                     }
                 }
             }

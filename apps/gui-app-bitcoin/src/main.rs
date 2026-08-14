@@ -16,12 +16,14 @@ use {
 mod account_id;
 mod bitcoin_settings;
 mod callbacks;
+mod casa_health;
 mod create_account;
 mod enter_passphrase;
 mod export_account;
 mod load;
 mod message_signing;
 mod psbt_signing;
+mod sensitive_xpriv;
 mod state;
 mod store;
 mod verify_address;
@@ -87,6 +89,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     bitcoin_settings::init_settings(state);
     callbacks::init_callbacks(state);
+    casa_health::init(state);
     verify_address::init(state);
     create_account::init(state);
     export_account::init(state);

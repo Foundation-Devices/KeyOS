@@ -4996,6 +4996,7 @@ dependencies = [
  "slint-keyos-platform-build",
  "thiserror 2.0.19",
  "xous-api-log",
+ "zeroize",
 ]
 
 [[package]]
