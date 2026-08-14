@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Check bootloader hash
+description: Verify the bootloader matches its tracked version and hash
+
+inputs:
+  base-ref:
+    description: Commit to use as the bootloader baseline
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Build and verify the bootloader
+      shell: bash
+      env:
+        BOOTLOADER_BASE_REF: ${{ inputs.base-ref }}
+      run: nix develop .#build --command "$GITHUB_ACTION_PATH/check.py"

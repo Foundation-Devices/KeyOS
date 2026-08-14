@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+version = "0.2.1"
+
+# Built with KEYOS_SOURCE_DATE_EPOCH=1 so changes in this hash reflect changes
+# to the bootloader binary rather than the commit timestamp. This normalized
+# hash is for source-drift detection only; it is not a release artifact hash.
+normalized_sha256 = "6d5c7ed481d8a0dcfe6a4ef3f3fe2c207778156f833d9d677a0b49cd4dbb7297"

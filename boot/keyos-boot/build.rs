@@ -36,7 +36,9 @@ fn generate_assets() -> Result<Vec<AssetFile>, Box<dyn std::error::Error>> {
     let crate_dir = env::var("CARGO_MANIFEST_DIR")?;
 
     let mut assets = vec![];
-    let assets_dir = fs::read_dir(PathBuf::from(&crate_dir).join("assets"))?;
+    let assets_path = PathBuf::from(&crate_dir).join("assets");
+    println!("cargo:rerun-if-changed={}", assets_path.display());
+    let assets_dir = fs::read_dir(assets_path)?;
     for dir in assets_dir {
         let dir = dir?;
         if !dir.path().extension().map(|s| s == "png").unwrap_or(false) {

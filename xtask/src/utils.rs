@@ -10,6 +10,11 @@ use std::{
 };
 
 pub static GIT_TIMESTAMP: LazyLock<String> = LazyLock::new(|| {
+    if let Ok(source_date_epoch) = std::env::var("KEYOS_SOURCE_DATE_EPOCH") {
+        source_date_epoch.parse::<u64>().expect("KEYOS_SOURCE_DATE_EPOCH must be an unsigned integer");
+        return source_date_epoch;
+    }
+
     let git_timestamp = std::process::Command::new("git")
         .args(["log", "-1", "--pretty=%ct"])
         .output()
