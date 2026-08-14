@@ -1,7 +1,7 @@
 {
-  "appBlocked.publisherExpired": "This app's publisher certificate expired. Compare Passport's time and date with the certificate's expiry date in Allowed Publishers under Settings, Apps.",
-  "appBlocked.publisherNotYetActive": "This app's publisher certificate is not valid yet. Compare Passport's time and the certificate's start date in Allowed Publishers under Settings, Apps.",
-  "appBlockedModal.content": "This app's publisher is not allowed. Import their certificate in Allowed Publishers under Settings, Apps.",
+  "appBlocked.publisherExpired": "This publisher certificate has expired. Check Passport’s date and time. If it is correct, import a current certificate from the publisher.",
+  "appBlocked.publisherNotYetActive": "This publisher certificate is not valid yet. Check Passport’s date and time. If it is correct, wait until the certificate becomes active or import a new one.",
+  "appBlockedModal.content": "This app’s publisher is not allowed. Import their certificate in Settings > Apps > Allowed Publishers.",
   "appBlockedModal.header": "Can't Open this App",
   "appCrash.content": "{0} has crashed with the following exit code: {1}.",
   "appCrash.header": "App Crashed",

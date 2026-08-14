@@ -83,6 +83,7 @@
   "common.slideToSign.signed": "Signed",
   "common.slideToSign.signing": "Signing",
   "confirmPassphrase.content": "Your passphrase will be erased upon shutdown, or can be manually cleared by returning to this screen.",
+  "confirmPassphrase.content2": "You can save your Passphrase to an unused Keycard. The Passphrase is encrypted with your Master Key and can only be decrypted with that Master Key.",
   "confirmPassphrase.fingerprint": "Fingerprint",
   "confirmPassphrase.labelAccount0": "Label Account #0",
   "confirmPassphrase.labelExplainer": "Enter a label for this passphrase account. This label can be changed at any time in the Account Details screen.",

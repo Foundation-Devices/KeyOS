@@ -1,5 +1,5 @@
 {
-  "_": "03b7 765b 2604 a185 7aa3 1795 2457 9138 dfff f199 4623 d88e 5806 4db9 cdb6 34d8",
+  "_": "Cancel",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "Sin códigos archivados",
@@ -568,15 +568,19 @@
       "firstPartStoredKeycard": "Parte 1 guardada en Keycard",
       "modalBewareContent": "Write down these words on the backup sheet provided. Store the sheet securely and never take a photo of it.\n\nAnyone requesting you expose these words outside of this device will gain full control over your funds. Take care.",
       "modalBewareHeader": "Beware of revealing sensitive information"
+    },
+    "passphraseKeycard": {
+      "createdHeader": "Passphrase Keycard Created",
+      "creatingHeader": "Write Passphrase Keycard"
     }
   },
   "launcher": {
     "appBlocked": {
-      "publisherExpired": "This app's publisher certificate expired. Compare Passport's time and date with the certificate's expiry date in Allowed Publishers under Settings, Apps.",
-      "publisherNotYetActive": "This app's publisher certificate is not valid yet. Compare Passport's time and the certificate's start date in Allowed Publishers under Settings, Apps."
+      "publisherExpired": "This publisher certificate has expired. Check Passport’s date and time. If it is correct, import a current certificate from the publisher.",
+      "publisherNotYetActive": "This publisher certificate is not valid yet. Check Passport’s date and time. If it is correct, wait until the certificate becomes active or import a new one."
     },
     "appBlockedModal": {
-      "content": "This app's publisher is not allowed. Import their certificate in Allowed Publishers under Settings, Apps.",
+      "content": "This app’s publisher is not allowed. Import their certificate in Settings > Apps > Allowed Publishers.",
       "header": "Can't Open this App"
     },
     "appCrash": {
@@ -1375,7 +1379,7 @@
       "allowedPublisherStatusInactive": "Inactive",
       "allowedPublisherStatusNotActiveYet": "Not active yet",
       "allowedPublishers": "Allowed Publishers",
-      "allowedPublishersIntro": "Add an app publisher by importing their certificate. Verify each fingerprint before allowing it.",
+      "allowedPublishersIntro": "Import a publisher certificate to allow its apps. Verify the fingerprint with the publisher first.",
       "appHash": "App Hash",
       "appId": "App ID",
       "automaticallyGranted": "Automatically Granted",
@@ -1394,7 +1398,9 @@
       "notVerified": "(not verified)",
       "openApp": "Open App",
       "publisher": "Publisher",
+      "publisherProblemExpired": "This certificate expired on {0}, and Passport's date is {1}. If that date is wrong, correct it; otherwise ask the publisher for a current certificate.",
       "publisherProblemNotAllowed": "This app's publisher is not allowed. Import their certificate under Allowed Publishers.",
+      "publisherProblemNotYetActive": "This certificate is not valid until {0}, and Passport's date is {1}. Check the date and time, then try again.",
       "removeApp": "Remove App",
       "removePublisher": "Remove Publisher",
       "removePublisherConfirm": "Are you sure you want to remove this Publisher?",
@@ -1409,8 +1415,11 @@
     "appsModalAllowedPublisherRemoveFailed": {
       "content": "Unable to remove this Publisher. Try again. If the problem continues, restart Passport."
     },
+    "appsModalCertificateNotValidNow": {
+      "header": "Certificate Not Valid"
+    },
     "appsModalDeveloperModeRisks": {
-      "content": "Developer Mode lets you install apps that Foundation has not verified. A malicious app could impersonate an existing app and access its data. Only install apps from developers you trust.",
+      "content": "Developer Mode allows unverified apps and USB debugging. Malicious apps may access existing app data. While the device is unlocked, a computer connected over USB can capture the screen, remotely control the device, change settings, and install apps.",
       "enableDeveloperMode": "Enable Developer Mode",
       "header": "Developer Mode Risks"
     },
@@ -1725,8 +1734,9 @@
     },
     "main": {
       "apps": "Apps",
-      "backedUpXAgo": "Copia de Seguridad realizada hace un momento.",
+      "backedUpXAgo": "Copia de seguridad realizada hace {0}.",
       "backup": "Copias seg.",
+      "bitcoinChart": "Bitcoin Price Chart",
       "envoyConnected": "Connected to Envoy",
       "envoyNotConnected": "No Connection to Envoy",
       "general": "General",
@@ -1757,6 +1767,9 @@
       "subheaderQL": "Scan to establish QuantumLink connection",
       "title": "Pair to Envoy"
     },
+    "passphraseToOneKeycard": {
+      "title": "Guardar Passphrase en Keycard"
+    },
     "recoverRestoreCardKeycard": {
       "tapAKeycard": "Acerca una Keycard a Passport",
       "tapAnotherKeycard": "Acerca otra Keycard a Passport"
@@ -1774,7 +1787,8 @@
       "subheader": "Esto guardará tu Master Key y sobrescribirá cualquier dato existente en tus Keycards.  "
     },
     "saveTo1CardSuccess": {
-      "masterKeySavedKeycard": "Master Key guardada en Keycard"
+      "masterKeySavedKeycard": "Master Key guardada en Keycard",
+      "passphraseSavedKeycard": "Passphrase saved to Keycard"
     },
     "security": {
       "changePIN": "Cambiar PIN",
@@ -2154,6 +2168,7 @@
     },
     "confirmPassphrase": {
       "content": "Tu Passphrase se borrará al apagarse, o puedes borrarla manualmente volviendo a esta pantalla.",
+      "content2": "Puedes guardar tu Passphrase en una Keycard sin usar. La Passphrase se cifra con tu Master Key y solo puede descifrarse con esa Master Key.",
       "fingerprint": "Huella digital",
       "labelAccount0": "Etiqueta la cuenta #0",
       "labelExplainer": "Introduce una etiqueta para esta cuenta de Passphrase. Puedes cambiarla en cualquier momento en la pantalla Detalles de la cuenta.",

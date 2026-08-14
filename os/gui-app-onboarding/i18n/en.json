@@ -167,6 +167,8 @@
   "keycardBackup.manual.firstPartStoredKeycard": "Part 1 stored on Keycard",
   "keycardBackup.manual.modalBewareContent": "Write down these words on the backup sheet provided. Store the sheet securely and never take a photo of it.\n\nAnyone requesting you expose these words outside of this device will gain full control over your funds. Take care.",
   "keycardBackup.manual.modalBewareHeader": "Beware of revealing sensitive information",
+  "keycardBackup.passphraseKeycard.createdHeader": "Passphrase Keycard Created",
+  "keycardBackup.passphraseKeycard.creatingHeader": "Write Passphrase Keycard",
   "legacyRecoverSuccess.header": "Seed Words Restored Successfully",
   "magicBackupFound.content": "Restoring your encrypted settings and data from the Foundation server",
   "magicBackupFound.header": "Encrypted Backup Found",
