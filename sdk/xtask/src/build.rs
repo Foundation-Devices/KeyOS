@@ -242,6 +242,11 @@ impl Drop for StageDirLock {
 }
 
 pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
+    let targets = selected_targets(config, &args.targets)?;
+    let mut source_overrides = args.source_overrides.clone();
+    submodules::apply_env_overrides(config, &mut source_overrides);
+    ensure_release_sources_are_pinned(args.release, &args.source_overrides, &source_overrides, config)?;
+
     let output_dir = util::absolute_path(root, &args.output_dir);
     util::ensure_dir(&output_dir)?;
 
@@ -253,9 +258,6 @@ pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
     let _stage_lock = StageDirLock::acquire(&output_dir, &stage_root)?;
 
     util::ensure_clean_dir(&stage_root)?;
-    let targets = selected_targets(config, &args.targets)?;
-    let mut source_overrides = args.source_overrides.clone();
-    submodules::apply_env_overrides(config, &mut source_overrides);
     let resolver = submodules::resolve(root, config, &source_overrides)?;
     ensure_layout(root, config, &resolver, args.verbose)?;
 
@@ -284,6 +286,77 @@ pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ensure_release_sources_are_pinned(
+    release: bool,
+    explicit_overrides: &SourceOverrides,
+    resolved_overrides: &SourceOverrides,
+    config: &Config,
+) -> Result<()> {
+    if !release {
+        return Ok(());
+    }
+    if !explicit_overrides.is_empty() {
+        return Err(boxed_err(
+            "release builds do not allow --keyos-dir or --slint-dir; use the sources pinned by the SDK build environment",
+        ));
+    }
+
+    let local_overrides = resolved_overrides
+        .keys()
+        .filter(|name| name.as_str() != "slint")
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !local_overrides.is_empty() {
+        return Err(boxed_err(format!(
+            "release builds do not allow local source overrides for {}; unset KEYOS_DIR/SLINT_DIR and use the sources pinned by the SDK build environment",
+            local_overrides.join(", ")
+        )));
+    }
+
+    let slint_source = resolved_overrides.get("slint").ok_or_else(|| {
+        boxed_err("release builds require the immutable Slint source pinned by the SDK build environment; run from nix develop")
+    })?;
+    let slint_hash = config
+        .submodules
+        .get("slint")
+        .map(|slint| slint.source_hash.as_str())
+        .filter(|hash| !hash.is_empty())
+        .ok_or_else(|| boxed_err("sdk-build.toml is missing submodules.slint.source_hash"))?;
+    validate_release_slint_source(slint_source, slint_hash)?;
+    Ok(())
+}
+
+fn validate_release_slint_source(source: &Path, expected_hash: &str) -> Result<()> {
+    let canonical = fs::canonicalize(source).map_err(|error| {
+        boxed_err(format!("failed to resolve release Slint source {}: {error}", source.display()))
+    })?;
+    if !canonical.starts_with("/nix/store") {
+        return Err(boxed_err(format!(
+            "release Slint source {} is mutable; use the source pinned by nix develop",
+            canonical.display()
+        )));
+    }
+
+    let actual_hash = util::capture_command(Command::new("nix").arg("hash").arg("path").arg(&canonical))
+        .map_err(|error| {
+            boxed_err(format!("failed to hash release Slint source {}: {error}", canonical.display()))
+        })?;
+    validate_release_slint_source_hash(&canonical, expected_hash, &actual_hash)
+}
+
+fn validate_release_slint_source_hash(source: &Path, expected_hash: &str, actual_hash: &str) -> Result<()> {
+    if actual_hash == expected_hash {
+        return Ok(());
+    }
+
+    Err(boxed_err(format!(
+        "release Slint source {} has content hash {}, expected {} from sdk-build.toml",
+        source.display(),
+        actual_hash,
+        expected_hash
+    )))
 }
 
 pub fn check_layout(root: &Path, config: &Config, args: &CheckLayoutArgs) -> Result<()> {
@@ -343,6 +416,7 @@ fn build_common_stage(
     util::copy_file(&root.join(SDK_USER_FLAKE_SOURCE), &stage_dir.join("flake.nix"))?;
     util::copy_file_if_exists(&root.join(SDK_USER_FLAKE_LOCK_SOURCE), &stage_dir.join("flake.lock"))?;
     util::copy_file(&root.join("setup.sh"), &stage_dir.join("setup.sh"))?;
+    fs::write(stage_dir.join("manifest.toml"), render_common_manifest(root, config, args.release))?;
 
     verify_common_stage(&stage_dir, args.skip_docs)?;
 
@@ -379,7 +453,7 @@ fn build_target_stage(
             stage_simulator_runtime(root, config, &stage_dir, target, entry, args, resolver)?;
             continue;
         }
-        compile_entry(root, config, &stage_dir, target, entry, args, resolver)?;
+        compile_entry(root, config, &stage_dir, target, host_target, entry, args, resolver)?;
     }
 
     for entry in &copy_entries {
@@ -404,6 +478,7 @@ fn copy_entries_for_bundle(config: &Config, bundle: CopyBundle) -> Vec<CopyEntry
 
 fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
     let mut required_paths = vec![
+        stage_dir.join("manifest.toml"),
         stage_dir.join("lib").join("keyos").join("Cargo.toml"),
         stage_dir.join("ui").join("ui").join("theme.slint"),
         stage_dir
@@ -738,6 +813,7 @@ fn compile_entry(
     config: &Config,
     stage_dir: &Path,
     target: &str,
+    host_target: &str,
     entry: &CompileEntry,
     args: &BuildArgs,
     resolver: &SourceResolver,
@@ -768,6 +844,11 @@ fn compile_entry(
     }
 
     let cargo_target_dir = root.join("target").join("xtask-build").join(target).join(&entry.name);
+    let target_override = config.targets.overrides.get(target);
+    let cargo_target = target_override
+        .map(|target_override| target_override.cargo_target.as_str())
+        .filter(|cargo_target| !cargo_target.is_empty())
+        .unwrap_or(target);
 
     let mut command = cargo_command_for_manifest(&manifest_dir);
     command
@@ -776,7 +857,7 @@ fn compile_entry(
         .arg("--manifest-path")
         .arg(&manifest_path)
         .arg("--target")
-        .arg(target)
+        .arg(cargo_target)
         .env("CARGO_TARGET_DIR", &cargo_target_dir);
     if let Some(package) = &entry.package {
         command.arg("-p").arg(package);
@@ -791,17 +872,21 @@ fn compile_entry(
     for flag in &entry.cargo_flags {
         command.arg(flag);
     }
-    if let Some(target_override) = config.targets.overrides.get(target) {
+    if let Some(target_override) = target_override {
         if !target_override.linker.is_empty() {
-            command.env(cargo_target_linker_env(target), &target_override.linker);
+            command.env(cargo_target_linker_env(cargo_target), &target_override.linker);
         }
+    }
+    if should_disable_libusb_pkg_config_for_entry(&entry.name, target, host_target) {
+        command.env("LIBUSB_1.0_NO_PKG_CONFIG", "1");
+        command.env("LIBUDEV_NO_PKG_CONFIG", "1");
     }
 
     util::run_command(&mut command, args.verbose)?;
 
     let profile = if args.release { "release" } else { "debug" };
     let built_artifact = entry.artifact.as_deref().unwrap_or(&entry.binary);
-    let built_binary = cargo_target_dir.join(target).join(profile).join(built_artifact);
+    let built_binary = cargo_target_dir.join(cargo_target).join(profile).join(built_artifact);
     if !built_binary.exists() {
         return Err(boxed_err(format!(
             "expected compiled artifact '{}' for '{}' at {}",
@@ -813,7 +898,16 @@ fn compile_entry(
 
     let staged_binary = stage_dir.join("bin").join(&entry.binary);
     util::copy_file(&built_binary, &staged_binary)?;
-    maybe_strip_staged_binary(&staged_binary, should_strip_packaged_binaries(args), args.verbose)?;
+    let strip_program = target_override
+        .map(|target_override| target_override.strip.as_str())
+        .filter(|strip| !strip.is_empty());
+    maybe_strip_staged_binary(
+        &staged_binary,
+        should_strip_packaged_binaries(args),
+        strip_program,
+        target == host_target,
+        args.verbose,
+    )?;
     Ok(())
 }
 
@@ -880,7 +974,13 @@ fn stage_simulator_runtime(
     let built_kernel = hosted_target_root.join(KEYOS_HOSTED_KERNEL_PACKAGE);
     let staged_kernel = runtime_kernel_dir.join(KEYOS_HOSTED_KERNEL_PACKAGE);
     util::copy_file(&built_kernel, &staged_kernel)?;
-    maybe_strip_staged_binary(&staged_kernel, should_strip_packaged_binaries(args), args.verbose)?;
+    maybe_strip_staged_binary(
+        &staged_kernel,
+        should_strip_packaged_binaries(args),
+        None,
+        false,
+        args.verbose,
+    )?;
 
     // The hosted build populated the system image (UI assets + built-in apps)
     // next to the source kernel; ship it so a fresh bundle boots with assets.
@@ -909,7 +1009,13 @@ fn stage_simulator_runtime(
             .to_owned();
         let staged_binary = runtime_bin_dir.join(&name);
         util::copy_file(&hosted_target_root.join(&name), &staged_binary)?;
-        maybe_strip_staged_binary(&staged_binary, should_strip_packaged_binaries(args), args.verbose)?;
+        maybe_strip_staged_binary(
+            &staged_binary,
+            should_strip_packaged_binaries(args),
+            None,
+            false,
+            args.verbose,
+        )?;
         service["path"] = serde_json::Value::String(format!("../../bin/{name}"));
     }
     fs::write(runtime_root.join("services.json"), serde_json::to_string_pretty(&services)?)?;
@@ -944,13 +1050,29 @@ fn stage_legacy_simulator_ui_assets(source_root: &Path, destination_root: &Path)
 
 fn should_strip_packaged_binaries(args: &BuildArgs) -> bool { args.package || args.release }
 
-fn maybe_strip_staged_binary(path: &Path, should_strip: bool, verbose: bool) -> Result<()> {
+fn maybe_strip_staged_binary(
+    path: &Path,
+    should_strip: bool,
+    configured_strip_program: Option<&str>,
+    allow_default_fallback: bool,
+    verbose: bool,
+) -> Result<()> {
     if !should_strip || !path.is_file() || !is_strippable_binary(path)? {
         return Ok(());
     }
 
-    let strip_program = find_strip_program().ok_or_else(|| {
-        boxed_err("packaged SDK binaries require 'strip' or 'llvm-strip' to remove bundled debug info")
+    let strip_program = find_strip_program(configured_strip_program, allow_default_fallback).ok_or_else(|| {
+        match (configured_strip_program, allow_default_fallback) {
+            (Some(program), true) => boxed_err(format!(
+                "packaged native SDK binaries require configured strip program '{program}' or fallback 'strip'/'llvm-strip'"
+            )),
+            (Some(program), false) => {
+                boxed_err(format!("packaged SDK binaries require configured strip program '{program}'"))
+            }
+            (None, _) => boxed_err(
+                "packaged SDK binaries require 'strip' or 'llvm-strip' to remove bundled debug info",
+            ),
+        }
     })?;
     let mut command = Command::new(strip_program);
     if cfg!(target_os = "macos") {
@@ -975,15 +1097,23 @@ fn strip_staged_binaries_in_dir(dir: &Path, should_strip: bool, verbose: bool) -
         if path.is_dir() {
             strip_staged_binaries_in_dir(&path, should_strip, verbose)?;
         } else {
-            maybe_strip_staged_binary(&path, should_strip, verbose)?;
+            maybe_strip_staged_binary(&path, should_strip, None, false, verbose)?;
         }
     }
 
     Ok(())
 }
 
-fn find_strip_program() -> Option<PathBuf> {
-    ["strip", "llvm-strip"].into_iter().find_map(find_program_in_path)
+fn find_strip_program(configured: Option<&str>, allow_default_fallback: bool) -> Option<PathBuf> {
+    strip_program_candidates(configured, allow_default_fallback).into_iter().find_map(find_program_in_path)
+}
+
+fn strip_program_candidates(configured: Option<&str>, allow_default_fallback: bool) -> Vec<&str> {
+    let mut candidates = configured.into_iter().collect::<Vec<_>>();
+    if configured.is_none() || allow_default_fallback {
+        candidates.extend(["strip", "llvm-strip"]);
+    }
+    candidates
 }
 
 fn find_program_in_path(name: &str) -> Option<PathBuf> {
@@ -1175,6 +1305,10 @@ fn cargo_target_linker_env(target: &str) -> String {
             })
             .collect::<String>()
     )
+}
+
+fn should_disable_libusb_pkg_config_for_entry(entry_name: &str, target: &str, host_target: &str) -> bool {
+    entry_name == "keyos-log-viewer" && target.ends_with("-unknown-linux-gnu") && target != host_target
 }
 
 fn copy_entry(root: &Path, stage_dir: &Path, entry: &CopyEntry, resolver: &SourceResolver) -> Result<()> {
@@ -1993,6 +2127,25 @@ fn render_manifest(
     Ok(lines.join("\n"))
 }
 
+fn render_common_manifest(root: &Path, config: &Config, release: bool) -> String {
+    let mut lines = vec![
+        "[sdk]".to_string(),
+        format!("version = \"{}\"", config.sdk.version),
+        "kind = \"common\"".to_string(),
+        String::new(),
+        "[build]".to_string(),
+        format!("profile = \"{}\"", if release { "release" } else { "debug" }),
+    ];
+    if let Some(commit) = git_revision(root) {
+        lines.push(format!("workspace_commit = \"{}\"", commit));
+    }
+    if let Some(is_dirty) = git_dirty(root) {
+        lines.push(format!("workspace_dirty = {is_dirty}"));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 fn host_triple() -> String {
     if let Ok(output) = util::capture_command(Command::new("rustc").arg("-vV")) {
         for line in output.lines() {
@@ -2011,7 +2164,12 @@ fn git_revision(path: &Path) -> Option<String> {
 
 fn git_dirty(path: &Path) -> Option<bool> {
     util::capture_command(
-        Command::new("git").arg("-C").arg(path).arg("status").arg("--porcelain").arg("--untracked-files=no"),
+        Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("status")
+            .arg("--porcelain")
+            .arg("--untracked-files=normal"),
     )
     .ok()
     .map(|output| !output.trim().is_empty())
@@ -2026,17 +2184,20 @@ mod tests {
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
 
     use super::{
-        cargo_target_linker_env, is_strippable_binary_header, keyos_slint_pin_from_manifest_and_lock,
-        local_staged_workspace_dependency_override, nix_shell_active, parse_git_source_commit,
-        parse_toolchain_channel, prune_nested_member_dirs, render_staged_keyos_workspace_manifest,
-        render_staged_slint_workspace_manifest, rust_toolchain_channel, should_scan_for_keyos_member,
+        cargo_target_linker_env, ensure_release_sources_are_pinned, git_dirty, is_strippable_binary_header,
+        keyos_slint_pin_from_manifest_and_lock, local_staged_workspace_dependency_override, nix_shell_active,
+        parse_git_source_commit, parse_toolchain_channel, prune_nested_member_dirs,
+        render_staged_keyos_workspace_manifest, render_staged_slint_workspace_manifest,
+        rust_toolchain_channel, should_disable_libusb_pkg_config_for_entry, should_scan_for_keyos_member,
         should_stage_simulator_for_target, should_strip_packaged_binaries, stage_cargo_package_snapshot,
-        stage_shared_ui_artifact, stage_slint_sdk_snapshot, verify_common_stage, verify_target_stage,
-        BuildArgs, SmokeCheckArgs, StageDirLock,
+        stage_shared_ui_artifact, stage_slint_sdk_snapshot, strip_program_candidates,
+        validate_release_slint_source, validate_release_slint_source_hash, verify_common_stage,
+        verify_target_stage, BuildArgs, SmokeCheckArgs, SourceOverrides, StageDirLock,
     };
-    use crate::config::workspace_root;
+    use crate::config::{load, workspace_root};
 
     #[test]
     fn stage_dir_lock_blocks_concurrent_holders() {
@@ -2060,9 +2221,33 @@ mod tests {
     #[test]
     fn cargo_target_linker_env_matches_cargo_convention() {
         assert_eq!(
-            cargo_target_linker_env("aarch64-unknown-linux-gnu"),
-            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER"
+            cargo_target_linker_env("aarch64-unknown-linux-musl"),
+            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER"
         );
+    }
+
+    #[test]
+    fn libusb_pkg_config_is_disabled_only_for_cross_log_viewer() {
+        assert!(should_disable_libusb_pkg_config_for_entry(
+            "keyos-log-viewer",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-unknown-linux-gnu"
+        ));
+        assert!(!should_disable_libusb_pkg_config_for_entry(
+            "passport-drive",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-unknown-linux-gnu"
+        ));
+        assert!(!should_disable_libusb_pkg_config_for_entry(
+            "keyos-log-viewer",
+            "x86_64-unknown-linux-gnu",
+            "x86_64-unknown-linux-gnu"
+        ));
+        assert!(!should_disable_libusb_pkg_config_for_entry(
+            "keyos-log-viewer",
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin"
+        ));
     }
 
     #[test]
@@ -2109,6 +2294,58 @@ mod tests {
     }
 
     #[test]
+    fn release_builds_reject_local_source_overrides() {
+        let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        let mut explicit = SourceOverrides::new();
+        explicit.insert("keyos".into(), PathBuf::from("/tmp/keyos"));
+        assert!(ensure_release_sources_are_pinned(true, &explicit, &explicit, &config).is_err());
+
+        let local_slint = tempfile::tempdir().unwrap();
+        let mut environment = SourceOverrides::new();
+        environment.insert("slint".into(), local_slint.path().to_path_buf());
+        let error = ensure_release_sources_are_pinned(true, &SourceOverrides::new(), &environment, &config)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("is mutable"), "unexpected error: {error}");
+
+        environment.insert("keyos".into(), PathBuf::from("/tmp/keyos"));
+        assert!(
+            ensure_release_sources_are_pinned(true, &SourceOverrides::new(), &environment, &config).is_err()
+        );
+
+        assert!(ensure_release_sources_are_pinned(
+            true,
+            &SourceOverrides::new(),
+            &SourceOverrides::new(),
+            &config
+        )
+        .is_err());
+        assert!(ensure_release_sources_are_pinned(false, &explicit, &explicit, &config).is_ok());
+    }
+
+    #[test]
+    fn release_slint_source_hash_must_match_configuration() {
+        let source = Path::new("/nix/store/pinned-slint");
+        let expected = "sha256-pinned";
+        assert!(validate_release_slint_source_hash(source, expected, expected).is_ok());
+
+        let error =
+            validate_release_slint_source_hash(source, expected, "sha256-other").unwrap_err().to_string();
+        assert!(error.contains("expected sha256-pinned"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn release_slint_source_accepts_configured_nix_source() {
+        let Some(source) = env::var_os("FOUNDATION_PINNED_SLINT_DIR") else {
+            return;
+        };
+        let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        let expected_hash = &config.submodules.get("slint").unwrap().source_hash;
+
+        validate_release_slint_source(Path::new(&source), expected_hash).unwrap();
+    }
+
+    #[test]
     fn packaged_or_release_builds_strip_staged_binaries() {
         let mut args = BuildArgs::default();
         assert!(!should_strip_packaged_binaries(&args));
@@ -2119,6 +2356,28 @@ mod tests {
         args.package = false;
         args.release = true;
         assert!(should_strip_packaged_binaries(&args));
+    }
+
+    #[test]
+    fn build_manifest_marks_untracked_files_dirty() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(Command::new("git").arg("init").arg("--quiet").arg(temp.path()).status().unwrap().success());
+        assert_eq!(git_dirty(temp.path()), Some(false));
+
+        fs::write(temp.path().join("untracked.txt"), "release input").unwrap();
+        assert_eq!(git_dirty(temp.path()), Some(true));
+    }
+
+    #[test]
+    fn native_target_strip_falls_back_to_host_tools() {
+        assert_eq!(
+            strip_program_candidates(Some("aarch64-unknown-linux-musl-strip"), true),
+            ["aarch64-unknown-linux-musl-strip", "strip", "llvm-strip"]
+        );
+        assert_eq!(
+            strip_program_candidates(Some("aarch64-unknown-linux-musl-strip"), false),
+            ["aarch64-unknown-linux-musl-strip"]
+        );
     }
 
     #[test]
@@ -2211,6 +2470,7 @@ mod tests {
             .unwrap();
 
         for path in [
+            stage_dir.join("manifest.toml"),
             stage_dir.join("lib").join("keyos").join("Cargo.toml"),
             stage_dir.join("lib").join("keyos").join("ui2").join("components").join("Cargo.toml"),
             stage_dir

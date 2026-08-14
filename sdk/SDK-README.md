@@ -18,8 +18,6 @@ It explains:
 
 For deeper reference material, also see:
 
-- `docs/sdk-architecture.md`
-- `docs/sdk-build-system.md`
 - `crates/cli/README.md`
 - `crates/cli/SPEC.md`
 - `ui/README.md`
@@ -166,7 +164,11 @@ The most important commands are:
 - `cargo xtask smoke-check`
 - `cargo xtask build`
 - `cargo xtask package`
+- `cargo xtask zip`
+- `cargo xtask unzip`
+- `cargo xtask sync`
 - `cargo xtask finalize`
+- `cargo xtask upload`
 
 In normal maintainer usage, `cargo xtask build --package` is the main release flow.
 
@@ -218,7 +220,7 @@ Useful commands from `sdk/`:
 nix develop --command cargo xtask check-layout
 nix develop --command cargo xtask smoke-check
 nix develop --command cargo xtask build --target aarch64-apple-darwin --release --package
-nix develop --command cargo xtask finalize
+nix develop --command cargo xtask finalize mac-all linux-x86
 ```
 
 There is also a convenience reinstall flow for Apple Silicon by default:
@@ -237,12 +239,19 @@ That command:
 You can also pass a target explicitly:
 
 ```bash
-just reinstall x86_64-apple-darwin
+just reinstall x86
 ```
 
-For macOS release artifacts, use `just build all` on a macOS host so both
-`aarch64-apple-darwin` and `x86_64-apple-darwin` archives are present before
-running `just finalize`.
+For macOS release artifacts, use `just build mac-all` on the Apple Silicon Mac
+that will finalize the release. This leaves both `aarch64-apple-darwin` and
+`x86_64-apple-darwin` archives in its local `dist/` before the Linux archives
+arrive and `just finalize` runs.
+
+Finalization accepts explicit triples and these selectors: `mac-all`,
+`mac-arm`, `mac-x86`, `linux-all`, `linux-arm`, `linux-x86`, `win-all`,
+`win-arm`, and `win-x86`. The Windows names are reserved for a future Windows
+build matrix; they fail clearly until Windows triples and toolchains are added
+to `sdk-build.toml`.
 
 ## Release Artifact Layout
 
@@ -257,7 +266,22 @@ When packaged, the release outputs include:
 - `dist/foundation-sdk-<version>-<target>.tar.gz`
 - `dist/checksums.sha256`
 - `dist/install.sh`
-- `dist/upload.sh`
+
+Finalization copies only the selected archives into a versioned local release
+directory and adds signatures plus a machine-readable upload manifest:
+
+- `dist/releases/v<version>/release.toml`
+- `dist/releases/v<version>/foundation-sdk-<version>-*.tar.gz`
+- `dist/releases/v<version>/checksums.sha256`
+- `dist/releases/v<version>/install.sh`
+- detached `.sig` files for the archives, checksum file, and installer
+
+Re-running finalization rebuilds and validates the release in a staging
+directory before replacing the previous local directory. If the version
+directory already exists remotely, upload asks for confirmation, uploads and
+verifies the complete replacement under a unique temporary prefix, then
+promotes it over the live version with per-object generation checks. The live
+release is never deleted up front, and temporary objects are removed afterward.
 
 Inside each archive, the important layout is:
 
@@ -281,10 +305,55 @@ Inside each archive, the important layout is:
 Deployment is conceptually simple:
 
 1. build and package one archive per target
-2. if the archives were built on multiple machines, copy them into one `dist/`
-3. run `cargo xtask finalize` to emit detached GPG signatures for the assembled archives and regenerate `checksums.sha256` plus the release-level `install.sh`; finalization fails if any configured target archive is missing
+2. send the Linux archives directly to the Apple Silicon finalization Mac with `just sync <address> <remote-dist-path>`, or use `just zip linux-all` and `just unzip <file-path>` for a USB handoff
+3. run `just finalize <selectors...>` to copy exactly the selected archives into `dist/releases/<release>/`, validate their embedded version, target, architecture, release profile, Git commit, and clean-workspace state, then generate and verify signatures, checksums, `install.sh`, and `release.toml`
 4. use `--sign-key` only if you want to override the default GPG signing identity source
-5. publish the archives plus installer
+5. publish with `just upload <release>` and add `--link-as-latest` when that release should become the default
+
+For example:
+
+```bash
+# On the Linux build machine. The remote path is the finalization Mac's sdk/dist/.
+just sync ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
+
+# On the Apple Silicon Mac that built mac-all and will finalize the release.
+just finalize mac-all linux-all
+just upload v1.0.0 --link-as-latest
+```
+
+Both transfer routes carry only the selected target archives. They do not carry
+`foundation-sdk-<version>-common.tar.gz`; finalization uses the common archive
+produced by the Mac's local `just build mac-all` run.
+
+`just sync <address> <remote-dist-path>` sends `linux-all` by default. The
+address may be an SSH host alias, a hostname, or `[user@]host`; an optional
+third argument selects a different target set, such as `linux-arm`. The remote
+directory must already exist. SCP uses the destination account's normal SSH
+authentication and may prompt for host-key confirmation, a password, or a key
+passphrase. It replaces same-named remote archives, so use it only after
+confirming that the address and path identify the intended finalization Mac.
+
+The `zip` target accepts the same host shortcuts as `build`: `native`, `x86`,
+`arm`, and `all`. It also accepts explicit selectors such as `linux-all`,
+`linux-x86`, `linux-arm`, and the corresponding macOS selectors. Its optional
+destination may be an existing directory, such as a mounted USB drive, or an
+explicit `.zip` path; it defaults to `dist/`.
+
+Each handoff ZIP carries a manifest listing its SDK version, targets, and exact
+archive names. `just unzip <file-path>` checks that manifest and the ZIP contents
+against the receiving checkout, imports the archives under `dist/`, preserves
+identical files, and asks before replacing any differing files.
+Export also asks before replacing an existing handoff ZIP. Destination
+directories must already exist so a misspelled or unmounted USB path fails
+instead of silently writing somewhere else.
+
+Versioned release objects are uploaded under `gs://foundation-sdk/v1.0.0/`.
+Release labels always use the complete SDK SemVer with a conventional `v`
+prefix (`1.0.0` → `v1.0.0`); abbreviated labels such as `v1.0` are rejected.
+Cloud Storage does not provide symlinks, so `--link-as-latest` safely copies
+the signed versioned installer to `latest/install.sh`; that installer continues
+to download its assets from the selected version directory. Existing objects
+at the bucket root are left untouched for compatibility.
 
 The generated `install.sh`:
 
@@ -298,7 +367,9 @@ The generated `install.sh`:
 - validates the launcher directory before adding it to `PATH`
 - tries to update the user's shell rc file to add that launcher directory to `PATH` unless `FOUNDATION_SDK_INSTALL_DIR` is set, or `FOUNDATION_SDK_UPDATE_RC=0` is provided; if the rc file is managed or read-only, installation still succeeds and prints a manual `PATH` export
 
-If `gpg` or `gpg2` is not available on the host, the installer prints a warning and falls back to checksum verification only.
+For a signed release, `gpg` or `gpg2` is required by default. Users can opt out
+with `--no-verify`, but that deliberately reduces verification to checksums from
+the same download source.
 
 By default the installed SDK lives at:
 

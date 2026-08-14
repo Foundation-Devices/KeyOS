@@ -510,6 +510,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "components",
+ "i-slint-common",
  "serde",
  "serde_json",
  "tempfile",

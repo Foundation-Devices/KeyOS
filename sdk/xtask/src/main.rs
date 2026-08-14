@@ -3,7 +3,9 @@
 
 mod build;
 mod config;
+mod handoff;
 mod package;
+mod release;
 mod submodules;
 mod util;
 
@@ -15,7 +17,9 @@ use std::process;
 
 use build::{BuildArgs, CheckLayoutArgs, SmokeCheckArgs};
 use config::{load, workspace_root, Result};
-use package::{FinalizeArgs, PackageArgs};
+use handoff::{SyncArgs, UnzipArgs, ZipArgs};
+use package::PackageArgs;
+use release::{FinalizeArgs, UploadArgs};
 
 fn main() {
     if let Err(err) = run() {
@@ -53,7 +57,23 @@ fn run() -> Result<()> {
         }
         "finalize" => {
             let parsed = FinalizeArgs::parse(args.collect())?;
-            package::finalize(&root, &config, &parsed)
+            release::finalize(&root, &config, &parsed)
+        }
+        "zip" => {
+            let parsed = ZipArgs::parse(args.collect())?;
+            handoff::zip(&root, &config, &parsed)
+        }
+        "unzip" => {
+            let parsed = UnzipArgs::parse(args.collect())?;
+            handoff::unzip(&root, &config, &parsed)
+        }
+        "sync" => {
+            let parsed = SyncArgs::parse(args.collect())?;
+            handoff::sync(&root, &config, &parsed)
+        }
+        "upload" => {
+            let parsed = UploadArgs::parse(args.collect())?;
+            release::upload(&root, &config, &parsed)
         }
         "clean" => clean(&root),
         "check-submodules" => {
@@ -98,6 +118,10 @@ Commands:
   smoke-check [OPTIONS]
   package [OPTIONS]
   finalize [OPTIONS]
+  zip <SELECTOR> [DESTINATION]
+  unzip <ARCHIVE> [OPTIONS]
+  sync <SELECTOR> <ADDRESS> <DESTINATION> [OPTIONS]
+  upload <RELEASE> [OPTIONS]
   clean
   check-submodules
 
@@ -107,7 +131,11 @@ Examples:
   cargo xtask build --target all --release
   cargo xtask build --target aarch64-apple-darwin --release --package
   cargo xtask package --target all
-  cargo xtask finalize
+  cargo xtask zip linux-all /media/usb
+  cargo xtask unzip /media/usb/foundation-sdk-1.0.0-linux-all-handoff.zip
+  cargo xtask sync linux-all ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
+  cargo xtask finalize mac-all linux-x86
+  cargo xtask upload v1.0.0 --link-as-latest
   cargo xtask check-submodules
 "
     );

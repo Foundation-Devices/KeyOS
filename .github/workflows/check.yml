@@ -43,6 +43,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/setup-nix-rust
+        with:
+          rust-cache-key: sdk
+          rust-cache-workspaces: |
+            sdk -> target
+            sdk/crates/cli -> target
 
       # The SDK is a self-contained Nix-first tree; enter its own maintainer
       # flake (sdk/flake.nix) rather than the parent workspace shell.

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: MIT
 
-use std::collections::BTreeSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -25,23 +24,9 @@ pub struct PackageArgs {
     pub verbose: bool,
 }
 
-#[derive(Clone, Debug)]
-pub struct FinalizeArgs {
-    pub version: Option<String>,
-    pub output_dir: PathBuf,
-    pub sign_key: Option<String>,
-    pub verbose: bool,
-}
-
 impl Default for PackageArgs {
     fn default() -> Self {
         Self { targets: Vec::new(), version: None, output_dir: PathBuf::from("dist"), verbose: false }
-    }
-}
-
-impl Default for FinalizeArgs {
-    fn default() -> Self {
-        Self { version: None, output_dir: PathBuf::from("dist"), sign_key: None, verbose: false }
     }
 }
 
@@ -64,25 +49,6 @@ impl PackageArgs {
     }
 }
 
-impl FinalizeArgs {
-    pub fn parse(raw: Vec<String>) -> Result<Self> {
-        let mut args = Self::default();
-        let mut iter = raw.into_iter();
-
-        while let Some(arg) = iter.next() {
-            match arg.as_str() {
-                "--version" => args.version = Some(next_value(&mut iter, "--version")?),
-                "--output-dir" => args.output_dir = PathBuf::from(next_value(&mut iter, "--output-dir")?),
-                "--sign-key" => args.sign_key = Some(next_value(&mut iter, "--sign-key")?),
-                "--verbose" => args.verbose = true,
-                other => return Err(boxed_err(format!("unsupported finalize option: {other}"))),
-            }
-        }
-
-        Ok(args)
-    }
-}
-
 pub fn run(
     root: &Path,
     config: &Config,
@@ -92,7 +58,7 @@ pub fn run(
 ) -> Result<()> {
     let output_dir = util::absolute_path(root, &args.output_dir);
     let targets = selected_targets(config, &args.targets)?;
-    let version = args.version.clone().unwrap_or_else(|| config.sdk.version.clone());
+    let version = crate::release::validated_sdk_version(root, config, args.version.as_deref())?;
 
     check_package_prerequisites(sign_key)?;
 
@@ -128,18 +94,16 @@ pub fn run(
         archive_paths.push(archive_path);
     }
 
-    write_release_metadata(&output_dir, &version, &targets, &archive_paths, sign_key, verbose)?;
+    write_release_metadata(
+        &output_dir,
+        &version,
+        &targets,
+        &archive_paths,
+        sign_key,
+        crate::release::PUBLIC_DOWNLOAD_ROOT,
+        verbose,
+    )?;
     Ok(())
-}
-
-pub fn finalize(root: &Path, config: &Config, args: &FinalizeArgs) -> Result<()> {
-    let output_dir = util::absolute_path(root, &args.output_dir);
-    let version = args.version.clone().unwrap_or_else(|| config.sdk.version.clone());
-    let sign_key =
-        args.sign_key.clone().or_else(|| default_sign_key(config)).ok_or_else(|| {
-            boxed_err(format!("finalize requires --sign-key or {}", config.signing.key_env))
-        })?;
-    finalize_release(&output_dir, config, &version, Some(sign_key.as_str()), args.verbose)
 }
 
 pub fn stage_root_dir(output_dir: &Path) -> PathBuf { output_dir.join(".stage") }
@@ -164,35 +128,12 @@ fn check_package_prerequisites(sign_key: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn check_finalize_prerequisites(sign_key: Option<&str>) -> Result<()> {
+pub(crate) fn check_finalize_prerequisites(sign_key: Option<&str>) -> Result<()> {
+    if find_gnu_tar()?.is_none() {
+        return Err(boxed_err("release validation requires GNU tar (expected 'tar' or 'gtar' with GNU tar)"));
+    }
     check_checksum_prerequisites()?;
     check_signing_prerequisites(sign_key)?;
-    Ok(())
-}
-
-fn finalize_release(
-    output_dir: &Path,
-    config: &Config,
-    version: &str,
-    sign_key: Option<&str>,
-    verbose: bool,
-) -> Result<()> {
-    check_finalize_prerequisites(sign_key)?;
-
-    let common_archive_path = output_dir.join(common_archive_name(version));
-    if !common_archive_path.exists() {
-        return Err(boxed_err(format!(
-            "missing packaged common archive for version {version}: {}",
-            common_archive_path.display()
-        )));
-    }
-
-    let targets = discover_packaged_targets(config, output_dir, version)?;
-    require_all_configured_targets(config, version, &targets)?;
-    let mut archive_paths = vec![common_archive_path];
-    archive_paths.extend(targets.iter().map(|target| output_dir.join(target_archive_name(version, target))));
-
-    write_release_metadata(output_dir, version, &targets, &archive_paths, sign_key, verbose)?;
     Ok(())
 }
 
@@ -291,7 +232,7 @@ pub fn default_sign_key(config: &Config) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn find_gnu_tar() -> Result<Option<OsString>> {
+pub(crate) fn find_gnu_tar() -> Result<Option<OsString>> {
     for candidate in ["tar", "gtar"] {
         let output = Command::new(candidate).arg("--version").output();
         match output {
@@ -309,7 +250,7 @@ fn find_gnu_tar() -> Result<Option<OsString>> {
     Ok(None)
 }
 
-fn find_gpg() -> Result<Option<OsString>> {
+pub(crate) fn find_gpg() -> Result<Option<OsString>> {
     for candidate in ["gpg", "gpg2"] {
         let output = Command::new(candidate).arg("--version").output();
         match output {
@@ -347,9 +288,11 @@ fn deterministic_archive_command(
     command
 }
 
-fn common_archive_name(version: &str) -> String { format!("foundation-sdk-{version}-common.tar.gz") }
+pub(crate) fn common_archive_name(version: &str) -> String {
+    format!("foundation-sdk-{version}-common.tar.gz")
+}
 
-fn target_archive_name(version: &str, target: &str) -> String {
+pub(crate) fn target_archive_name(version: &str, target: &str) -> String {
     format!("foundation-sdk-{version}-{target}.tar.gz")
 }
 
@@ -399,15 +342,26 @@ fn gpg_secret_key_exists(gpg_program: impl AsRef<OsStr>, signer: &str) -> Result
     }))
 }
 
-fn write_release_metadata(
+pub(crate) struct WrittenReleaseMetadata {
+    pub files: Vec<PathBuf>,
+    pub signing_fingerprint: Option<String>,
+}
+
+pub(crate) fn write_release_metadata(
     output_dir: &Path,
     version: &str,
     targets: &[String],
     archives: &[PathBuf],
     sign_key: Option<&str>,
+    default_base_url: &str,
     verbose: bool,
-) -> Result<()> {
+) -> Result<WrittenReleaseMetadata> {
+    let legacy_upload_script = output_dir.join("upload.sh");
+    if legacy_upload_script.exists() {
+        fs::remove_file(&legacy_upload_script)?;
+    }
     let embedded_public_key = sign_key.map(export_public_key).transpose()?;
+    let signing_fingerprint = embedded_public_key.as_ref().map(|key| key.fingerprint.clone());
     let mut checksums = Vec::new();
 
     for archive in archives {
@@ -419,7 +373,10 @@ fn write_release_metadata(
     }
 
     let install_script_path = output_dir.join("install.sh");
-    fs::write(&install_script_path, render_install_script(version, targets, embedded_public_key.as_ref()))?;
+    fs::write(
+        &install_script_path,
+        render_install_script(version, targets, embedded_public_key.as_ref(), default_base_url),
+    )?;
     set_install_script_permissions(&install_script_path)?;
     checksums.push(checksum_line(&install_script_path)?);
 
@@ -427,9 +384,9 @@ fn write_release_metadata(
     checksums.sort();
     fs::write(&checksums_path, checksums.join("\n") + "\n")?;
 
-    let mut upload_files = archives.iter().map(|path| util::display_name(path)).collect::<Vec<_>>();
-    upload_files.push(util::display_name(&install_script_path));
-    upload_files.push(util::display_name(&checksums_path));
+    let mut files = archives.to_vec();
+    files.push(install_script_path.clone());
+    files.push(checksums_path.clone());
 
     if let Some(key) = sign_key {
         for artifact in archives
@@ -437,88 +394,12 @@ fn write_release_metadata(
             .map(PathBuf::as_path)
             .chain([install_script_path.as_path(), checksums_path.as_path()])
         {
-            sign_archive(artifact, key, verbose)?;
-            upload_files.push(format!("{}.sig", util::display_name(artifact)));
+            files.push(sign_archive(artifact, key, verbose)?);
         }
     }
 
-    upload_files.sort();
-    let upload_script_path = output_dir.join("upload.sh");
-    fs::write(&upload_script_path, render_upload_script(&upload_files))?;
-    set_install_script_permissions(&upload_script_path)?;
-
-    Ok(())
-}
-
-fn discover_packaged_targets(config: &Config, output_dir: &Path, version: &str) -> Result<Vec<String>> {
-    let common_archive = common_archive_name(version);
-    let prefix = format!("foundation-sdk-{version}-");
-    let mut discovered = BTreeSet::new();
-
-    for entry in fs::read_dir(output_dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if file_name == common_archive {
-            continue;
-        }
-
-        let Some(target) = file_name
-            .strip_prefix(&prefix)
-            .and_then(|value| value.strip_suffix(".tar.gz"))
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        discovered.insert(target.to_string());
-    }
-
-    if discovered.is_empty() {
-        return Err(boxed_err(format!(
-            "no packaged target archives found for version {version} in {}",
-            output_dir.display()
-        )));
-    }
-
-    let mut ordered = Vec::new();
-    for target in &config.targets.triples {
-        if discovered.remove(target) {
-            ordered.push(target.clone());
-        }
-    }
-
-    if !discovered.is_empty() {
-        let unexpected = discovered.into_iter().collect::<Vec<_>>().join(", ");
-        return Err(boxed_err(format!(
-            "found packaged archives for unsupported target triples: {unexpected}"
-        )));
-    }
-
-    Ok(ordered)
-}
-
-fn require_all_configured_targets(config: &Config, version: &str, targets: &[String]) -> Result<()> {
-    let found = targets.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let missing = config
-        .targets
-        .triples
-        .iter()
-        .filter(|target| !found.contains(target.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    Err(boxed_err(format!(
-        "missing packaged target archives for version {version}: {}. Build every configured SDK target before finalizing the release.",
-        missing.join(", ")
-    )))
+    files.sort();
+    Ok(WrittenReleaseMetadata { files, signing_fingerprint })
 }
 
 fn set_install_script_permissions(path: &Path) -> Result<()> {
@@ -539,7 +420,7 @@ fn set_install_script_permissions(path: &Path) -> Result<()> {
 /// `base64 -d`, which is available on every POSIX platform we ship for.
 fn base64_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0];
         let b1 = chunk.get(1).copied().unwrap_or(0);
@@ -557,6 +438,7 @@ fn render_install_script(
     version: &str,
     targets: &[String],
     embedded_public_key: Option<&EmbeddedPublicKey>,
+    default_base_url: &str,
 ) -> String {
     let supported_targets = targets.join(" ");
     // Base64-encode the armored key so we can embed it as a single-line shell
@@ -580,7 +462,7 @@ EMBEDDED_GPG_PUBLIC_KEY_B64="{base64_key}"
 set -eu
 
 VERSION="{version}"
-DEFAULT_BASE_URL="https://sdk.foundation.xyz"
+DEFAULT_BASE_URL="{default_base_url}"
 BASE_URL="${{FOUNDATION_SDK_BASE_URL:-$DEFAULT_BASE_URL}}"
 INSTALL_ROOT="${{FOUNDATION_SDK_INSTALL_DIR:-$HOME/.foundation/sdk}}"
 UPDATE_RC="${{FOUNDATION_SDK_UPDATE_RC:-}}"
@@ -1036,30 +918,6 @@ echo "  foundation develop"
     )
 }
 
-fn render_upload_script(files: &[String]) -> String {
-    let commands = files
-        .iter()
-        .map(|file| format!("gcloud storage cp \"$SCRIPT_DIR/{file}\" \"$BUCKET\""))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!(
-        r##"#!/usr/bin/env sh
-set -eu
-
-BUCKET="${{FOUNDATION_SDK_GCS_BUCKET:-gs://foundation-sdk/}}"
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "gcloud is required to upload Foundation SDK release artifacts." >&2
-  exit 1
-fi
-
-{commands}
-"##
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::{OsStr, OsString};
@@ -1068,11 +926,9 @@ mod tests {
 
     use super::{
         common_archive_name, detached_signature_command, deterministic_archive_command,
-        discover_packaged_targets, finalize, finalize_release, is_gnu_tar_version_output, next_value,
-        render_install_script, render_upload_script, target_archive_name, EmbeddedPublicKey, FinalizeArgs,
-        PackageArgs,
+        is_gnu_tar_version_output, next_value, render_install_script, target_archive_name,
+        write_release_metadata, EmbeddedPublicKey, PackageArgs,
     };
-    use crate::config::{Config, TargetsConfig};
 
     const TEST_PUBLIC_KEY: &str =
         "-----BEGIN PGP PUBLIC KEY BLOCK-----\nTESTKEY\n-----END PGP PUBLIC KEY BLOCK-----";
@@ -1099,25 +955,6 @@ mod tests {
         );
         assert_eq!(parsed.version.as_deref(), Some("1.2.3"));
         assert_eq!(parsed.output_dir, PathBuf::from("out"));
-        assert!(parsed.verbose);
-    }
-
-    #[test]
-    fn finalize_args_parse_sign_key_and_output_dir() {
-        let parsed = FinalizeArgs::parse(vec![
-            "--version".into(),
-            "1.2.3".into(),
-            "--output-dir".into(),
-            "release".into(),
-            "--sign-key".into(),
-            "release@example.com".into(),
-            "--verbose".into(),
-        ])
-        .unwrap();
-
-        assert_eq!(parsed.version.as_deref(), Some("1.2.3"));
-        assert_eq!(parsed.output_dir, PathBuf::from("release"));
-        assert_eq!(parsed.sign_key.as_deref(), Some("release@example.com"));
         assert!(parsed.verbose);
     }
 
@@ -1203,10 +1040,11 @@ mod tests {
                 "x86_64-unknown-linux-gnu".to_string(),
             ],
             Some(&public_key),
+            "https://sdk.foundation.xyz/v1.2",
         );
 
         assert!(script.contains("VERSION=\"1.2.3\""));
-        assert!(script.contains("DEFAULT_BASE_URL=\"https://sdk.foundation.xyz\""));
+        assert!(script.contains("DEFAULT_BASE_URL=\"https://sdk.foundation.xyz/v1.2\""));
         assert!(script.contains(
             "SUPPORTED_TARGETS=\"aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu\""
         ));
@@ -1253,29 +1091,6 @@ mod tests {
     }
 
     #[test]
-    fn upload_script_mentions_each_release_file() {
-        let script = render_upload_script(&[
-            "checksums.sha256".to_string(),
-            "checksums.sha256.sig".to_string(),
-            "foundation-sdk-1.2.3-common.tar.gz".to_string(),
-            "foundation-sdk-1.2.3-common.tar.gz.sig".to_string(),
-            "install.sh".to_string(),
-            "install.sh.sig".to_string(),
-        ]);
-
-        assert!(script.contains("BUCKET=\"${FOUNDATION_SDK_GCS_BUCKET:-gs://foundation-sdk/}\""));
-        assert!(script.contains("gcloud storage cp \"$SCRIPT_DIR/checksums.sha256\" \"$BUCKET\""));
-        assert!(script.contains("gcloud storage cp \"$SCRIPT_DIR/checksums.sha256.sig\" \"$BUCKET\""));
-        assert!(script
-            .contains("gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-common.tar.gz\" \"$BUCKET\""));
-        assert!(script.contains(
-            "gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-common.tar.gz.sig\" \"$BUCKET\""
-        ));
-        assert!(script.contains("gcloud storage cp \"$SCRIPT_DIR/install.sh\" \"$BUCKET\""));
-        assert!(script.contains("gcloud storage cp \"$SCRIPT_DIR/install.sh.sig\" \"$BUCKET\""));
-    }
-
-    #[test]
     fn archive_names_match_expected_layout() {
         assert_eq!(common_archive_name("1.2.3"), "foundation-sdk-1.2.3-common.tar.gz");
         assert_eq!(
@@ -1285,141 +1100,25 @@ mod tests {
     }
 
     #[test]
-    fn discover_packaged_targets_uses_config_order() {
-        let (_temp_guard, temp_dir) = temp_dir();
-        fs::write(temp_dir.join(common_archive_name("1.2.3")), "common").unwrap();
-        fs::write(temp_dir.join(target_archive_name("1.2.3", "x86_64-unknown-linux-gnu")), "linux").unwrap();
-        fs::write(temp_dir.join(target_archive_name("1.2.3", "aarch64-apple-darwin")), "mac").unwrap();
-        fs::write(temp_dir.join("ignore-me.txt"), "ignore").unwrap();
+    fn release_metadata_removes_legacy_upload_script() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join(common_archive_name("1.2.3"));
+        fs::write(&archive, "common").unwrap();
+        fs::write(temp.path().join("upload.sh"), "legacy").unwrap();
 
-        let mut config = Config::default();
-        config.targets = TargetsConfig {
-            triples: vec![
-                "aarch64-apple-darwin".to_string(),
-                "x86_64-apple-darwin".to_string(),
-                "x86_64-unknown-linux-gnu".to_string(),
-            ],
-            overrides: Default::default(),
-        };
-
-        let discovered = discover_packaged_targets(&config, &temp_dir, "1.2.3").unwrap();
-        assert_eq!(
-            discovered,
-            vec!["aarch64-apple-darwin".to_string(), "x86_64-unknown-linux-gnu".to_string()]
-        );
-    }
-
-    #[test]
-    fn finalize_requires_signing_key() {
-        let (_root_guard, root) = temp_dir();
-        let output_dir = root.join("dist");
-        fs::create_dir_all(&output_dir).unwrap();
-        fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "x86_64-unknown-linux-gnu")), "linux")
-            .unwrap();
-
-        let mut config = Config::default();
-        config.sdk.version = "1.2.3".to_string();
-        config.targets = TargetsConfig {
-            triples: vec!["x86_64-unknown-linux-gnu".to_string()],
-            overrides: Default::default(),
-        };
-        config.signing.key_env = "FOUNDATION_SIGN_KEY".to_string();
-
-        let error = finalize(
-            &root,
-            &config,
-            &FinalizeArgs { output_dir: PathBuf::from("dist"), ..FinalizeArgs::default() },
+        let written = write_release_metadata(
+            temp.path(),
+            "1.2.3",
+            &["aarch64-apple-darwin".to_string()],
+            &[archive],
+            None,
+            "https://sdk.foundation.xyz/v1.2.3",
+            false,
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("finalize requires --sign-key or FOUNDATION_SIGN_KEY"));
-    }
+        .unwrap();
 
-    #[test]
-    fn finalize_release_regenerates_install_script_and_checksums_from_existing_archives() {
-        let (_root_guard, root) = temp_dir();
-        let output_dir = root.join("dist");
-        fs::create_dir_all(&output_dir).unwrap();
-        fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "aarch64-apple-darwin")), "mac-arm").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "x86_64-apple-darwin")), "mac-x86").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "x86_64-unknown-linux-gnu")), "linux")
-            .unwrap();
-
-        let mut config = Config::default();
-        config.sdk.version = "1.2.3".to_string();
-        config.targets = TargetsConfig {
-            triples: vec![
-                "aarch64-apple-darwin".to_string(),
-                "x86_64-apple-darwin".to_string(),
-                "x86_64-unknown-linux-gnu".to_string(),
-            ],
-            overrides: Default::default(),
-        };
-        config.signing.key_env = "FOUNDATION_SIGN_KEY".to_string();
-
-        finalize_release(&output_dir, &config, "1.2.3", None, false).unwrap();
-
-        let install_script = fs::read_to_string(output_dir.join("install.sh")).unwrap();
-        assert!(install_script.contains(
-            "SUPPORTED_TARGETS=\"aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu\""
-        ));
-
-        let checksums = fs::read_to_string(output_dir.join("checksums.sha256")).unwrap();
-        assert!(checksums.contains("foundation-sdk-1.2.3-common.tar.gz"));
-        assert!(checksums.contains("foundation-sdk-1.2.3-aarch64-apple-darwin.tar.gz"));
-        assert!(checksums.contains("foundation-sdk-1.2.3-x86_64-apple-darwin.tar.gz"));
-        assert!(checksums.contains("foundation-sdk-1.2.3-x86_64-unknown-linux-gnu.tar.gz"));
-        assert!(checksums.contains("install.sh"));
-        assert!(!checksums.contains(".sig"));
-
-        let upload_script = fs::read_to_string(output_dir.join("upload.sh")).unwrap();
-        assert!(upload_script.contains("gcloud storage cp \"$SCRIPT_DIR/checksums.sha256\" \"$BUCKET\""));
-        assert!(upload_script
-            .contains("gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-common.tar.gz\" \"$BUCKET\""));
-        assert!(upload_script.contains(
-            "gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-aarch64-apple-darwin.tar.gz\" \"$BUCKET\""
-        ));
-        assert!(upload_script.contains(
-            "gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-x86_64-apple-darwin.tar.gz\" \"$BUCKET\""
-        ));
-        assert!(
-            upload_script.contains(
-                "gcloud storage cp \"$SCRIPT_DIR/foundation-sdk-1.2.3-x86_64-unknown-linux-gnu.tar.gz\" \"$BUCKET\""
-            )
-        );
-        assert!(upload_script.contains("gcloud storage cp \"$SCRIPT_DIR/install.sh\" \"$BUCKET\""));
-    }
-
-    #[test]
-    fn finalize_release_requires_all_configured_target_archives() {
-        let (_root_guard, root) = temp_dir();
-        let output_dir = root.join("dist");
-        fs::create_dir_all(&output_dir).unwrap();
-        fs::write(output_dir.join(common_archive_name("1.2.3")), "common").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "aarch64-apple-darwin")), "mac-arm").unwrap();
-        fs::write(output_dir.join(target_archive_name("1.2.3", "x86_64-unknown-linux-gnu")), "linux")
-            .unwrap();
-
-        let mut config = Config::default();
-        config.sdk.version = "1.2.3".to_string();
-        config.targets = TargetsConfig {
-            triples: vec![
-                "aarch64-apple-darwin".to_string(),
-                "x86_64-apple-darwin".to_string(),
-                "x86_64-unknown-linux-gnu".to_string(),
-            ],
-            overrides: Default::default(),
-        };
-
-        let error = finalize_release(&output_dir, &config, "1.2.3", None, false).unwrap_err();
-        assert!(error.to_string().contains("missing packaged target archives for version 1.2.3"));
-        assert!(error.to_string().contains("x86_64-apple-darwin"));
-    }
-
-    fn temp_dir() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().to_path_buf();
-        (dir, path)
+        assert!(!temp.path().join("upload.sh").exists());
+        assert!(written.files.iter().any(|path| path.ends_with("install.sh")));
+        assert!(written.files.iter().any(|path| path.ends_with("checksums.sha256")));
     }
 }

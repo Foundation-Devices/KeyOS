@@ -243,6 +243,7 @@ mod tests {
                 path: "external/slint".to_string(),
                 repo: "git@github.com:Foundation-Devices/slint.git".to_string(),
                 r#ref: "v1.12.1-foundation10".to_string(),
+                source_hash: String::new(),
                 env_override: "SLINT_DIR".to_string(),
             },
         );
@@ -264,6 +265,7 @@ mod tests {
                 path: "external/slint".to_string(),
                 repo: "git@github.com:Foundation-Devices/slint.git".to_string(),
                 r#ref: "v1.12.1-foundation10".to_string(),
+                source_hash: String::new(),
                 env_override: "SLINT_DIR".to_string(),
             },
         );

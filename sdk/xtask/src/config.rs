@@ -5,9 +5,9 @@
 //! parser so quoted-string escapes, multi-line strings, inline tables, and
 //! arrays of tables all parse without surprises as the schema grows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -40,6 +40,7 @@ pub struct SubmoduleConfig {
     pub path: String,
     pub repo: String,
     pub r#ref: String,
+    pub source_hash: String,
     pub env_override: String,
 }
 
@@ -51,7 +52,9 @@ pub struct TargetsConfig {
 
 #[derive(Clone, Debug, Default)]
 pub struct TargetOverride {
+    pub cargo_target: String,
     pub linker: String,
+    pub strip: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -135,6 +138,8 @@ struct RawSubmodule {
     repo: String,
     #[serde(rename = "ref")]
     refspec: String,
+    #[serde(default)]
+    source_hash: String,
     env_override: String,
 }
 
@@ -150,7 +155,11 @@ struct RawTargets {
 #[serde(deny_unknown_fields)]
 struct RawTargetOverride {
     #[serde(default)]
+    cargo_target: String,
+    #[serde(default)]
     linker: String,
+    #[serde(default)]
+    strip: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,9 +218,7 @@ pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask has a workspace parent").to_path_buf()
 }
 
-pub fn boxed_err(message: impl Into<String>) -> DynError {
-    Box::new(Error::new(ErrorKind::Other, message.into()))
-}
+pub fn boxed_err(message: impl Into<String>) -> DynError { Box::new(Error::other(message.into())) }
 
 impl Config {
     pub fn expanded_copy_entries(&self) -> Vec<CopyEntry> {
@@ -234,12 +241,20 @@ impl Config {
 
 impl From<RawSubmodule> for SubmoduleConfig {
     fn from(raw: RawSubmodule) -> Self {
-        SubmoduleConfig { path: raw.path, repo: raw.repo, r#ref: raw.refspec, env_override: raw.env_override }
+        SubmoduleConfig {
+            path: raw.path,
+            repo: raw.repo,
+            r#ref: raw.refspec,
+            source_hash: raw.source_hash,
+            env_override: raw.env_override,
+        }
     }
 }
 
 impl From<RawTargetOverride> for TargetOverride {
-    fn from(raw: RawTargetOverride) -> Self { TargetOverride { linker: raw.linker } }
+    fn from(raw: RawTargetOverride) -> Self {
+        TargetOverride { cargo_target: raw.cargo_target, linker: raw.linker, strip: raw.strip }
+    }
 }
 
 impl From<RawCompile> for CompileEntry {
@@ -299,17 +314,46 @@ pub fn load(path: &Path) -> Result<Config> {
 }
 
 pub fn selected_targets(config: &Config, requested: &[String]) -> Result<Vec<String>> {
-    if requested.is_empty() || requested.iter().any(|value| value == "all") {
+    if requested.is_empty() || (requested.len() == 1 && requested[0] == "all") {
         return Ok(config.targets.triples.clone());
     }
-
-    for target in requested {
-        if !config.targets.triples.iter().any(|item| item == target) {
-            return Err(boxed_err(format!("unsupported target triple: {target}")));
-        }
+    if requested.iter().any(|value| value == "all") {
+        return Err(boxed_err("target selector 'all' cannot be combined with other selectors"));
     }
 
-    Ok(requested.to_vec())
+    let mut selected = BTreeSet::new();
+    for selector in requested {
+        let matches = targets_for_selector(config, selector);
+        if matches.is_empty() {
+            return Err(boxed_err(format!("target selector '{selector}' matches no configured SDK targets")));
+        }
+        selected.extend(matches);
+    }
+
+    Ok(config.targets.triples.iter().filter(|target| selected.contains(target.as_str())).cloned().collect())
+}
+
+fn targets_for_selector(config: &Config, selector: &str) -> Vec<String> {
+    if config.targets.triples.iter().any(|target| target == selector) {
+        return vec![selector.to_string()];
+    }
+
+    let predicate: Option<fn(&str) -> bool> = match selector {
+        "mac-all" => Some(|target| target.ends_with("-apple-darwin")),
+        "mac-arm" => Some(|target| target.starts_with("aarch64-") && target.ends_with("-apple-darwin")),
+        "mac-x86" => Some(|target| target.starts_with("x86_64-") && target.ends_with("-apple-darwin")),
+        "linux-all" => Some(|target| target.contains("-linux-")),
+        "linux-arm" => Some(|target| target.starts_with("aarch64-") && target.contains("-linux-")),
+        "linux-x86" => Some(|target| target.starts_with("x86_64-") && target.contains("-linux-")),
+        "win-all" => Some(|target| target.contains("-windows-")),
+        "win-arm" => Some(|target| target.starts_with("aarch64-") && target.contains("-windows-")),
+        "win-x86" => Some(|target| target.starts_with("x86_64-") && target.contains("-windows-")),
+        _ => None,
+    };
+
+    predicate
+        .map(|matches| config.targets.triples.iter().filter(|target| matches(target)).cloned().collect())
+        .unwrap_or_default()
 }
 
 fn validate(config: &Config) -> Result<()> {
@@ -321,6 +365,9 @@ fn validate(config: &Config) -> Result<()> {
     }
     if config.sdk.keyos_api_interfaces.is_empty() {
         return Err(boxed_err("sdk.keyos_api_interfaces is required"));
+    }
+    if config.submodules.get("slint").is_some_and(|slint| slint.source_hash.is_empty()) {
+        return Err(boxed_err("submodules.slint.source_hash is required"));
     }
     let mut seen_interfaces = BTreeMap::new();
     for interface in &config.sdk.keyos_api_interfaces {
@@ -380,7 +427,8 @@ mod tests {
                 "sdk-build.toml is missing the {expected} api interface"
             );
         }
-        assert!(config.submodules.contains_key("slint"));
+        let slint = config.submodules.get("slint").unwrap();
+        assert_eq!(slint.source_hash, "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE=");
         assert!(config
             .compile
             .iter()
@@ -397,6 +445,16 @@ mod tests {
             .compile
             .iter()
             .any(|entry| entry.name == "passport-drive" && entry.binary == "foundation-passport-drive"));
+        let slint_viewer = config.compile.iter().find(|entry| entry.name == "slint-viewer").unwrap();
+        assert!(slint_viewer.cargo_flags.windows(2).any(|flags| flags == ["-p", "i-slint-common"]));
+        assert!(slint_viewer
+            .cargo_flags
+            .iter()
+            .any(|flag| flag.contains("i-slint-common/fontconfig-dlopen")));
+        let linux_arm = config.targets.overrides.get("aarch64-unknown-linux-gnu").unwrap();
+        assert_eq!(linux_arm.cargo_target, "aarch64-unknown-linux-musl");
+        assert_eq!(linux_arm.linker, "aarch64-unknown-linux-musl-gcc");
+        assert_eq!(linux_arm.strip, "aarch64-unknown-linux-musl-strip");
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/api/gui-server"));
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/api/bt"));
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/utils/defer"));
@@ -432,10 +490,50 @@ mod tests {
     }
 
     #[test]
+    fn selected_targets_supports_platform_aliases_in_config_order() {
+        let mut config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        config
+            .targets
+            .triples
+            .extend(["x86_64-pc-windows-msvc".to_string(), "aarch64-pc-windows-msvc".to_string()]);
+
+        assert_eq!(
+            selected_targets(&config, &["mac-all".to_string()]).unwrap(),
+            ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+        );
+        assert_eq!(
+            selected_targets(&config, &["linux-all".to_string()]).unwrap(),
+            ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+        );
+        assert_eq!(
+            selected_targets(&config, &["win-all".to_string()]).unwrap(),
+            ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
+        );
+        assert_eq!(
+            selected_targets(&config, &["mac-arm".to_string(), "linux-x86".to_string()]).unwrap(),
+            ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+        );
+    }
+
+    #[test]
+    fn windows_aliases_are_reserved_until_windows_targets_are_configured() {
+        let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        let error = selected_targets(&config, &["win-all".to_string()]).unwrap_err();
+        assert!(error.to_string().contains("matches no configured SDK targets"));
+    }
+
+    #[test]
     fn selected_targets_rejects_unknown_target() {
         let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
         let error = selected_targets(&config, &["totally-unknown-target".to_string()]).unwrap_err();
-        assert!(error.to_string().contains("unsupported target triple"));
+        assert!(error.to_string().contains("matches no configured SDK targets"));
+    }
+
+    #[test]
+    fn selected_targets_rejects_all_mixed_with_other_selectors() {
+        let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        let error = selected_targets(&config, &["all".to_string(), "mac-arm".to_string()]).unwrap_err();
+        assert!(error.to_string().contains("cannot be combined"));
     }
 
     #[test]

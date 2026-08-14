@@ -7,6 +7,10 @@ inputs:
     description: 'Key suffix for Rust cache'
     required: false
     default: ${{ github.workflow }}
+  rust-cache-workspaces:
+    description: 'Cargo workspaces and target directories for Rust cache'
+    required: false
+    default: '. -> target'
   setup-git-auth:
     description: 'Setup Git credentials via gh CLI'
     required: false
@@ -40,3 +44,4 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ inputs.rust-cache-key }}-${{ hashFiles('flake.lock', 'sdk/flake.lock') }}
+        workspaces: ${{ inputs.rust-cache-workspaces }}

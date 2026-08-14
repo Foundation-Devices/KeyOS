@@ -56,7 +56,7 @@ cross-compiler, simulator, Slint tools, and signing utilities.
 Install the current SDK release:
 
 ```sh
-curl -fsSL https://sdk.foundation.xyz/install.sh | sh
+curl -sSfL https://sdk.foundation.xyz/latest/install.sh | bash
 ```
 
 On NixOS or systems where shell startup files are managed by Home Manager,
@@ -64,7 +64,7 @@ disable the automatic `PATH` update and add the SDK launcher to your managed
 shell configuration instead:
 
 ```sh
-curl -fsSL https://sdk.foundation.xyz/install.sh | FOUNDATION_SDK_UPDATE_RC=0 sh
+curl -sSfL https://sdk.foundation.xyz/latest/install.sh | FOUNDATION_SDK_UPDATE_RC=0 bash
 ```
 
 Restart your shell or follow the installer's printed `PATH` instructions, then

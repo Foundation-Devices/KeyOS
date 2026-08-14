@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: MIT
 
+[private]
 _host_os := if os() == "macos" { "apple-darwin" } else { "unknown-linux-gnu" }
 
 build targets="native":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    host_os="{{_host_os}}"
+    host_os="{{ _host_os }}"
 
-    case "{{targets}}" in
+    case "{{ targets }}" in
         native)
             arch="$(uname -m)"
             case "$arch" in
@@ -27,8 +28,36 @@ build targets="native":
         all)
             xtask_targets=("aarch64-${host_os}" "x86_64-${host_os}")
             ;;
+        mac-all)
+            [[ "$host_os" == "apple-darwin" ]] || { echo "ERROR: macOS SDK builds require a macOS host." >&2; exit 1; }
+            xtask_targets=("aarch64-apple-darwin" "x86_64-apple-darwin")
+            ;;
+        mac-arm)
+            [[ "$host_os" == "apple-darwin" ]] || { echo "ERROR: macOS SDK builds require a macOS host." >&2; exit 1; }
+            xtask_targets=("aarch64-apple-darwin")
+            ;;
+        mac-x86)
+            [[ "$host_os" == "apple-darwin" ]] || { echo "ERROR: macOS SDK builds require a macOS host." >&2; exit 1; }
+            xtask_targets=("x86_64-apple-darwin")
+            ;;
+        linux-all)
+            [[ "$host_os" == "unknown-linux-gnu" ]] || { echo "ERROR: Linux SDK builds require a Linux host." >&2; exit 1; }
+            xtask_targets=("aarch64-unknown-linux-gnu" "x86_64-unknown-linux-gnu")
+            ;;
+        linux-arm)
+            [[ "$host_os" == "unknown-linux-gnu" ]] || { echo "ERROR: Linux SDK builds require a Linux host." >&2; exit 1; }
+            xtask_targets=("aarch64-unknown-linux-gnu")
+            ;;
+        linux-x86)
+            [[ "$host_os" == "unknown-linux-gnu" ]] || { echo "ERROR: Linux SDK builds require a Linux host." >&2; exit 1; }
+            xtask_targets=("x86_64-unknown-linux-gnu")
+            ;;
+        win-all|win-arm|win-x86)
+            echo "ERROR: Windows target selectors are reserved, but no Windows SDK targets/toolchains are configured yet." >&2
+            exit 1
+            ;;
         *)
-            echo "ERROR: targets must be one of: native, arm, x86, all" >&2
+            echo "ERROR: targets must be one of: native, arm, x86, all, mac-all, mac-arm, mac-x86, linux-all, linux-arm, linux-x86, win-all, win-arm, win-x86" >&2
             exit 1
             ;;
     esac
@@ -50,14 +79,14 @@ build targets="native":
     trap cleanup EXIT
 
     mkdir -p "$temp_flake_dir/nix"
-    cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
-    cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
-    cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
-    cp "{{justfile_directory()}}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
-    cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
-    cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
 
-    cd "{{justfile_directory()}}"
+    cd "{{ justfile_directory() }}"
 
     xtask_args=()
     for target in "${xtask_targets[@]}"; do
@@ -67,7 +96,58 @@ build targets="native":
     nix develop "path:$temp_flake_dir" --command \
         cargo xtask build "${xtask_args[@]}" --release --package
 
-finalize sign_key="":
+# Export packaged SDK builds to a portable handoff ZIP.
+zip targets="native" destination="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    host_os="{{ _host_os }}"
+    case {{ quote(targets) }} in
+        native)
+            arch="$(uname -m)"
+            case "$arch" in
+                arm64|aarch64) selector="aarch64-${host_os}" ;;
+                x86_64|amd64)  selector="x86_64-${host_os}" ;;
+                *) echo "ERROR: unsupported architecture: $arch" >&2; exit 1 ;;
+            esac
+            ;;
+        arm) selector="aarch64-${host_os}" ;;
+        x86) selector="x86_64-${host_os}" ;;
+        all)
+            case "$host_os" in
+                apple-darwin) selector="mac-all" ;;
+                unknown-linux-gnu) selector="linux-all" ;;
+            esac
+            ;;
+        *) selector={{ quote(targets) }} ;;
+    esac
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{ justfile_directory() }}"
+
+    destination_args=()
+    if [[ -n {{ quote(destination) }} ]]; then
+        destination_args+=({{ quote(destination) }})
+    fi
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask zip "$selector" "${destination_args[@]}"
+
+# Import a handoff ZIP into dist/ for finalization.
+unzip archive:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -79,44 +159,99 @@ finalize sign_key="":
     trap cleanup EXIT
 
     mkdir -p "$temp_flake_dir/nix"
-    cp "{{justfile_directory()}}/flake.nix" "$temp_flake_dir/flake.nix"
-    cp "{{justfile_directory()}}/flake.lock" "$temp_flake_dir/flake.lock"
-    cp "{{justfile_directory()}}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
-    cp "{{justfile_directory()}}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
-    cp -R "{{justfile_directory()}}/nix/." "$temp_flake_dir/nix/"
-    cp "{{justfile_directory()}}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
 
-    cd "{{justfile_directory()}}"
-
-    xtask_args=()
-    if [[ -n "{{sign_key}}" ]]; then
-        xtask_args+=(--sign-key "{{sign_key}}")
-    fi
+    cd "{{ justfile_directory() }}"
 
     nix develop "path:$temp_flake_dir" --command \
-        cargo xtask finalize "${xtask_args[@]}"
+        cargo xtask unzip {{ quote(archive) }}
 
-upload:
+# Send packaged Linux SDK builds directly to a Mac over SSH/SCP.
+sync address destination targets="linux-all":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    cd "{{justfile_directory()}}"
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
 
-    if [[ ! -x dist/upload.sh ]]; then
-        echo "ERROR: dist/upload.sh not found. Run 'just finalize' first." >&2
-        exit 1
-    fi
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
 
-    ./dist/upload.sh
+    cd "{{ justfile_directory() }}"
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask sync {{ quote(targets) }} {{ quote(address) }} {{ quote(destination) }}
+
+finalize *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{ justfile_directory() }}"
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask finalize {{ args }}
+
+upload release *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{ justfile_directory() }}"
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask upload "{{ release }}" {{ args }}
 
 reinstall targets="native":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    cd "{{justfile_directory()}}"
+    cd "{{ justfile_directory() }}"
 
-    just build "{{targets}}"
+    just build "{{ targets }}"
 
-    cat "{{justfile_directory()}}/dist/install.sh" | \
-        FOUNDATION_SDK_BASE_URL="file://{{justfile_directory()}}/dist" \
+    cat "{{ justfile_directory() }}/dist/install.sh" | \
+        FOUNDATION_SDK_BASE_URL="file://{{ justfile_directory() }}/dist" \
         bash

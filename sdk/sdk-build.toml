@@ -10,13 +10,18 @@ keyos_api_interfaces = ["app-manager", "backup", "camera", "crypto", "fs", "gui-
 path = "external/slint"
 repo = "git@github.com:Foundation-Devices/slint.git"
 ref = "v1.17.0-foundation2"
+source_hash = "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE="
 env_override = "SLINT_DIR"
 
 [targets]
 triples = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
+# Keep the public target name for installer compatibility, but use a static
+# musl executable so ARM Linux archives do not depend on Nix store paths.
 [targets.overrides."aarch64-unknown-linux-gnu"]
-linker = "aarch64-unknown-linux-gnu-gcc"
+cargo_target = "aarch64-unknown-linux-musl"
+linker = "aarch64-unknown-linux-musl-gcc"
+strip = "aarch64-unknown-linux-musl-strip"
 
 [[compile]]
 name = "foundation"
@@ -62,10 +67,14 @@ artifact = "slint-viewer"
 binary = "foundation-slint-viewer"
 # Explicit backend selection: the default `backend-default` feature pulls in
 # i-slint-backend-qt, whose build script probes the environment for qmake.
+# Select i-slint-common too so Cargo can enable its fontconfig-dlopen feature
+# for the shared fontique dependency when cross-compiling the viewer.
 cargo_flags = [
+    "-p",
+    "i-slint-common",
     "--no-default-features",
     "--features",
-    "backend-winit,renderer-femtovg,renderer-software,custom-translations",
+    "backend-winit,renderer-femtovg,renderer-software,custom-translations,i-slint-common/fontconfig-dlopen",
 ]
 
 [[compile]]
