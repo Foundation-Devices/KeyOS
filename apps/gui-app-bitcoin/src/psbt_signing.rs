@@ -264,7 +264,7 @@ async fn sign_psbt(state: StoredValue<AppState>) -> Result<(), SignPsbtError> {
     let (account_id, account, signed) = spawn_worker(async move {
         let (id, account) = load_account.await.context("load account")?;
         let mut signed_psbt = psbt;
-        let options = SignOptions { trust_witness_utxo: true, ..SignOptions::default() };
+        let options = SignOptions::default();
         for wallet in account.wallets.read().unwrap().iter() {
             let bdk_wallet = wallet.bdk_wallet.lock().unwrap();
             bdk_wallet.sign(&mut signed_psbt, options.clone())?;
