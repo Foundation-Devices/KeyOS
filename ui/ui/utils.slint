@@ -90,6 +90,9 @@ export global Utils {
         if (color == CardColor.blue) {
             return UIColors.blue-500;
         }
+        if (color == CardColor.dark-blue) {
+            return UIColors.navy-500;
+        }
         if (color == CardColor.teal) {
             return UIColors.teal-500;
         }
@@ -123,6 +126,9 @@ export global Utils {
     pure public function get-card-line-top-color(color: CardColor) -> brush {
         if (color == CardColor.blue) {
             return UIColors.blue-300;
+        }
+        if (color == CardColor.dark-blue) {
+            return UIColors.navy-300;
         }
         if (color == CardColor.teal) {
             return UIColors.teal-300;
@@ -158,6 +164,9 @@ export global Utils {
         if (color == CardColor.blue) {
             return UIColors.blue-700;
         }
+        if (color == CardColor.dark-blue) {
+            return UIColors.navy-700;
+        }
         if (color == CardColor.teal) {
             return UIColors.teal-700;
         }
@@ -191,6 +200,9 @@ export global Utils {
     pure public function get-card-color-picker-color(color: CardColor) -> brush {
         if (color == CardColor.blue) {
             return UIColors.blue-700;
+        }
+        if (color == CardColor.dark-blue) {
+            return UIColors.navy-500;
         }
         if (color == CardColor.teal) {
             return UIColors.blue-400;

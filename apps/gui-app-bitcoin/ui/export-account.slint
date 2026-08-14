@@ -35,6 +35,7 @@ export global ExportAccount {
 
     pure callback all-connectors() -> [string];
     pure callback connector-display-name(connector-id: string) -> string;
+    pure callback connector-import-label(connector-id: string) -> string;
     pure callback connector-formats(connector-id: string) -> ExportFormats;
     pure callback connector-capabilities(connector-id: string) -> ExportCapabilities;
 

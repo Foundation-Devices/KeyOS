@@ -645,6 +645,7 @@ pub enum AccountColor {
     DarkCopper,
     Teal,
     Blue,
+    DarkBlue,
 }
 
 impl AccountColor {
@@ -658,6 +659,7 @@ impl AccountColor {
             AccountColor::DarkCopper => "#bf755f",  // dark-copper-500
             AccountColor::Teal => "#00a5b2",        // teal-500
             AccountColor::Blue => "#009db9",        // blue-500
+            AccountColor::DarkBlue => "#1c335e",    // Unchained dark blue
         }
     }
 
@@ -671,6 +673,7 @@ impl AccountColor {
             "#bf755f" => AccountColor::DarkCopper,
             "#00a5b2" => AccountColor::Teal,
             "#009db9" => AccountColor::Blue,
+            "#1c335e" => AccountColor::DarkBlue,
             _ => AccountColor::LightCopper,
         }
     }
@@ -699,6 +702,7 @@ impl From<AccountColor> for CardColor {
             AccountColor::DarkCopper => CardColor::DarkCopper,
             AccountColor::Teal => CardColor::Teal,
             AccountColor::Blue => CardColor::Blue,
+            AccountColor::DarkBlue => CardColor::DarkBlue,
         }
     }
 }
@@ -716,6 +720,7 @@ impl From<CardColor> for AccountColor {
             CardColor::Blue => AccountColor::Blue,
             CardColor::Orange => AccountColor::Blue,
             CardColor::Red => AccountColor::Blue,
+            CardColor::DarkBlue => AccountColor::DarkBlue,
         }
     }
 }

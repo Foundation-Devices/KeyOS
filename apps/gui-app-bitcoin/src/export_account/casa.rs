@@ -6,8 +6,9 @@
 use {
     crate::{
         account_id::AccountId,
-        export_account::{UrExport, WalletConnector},
+        export_account::{ImportedAccountDefaults, UrExport, WalletConnector},
         sensitive_xpriv::SensitiveXpriv,
+        state::AccountColor,
         AppState, ExportCapabilities, ExportFormats, VisualFormat,
     },
     anyhow::{bail, Context},
@@ -168,6 +169,10 @@ impl WalletConnector for Connector {
     fn file_extension(&self, _as_multi: bool) -> String { "txt".to_owned() }
 
     fn display_name(&self) -> SharedString { "Casa".into() }
+
+    fn imported_account_defaults(&self) -> Option<ImportedAccountDefaults> {
+        Some(ImportedAccountDefaults { label: self.display_name(), color: AccountColor::Purple })
+    }
 
     fn connect(
         &self,

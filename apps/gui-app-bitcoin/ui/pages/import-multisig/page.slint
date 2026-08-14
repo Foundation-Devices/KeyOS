@@ -25,6 +25,7 @@ import { NetworkKind, Network, MultiSigView } from "../../callbacks.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
 import { VerifyAddress } from "../../verify-address.slint";
 import { CreateAccount, CreateAccountState } from "../../create-account.slint";
+import { ExportAccount } from "../../export-account.slint";
 import { SignPsbt } from "../../sign-psbt.slint";
 import { TimerCircularProgress } from "../../../../../ui/ui/widgets.slint";
 
@@ -35,8 +36,7 @@ export component ImportMultiSigPage inherits BasePage {
     property <Network> new-network: multisig.network-kind == NetworkKind.Main ? Network.Bitcoin : Network.Testnet4;
 
     property <bool> configuring: false;
-    // TODO: localization
-    property <string> new-label: CreateAccount.pending-multisig-is-casa ? "Casa" : "";
+    property <string> new-label: ExportAccount.connector-import-label(CreateAccount.multisig-import-connector-id);
 
     if !configuring && (CreateAccount.state == CreateAccountState.Idle): VerticalLayout {
         spacing: Size.sz6;
@@ -96,9 +96,9 @@ export component ImportMultiSigPage inherits BasePage {
                 label-input := TitledInput {
                     title: TR2.lookup(TrId.ConnectMultiSigImportLabel);
                     placeholder: TR2.lookup(TrId.ConnectMultiSigImportWalletFillerText);
+                    text: new-label;
                     show-clear-btn: false;
                     caps-mode: sentences;
-                    text: new-label;
                     has-notice: true;
                     init => {
                         if (new-label != "") {
@@ -219,7 +219,7 @@ export component ImportMultiSigPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonRetry);
                     importance: Importance.primary;
                     clicked => {
-                        CreateAccount.import-multisig(CreateAccount.pending-multisig-is-casa ? "Casa" : "");
+                        CreateAccount.import-multisig(false, CreateAccount.multisig-import-connector-id);
                     }
                 }
             }

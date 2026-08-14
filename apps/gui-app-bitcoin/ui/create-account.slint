@@ -25,6 +25,7 @@ export global CreateAccount {
     in property <CreateAccountState> state: CreateAccountState.Idle;
     in-out property <MultiSigView> pending-multisig-account;
     in property <bool> pending-multisig-is-casa;
+    in-out property <string> multisig-import-connector-id;
 
     in property <string> new-account-id;
 
@@ -32,8 +33,7 @@ export global CreateAccount {
     in property <string> prefilled-index;
     in property <Network> prefilled-network;
 
-    // An empty connector ID means a normal multisig import.
-    callback import-multisig(connector-id: string);
+    callback import-multisig(bool, string);
     callback create-single-sig(CreateSingleSigOptions);
     callback create-multi-sig(CreateMultiSigOptions);
 

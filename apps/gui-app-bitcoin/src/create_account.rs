@@ -11,7 +11,7 @@ use {
     slint_keyos_platform::{
         gui_server_api::navigation::qrscanner::{ScanQrOptions, ScanQrResult},
         navigation::open_qr_scanner,
-        slint::{ComponentHandle, ToSharedString},
+        slint::{ComponentHandle, SharedString, ToSharedString},
         spawn_local, StoredValue,
     },
     std::{thread, time::Duration},
@@ -64,8 +64,9 @@ pub fn try_parse_multisig(scan: &ScanQrResult) -> anyhow::Result<MultiSigDetails
 pub fn present_multisig(
     state: StoredValue<AppState>,
     details: MultiSigDetails,
-    source: AccountSource,
+    connector_id: SharedString,
 ) -> anyhow::Result<()> {
+    let source = if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
     let view = MultiSigView::from(&details);
     {
         let mut state = state.borrow_mut();
@@ -76,6 +77,7 @@ pub fn present_multisig(
     global.set_state(CreateAccountState::Idle);
     global.set_pending_multisig_account(view);
     global.set_pending_multisig_is_casa(source == AccountSource::Casa);
+    global.set_multisig_import_connector_id(connector_id);
 
     if ui.global::<RouteState>().get_active() != RouteOption::ImportMultiSig {
         ui.global::<Navigate>()
@@ -89,16 +91,14 @@ pub fn init(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let global = ui.global::<CreateAccount>();
 
-    global.on_import_multisig(move |connector_id| {
+    global.on_import_multisig(move |from_connect, connector_id| {
         let source =
             if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
-        let from_connect = !connector_id.is_empty();
-        state
-            .borrow()
-            .ui()
-            .global::<CreateAccount>()
-            .set_pending_multisig_is_casa(source == AccountSource::Casa);
-        if let Err(e) = import_multisig(state, from_connect, source) {
+        let ui = state.borrow().ui();
+        let create_account = ui.global::<CreateAccount>();
+        create_account.set_pending_multisig_is_casa(source == AccountSource::Casa);
+        create_account.set_multisig_import_connector_id(connector_id.clone());
+        if let Err(e) = import_multisig(state, from_connect, connector_id) {
             let ui = state.borrow().ui();
             ui.global::<CreateAccount>().set_state(CreateAccountState::Error);
             ui.global::<Navigate>().invoke_import_multi_sig(Default::default());
@@ -156,12 +156,16 @@ async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOp
 
     let ui = state.borrow().ui();
     let global = ui.global::<CreateAccount>();
+    let connector_id = global.get_multisig_import_connector_id();
+    let color = crate::export_account::connector_import_defaults(&connector_id)
+        .map(|defaults| defaults.color)
+        .unwrap_or(AccountColor::Pine);
 
     global.set_state(CreateAccountState::Creating);
 
     let create = CreateMultiSigAccount {
         label: options.label.into(),
-        color: if pending.source == AccountSource::Casa { AccountColor::Purple } else { AccountColor::Pine },
+        color,
         network: options.network.into(),
         multisig: pending.details,
         source: pending.source,
@@ -172,6 +176,7 @@ async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOp
         Ok(account_id) => {
             global.set_state(CreateAccountState::Success);
             global.set_new_account_id(account_id.to_shared_string());
+            global.set_multisig_import_connector_id("".into());
             state.borrow_mut().pending_multisig = None;
             global.set_pending_multisig_is_casa(false);
 
@@ -242,7 +247,7 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
 fn import_multisig(
     state: StoredValue<AppState>,
     from_connect: bool,
-    source: AccountSource,
+    connector_id: SharedString,
 ) -> anyhow::Result<()> {
     let opts = ScanQrOptions {
         header_title: tr::lookup_id(TrId::ImportConfigTitle).into(),
@@ -288,10 +293,10 @@ fn import_multisig(
             };
 
             let text = String::from_utf8(bytes).context("invalid file utf8")?;
-            present_multisig(state, parse_multisig_str(&text)?, source)?;
+            present_multisig(state, parse_multisig_str(&text)?, connector_id)?;
         }
         ScanQrResult::Qr { .. } | ScanQrResult::Ur2 { .. } => {
-            present_multisig(state, try_parse_multisig(&scan)?, source)?
+            present_multisig(state, try_parse_multisig(&scan)?, connector_id)?
         }
     }
 

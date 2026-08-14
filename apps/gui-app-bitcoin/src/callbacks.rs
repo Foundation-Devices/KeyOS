@@ -128,6 +128,7 @@ pub fn reset_for_incoming_scan(state: StoredValue<AppState>) {
         account_global.set_state(CreateAccountState::Idle);
         account_global.set_pending_multisig_account(MultiSigView::default());
         account_global.set_pending_multisig_is_casa(false);
+        account_global.set_multisig_import_connector_id("".into());
         account_global.set_new_account_id("".into());
         account_global.set_prefilled_mode(false);
         account_global.set_prefilled_index("".into());
@@ -161,9 +162,7 @@ pub fn handle_scan_result(state: StoredValue<AppState>, scan: ScanQrResult) -> a
     }
 
     if let Ok(details) = crate::create_account::try_parse_multisig(&scan) {
-        if crate::create_account::present_multisig(state, details, crate::store::AccountSource::Generic)
-            .is_ok()
-        {
+        if crate::create_account::present_multisig(state, details, "".into()).is_ok() {
             return Ok(());
         }
     }

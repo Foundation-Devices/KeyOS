@@ -3,12 +3,21 @@
 
 use {
     crate::{
-        account_id::AccountId, state::AppState, ExportAccount, ExportAccountState, ExportCapabilities,
-        ExportFormats,
+        account_id::AccountId,
+        state::{AccountColor, AppState},
+        ExportAccount, ExportAccountState, ExportCapabilities, ExportFormats,
     },
-    foundation_urtypes::value::Value as UrValue,
+    foundation_urtypes::{
+        registry::{CoinInfo, CoinType},
+        value::Value as UrValue,
+    },
+    minicbor::{data::Tag, Encode, Encoder},
     ngwallet::{
-        bdk_wallet::bitcoin::{base58, Network as NgNetwork},
+        bdk_wallet::bitcoin::{
+            base58,
+            bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
+            Network as NgNetwork,
+        },
         config::{AddressType as NgAddressType, NgAccountConfig},
         utils::extract_xpub_from_descriptor,
     },
@@ -19,6 +28,7 @@ use {
         spawn_local, StoredValue,
     },
     std::{collections::BTreeMap, fmt::Debug, io::Write, rc::Rc},
+    zeroize::Zeroize,
 };
 
 // mod bitcoin_core;
@@ -37,6 +47,7 @@ mod nunchuk;
 mod sparrow;
 mod specter;
 mod theya;
+mod unchained;
 mod zeus;
 
 // This is done for macro purposes
@@ -57,6 +68,7 @@ use {
     sparrow::CONNECTOR as Sparrow,
     specter::CONNECTOR as Specter,
     theya::CONNECTOR as Theya,
+    unchained::CONNECTOR as Unchained,
     zeus::CONNECTOR as Zeus,
 };
 
@@ -83,6 +95,10 @@ pub fn init(state: StoredValue<AppState>) {
         };
 
         connector.display_name()
+    });
+
+    global.on_connector_import_label(|connector_id| {
+        connector_import_defaults(&connector_id).map(|defaults| defaults.label).unwrap_or_default()
     });
 
     global.on_connector_capabilities(|connector_id| {
@@ -567,6 +583,7 @@ register_wallets! {
     Sparrow,
     Specter,
     Theya,
+    Unchained,
     Zeus,
 }
 
@@ -575,10 +592,20 @@ pub struct UrExport {
     pub cbor: Vec<u8>,
 }
 
+pub struct ImportedAccountDefaults {
+    pub label: SharedString,
+    pub color: AccountColor,
+}
+
+pub fn connector_import_defaults(connector_id: &str) -> Option<ImportedAccountDefaults> {
+    get_connector(connector_id).ok()?.imported_account_defaults()
+}
+
 pub trait WalletConnector {
     fn capabilities(&self) -> ExportCapabilities;
     fn formats(&self) -> ExportFormats;
     fn display_name(&self) -> SharedString;
+    fn imported_account_defaults(&self) -> Option<ImportedAccountDefaults> { None }
     fn file_extension(&self, as_multi: bool) -> String;
     fn connect(
         &self,
@@ -883,21 +910,9 @@ pub struct GenericMultiFormat {
     fw_version: Option<String>,
 }
 
-pub fn generic_multi_format(
-    state: &AppState,
-    id: &AccountId,
-    cfg: &NgAccountConfig,
-    export_fw_version: bool,
-) -> Result<String, anyhow::Error> {
+fn generic_multi_paths(cfg: &NgAccountConfig) -> BTreeMap<String, String> {
     let network_int = network_to_u32(cfg.network);
-
-    let xfp = match id.fingerprint() {
-        Some(f) => f.to_string(),
-        None => anyhow::bail!("Could not get fingerprint for account id: {}", id),
-    };
-
-    let paths = cfg
-        .descriptors
+    cfg.descriptors
         .iter()
         .flat_map(|d| {
             let addr_type = d.export_addr_hint.unwrap_or(d.address_type);
@@ -920,16 +935,358 @@ pub fn generic_multi_format(
 
             vec![(deriv_name, deriv), (xpub_name, xpub)]
         })
-        .collect::<BTreeMap<String, String>>();
+        .collect::<BTreeMap<String, String>>()
+}
 
-    let generic_multi_data = GenericMultiFormat {
-        xfp,
-        paths,
-        fw_version: if export_fw_version { Some(get_version_info(state)) } else { None },
+fn serialize_generic_multi_format(
+    state: &AppState,
+    id: &AccountId,
+    paths: BTreeMap<String, String>,
+    export_fw_version: bool,
+) -> Result<String, anyhow::Error> {
+    let xfp = match id.fingerprint() {
+        Some(f) => f.to_string(),
+        None => anyhow::bail!("Could not get fingerprint for account id: {}", id),
     };
+
+    let fw_version = if export_fw_version { Some(get_version_info(state)) } else { None };
+
+    serialize_generic_multi_paths(xfp, paths, fw_version)
+}
+
+fn serialize_generic_multi_paths(
+    xfp: String,
+    paths: BTreeMap<String, String>,
+    fw_version: Option<String>,
+) -> Result<String, anyhow::Error> {
+    let generic_multi_data = GenericMultiFormat { xfp, paths, fw_version };
 
     serde_json::to_string(&generic_multi_data)
         .map_err(|e| anyhow::anyhow!("Could not serialize generic multi json: {:?}", e))
+}
+
+pub fn generic_multi_format(
+    state: &AppState,
+    id: &AccountId,
+    cfg: &NgAccountConfig,
+    export_fw_version: bool,
+) -> Result<String, anyhow::Error> {
+    serialize_generic_multi_format(state, id, generic_multi_paths(cfg), export_fw_version)
+}
+
+struct ZeroizingXpriv(Xpriv);
+
+impl Drop for ZeroizingXpriv {
+    fn drop(&mut self) {
+        self.0.private_key.non_secure_erase();
+        let chain_code: &mut [u8; 32] = self.0.chain_code.as_mut();
+        chain_code.zeroize();
+    }
+}
+
+pub fn unchained_bip45(
+    state: &AppState,
+    id: &AccountId,
+    cfg: &NgAccountConfig,
+) -> Result<(Xpub, u32), anyhow::Error> {
+    const BIP45_PATH: &str = "m/45'";
+
+    let master_key = state.store.load_master_key(cfg.network)?;
+    let expected_fingerprint = id
+        .fingerprint()
+        .ok_or_else(|| anyhow::anyhow!("Unchained export requires a single-signature account"))?;
+    if expected_fingerprint != &master_key.fingerprint {
+        anyhow::bail!("Unchained export account does not match the active Master Key");
+    }
+    let master_fingerprint = u32::from_be_bytes(master_key.fingerprint.to_bytes());
+    let master_xpriv = ZeroizingXpriv(
+        Xpriv::new_master(cfg.network, &master_key.key.0)
+            .map_err(|e| anyhow::anyhow!("Could not construct master key for Unchained export: {e}"))?,
+    );
+    let derivation = DerivationPath::from(vec![ChildNumber::from_hardened_idx(45)?]);
+    let bip45_xpriv = ZeroizingXpriv(
+        master_xpriv
+            .0
+            .derive_priv(state.store.secp.as_ref(), &derivation)
+            .map_err(|e| anyhow::anyhow!("Could not derive {BIP45_PATH} for Unchained export: {e}"))?,
+    );
+    Ok((Xpub::from_priv(state.store.secp.as_ref(), &bip45_xpriv.0), master_fingerprint))
+}
+
+pub fn unchained_format(
+    state: &AppState,
+    id: &AccountId,
+    cfg: &NgAccountConfig,
+) -> Result<String, anyhow::Error> {
+    let (bip45_xpub, _) = unchained_bip45(state, id, cfg)?;
+    serialize_generic_multi_format(state, id, unchained_paths(cfg, bip45_xpub.to_string()), false)
+}
+
+fn unchained_paths(cfg: &NgAccountConfig, bip45_xpub: String) -> BTreeMap<String, String> {
+    let mut paths = generic_multi_paths(cfg);
+    paths.insert("p2sh_deriv".into(), "m/45'".into());
+    paths.insert("p2sh".into(), bip45_xpub);
+    paths
+}
+
+pub fn unchained_bip45_ur(
+    xpub: &Xpub,
+    master_fingerprint: u32,
+    network: NgNetwork,
+) -> Result<UrExport, anyhow::Error> {
+    const LEGACY_COIN_INFO_TAG: u64 = 305;
+    const LEGACY_KEYPATH_TAG: u64 = 304;
+
+    let use_info = match network {
+        NgNetwork::Bitcoin => CoinInfo::BTC_MAINNET,
+        _ => CoinInfo::new(CoinType::BTC, CoinInfo::NETWORK_BTC_TESTNET),
+    };
+
+    // Caravan's BCUR2 decoder uses the original BCR-2020 registry tags for
+    // nested crypto-hdkey values. foundation-urtypes emits the newer
+    // BCR-2023 tags, which are valid but Caravan cannot currently decode.
+    let mut cbor = Vec::new();
+    let mut encoder = Encoder::new(&mut cbor);
+    let parent_fingerprint = u32::from_be_bytes(xpub.parent_fingerprint.to_bytes());
+    encoder.map(4 + u64::from(parent_fingerprint != 0))?;
+    encoder.u8(3)?.bytes(&xpub.public_key.serialize())?;
+    encoder.u8(4)?.bytes(&xpub.chain_code.to_bytes())?;
+    encoder.u8(5)?.tag(Tag::new(LEGACY_COIN_INFO_TAG))?;
+    use_info.encode(&mut encoder, &mut ())?;
+    encoder.u8(6)?.tag(Tag::new(LEGACY_KEYPATH_TAG))?;
+    encoder.map(2 + u64::from(master_fingerprint != 0))?;
+    encoder.u8(1)?.array(2)?.u32(45)?.bool(true)?;
+    if master_fingerprint != 0 {
+        encoder.u8(2)?.u32(master_fingerprint)?;
+    }
+    encoder.u8(3)?.u8(1)?;
+    if parent_fingerprint != 0 {
+        encoder.u8(8)?.u32(parent_fingerprint)?;
+    }
+
+    Ok(UrExport { ur_type: "crypto-hdkey", cbor })
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        foundation_urtypes::{
+            registry::{ChildNumber as UrChildNumber, HDKeyRef},
+            value::Value as UrValue,
+        },
+        ngwallet::{
+            bdk_wallet::bitcoin::{
+                bip32::{ChildNumber, DerivationPath},
+                secp256k1::Secp256k1,
+            },
+            config::NgDescriptor,
+        },
+        std::num::NonZeroU32,
+    };
+
+    fn bip45_xpub() -> (Xpub, u32) {
+        let secp = Secp256k1::new();
+        let master = Xpriv::new_master(NgNetwork::Bitcoin, &[7; 32]).unwrap();
+        let master_fingerprint = u32::from_be_bytes(master.fingerprint(&secp).to_bytes());
+        assert_ne!(master_fingerprint, 0);
+        let derivation = DerivationPath::from(vec![ChildNumber::from_hardened_idx(45).unwrap()]);
+        let derived = master.derive_priv(&secp, &derivation).unwrap();
+        (Xpub::from_priv(&secp, &derived), master_fingerprint)
+    }
+
+    #[test]
+    fn unchained_import_defaults_match_connector_branding() {
+        let defaults = connector_import_defaults("Unchained").unwrap();
+
+        assert_eq!(defaults.label.as_str(), "Unchained");
+        assert_eq!(defaults.color, AccountColor::DarkBlue);
+        assert!(connector_import_defaults("Sparrow").is_none());
+    }
+
+    fn multisig_export_config(network: NgNetwork, index: u32) -> NgAccountConfig {
+        let network_int = network_to_u32(network);
+        NgAccountConfig {
+            name: "Multisig".into(),
+            color: "#000000".into(),
+            seed_has_passphrase: false,
+            device_serial: None,
+            date_added: None,
+            preferred_address_type: NgAddressType::P2wpkh,
+            index,
+            descriptors: vec![
+                NgDescriptor {
+                    internal: String::new(),
+                    external: Some(format!("[f23f9fd2/48'/{network_int}'/{index}'/1']nested-xpub/0/*")),
+                    address_type: NgAddressType::P2wpkh,
+                    export_addr_hint: Some(NgAddressType::P2ShWsh),
+                },
+                NgDescriptor {
+                    internal: String::new(),
+                    external: Some(format!("[f23f9fd2/48'/{network_int}'/{index}'/2']native-xpub/0/*")),
+                    address_type: NgAddressType::P2wpkh,
+                    export_addr_hint: Some(NgAddressType::P2wsh),
+                },
+                NgDescriptor {
+                    internal: String::new(),
+                    external: Some(format!("[f23f9fd2/84'/{network_int}'/{index}']ignored-xpub/0/*")),
+                    address_type: NgAddressType::P2wpkh,
+                    export_addr_hint: None,
+                },
+            ],
+            date_synced: None,
+            network,
+            id: "test-account".into(),
+            multisig: None,
+            archived: false,
+            last_remote_sequence: 0,
+        }
+    }
+
+    #[test]
+    fn generic_multi_json_without_firmware_matches_legacy_output() {
+        let cfg = multisig_export_config(NgNetwork::Bitcoin, 7);
+        let json = serialize_generic_multi_paths("f23f9fd2".into(), generic_multi_paths(&cfg), None).unwrap();
+
+        assert_eq!(
+            json,
+            r#"{"xfp":"f23f9fd2","p2wsh":"native-xpub","p2wsh_deriv":"m/48'/0'/7'/2'","p2wsh_p2sh":"nested-xpub","p2wsh_p2sh_deriv":"m/48'/0'/7'/1'"}"#
+        );
+    }
+
+    #[test]
+    fn generic_multi_json_with_firmware_matches_legacy_output() {
+        let cfg = multisig_export_config(NgNetwork::Testnet4, 12);
+        let json =
+            serialize_generic_multi_paths("f23f9fd2".into(), generic_multi_paths(&cfg), Some("1.4.0".into()))
+                .unwrap();
+
+        assert_eq!(
+            json,
+            r#"{"xfp":"f23f9fd2","p2wsh":"native-xpub","p2wsh_deriv":"m/48'/1'/12'/2'","p2wsh_p2sh":"nested-xpub","p2wsh_p2sh_deriv":"m/48'/1'/12'/1'","fw_version":"1.4.0"}"#
+        );
+    }
+
+    #[test]
+    fn unchained_json_includes_bip45_and_bip48_paths() {
+        let cfg = multisig_export_config(NgNetwork::Bitcoin, 7);
+        let json = serialize_generic_multi_paths(
+            "f23f9fd2".into(),
+            unchained_paths(&cfg, "bip45-xpub".into()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            json,
+            r#"{"xfp":"f23f9fd2","p2sh":"bip45-xpub","p2sh_deriv":"m/45'","p2wsh":"native-xpub","p2wsh_deriv":"m/48'/0'/7'/2'","p2wsh_p2sh":"nested-xpub","p2wsh_p2sh_deriv":"m/48'/0'/7'/1'"}"#
+        );
+    }
+
+    #[test]
+    fn bcur2_export_is_caravan_crypto_hdkey() {
+        let (xpub, master_fingerprint) = bip45_xpub();
+
+        let export = unchained_bip45_ur(&xpub, master_fingerprint, NgNetwork::Bitcoin).unwrap();
+        assert_eq!(export.ur_type, "crypto-hdkey");
+
+        let mut decoder = minicbor::Decoder::new(&export.cbor);
+        let entries = decoder.map().unwrap().unwrap();
+        let mut saw_coin_info = false;
+        let mut saw_origin = false;
+        for _ in 0..entries {
+            match decoder.u8().unwrap() {
+                5 => {
+                    assert_eq!(decoder.tag().unwrap(), Tag::new(305));
+                    decoder.skip().unwrap();
+                    saw_coin_info = true;
+                }
+                6 => {
+                    assert_eq!(decoder.tag().unwrap(), Tag::new(304));
+                    decoder.skip().unwrap();
+                    saw_origin = true;
+                }
+                _ => decoder.skip().unwrap(),
+            }
+        }
+        assert!(saw_coin_info, "crypto-hdkey must include legacy coin-info tag 305");
+        assert!(saw_origin, "crypto-hdkey must include legacy keypath tag 304");
+
+        let UrValue::HDKey(HDKeyRef::DerivedKey(decoded)) =
+            UrValue::from_ur(export.ur_type, &export.cbor).unwrap()
+        else {
+            panic!("expected a derived crypto-hdkey");
+        };
+        assert!(!decoded.is_private);
+        assert_eq!(decoded.key_data, xpub.public_key.serialize());
+        assert_eq!(decoded.chain_code, Some(xpub.chain_code.to_bytes()));
+        assert_eq!(decoded.use_info, Some(CoinInfo::BTC_MAINNET));
+        assert_eq!(decoded.parent_fingerprint, NonZeroU32::new(master_fingerprint));
+
+        let origin = decoded.origin.unwrap();
+        assert_eq!(origin.source_fingerprint, NonZeroU32::new(master_fingerprint));
+        assert_eq!(origin.depth, Some(1));
+        let components = origin.components.iter().collect::<Vec<_>>();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].number, UrChildNumber::Number(45));
+        assert!(components[0].is_hardened);
+    }
+
+    fn assert_bcur2_fingerprints(
+        export: &UrExport,
+        expected_source_fingerprint: Option<u32>,
+        expected_parent_fingerprint: Option<u32>,
+    ) {
+        let mut decoder = minicbor::Decoder::new(&export.cbor);
+        let entries = decoder.map().unwrap().unwrap();
+        let mut source_fingerprint = None;
+        let mut parent_fingerprint = None;
+
+        for _ in 0..entries {
+            match decoder.u8().unwrap() {
+                6 => {
+                    assert_eq!(decoder.tag().unwrap(), Tag::new(304));
+                    let origin_entries = decoder.map().unwrap().unwrap();
+                    for _ in 0..origin_entries {
+                        match decoder.u8().unwrap() {
+                            2 => source_fingerprint = Some(decoder.u32().unwrap()),
+                            _ => decoder.skip().unwrap(),
+                        }
+                    }
+                }
+                8 => parent_fingerprint = Some(decoder.u32().unwrap()),
+                _ => decoder.skip().unwrap(),
+            }
+        }
+
+        assert_eq!(source_fingerprint, expected_source_fingerprint);
+        assert_eq!(parent_fingerprint, expected_parent_fingerprint);
+
+        let UrValue::HDKey(HDKeyRef::DerivedKey(decoded)) =
+            UrValue::from_ur(export.ur_type, &export.cbor).unwrap()
+        else {
+            panic!("expected a derived crypto-hdkey");
+        };
+        assert_eq!(decoded.parent_fingerprint, expected_parent_fingerprint.and_then(NonZeroU32::new));
+        let origin = decoded.origin.unwrap();
+        assert_eq!(origin.source_fingerprint, expected_source_fingerprint.and_then(NonZeroU32::new));
+    }
+
+    #[test]
+    fn bcur2_export_omits_zero_fingerprints_independently() {
+        let (xpub, master_fingerprint) = bip45_xpub();
+        let parent_fingerprint = u32::from_be_bytes(xpub.parent_fingerprint.to_bytes());
+        assert_ne!(parent_fingerprint, 0);
+
+        let zero_source = unchained_bip45_ur(&xpub, 0, NgNetwork::Bitcoin).unwrap();
+        assert_bcur2_fingerprints(&zero_source, None, Some(parent_fingerprint));
+
+        let mut zero_parent_xpub = xpub;
+        zero_parent_xpub.parent_fingerprint = Default::default();
+        let zero_parent =
+            unchained_bip45_ur(&zero_parent_xpub, master_fingerprint, NgNetwork::Bitcoin).unwrap();
+        assert_bcur2_fingerprints(&zero_parent, Some(master_fingerprint), None);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
