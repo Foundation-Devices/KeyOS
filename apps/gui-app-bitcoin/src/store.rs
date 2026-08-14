@@ -15,7 +15,7 @@ use ngwallet::{
         Network as NgNetwork,
     },
     bip39::MasterKey,
-    config::{MultiSigDetails, NetworkKind, NgAccountConfig},
+    config::{MultiSigDetails, MultiSigSigner, NetworkKind, NgAccountConfig},
     store::MetaStorage,
 };
 use slint_keyos_platform::{
@@ -119,6 +119,24 @@ fn validate_local_multisig_signer<C: Signing>(
         bail!("Casa signer xpub does not match the active Master Key");
     }
     Ok(())
+}
+
+fn has_repeated_xpub_authority(signers: &[MultiSigSigner]) -> anyhow::Result<bool> {
+    // A parent public key identifies the underlying private-key authority. The
+    // chain code is public input, and P and -P are both controlled by the
+    // same private-key authority. Use the parity-independent x coordinate.
+    let xpubs: HashSet<_> = signers
+        .iter()
+        .map(|signer| {
+            signer.get_pubkey().map(|xpub| {
+                let serialized = xpub.public_key.serialize_uncompressed();
+                let mut x_coordinate = [0; 32];
+                x_coordinate.copy_from_slice(&serialized[1..33]);
+                x_coordinate
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(xpubs.len() != signers.len())
 }
 
 impl Account {
@@ -414,6 +432,7 @@ impl AccountStore {
         // This check ensures that multisigs that contain the current fingerprint
         // and a passphrased fingerprint won't allow duplicates of the passphrased fingerprint
         let repeated_fingerprint = signers_set.len() != signers.len();
+        let repeated_xpub = has_repeated_xpub_authority(signers)?;
 
         // Ensure the current fingerprint owns exaclty one signer,
         // otherwise this multisig is irrelevant
@@ -435,12 +454,13 @@ impl AccountStore {
         });
 
         if repeated_fingerprint
+            || repeated_xpub
             || not_user_multisig
             || invalid_label.is_some()
             || duplicate_account_id
             || invalid_network
         {
-            bail!("Invalid multisig: repeated_fingerprint? {}, not_user_multisig? {}, invalid_label? {:?}, duplicate_account_id? {}, invalid_network? {}", repeated_fingerprint, not_user_multisig, invalid_label, duplicate_account_id, invalid_network);
+            bail!("Invalid multisig: repeated_fingerprint? {}, repeated_xpub? {}, not_user_multisig? {}, invalid_label? {:?}, duplicate_account_id? {}, invalid_network? {}", repeated_fingerprint, repeated_xpub, not_user_multisig, invalid_label, duplicate_account_id, invalid_network);
         } else {
             Ok(())
         }
@@ -707,5 +727,30 @@ mod tests {
             signer(&secp, &cosigner, cosigner.fingerprint, "m/45'/0/0"),
         ]);
         validate_local_multisig_signer(&secp, &local, &multisig).unwrap();
+    }
+
+    #[test]
+    fn repeated_xpub_detection_ignores_serialization_metadata() {
+        let secp = Secp256k1::new();
+        let key = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[0; 16], "", None).unwrap();
+        let derivation: DerivationPath = "m/45'/0/0".parse().unwrap();
+        let root = SensitiveXpriv(Xpriv::new_master(NgNetwork::Bitcoin, &key.key.0).unwrap());
+        let derived = SensitiveXpriv(root.0.derive_priv(&secp, &derivation).unwrap());
+        let original = Xpub::from_priv(&secp, &derived.0);
+        let mut reconstructed = original;
+        reconstructed.depth = 0;
+        reconstructed.parent_fingerprint = Fingerprint::default();
+        reconstructed.child_number = ChildNumber::Normal { index: 0 };
+        reconstructed.chain_code = [0x42; 32].into();
+        reconstructed.public_key = original.public_key.negate(&secp);
+
+        let signers = vec![
+            MultiSigSigner::new(&derivation, &Fingerprint::from(&[0, 1, 2, 3]), &original),
+            MultiSigSigner::new(&derivation, &Fingerprint::from(&[4, 5, 6, 7]), &reconstructed),
+        ];
+        assert_ne!(signers[0].get_pubkey_str(), signers[1].get_pubkey_str());
+        assert_ne!(signers[0].get_pubkey().unwrap().chain_code, signers[1].get_pubkey().unwrap().chain_code);
+        assert_ne!(signers[0].get_pubkey().unwrap().public_key, signers[1].get_pubkey().unwrap().public_key);
+        assert!(has_repeated_xpub_authority(&signers).unwrap());
     }
 }
