@@ -8919,7 +8919,7 @@ dependencies = [
 [[package]]
 name = "ngwallet"
 version = "1.1.1"
-source = "git+https://github.com/Foundation-Devices/ngwallet?tag=3.8.0#3bc75404737651b6c0c64fba10c78f1ee103a6a7"
+source = "git+https://github.com/Foundation-Devices/ngwallet?tag=3.9.0#5f3ecfb86579831275384e99f0371e2635ebf60a"
 dependencies = [
  "anyhow",
  "bdk_core",
