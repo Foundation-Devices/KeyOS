@@ -7678,7 +7678,7 @@ dependencies = [
 
 [[package]]
 name = "keyos-boot"
-version = "0.2.1"
+version = "0.2.5"
 dependencies = [
  "arrayvec",
  "atsama5d27",
