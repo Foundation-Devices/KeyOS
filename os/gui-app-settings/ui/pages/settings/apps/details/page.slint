@@ -322,13 +322,13 @@ export component AppDetailsPage inherits BasePage {
                 title: "";
 
                 MenuSectionLayout {
-                    InfoRow {
+                    if AppManagementGlobal.selected-app.publisher_fingerprint != "": InfoRow {
                         label: TR2.lookup(TrId.AppsAllowedPublisherFingerprint);
-                        value: AppManagementGlobal.selected-app.publisher;
+                        value: AppManagementGlobal.selected-app.publisher_fingerprint;
                         value-width: 120px;
                     }
 
-                    HLine { }
+                    if AppManagementGlobal.selected-app.publisher_fingerprint != "": HLine { }
 
                     InfoRow {
                         label: TR2.lookup(TrId.AppsVersion);

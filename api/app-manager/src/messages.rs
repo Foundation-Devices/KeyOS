@@ -131,7 +131,14 @@ pub struct InstalledAppInfo {
     /// Short fingerprint of the third-party publisher that signed the app, whether or not its
     /// certificate currently allows a launch; empty for built-in apps and for a signer no stored
     /// certificate matches.
-    pub publisher: String,
+    pub publisher_fingerprint: String,
+    /// Publisher display name: the certificate name the user confirmed at import for a
+    /// certified third-party app, the manifest's publisher for a Foundation-signed app,
+    /// empty otherwise.
+    pub publisher_name: String,
+    /// Whether the bundle carries a Foundation signature header; the signature itself is
+    /// only verified at launch.
+    pub is_foundation_signed: bool,
     /// Why launching the app would fail right now, or `None` while it would succeed. The signature
     /// is only checked by an actual launch, so a launch can still fail with an error this never
     /// reports.

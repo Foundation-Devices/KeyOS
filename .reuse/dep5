@@ -40,6 +40,7 @@ Files:
   apps/gui-app-*/ui/images/*.svg
   os/gui-app-*/ui/images/*.svg
   apps/gui-app-*/resources/icon*.png
+  apps/app-flux-*/resources/icon*.png
   os/gui-app-*/resources/icon*.png
   os/gui-server/assets/*.png
   os/gui-server/assets/*.raw

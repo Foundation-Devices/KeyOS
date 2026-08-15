@@ -8,7 +8,6 @@ import {
     ConfirmationModal,
     ErrorModal,
     HLine,
-    IconButton,
     Icon,
     MenuActionItem,
     MenuBooleanItem,
@@ -39,7 +38,6 @@ component AppListCard inherits Rectangle {
     in property <bool> last;
 
     callback clicked();
-    callback launch-clicked();
 
     property <duration> select-anim-duration: 100ms;
     animate background { duration: select-anim-duration; }
@@ -51,9 +49,6 @@ component AppListCard inherits Rectangle {
     border-bottom-right-radius: last ? Size.sz6 : 0px;
 
     TouchArea {
-        width: parent.width - Size.sz16;
-        height: parent.height;
-
         clicked => {
             root.background = Palette.background-pressed;
             select-timer.running = true;
@@ -106,7 +101,7 @@ component AppListCard inherits Rectangle {
         content-column := VerticalLayout {
             alignment: center;
             spacing: Size.sz1;
-            width: root.width - (Size.sz4 * 2) - icon-column.width - launch-column.width - (parent.spacing * 2);
+            width: root.width - (Size.sz4 * 2) - icon-column.width - parent.spacing;
 
             TextMd {
                 width: parent.width;
@@ -117,36 +112,33 @@ component AppListCard inherits Rectangle {
                 overflow: elide;
             }
 
-            TextSm {
-                width: parent.width;
-                text: root.app.publisher;
-                color: Palette.content-tertiary;
-                horizontal-alignment: left;
-                wrap: no-wrap;
-                overflow: elide;
-            }
-        }
+            HorizontalLayout {
+                spacing: Size.sz1;
 
-        launch-column := Rectangle {
-            // Flux children never get a play button: they only run inside the Flux emulator.
-            property <bool> show-launch: root.app.can_launch && !root.app.is_flux;
+                TextSm {
+                    horizontal-stretch: 0;
+                    max-width: parent.width - Size.sz5;
+                    text: root.app.publisher_name;
+                    color: Palette.content-tertiary;
+                    horizontal-alignment: left;
+                    wrap: no-wrap;
+                    overflow: elide;
+                }
 
-            width: self.show-launch ? Size.sz10 : 0px;
-            height: parent.height;
-            visible: self.show-launch;
-            background: Palette.transparent;
+                // Any bundle can claim a publisher string; the shield marks the ones whose
+                // Foundation signature backs the claim.
+                if root.app.is_foundation_signed && root.app.publisher_name != "": VerticalLayout {
+                    alignment: center;
 
-            VerticalLayout {
-                alignment: center;
-
-                IconButton {
-                    icon: "play";
-                    size: Size.sz10;
-                    icon-size: Size.sz6;
-
-                    clicked => {
-                        root.launch-clicked();
+                    Icon {
+                        name: "shield2";
+                        size: Size.sz4;
+                        color: Palette.content-positive;
                     }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
                 }
             }
         }
@@ -233,10 +225,6 @@ export component AppsPage inherits BasePage {
                         if AppManagementGlobal.select-installed-app(row.app.app_id) {
                             Navigate.app-details({ app-id: row.app.app_id, focus: "" }, { });
                         }
-                    }
-
-                    launch-clicked => {
-                        AppManagementGlobal.launch-installed-app(row.app.app_id);
                     }
                 }
 

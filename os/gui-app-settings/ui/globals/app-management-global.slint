@@ -19,7 +19,9 @@ export struct AppPermissionGroup {
 export struct InstalledApp {
     app_id: string,
     name: string,
-    publisher: string,
+    publisher_fingerprint: string,
+    publisher_name: string,
+    is_foundation_signed: bool,
     can_launch: bool,
     // Why the app cannot be launched, ready to show; empty when it can.
     launch_blocked_reason: string,

@@ -3,7 +3,7 @@
 
 appId = "0x6775692d6170702d656d752d666c7578"
 extends = "../../api/gui-app-emu-flux"
-publisher = "Foundation Devices"
+publisher = "Foundation"
 description = "Legacy mode."
 version = "1.0.0"
 

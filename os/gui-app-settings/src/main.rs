@@ -615,7 +615,9 @@ fn installed_app(state: &AppState, app: app_manager::InstalledAppInfo, lang: &st
     InstalledApp {
         app_id: app.app_id.into(),
         name: app.name.into(),
-        publisher: app.publisher.into(),
+        publisher_fingerprint: app.publisher_fingerprint.into(),
+        publisher_name: sanitize_publisher_claim(&app.publisher_name).into(),
+        is_foundation_signed: app.is_foundation_signed,
         can_launch: app.launch_error.is_none(),
         launch_blocked_reason: launch_blocked_reason(state, app.launch_error).into(),
         can_remove: app.can_remove,

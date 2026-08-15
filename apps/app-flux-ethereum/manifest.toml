@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 appId = "0x38a8f01a9eef414b7c2c6729a6b0c306"
-publisher = "Foundation Devices"
+publisher = "Foundation"
 description = "Ethereum app running in Legacy Mode."
 version = "1.22.1"
 

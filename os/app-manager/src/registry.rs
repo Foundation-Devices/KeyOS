@@ -336,12 +336,29 @@ impl AppRegistry {
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
             .filter(|app_info| filter.sideloaded.map_or(true, |want| app_info.is_sideloaded() == want))
             .map(|app_info| {
-                let (publisher, launch_error) = app_info.publisher_and_launch_error(publishers);
+                let (publisher_fingerprint, launch_error) = app_info.publisher_and_launch_error(publishers);
+                // The label is an identity, not the bundle's claim: a certified app shows the
+                // certificate name the user confirmed at import, a Foundation-signed app its
+                // manifest publisher (covered by the Foundation signature), an uncertified
+                // bundle nothing.
+                let publisher_name = if !publisher_fingerprint.is_empty() {
+                    publishers
+                        .iter()
+                        .find(|p| p.short_fingerprint == publisher_fingerprint)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default()
+                } else if !app_info.is_third_party() {
+                    app_info.manifest.publisher.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                };
                 let (basic_permissions, approvable_permissions) =
                     app_info.permission_groups(permission_grants, locale);
                 InstalledAppInfo {
                     app_id: format!("0x{}", app_info.id),
-                    publisher,
+                    publisher_fingerprint,
+                    publisher_name,
+                    is_foundation_signed: !app_info.is_third_party(),
                     launch_error,
                     can_remove: app_info.is_sideloaded(),
                     is_flux: app_info.is_flux,
@@ -1339,6 +1356,7 @@ mod tests {
         );
         app.manifest.permissions =
             BTreeMap::from([("os/camera".to_string(), BTreeSet::from(["Subscribe".to_string()]))]);
+        app.manifest.publisher = Some("Foundation Devices".to_string());
         let registry = registry_with(vec![app, camera_provider()]);
         let grants = grants_for(&registry);
 
@@ -1346,7 +1364,9 @@ mod tests {
         assert_eq!(apps.len(), 1, "Settings lists the Foundation sideload");
         assert_eq!(apps[0].launch_error, None, "launchable with no publisher cert");
         assert!(apps[0].can_remove);
-        assert!(apps[0].publisher.is_empty());
+        assert!(apps[0].publisher_fingerprint.is_empty());
+        assert_eq!(apps[0].publisher_name, "Foundation Devices");
+        assert!(apps[0].is_foundation_signed);
         assert!(apps[0].approvable_permissions.is_empty(), "nothing is left to approve");
         assert_eq!(apps[0].basic_permissions.len(), 1, "declared permissions are auto-granted");
 
@@ -1457,7 +1477,9 @@ mod tests {
             &PermissionGrantStore::default(),
         );
 
-        assert!(apps[0].publisher.is_empty());
+        assert!(apps[0].publisher_fingerprint.is_empty());
+        assert!(apps[0].publisher_name.is_empty(), "an uncertified bundle's claim is not shown");
+        assert!(!apps[0].is_foundation_signed, "a third-party bundle never gets the Foundation badge");
         assert_eq!(apps[0].launch_error, Some(LaunchError::NoCertificate));
         assert_eq!(apps[0].description, "Example description");
         assert_eq!(apps[0].version, "1.2.3");
