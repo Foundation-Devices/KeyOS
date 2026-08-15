@@ -27,7 +27,6 @@ import { TR } from "@ui/i18n/i18n.slint"; // Only used to fix the compilation, c
 export * from "gen/exports.slint";
 export { TR, Utils, Images, CurrentTheme }
 export global Constants {
-    out property <int> max-title-length: 17;
     out property <length> app-card-width: UISize.screen-width / 2;
     out property <length> app-card-spacer-width: (self.app-card-width - self.app-card-gap-width);
     out property <length> app-card-gap-width: Size.sz8;
@@ -95,8 +94,11 @@ component AppCard inherits Rectangle {
             horizontal-stretch: 0;
 
             HeadingLg {
+                width: Constants.app-card-width;
                 color: Palette.content-primary;
-                text: Utils.shorten-string(app-name, Constants.max-title-length, true);
+                text: app-name;
+                wrap: no-wrap;
+                overflow: elide;
                 vertical-alignment: center;
                 horizontal-alignment: center;
             }
