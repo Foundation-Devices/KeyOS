@@ -34,6 +34,8 @@ pub(crate) const APP_ICONS_DIR: &str = "keyos/app-icons";
 /// print-hashes. Separate from `app-bundles`, where `build-app` leaves developer bundles that
 /// are not release artifacts.
 pub(crate) const SIDELOAD_BUNDLES_DIR: &str = "sideload-bundles";
+/// Unsigned counterpart produced for the external production signing pipeline.
+pub(crate) const UNSIGNED_SIDELOAD_BUNDLES_DIR: &str = "sideload-bundles-unsigned";
 
 static METADATA: LazyLock<cargo_metadata::Metadata> =
     LazyLock::new(|| cargo_metadata::MetadataCommand::new().exec().unwrap());

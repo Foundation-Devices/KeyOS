@@ -27,7 +27,7 @@ mod tests;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.3.0";
+const KEYOS_VERSION: &str = "1.4.0-beta1";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
@@ -137,6 +137,13 @@ const DEV_APPS: &[&str] = &[
 /// sideloads.
 pub const FOUNDATION_SIDELOAD_APPS: &[&str] =
     &["gui-app-emu-flux-server", "app-flux-ethereum", "app-flux-solana"];
+
+fn foundation_sideload_artifact_name(crate_name: &str) -> &str {
+    match crate_name {
+        "gui-app-emu-flux-server" => "gui-app-emu-flux",
+        _ => crate_name,
+    }
+}
 
 // Services whose exit should take the whole hosted system down with them. A service
 // belongs here when it runs a real hosted server (its `main` keeps listening), so an
@@ -493,15 +500,17 @@ fn build_sideload_apps(apps: &[String], dont_sign: bool, build_args: BuildArgs) 
     // pipeline.
     let signing_mode = if dont_sign { SigningMode::None } else { SigningMode::Developer };
     let bundles_dir = if dont_sign {
-        builder.get_target_root().join("sideload-bundles-unsigned")
+        builder.get_target_root().join(UNSIGNED_SIDELOAD_BUNDLES_DIR)
     } else {
         builder.get_target_root().join(SIDELOAD_BUNDLES_DIR)
     };
-    if apps.is_empty() && !dont_sign {
+    if apps.is_empty() {
         std::fs::remove_dir_all(&bundles_dir).ok();
-        for entry in Builder::images_path().read_dir().expect("images dir is readable").flatten() {
-            if entry.path().extension().is_some_and(|ext| ext == "app") {
-                std::fs::remove_file(entry.path()).expect("stale app archive is removable");
+        if !dont_sign {
+            for entry in Builder::images_path().read_dir().expect("images dir is readable").flatten() {
+                if entry.path().extension().is_some_and(|ext| ext == "app") {
+                    std::fs::remove_file(entry.path()).expect("stale app archive is removable");
+                }
             }
         }
     }
@@ -511,10 +520,27 @@ fn build_sideload_apps(apps: &[String], dont_sign: bool, build_args: BuildArgs) 
         apps.iter().map(String::as_str).collect()
     };
     for app_name in &apps {
+        let artifact_name = foundation_sideload_artifact_name(app_name);
         let bundle = builder.build_app(app_name, &bundles_dir, None, signing_mode, FOUNDATION_SIDELOAD_APPS);
         if !dont_sign {
-            pack_app_archive(&bundle, &Builder::images_path().join(app_archive::archive_file_name(app_name)));
+            pack_app_archive(
+                &bundle,
+                &Builder::images_path().join(app_archive::archive_file_name(artifact_name)),
+            );
         }
+
+        // build_app uses the app ID for generic SDK output because that is how an installed
+        // sideload is keyed on device. Release staging is easier to audit by crate name, and the
+        // parent directory is not carried into the .app archive or covered by either signature.
+        let named_bundle_dir = bundles_dir.join(artifact_name);
+        std::fs::remove_dir_all(&named_bundle_dir).ok();
+        std::fs::rename(&bundle.dir, &named_bundle_dir).unwrap_or_else(|e| {
+            panic!(
+                "Could not rename sideload bundle {} to {}: {e}",
+                bundle.dir.display(),
+                named_bundle_dir.display()
+            )
+        });
     }
 }
 

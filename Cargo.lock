@@ -5065,7 +5065,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-emu-flux-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ab_glyph",
  "anyhow",

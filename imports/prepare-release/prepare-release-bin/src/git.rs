@@ -255,6 +255,20 @@ fn copy_firmware_files(
         .map_err(Error::Stdout)?;
     }
 
+    // Sideload bundles are release inputs, but they must stay outside keyos/apps so Factory,
+    // Recovery, and OTA images do not install them as built-in apps.
+    let sideload_release_dir = release_dir.join("sideload-apps");
+    writeln!(
+        stdout,
+        "Debug: Copying Foundation sideload app bundles to {}",
+        sideload_release_dir.display()
+    )
+    .map_err(Error::Stdout)?;
+    copy_dir_all(
+        keyos_dir.join(&firmware_paths.sideload_apps_dir),
+        sideload_release_dir,
+    )?;
+
     // Copy blassets directory (only .raw files, not source PNGs)
     writeln!(stdout, "Debug: Copying bootloader assets (.raw files only) to {}", release_dir.display())
         .map_err(Error::Stdout)?;

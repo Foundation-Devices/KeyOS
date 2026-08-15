@@ -3,6 +3,8 @@
 
 use std::{env, fs, io::Write, path::PathBuf, process::Command};
 
+const FOUNDATION_SIDELOAD_APP_COUNT: usize = 3;
+
 /// Paths to the firmware files
 #[derive(Debug, Clone)]
 pub struct FirmwarePaths {
@@ -10,6 +12,7 @@ pub struct FirmwarePaths {
     pub recovery: PathBuf,
     pub app: PathBuf,
     pub apps_dir: Option<PathBuf>,
+    pub sideload_apps_dir: PathBuf,
     pub blassets_dir: PathBuf,
     pub common_assets_boot_dir: Option<PathBuf>,
     pub common_assets_dir: Option<PathBuf>,
@@ -122,6 +125,8 @@ pub fn verify_firmware_files_push() -> Result<FirmwarePaths, Error> {
     let recovery_bin = PathBuf::from("target/armv7a-unknown-xous-elf/release/images/recovery.bin");
     let app_bin = PathBuf::from("target/armv7a-unknown-xous-elf/release/images/app.bin");
     let apps_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/keyos/apps");
+    let sideload_apps_dir =
+        PathBuf::from("target/armv7a-unknown-xous-elf/release/sideload-bundles-unsigned");
     let blassets_dir = PathBuf::from("boot/keyos-boot/assets");
     let common_assets_boot_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/common-boot");
     let common_assets_dir = PathBuf::from("target/armv7a-unknown-xous-elf/release/common");
@@ -147,6 +152,22 @@ pub fn verify_firmware_files_push() -> Result<FirmwarePaths, Error> {
     }
 
     let apps_dir_exists = apps_dir.exists();
+    let sideload_apps_valid = fs::read_dir(&sideload_apps_dir)
+        .map(|entries| {
+            let bundles: Vec<_> = entries.filter_map(Result::ok).filter(|entry| entry.path().is_dir()).collect();
+            bundles.len() == FOUNDATION_SIDELOAD_APP_COUNT
+                && bundles.iter().all(|entry| {
+                    entry.path().join("app.elf").is_file()
+                        && entry.path().join("manifest.json").is_file()
+                })
+        })
+        .unwrap_or(false);
+    if !sideload_apps_valid {
+        return Err(Error::FirmwareNotFound {
+            firmware: "Foundation sideload app bundles".to_string(),
+            path: sideload_apps_dir,
+        });
+    }
     let common_assets_boot_dir_exists = common_assets_boot_dir.exists();
     let common_assets_dir_exists = common_assets_dir.exists();
 
@@ -173,6 +194,7 @@ pub fn verify_firmware_files_push() -> Result<FirmwarePaths, Error> {
         recovery: recovery_bin,
         app: app_bin,
         apps_dir: if apps_dir_exists { Some(apps_dir) } else { None },
+        sideload_apps_dir,
         blassets_dir,
         common_assets_dir: if common_assets_dir_exists { Some(common_assets_dir) } else { None },
         common_assets_boot_dir: if common_assets_boot_dir_exists {

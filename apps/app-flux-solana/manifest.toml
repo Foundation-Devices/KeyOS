@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 appId = "0x05a7b38cd1e94f2a8b6c3d0e7f12a459"
+publisher = "Foundation Devices"
+description = "Solana app running in Legacy Mode."
+version = "1.16.0"
 
 [appName]
 en = "Solana"
-
-[appDescription]
-en = "Solana app running on Flux."
 
 [permissions]
 template = ["flux-app"]
