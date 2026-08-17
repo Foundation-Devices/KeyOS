@@ -1,5 +1,5 @@
 {
-  "_": "Cancel",
+  "_": "KeyOS-v0.11.0.bin",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "No archived codes",
@@ -1162,9 +1162,9 @@
       "title": "Recovery"
     },
     "progress": {
-      "copyFile": "Copy file to Prime",
-      "copyingFile": "Copying file to Prime",
-      "fileCopied": "File copied to Prime",
+      "copyFile": "Copy file to Passport",
+      "copyingFile": "Copying file to Passport",
+      "fileCopied": "File copied to Passport",
       "fileRead": "File read",
       "header": "Recovering KeyOS",
       "installingFirmware": "Installing firmware",

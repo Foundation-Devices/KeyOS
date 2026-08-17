@@ -1,5 +1,5 @@
 {
-  "_": "Cancel",
+  "_": "KeyOS-v0.11.0.bin",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "Sin códigos archivados",
@@ -1734,7 +1734,7 @@
     },
     "main": {
       "apps": "Apps",
-      "backedUpXAgo": "Copia de seguridad realizada hace {0}.",
+      "backedUpXAgo": "Copia de Seguridad realizada hace un momento.",
       "backup": "Copias seg.",
       "bitcoinChart": "Bitcoin Price Chart",
       "envoyConnected": "Connected to Envoy",
@@ -1768,7 +1768,7 @@
       "title": "Pair to Envoy"
     },
     "passphraseToOneKeycard": {
-      "title": "Guardar Passphrase en Keycard"
+      "title": "Passphrase to Keycard"
     },
     "recoverRestoreCardKeycard": {
       "tapAKeycard": "Acerca una Keycard a Passport",
@@ -2168,7 +2168,7 @@
     },
     "confirmPassphrase": {
       "content": "Tu Passphrase se borrará al apagarse, o puedes borrarla manualmente volviendo a esta pantalla.",
-      "content2": "Puedes guardar tu Passphrase en una Keycard sin usar. La Passphrase se cifra con tu Master Key y solo puede descifrarse con esa Master Key.",
+      "content2": "You can save your Passphrase to an unused Keycard. The Passphrase is encrypted with your Master Key and can only be decrypted with that Master Key.",
       "fingerprint": "Huella digital",
       "labelAccount0": "Etiqueta la cuenta #0",
       "labelExplainer": "Introduce una etiqueta para esta cuenta de Passphrase. Puedes cambiarla en cualquier momento en la pantalla Detalles de la cuenta.",

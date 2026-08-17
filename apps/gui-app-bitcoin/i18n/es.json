@@ -83,7 +83,7 @@
   "common.slideToSign.signed": "Firmado",
   "common.slideToSign.signing": "Firmando",
   "confirmPassphrase.content": "Tu Passphrase se borrará al apagarse, o puedes borrarla manualmente volviendo a esta pantalla.",
-  "confirmPassphrase.content2": "Puedes guardar tu Passphrase en una Keycard sin usar. La Passphrase se cifra con tu Master Key y solo puede descifrarse con esa Master Key.",
+  "confirmPassphrase.content2": "You can save your Passphrase to an unused Keycard. The Passphrase is encrypted with your Master Key and can only be decrypted with that Master Key.",
   "confirmPassphrase.fingerprint": "Huella digital",
   "confirmPassphrase.labelAccount0": "Etiqueta la cuenta #0",
   "confirmPassphrase.labelExplainer": "Introduce una etiqueta para esta cuenta de Passphrase. Puedes cambiarla en cualquier momento en la pantalla Detalles de la cuenta.",
