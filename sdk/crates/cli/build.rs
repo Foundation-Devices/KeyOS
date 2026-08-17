@@ -4,6 +4,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -30,4 +31,27 @@ fn main() {
     }
 
     println!("cargo:rustc-env=FOUNDATION_FAKE_BIN={}", dest_dir.display());
+    println!("cargo:rustc-env=FOUNDATION_GIT_COMMIT={}", git_commit(&manifest_dir));
+}
+
+/// Short HEAD hash of the checkout being built, or `unknown` when git cannot answer (source
+/// snapshot, no git in PATH).
+fn git_commit(manifest_dir: &str) -> String {
+    if let Some(git_dir) = git_output(manifest_dir, &["rev-parse", "--absolute-git-dir"]) {
+        // `HEAD` moves on checkout, `logs/HEAD` on every commit; without both, the hash sticks
+        // at whatever it was when the crate was last recompiled for another reason.
+        for file in ["HEAD", "logs/HEAD"] {
+            let path = Path::new(&git_dir).join(file);
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
+    git_output(manifest_dir, &["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".to_string())
+}
+
+fn git_output(dir: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

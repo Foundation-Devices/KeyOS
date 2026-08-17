@@ -11,10 +11,14 @@ use clap::{Parser, Subcommand};
 
 use crate::commands;
 
+/// Version string for `-V`: the package version alone does not say which tree a build came from,
+/// so it carries the commit `build.rs` captured.
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("FOUNDATION_GIT_COMMIT"), ")");
+
 #[derive(Parser)]
 #[command(
     name = "foundation",
-    version,
+    version = VERSION,
     about = "Foundation CLI for KeyOS app development",
     arg_required_else_help = true,
     disable_help_subcommand = true
