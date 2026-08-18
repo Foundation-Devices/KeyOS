@@ -914,6 +914,13 @@ else
   echo "  export PATH=\"$INSTALL_ROOT/bin:\$PATH\""
 fi
 echo "  foundation develop"
+
+if [ "$OS" = "unknown-linux-gnu" ] && [ ! -f /etc/udev/rules.d/99-passport.rules ]; then
+  echo
+  echo "To access Passport Prime over USB (sideload, logs, passport-drive), install the udev rules:"
+  echo "  sudo cp \"$CURRENT_LINK/share/99-passport.rules\" /etc/udev/rules.d/"
+  echo "  sudo udevadm control --reload && sudo udevadm trigger"
+fi
 "##
     )
 }

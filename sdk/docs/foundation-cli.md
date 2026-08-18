@@ -194,6 +194,10 @@ These are prompt workflows, not `foundation` CLI subcommands:
 Use `--no-run` when the user only wants the bundle uploaded; it still verifies passport-drive MCP and Developer Mode
 before writing.
 
+On Linux, every USB device interaction (`sideload`, `logs`, `cert install`, passport-drive MCP) requires the udev
+rules shipped at `<sdk-root>/share/99-passport.rules`. A permission error opening the device means they are not
+installed: copy the file to `/etc/udev/rules.d/`, then `sudo udevadm control --reload && sudo udevadm trigger`.
+
 `foundation cert gen` creates long-lived signing material in the user's home directory. Treat this as a user
 identity operation, not a routine build step. If a build fails because no signing identity exists, explain the
 required setup instead of generating one silently.

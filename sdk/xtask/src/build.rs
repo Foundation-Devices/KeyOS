@@ -1327,6 +1327,9 @@ fn copy_entry(root: &Path, stage_dir: &Path, entry: &CopyEntry, resolver: &Sourc
     }
 
     let destination = stage_dir.join(&entry.dest);
+    if source.is_file() {
+        return util::copy_file(&source, &destination);
+    }
     match entry.filter {
         CopyFilter::All => util::copy_dir_all(&source, &destination)?,
         CopyFilter::CargoPackage => stage_cargo_package_snapshot(&source, &destination)?,

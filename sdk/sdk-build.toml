@@ -203,6 +203,10 @@ dest = ".claude"
 source = "examples"
 dest = "examples"
 
+[[copy]]
+source = "../utils/passport-drive/99-passport.rules"
+dest = "share/99-passport.rules"
+
 [docs]
 guide_source = "docs"
 api_crates = []

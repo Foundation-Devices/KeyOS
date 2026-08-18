@@ -208,6 +208,7 @@ The staged bundle also receives:
 - the generated shared UI assets under `resources/`
 - templates under `lib/templates/`
 - docs and examples
+- the Passport Prime udev rules at `share/99-passport.rules` (Linux USB access)
 - the SDK-user `flake.nix`, `flake.lock`, and `setup.sh`
 
 The copy list and compile list are configured in `sdk-build.toml`.
