@@ -351,11 +351,6 @@ struct BuildArgs {
     /// This adds the `log-serial` kernel feature and includes `log-serial`.
     #[arg(long, conflicts_with = "hosted")]
     log_serial: bool,
-    /// Enable USB debug protocol service in production firmware builds.
-    ///
-    /// This includes `usb-debug`.
-    #[arg(long, conflicts_with = "hosted")]
-    log_usb_debug: bool,
     /// Write logs to files on the external USB drive.
     #[arg(long, conflicts_with = "hosted")]
     log_usb_file: bool,
@@ -375,8 +370,8 @@ struct BuildArgs {
     #[arg(long)]
     reproducible: bool,
     /// Disables serial logging output in production firmware. Implies --reproducible.
-    /// Use `--log-serial` and/or `--log-usb-debug` to re-enable serial/USB debug logging in production
-    /// builds. Internal flash file logging remains enabled.
+    /// Use `--log-serial` to re-enable serial logging in production builds.
+    /// Internal flash file logging remains enabled.
     #[arg(
         long,
         conflicts_with = "hosted",
@@ -561,19 +556,22 @@ fn process_services(build_args: &mut BuildArgs) {
         // Keep internal file logging enabled for all hardware builds.
         add_service(LOGGING_SERVICE_FILE);
 
-        // In non-production firmware, auto-enable serial logging outputs.
+        // In non-production firmware, auto-enable serial logging.
         if !build_args.production_firmware {
             build_args.log_serial = true;
-            build_args.log_usb_debug = true;
         }
 
         if build_args.log_serial {
             add_service(LOGGING_SERVICE_SERIAL);
         }
+        // usb-debug ships in production firmware too: built with the `production`
+        // feature it restricts its command set and keeps its USB interface off
+        // until Developer Mode is enabled. Recovery has no settings-server, so a
+        // production recovery image could never enable the interface; skip it.
         // Only auto-include usb-debug when using default services (which
         // include gui-server). Explicit service lists (e.g. sys-benchmark)
         // may not have gui-server, and usb-debug can't function without it.
-        if build_args.log_usb_debug && build_args.services.is_empty() {
+        if build_args.services.is_empty() && !(build_args.production_firmware && build_args.is_recovery) {
             add_service(LOGGING_SERVICE_USB_DEBUG);
         }
         if build_args.log_usb_file {

@@ -125,6 +125,16 @@ impl server::ScalarEventHandler<fs::FileSystemEvent> for Server {
                 .inspect_err(|e| log::error!("failed to mount encrypted settings {e:?}"))
                 .ok();
 
+            // Developer Mode must not survive a power cycle on production firmware: a shipped unit
+            // that was once unlocked with it on would otherwise keep the usb-debug interface
+            // reachable. Clear it as the encrypted store mounts, before subscribers are notified.
+            #[cfg(feature = "production")]
+            if let Some(mut encrypted) = self.store.get_encrypted() {
+                if encrypted.developer_mode.0 {
+                    encrypted.developer_mode = settings::global::DeveloperMode(false);
+                }
+            }
+
             if let Some(settings) = self.store.get_encrypted() {
                 self.subscriptions.notify_encrypted_subscribers(&settings);
             }

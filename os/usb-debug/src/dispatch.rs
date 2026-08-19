@@ -96,6 +96,22 @@ impl DebugProtocol {
             let _ = resp_tx.send(Response::Err);
             return;
         }
+        #[cfg(feature = "production")]
+        if requires_unlock(&cmd) {
+            match self.gui.is_locked() {
+                Ok(false) => {}
+                Ok(true) => {
+                    log::warn!("debug: command 0x{:02x} rejected: device is locked", cmd.cmd_byte());
+                    let _ = resp_tx.send(Response::Locked);
+                    return;
+                }
+                Err(e) => {
+                    log::error!("debug: lock-state check failed: {e:?}");
+                    let _ = resp_tx.send(Response::Err);
+                    return;
+                }
+            }
+        }
         let response = self.dispatch(cmd);
         let _ = resp_tx.send(response);
         if self.reboot_after_answering {
@@ -791,6 +807,22 @@ fn command_allowed(cmd: &Command) -> bool {
 
 #[cfg(not(feature = "production"))]
 fn command_allowed(_cmd: &Command) -> bool { true }
+
+/// Commands that capture the screen or drive input, which a locked production unit must refuse so
+/// USB access cannot read the display or the PIN keypad. Non-production firmware keeps them
+/// available while locked, which the KeyOS development workflow relies on. LaunchApp,
+/// InstallCertificate and SetSystemTime carry their own lock checks in every build.
+#[cfg(feature = "production")]
+fn requires_unlock(cmd: &Command) -> bool {
+    matches!(
+        cmd,
+        Command::Screenshot
+            | Command::Swipe { .. }
+            | Command::PowerButton { .. }
+            | Command::InputText(_)
+            | Command::CloseApp { .. }
+    )
+}
 
 // On keyos, the response payload borrows the gui-server-lent buffer or the
 // kernel debug buffer directly so the writer thread can read from mapped pages
