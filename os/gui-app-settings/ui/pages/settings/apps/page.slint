@@ -39,6 +39,9 @@ component AppListCard inherits Rectangle {
 
     callback clicked();
 
+    // Any bundle can claim a publisher string; the badge marks the ones whose
+    // Foundation signature backs the claim.
+    property <bool> show-badge: root.app.is_foundation_signed && root.app.publisher_name != "";
     property <duration> select-anim-duration: 100ms;
     animate background { duration: select-anim-duration; }
 
@@ -101,7 +104,8 @@ component AppListCard inherits Rectangle {
         content-column := VerticalLayout {
             alignment: center;
             spacing: Size.sz1;
-            width: root.width - (Size.sz4 * 2) - icon-column.width - parent.spacing;
+            width: root.width - (Size.sz4 * 2) - icon-column.width - parent.spacing
+                - (root.show-badge ? Size.sz8 + Size.sz4 : 0px);
 
             TextMd {
                 width: parent.width;
@@ -112,36 +116,23 @@ component AppListCard inherits Rectangle {
                 overflow: elide;
             }
 
-            HorizontalLayout {
-                spacing: Size.sz1;
-
-                TextSm {
-                    horizontal-stretch: 0;
-                    max-width: parent.width - Size.sz5;
-                    text: root.app.publisher_name;
-                    color: Palette.content-tertiary;
-                    horizontal-alignment: left;
-                    wrap: no-wrap;
-                    overflow: elide;
-                }
-
-                // Any bundle can claim a publisher string; the shield marks the ones whose
-                // Foundation signature backs the claim.
-                if root.app.is_foundation_signed && root.app.publisher_name != "": VerticalLayout {
-                    alignment: center;
-
-                    Icon {
-                        name: "shield2";
-                        size: Size.sz4;
-                        color: Palette.content-positive;
-                    }
-                }
-
-                Rectangle {
-                    horizontal-stretch: 1;
-                }
+            TextSm {
+                width: parent.width;
+                text: root.app.publisher_name;
+                color: Palette.content-tertiary;
+                horizontal-alignment: left;
+                wrap: no-wrap;
+                overflow: elide;
             }
         }
+    }
+
+    if root.show-badge: Icon {
+        x: root.width - Size.sz4 - self.width;
+        y: (root.height - self.height) / 2;
+        name: "foundation";
+        size: Size.sz8;
+        color: Palette.content-copper-brand;
     }
 }
 
