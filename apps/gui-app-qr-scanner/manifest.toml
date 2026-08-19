@@ -1,5 +1,6 @@
 manifestVersion = "0"
 appId = "0x6775692d6170702d6578616d706c652e"
+version = "1.4.0"
 
 [appName]
 en = "QR Scanner"

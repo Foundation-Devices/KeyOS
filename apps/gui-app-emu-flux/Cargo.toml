@@ -3,7 +3,7 @@
 
 [package]
 name = "gui-app-emu-flux-server"
-version = "1.0.0"
+version = "1.4.0"
 edition = "2021"
 publish = false
 build = "build.rs"

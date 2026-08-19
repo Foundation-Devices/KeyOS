@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-ethereum"
-version = "0.1.0"
+version = "1.22.1"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-solana"
-version = "0.1.0"
+version = "1.16.0"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "app-manager"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "app-manifest",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "backup"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crypto",
  "fs",
@@ -1537,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "bt"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bitflags 2.9.4",
  "gpio",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "camera"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log 0.4.27",
  "num-derive",
@@ -2782,7 +2782,7 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "crypto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log 0.4.27",
  "num-derive",
@@ -4339,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "fs"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bitflags 2.9.4",
  "chrono",
@@ -4918,7 +4918,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-alerts"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "fs",
  "jiff",
@@ -4932,7 +4932,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-authenticator"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4969,7 +4969,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-bitcoin"
-version = "0.2.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5065,7 +5065,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-emu-flux-server"
-version = "1.0.0"
+version = "1.4.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -5115,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-file-browser"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5219,7 +5219,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-onboarding"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "app-manager",
@@ -5274,7 +5274,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-qr-scanner"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "app-manager",
  "app-manifest",
@@ -5349,7 +5349,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-security-keys"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "fido",
  "fs",
@@ -5371,7 +5371,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-seed-vault"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "bip85_extended",
@@ -5396,7 +5396,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-settings"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "app-archive",
@@ -5523,7 +5523,7 @@ dependencies = [
 
 [[package]]
 name = "gui-server-api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "app-manifest",
  "hex-literal",
@@ -5552,7 +5552,7 @@ dependencies = [
 
 [[package]]
 name = "haptics"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log 0.4.27",
  "num-derive",
@@ -7607,7 +7607,7 @@ dependencies = [
 
 [[package]]
 name = "keycard"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "backup-shard",
  "crypto",
@@ -8871,7 +8871,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nfc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "gpio",
  "num-derive",
@@ -10883,7 +10883,7 @@ dependencies = [
 
 [[package]]
 name = "quantum-link"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "backup-shard",
  "bt",
@@ -11517,7 +11517,7 @@ dependencies = [
 
 [[package]]
 name = "rgb-led"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log 0.4.27",
  "rkyv",
@@ -12201,7 +12201,7 @@ dependencies = [
 
 [[package]]
 name = "security"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bip39",
  "crypto",
@@ -12483,7 +12483,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fs",
  "jiff",

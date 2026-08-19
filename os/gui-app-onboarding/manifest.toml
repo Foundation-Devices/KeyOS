@@ -1,5 +1,6 @@
 manifestVersion = "0"
 appId = "0xdac5321775d449c11bc9c90f38067f8f"
+version = "1.4.0"
 
 [appName]
 en = "Onboarding"

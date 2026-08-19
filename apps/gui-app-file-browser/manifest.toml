@@ -1,5 +1,6 @@
 manifestVersion = "0"
 appId = "0x46696c652042726f7773657200000000"
+version = "1.4.0"
 
 [appName]
 en = "Files"

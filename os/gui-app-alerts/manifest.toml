@@ -1,5 +1,6 @@
 manifestVersion = "0"
 appId = "0x32defc0867555fe8002759667000b22a"
+version = "1.4.0"
 
 [appName]
 en = "Alerts"

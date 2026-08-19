@@ -3,7 +3,7 @@
 
 [package]
 name = "keycard"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Keycard server API crate"
 publish = false
