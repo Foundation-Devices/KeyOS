@@ -31,6 +31,7 @@ import {
     UISize,
     Utils,
 } from "@ui/theme.slint";
+import { UIColors } from "@ui/palettes/ui-colors.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 
 component PageDot inherits Rectangle {
@@ -373,9 +374,9 @@ component LauncherCollectionItem inherits Rectangle {
             if !root.is-dragging && State.loading-item-id == root.item.id: TimerLoader {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                size: 56px;
-                loader-color: CurrentTheme.is-dark ? #54cad8aa : #0ea6b3aa;
-                active-color: Palette.content-brand;
+                size: 44px;
+                loader-color: CurrentTheme.is-dark ? UIColors.neutral-600.with-alpha(0.667) : UIColors.neutral-900.with-alpha(0.667);
+                active-color: CurrentTheme.is-dark ? UIColors.neutral-600 : UIColors.neutral-900;
             }
 
             if State.loading-item-id != root.item.id || root.is-dragging: Rectangle {
