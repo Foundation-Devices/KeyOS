@@ -15,6 +15,7 @@ use xous_ticktimer::TicktimerCallback;
 
 use crate::core::{UpdateEvent, UpdateOutcome, FIRMWARE_FILE_PATH, STAGED_FIRMWARE_FILE_PATH};
 use crate::downloader::{EventOutcome, UpdateDownloader};
+use crate::firmware_release::FirmwareReleaseTracker;
 use crate::fs_permissions::FileSystemPermissions;
 use crate::state::{DownloadedUpdate, UpdateState};
 use crate::{
@@ -554,7 +555,7 @@ impl InstallTask {
     fn apply_releases(&self, release_paths: Vec<String>) -> whence::Result<UpdateOutcome, Error> {
         let current_fw_timestamp: u32 =
             self.security.firmware_timestamp().map(u32::from).map_err(|_| Error::SecurityError).whence()?;
-        let mut min_allowed_update_timestamp = current_fw_timestamp;
+        let mut firmware_releases = FirmwareReleaseTracker::new(current_fw_timestamp);
 
         let patches = core::analyze_patches(&self.fs, &release_paths)?;
         let total_bytes = core::measure_fw_size(&self.fs)?;
@@ -576,8 +577,6 @@ impl InstallTask {
         let crypto = &self.crypto;
         let sender = &self.sender;
 
-        let mut fw_timestamp = None;
-
         let outcome = core::apply_update(
             fs,
             |path| {
@@ -594,19 +593,10 @@ impl InstallTask {
                 }
 
                 let update_timestamp = header.timestamp();
-                if update_timestamp < min_allowed_update_timestamp {
-                    log::error!(
-                        "rollback prevented while verifying {path}: current timestamp = {min_allowed_update_timestamp}, update timestamp = {update_timestamp}"
-                    );
-                    return Err(Error::RollbackPrevented {
-                        current: min_allowed_update_timestamp,
-                        update: update_timestamp,
-                    })
-                    .whence();
-                }
-
-                min_allowed_update_timestamp = update_timestamp;
-                fw_timestamp = Some(update_timestamp.into());
+                firmware_releases
+                    .record_verified(header.version(), update_timestamp)
+                    .inspect_err(|error| log::error!("rollback prevented while verifying {path}: {error}"))
+                    .whence()?;
                 Ok(())
             },
             release_paths,
@@ -622,12 +612,18 @@ impl InstallTask {
             },
         )?;
 
-        let Some(fw_timestamp) = fw_timestamp else {
+        if firmware_releases.last_release().is_none() {
             log::error!("firmware timestamp wasn't set");
             return Err(Error::Cosign2HeaderMissing).whence();
-        };
+        }
 
-        self.security.set_firmware_timestamp(fw_timestamp).map_err(|_| Error::SecurityError)?;
+        if let Some(fw_timestamp) = firmware_releases.timestamp_to_persist() {
+            self.security.set_firmware_timestamp(fw_timestamp.into()).map_err(|_| Error::SecurityError)?;
+        } else {
+            log::warn!(
+                "Skipping firmware timestamp update because the batch contained only pre-release firmware"
+            );
+        }
 
         Ok(outcome)
     }

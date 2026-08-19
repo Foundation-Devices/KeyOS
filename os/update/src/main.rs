@@ -16,6 +16,8 @@ mod core;
 #[cfg(any(keyos, test))]
 mod downloader;
 #[cfg(keyos)]
+mod firmware_release;
+#[cfg(keyos)]
 mod state;
 
 #[derive(Debug, Copy, Clone, server::Message)]
