@@ -22,7 +22,7 @@ i18n = { path = "../../i18n" }
 jiff = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
-lru = "0.13"
+lru = "0.18.2"
 quantum-link = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

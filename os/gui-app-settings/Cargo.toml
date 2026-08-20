@@ -24,7 +24,7 @@ keycard = { workspace = true }
 keycard-scan = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
-lru = "0.13"
+lru = "0.18.2"
 ngwallet = { workspace = true }
 num-format = "0.4.4"
 oneshot = { workspace = true }

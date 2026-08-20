@@ -34,7 +34,7 @@ itoa = { version = "1.0" }
 libloading = "0.8"
 log = { workspace = true }
 log-server = { workspace = true }
-lru = "0.13"
+lru = "0.18.2"
 paste = { workspace = true }
 percent-encoding = { version = "2.3.1" }
 phf = { version = "0.11" }

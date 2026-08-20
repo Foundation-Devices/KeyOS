@@ -19,7 +19,7 @@ fatfs = { workspace = true, features = ["std", "alloc", "chrono"] }
 fs = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
-lru = "0.13"
+lru = "0.18.2"
 num-derive = { workspace = true }
 num-traits = { workspace = true }
 rkyv = { workspace = true }
