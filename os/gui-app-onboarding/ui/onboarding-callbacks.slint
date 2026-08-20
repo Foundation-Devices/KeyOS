@@ -72,11 +72,17 @@ export enum MasterSeedState { Idle, SavingToSE, EncryptingFs, Success, Failed }
 
 export enum RestoreBackupState { Idle, NotFound, Downloading, Restoring, Restored, Error }
 
+// Controls the backup choice shown after restoring a seed. This is kept separate
+// from the restore route because the Magic Backup restore screen is shared by all
+// recovery methods.
+export enum BackupFlow { NewSeed, RecoveredSeed, SamePassportKeycards, NewDeviceKeycards, ForcedBackup }
+
 export global SeedGlobal {
     in property <MasterSeedState> master-seed-state;
     in property <RestoreBackupState> restore-backup-state;
     // invalid scanned SeedQR payload
     in-out property <bool> seed-qr-error: false;
+    in property <BackupFlow> backup-flow: NewSeed;
 
     // Store the pin to be set later
     // params:(pin, is-pin)

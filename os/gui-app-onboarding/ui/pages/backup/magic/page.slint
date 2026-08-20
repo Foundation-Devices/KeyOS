@@ -3,7 +3,6 @@
 
 import { MagicBackupProps } from "props.slint";
 import { Navigate } from "../../../gen/navigate.slint";
-import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
 import { Size, Palette } from "@ui/theme.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import {
@@ -23,10 +22,6 @@ export component MagicBackupPage inherits GlowShieldPage {
     in property <MagicBackupProps> props;
 
     property <bool> first-page: true;
-
-    init => {
-        OnboardingCallbacks.set-magic-backup-enabled(true);
-    }
 
     NavHeader {
         y: 0;

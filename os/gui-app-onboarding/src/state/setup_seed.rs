@@ -25,7 +25,7 @@ use crate::{
     notify_onboarding_state,
     security_permissions::SecurityPermissions,
     state::{AppState, PendingPin},
-    tr, Animate, MasterSeedState, Navigate, NavigateOptions, QlStatus, SeedGlobal, TrId,
+    tr, Animate, BackupFlow, MasterSeedState, Navigate, NavigateOptions, QlStatus, SeedGlobal, TrId,
 };
 
 /// Domain separator for folding secure element randomness into a new master
@@ -85,6 +85,8 @@ pub async fn restore_from_seed_words(state: StoredValue<AppState>, words: ModelR
         nav.invoke_master_key_deleted_restore(NavigateOptions { replace: true, ..Default::default() });
         return;
     }
+
+    seed_global.set_backup_flow(BackupFlow::RecoveredSeed);
 
     wrap_set_seed(state, false, async move {
         log::info!("Starting seed words restore process");
@@ -149,6 +151,8 @@ pub async fn restore_from_seed_qr(state: StoredValue<AppState>) -> anyhow::Resul
         nav.invoke_master_key_deleted_restore(NavigateOptions { replace: true, ..Default::default() });
         return Ok(());
     }
+
+    seed_global.set_backup_flow(BackupFlow::RecoveredSeed);
 
     wrap_set_seed(state, false, async move {
         async_archive::<SecurityPermissions, _>(SetSeedAndPin { seed, pin, pin_entry })

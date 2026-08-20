@@ -21,7 +21,7 @@ use crate::{
         setup_seed::{compare_with_current_seed, wrap_set_seed},
         AppState, PendingPin,
     },
-    tr, KeycardRestoreGlobal, KeycardRestoreKind, MasterSeedState, SeedGlobal, StepModel, TrId,
+    tr, BackupFlow, KeycardRestoreGlobal, KeycardRestoreKind, MasterSeedState, SeedGlobal, StepModel, TrId,
 };
 
 pub struct KeycardRestoreFlow {
@@ -72,7 +72,8 @@ async fn restore_seed(
 
     // In case we're recovering a previously erased master key,
     // compare the fingerprints to ensure they're matching
-    if seed_global.get_is_master_key_recovery()
+    let is_master_key_recovery = seed_global.get_is_master_key_recovery();
+    if is_master_key_recovery
         && !compare_with_current_seed(&seed)
             .await
             .inspect_err(|e| log::error!("failed to compare seed {e:?}"))
@@ -83,16 +84,64 @@ async fn restore_seed(
         return;
     }
 
+    // A missing Envoy part on Magic keycards requires a fresh backup even if
+    // the cards belong to this Passport. It takes precedence over the normal
+    // same-Passport shortcut.
+    seed_global.set_backup_flow(backup_flow(kind, different_device_id));
+    let magic_backup_enabled = matches!(kind, KeycardRestoreKind::Magic | KeycardRestoreKind::TwoCards);
+
     wrap_set_seed(state, false, async move {
         let PendingPin { pin, pin_entry } = state.borrow().get_pending_pin()?;
 
         async_archive::<SecurityPermissions, _>(SetSeedAndPin { seed, pin, pin_entry })
             .await
             .context("failed to set pin and seed")?;
+        if !is_master_key_recovery {
+            state.borrow().settings.set_magic_backup_enabled(magic_backup_enabled);
+        }
 
         Ok(())
     })
     .await;
+}
+
+fn backup_flow(kind: KeycardRestoreKind, different_device_id: bool) -> BackupFlow {
+    match kind {
+        KeycardRestoreKind::TwoCards => BackupFlow::ForcedBackup,
+        KeycardRestoreKind::Manual | KeycardRestoreKind::Magic => {
+            if different_device_id {
+                BackupFlow::NewDeviceKeycards
+            } else {
+                BackupFlow::SamePassportKeycards
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_magic_envoy_part_forces_a_backup_even_for_the_same_passport() {
+        assert!(matches!(backup_flow(KeycardRestoreKind::TwoCards, false), BackupFlow::ForcedBackup));
+    }
+
+    #[test]
+    fn same_passport_keycards_skip_backup_selection() {
+        assert!(matches!(backup_flow(KeycardRestoreKind::Manual, false), BackupFlow::SamePassportKeycards));
+    }
+
+    #[test]
+    fn different_passport_keycards_show_the_new_device_dialog() {
+        assert!(matches!(backup_flow(KeycardRestoreKind::Magic, true), BackupFlow::NewDeviceKeycards));
+        assert!(matches!(backup_flow(KeycardRestoreKind::Manual, true), BackupFlow::NewDeviceKeycards));
+    }
+
+    #[test]
+    fn magic_keycard_fallback_never_shows_the_new_device_dialog() {
+        assert!(matches!(backup_flow(KeycardRestoreKind::TwoCards, true), BackupFlow::ForcedBackup));
+    }
 }
 
 async fn scan_card(

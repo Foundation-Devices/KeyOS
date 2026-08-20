@@ -17,8 +17,8 @@ import { TR2, TrId } from "../../../../gen/tr.slint";
 import { TR2, TrId } from "../../../../gen/tr.slint";
 import { Navigate, Animate } from "../../../../gen/navigate.slint";
 import {
+    BackupFlow,
     OnboardingCallbacks,
-    KeycardRestoreGlobal,
     SeedGlobal,
     RestoreBackupState,
 } from "../../../../onboarding-callbacks.slint";
@@ -70,6 +70,7 @@ component RestoringView inherits JumboIconPageBody {
 
 component ErrorView inherits JumboIconPageBody {
     callback retry();
+    callback proceed(bool, Animate);
 
     OnboardingContentSection {
         HorizontalLayout {
@@ -98,7 +99,7 @@ component ErrorView inherits JumboIconPageBody {
             label: TR2.lookup(TrId.CommonButtonContinue);
             importance: tertiary;
             clicked => {
-                Navigate.connect-wallet({ })
+                root.proceed(false, Animate.Forward)
             }
         }
 
@@ -117,13 +118,19 @@ export component RestoreMagicBackupPage inherits OnboardingBasePage {
     property <RestoreBackupState> state <=> SeedGlobal.restore-backup-state;
     property <bool> show-dialog: false;
 
+    function proceed(replace: bool, animate: Animate) {
+        if SeedGlobal.backup-flow == BackupFlow.SamePassportKeycards {
+            Navigate.connect-wallet({ replace: replace, animate: animate });
+        } else if SeedGlobal.backup-flow == BackupFlow.NewDeviceKeycards {
+            show-dialog = true;
+        } else {
+            OnboardingCallbacks.navigate-backup();
+        }
+    }
+
     function next() {
         if (state == RestoreBackupState.Restored || state == RestoreBackupState.NotFound) {
-            if KeycardRestoreGlobal.different-device-id {
-                show-dialog = true;
-            } else {
-                Navigate.connect-wallet({ replace: true, animate: Animate.None })
-            }
+            proceed(true, Animate.None);
         }
     }
 
@@ -138,6 +145,9 @@ export component RestoreMagicBackupPage inherits OnboardingBasePage {
     if state == RestoreBackupState.Idle: LoadingView { }
     if state == RestoreBackupState.Downloading || state == RestoreBackupState.Restoring: RestoringView { }
     if state == RestoreBackupState.Error: ErrorView {
+        proceed(replace, animate) => {
+            root.proceed(replace, animate);
+        }
         retry => {
             SeedGlobal.restore-backup-state = RestoreBackupState.Idle;
             SeedGlobal.retry-restore-magic-backup();
@@ -146,6 +156,7 @@ export component RestoreMagicBackupPage inherits OnboardingBasePage {
 
     if show-dialog: Rectangle {
         background: Palette.overlay;
+
         Dialog {
             title: TR2.lookup(TrId.RecoverSuccessModalNewDeviceHeader);
             message: TR2.lookup(TrId.RecoverSuccessModalNewDeviceSubheader);
@@ -157,7 +168,7 @@ export component RestoreMagicBackupPage inherits OnboardingBasePage {
             show-close-button: true;
             width: UISize.modal-width;
             on-cancel => {
-                Navigate.connect-wallet({ replace: true, animate: Animate.None })
+                Navigate.connect-wallet({ replace: true, animate: Animate.None });
             }
             on-ok => {
                 OnboardingCallbacks.navigate-backup();

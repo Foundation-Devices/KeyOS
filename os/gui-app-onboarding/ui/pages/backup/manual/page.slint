@@ -8,6 +8,7 @@ import {
     ButtonSection,
     Button,
     HeadingMd,
+    Link,
     NavHeader,
     TextMd,
     GlowShieldPage,
@@ -15,8 +16,12 @@ import {
     ShieldContent,
     OverlayImage,
 } from "@ui/widgets.slint";
-import { Palette, UISize } from "@ui/theme.slint";
-import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
+import { Importance, Palette, UISize } from "@ui/theme.slint";
+import {
+    BackupFlow,
+    OnboardingCallbacks,
+    SeedGlobal,
+} from "../../../onboarding-callbacks.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 
 export component ManualBackupPage inherits GlowShieldPage {
@@ -24,14 +29,22 @@ export component ManualBackupPage inherits GlowShieldPage {
 
     property <bool> show-dialog:false;
 
-    init => {
-        OnboardingCallbacks.set-magic-backup-enabled(false);
-    }
-
     NavHeader {
         y: 0;
         clicked => {
             Navigate.backward();
+        }
+
+        if SeedGlobal.backup-flow == BackupFlow.RecoveredSeed
+            || SeedGlobal.backup-flow == BackupFlow.NewDeviceKeycards: Link {
+            label: TR2.lookup(TrId.CommonButtonSkip);
+            importance: Importance.normal;
+            clicked => {
+                if SeedGlobal.backup-flow == BackupFlow.RecoveredSeed {
+                    OnboardingCallbacks.set-magic-backup-enabled(false);
+                }
+                Navigate.connect-wallet({ });
+            }
         }
     }
 
@@ -54,6 +67,7 @@ export component ManualBackupPage inherits GlowShieldPage {
                 label: TR2.format(TrId.BackupManualMainXOfYKeycardBackup, ["2", "3"]);
                 importance: primary;
                 clicked => {
+                    OnboardingCallbacks.set-magic-backup-enabled(false);
                     Navigate.manual-keycard-backup({ });
                 }
             }
@@ -88,6 +102,7 @@ export component ManualBackupPage inherits GlowShieldPage {
                 show-dialog = false;
             }
             on-ok => {
+                OnboardingCallbacks.set-magic-backup-enabled(false);
                 Navigate.manual-backup-seed({ });
             }
         }

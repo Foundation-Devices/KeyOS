@@ -12,6 +12,7 @@ import {
 } from "@ui/widgets.slint";
 import { TR2, TrId } from "../../../gen/tr.slint";
 import { Navigate, Animate } from "../../../gen/navigate.slint";
+import { OnboardingCallbacks } from "../../../onboarding-callbacks.slint";
 import { KeyCardAnimation } from "@ui/widgets/key-card-animation.slint";
 import { Palette, Size, UISize } from "@ui/theme.slint";
 
@@ -56,6 +57,7 @@ export component KeycardTipPage inherits BasePage {
                     label: TR2.lookup(TrId.CommonButtonConfirm);
                     importance: primary;
                     clicked => {
+                        OnboardingCallbacks.set-magic-backup-enabled(true);
                         Navigate.creating-magic-backup({ });
                     }
                 }

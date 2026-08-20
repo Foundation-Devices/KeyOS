@@ -964,6 +964,7 @@ fn clear_slint_state(ui: &AppWindow, state: &AppState) {
     seed.set_master_seed_state(Default::default());
     seed.set_restore_backup_state(Default::default());
     seed.set_seed_qr_error(Default::default());
+    seed.set_backup_flow(Default::default());
     seed.set_is_master_key_recovery(Default::default());
     seed.set_fingerprint_mismatch(Default::default());
 
