@@ -1,5 +1,5 @@
 {
-  "_": "KeyOS-v0.11.0.bin",
+  "_": "Ask to Import",
   "authenticator": {
     "archivedCodes": {
       "noArchivedCodes": "Sin códigos archivados",
@@ -784,6 +784,10 @@
       "content": "This device may not be genuine or may have been tampered with during shipping. Please contact support.",
       "warning": "Security Check Failed"
     },
+    "errorSecurityCheckIncomplete": {
+      "content": "Keep Passport nearby, check your internet connection, and make sure your phone’s date and time are set automatically. Then try again.",
+      "warning": "Security Check Incomplete"
+    },
     "errorSecurityCheckPending": {
       "content": "Envoy failed to connect to Foundation servers. Please retry the check on Envoy. ",
       "warning": "Security Check Pending"
@@ -1454,6 +1458,11 @@
     "appsModalInvalidSignature": {
       "content": "Install failed. Passport is unable to verify the app signature. Contact the app publisher.",
       "header": "Invalid Signature"
+    },
+    "appsModalNewVersionAvailable": {
+      "content": "Do you want to update {0} app from version {1} to version {2}?",
+      "header": "New Version Available",
+      "installAndUpdate": "Install and Update"
     },
     "appsModalRemoveXFirstThenRetry": {
       "content": "{0} is installed and depends on this certificate. Remove the app first, then try again.",
@@ -2289,8 +2298,12 @@
     "enterPassphrase": {
       "content": "Escribe con cuidado. Cualquier Passphrase es válida. Asegúrate de hacer una copia de seguridad de tu Passphrase.",
       "fillerText": "Introduce la Passphrase...",
+      "medium": "medium",
       "passphraseLength": "Characters used",
-      "title": "Introduce Passphrase"
+      "passphraseStrength": "Passphrase Strength: ",
+      "strong": "strong",
+      "title": "Introduce Passphrase",
+      "weak": "weak"
     },
     "exploreAddresses": {
       "title": "Explorar direcciones"
@@ -2391,6 +2404,11 @@
       "signFile": "Firmar con un archivo",
       "signQuantum": "Firmar con QuantumLink"
     },
+    "scanModalUnableVerifyInputs": {
+      "content": "Passport could not confirm the true amount of one or more inputs in this transaction.\nThis usually means your wallet software did not include the full input history. If you trust it, you can turn verification off.",
+      "header": "Unable to Verify Inputs",
+      "temporarilyDisable": "Temporarily Disable"
+    },
     "seedWords": {
       "suggest": "Sugerir",
       "title": "Palabras semilla"
@@ -2404,6 +2422,9 @@
       "subtitleMultisig": "Multifirma",
       "subtitleMultisigPolicy": "Política",
       "subtitleMultisigPolicyAsk": "Preguntar al importar",
+      "subtitleSecurity": "Security",
+      "subtitleSecurityVerifyInputs": "Verify Full Input History",
+      "subtitleSecurityVerifyInputsContent": "Reject transactions where Passport cannot verify all input history. ",
       "title": "Configuración"
     },
     "settingsDisplayAmount": {

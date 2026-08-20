@@ -8,8 +8,8 @@ use {
         psbt_signing::{PendingPsbt, PsbtOrigin},
         state::AppState,
         tr, AddressType, Animate, Callbacks, CasaHealth, CasaHealthState, CreateAccount, CreateAccountState,
-        FileSaveState, KeychainKind, MultiSigView, Navigate, Network, PsbtOriginView, PsbtView, SignPsbt,
-        SignPsbtState, TrId,
+        FileSaveState, KeychainKind, MultiSigView, Navigate, Network, PsbtOriginView, PsbtValidationModal,
+        PsbtView, SignPsbt, SignPsbtState, TrId,
     },
     anyhow::Context,
     foundation_urtypes::value::Value as UrValue,
@@ -113,13 +113,11 @@ pub fn reset_for_incoming_scan(state: StoredValue<AppState>) {
         sign_global.set_state(SignPsbtState::Idle);
         sign_global.set_origin(PsbtOriginView::Qr);
         sign_global.set_pending_psbt(PsbtView::default());
-        sign_global.set_show_account_not_found_modal(false);
+        sign_global.set_validation_modal(PsbtValidationModal::None);
         sign_global.set_is_multisig_account(false);
         sign_global.set_account_index("".into());
-        sign_global.set_show_account_archived_modal(false);
         sign_global.set_file_save_state(FileSaveState::Idle);
         sign_global.set_saved_file_path("".into());
-        sign_global.set_show_cant_sign_modal(false);
         sign_global.set_needed_fingerprint("".into());
         sign_global.set_found_fingerprints("".into());
 

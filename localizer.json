@@ -88,7 +88,7 @@
     {
       "name": "wallet",
       "path": "apps/gui-app-bitcoin",
-      "include": ["common.button", "common.slideToSign", "common.createAccountsanitized", "common.createAccount"]
+      "include": ["common.button", "common.slideToSign", "common.createAccountsanitized", "common.createAccount", "common.supportModalDocumentation"]
     },
     {
       "name": "gui-server",

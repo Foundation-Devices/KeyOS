@@ -16,6 +16,8 @@ import {
     MenuBooleanItem,
     ContentSection,
     NavHeader,
+    Link,
+    QrOverlay,
     SearchInput,
     TextSm,
 } from "@ui/widgets.slint";
@@ -28,6 +30,7 @@ import { ListView } from "std-widgets.slint";
 
 export component SettingsPage inherits BasePage {
     in property <SettingsProps> props;
+    private property <string> learn-more-url: "";
 
     VerticalLayout {
         NavHeader {
@@ -93,7 +96,52 @@ export component SettingsPage inherits BasePage {
                         }
                     }
                 }
+
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    MenuSection {
+                        title: TR2.lookup(TrId.SettingsSubtitleSecurity);
+                        MenuSectionLayout {
+                            MenuBooleanItem {
+                                first: true;
+                                last: true;
+                                label: TR2.lookup(TrId.SettingsSubtitleSecurityVerifyInputs);
+                                checked: Settings.verify-inputs;
+                                changed(checked) => {
+                                    Settings.set-verify-inputs(checked);
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        HorizontalLayout {
+                            padding-left: Size.sz4;
+                            padding-right: Size.sz4;
+
+                            TextSm {
+                                text: TR2.lookup(TrId.SettingsSubtitleSecurityVerifyInputsContent);
+                                color: Palette.content-tertiary;
+                                wrap: word-wrap;
+                                horizontal-alignment: center;
+                            }
+                        }
+
+                        Link {
+                            label: TR2.lookup(TrId.CommonButtonLearnMore);
+                            clicked => {
+                                learn-more-url = "https://docs.foundation.xyz/faq/home/#input-history-verification";
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    if learn-more-url != "": QrOverlay {
+        url <=> learn-more-url;
+        title: TR2.lookup(TrId.CommonSupportModalDocumentationHeader);
     }
 }

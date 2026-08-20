@@ -19,6 +19,14 @@ export enum SignPsbtState {
     Error,
 }
 
+export enum PsbtValidationModal {
+    None,
+    AccountNotFound,
+    AccountArchived,
+    CantSign,
+    UnableToVerifyInputs,
+}
+
 export enum FileSaveState {
     Idle,
     Saved,
@@ -36,19 +44,18 @@ export global SignPsbt {
     in property <PsbtOriginView> origin;
     in property <PsbtView> pending-psbt;
 
-    in-out property <bool> show-account-not-found-modal;
+    in-out property <PsbtValidationModal> validation-modal: PsbtValidationModal.None;
     in property <bool> is-multisig-account;
     in property <string> account-index;
 
-    in-out property <bool> show-account-archived-modal;
     in-out property <FileSaveState> file-save-state: FileSaveState.Idle;
     in property <string> saved-file-path;
 
-    in-out property <bool> show-cant-sign-modal;
     in property <string> needed-fingerprint;
     in property <string> found-fingerprints;
 
     callback cancel-signing();
+    callback temporarily-disable-input-verification();
     callback sign-psbt();
     pure callback get-signed-ur(int) -> [string];
     callback save-signed-psbt-to-file();

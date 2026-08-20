@@ -27,6 +27,7 @@ import {
     SignPsbt,
     SignPsbtState,
     PsbtOriginView,
+    PsbtValidationModal,
     FileSaveState,
 } from "../../sign-psbt.slint";
 import { Callbacks } from "../../callbacks.slint";
@@ -381,12 +382,12 @@ export component SignPsbtPage inherits BasePage {
 
     if state == SignPsbtState.Error: ErrorPage { }
 
-    if SignPsbt.show-account-not-found-modal: AccountNotFoundModal {
+    if SignPsbt.validation-modal == PsbtValidationModal.AccountNotFound: AccountNotFoundModal {
         is-multisig: SignPsbt.is-multisig-account;
         account-index: SignPsbt.account-index;
 
         cancel-clicked => {
-            SignPsbt.show-account-not-found-modal = false;
+            SignPsbt.validation-modal = PsbtValidationModal.None;
             SignPsbt.done();
         }
 
@@ -395,7 +396,7 @@ export component SignPsbtPage inherits BasePage {
         }
     }
 
-    if SignPsbt.show-account-archived-modal: AccountArchivedModal {
+    if SignPsbt.validation-modal == PsbtValidationModal.AccountArchived: AccountArchivedModal {
         is-multisig: SignPsbt.is-multisig-account;
         account-index: SignPsbt.account-index;
         account-name: SignPsbt.pending-psbt.account-name;
@@ -405,7 +406,7 @@ export component SignPsbtPage inherits BasePage {
         }
 
         confirm-clicked => {
-            SignPsbt.show-account-archived-modal = false;
+            SignPsbt.validation-modal = PsbtValidationModal.None;
             SignPsbt.done();
         }
     }
@@ -444,7 +445,25 @@ export component SignPsbtPage inherits BasePage {
         }
     }
 
-    if SignPsbt.show-cant-sign-modal: Modal {
+    if SignPsbt.validation-modal == PsbtValidationModal.UnableToVerifyInputs: ConfirmationModal {
+        modal-width: 400px;
+        button-section-padding: 0px;
+        icon: "info";
+        title: TR2.lookup(TrId.ScanModalUnableVerifyInputsHeader);
+        text: TR2.lookup(TrId.ScanModalUnableVerifyInputsContent);
+        cancel-button-label: TR2.lookup(TrId.ScanModalUnableVerifyInputsTemporarilyDisable);
+        confirm-button-label: TR2.lookup(TrId.CommonButtonBack);
+
+        cancel-clicked => {
+            SignPsbt.temporarily-disable-input-verification();
+        }
+
+        confirm-clicked => {
+            SignPsbt.done();
+        }
+    }
+
+    if SignPsbt.validation-modal == PsbtValidationModal.CantSign: Modal {
         icon: "alert";
         icon-color: Palette.content-notice;
         title: TR2.lookup(TrId.ScanModalIncorrectKeySinglesigHeader);
@@ -455,7 +474,7 @@ export component SignPsbtPage inherits BasePage {
             label: TR2.lookup(TrId.CommonButtonConfirm);
             importance: primary;
             clicked => {
-                SignPsbt.show-cant-sign-modal = false;
+                SignPsbt.validation-modal = PsbtValidationModal.None;
                 SignPsbt.done();
             }
         }

@@ -119,6 +119,8 @@
   "errorConnectionLost.warning": "Device Connection Lost",
   "errorSecurityCheckFailed.content": "This device may not be genuine or may have been tampered with during shipping. Please contact support.",
   "errorSecurityCheckFailed.warning": "Security Check Failed",
+  "errorSecurityCheckIncomplete.content": "Keep Passport nearby, check your internet connection, and make sure your phone’s date and time are set automatically. Then try again.",
+  "errorSecurityCheckIncomplete.warning": "Security Check Incomplete",
   "errorSecurityCheckPending.content": "Envoy failed to connect to Foundation servers. Please retry the check on Envoy. ",
   "errorSecurityCheckPending.warning": "Security Check Pending",
   "importSettings.content": "¿Quieres restaurar un archivo de copia de seguridad de Configuración y datos de un Passport Prime?",

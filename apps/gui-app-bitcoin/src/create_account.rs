@@ -19,7 +19,7 @@ use {
 
 use crate::{
     gui_permissions::GuiPermissions,
-    psbt_signing::{verify::verify_psbt, PendingPsbt},
+    psbt_signing::{verify::verify_parsed_psbt, PendingPsbt},
     state::{AccountColor, AppState},
     store::{AccountSource, CreateMultiSigAccount, CreateSingleSigAccount},
     tr, Animate, CreateAccount, CreateAccountState, CreateMultiSigOptions, CreateSingleSigOptions,
@@ -180,13 +180,12 @@ async fn create_multisig(state: StoredValue<AppState>, options: CreateMultiSigOp
             state.borrow_mut().pending_multisig = None;
             global.set_pending_multisig_is_casa(false);
 
-            if let PendingPsbt::NotSaved { psbt, origin } =
+            if let PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo } =
                 std::mem::take(&mut state.borrow_mut().pending_psbt)
             {
                 global.set_state(CreateAccountState::Idle);
-                let bytes = psbt.serialize();
                 spawn_local(async move {
-                    verify_psbt(state, bytes, origin, true).await;
+                    verify_parsed_psbt(state, psbt, origin, true, trust_witness_utxo).await;
                 })
                 .detach();
             }
@@ -226,13 +225,12 @@ async fn create_single_sig(state: StoredValue<AppState>, options: CreateSingleSi
             global.set_new_account_id(account_id.to_shared_string());
             state.borrow_mut().pending_singlesig = None;
 
-            if let PendingPsbt::NotSaved { psbt, origin } =
+            if let PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo } =
                 std::mem::take(&mut state.borrow_mut().pending_psbt)
             {
                 global.set_state(CreateAccountState::Idle);
-                let bytes = psbt.serialize();
                 spawn_local(async move {
-                    verify_psbt(state, bytes, origin, true).await;
+                    verify_parsed_psbt(state, psbt, origin, true, trust_witness_utxo).await;
                 })
                 .detach();
             }

@@ -7,15 +7,12 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use ngwallet::{
     bdk_wallet::{
-        bitcoin::{
-            amount::Amount, bip32::Xpriv, psbt::Error as BdkPsbtError, Network as NgNetwork,
-            NetworkKind as NgNetworkKind, Psbt,
-        },
+        bitcoin::{amount::Amount, bip32::Xpriv, Network as NgNetwork, NetworkKind as NgNetworkKind, Psbt},
         signer::SignerError,
         SignOptions,
     },
     config::NgAccountConfig,
-    psbt::{OutputKind, TransactionDetails},
+    psbt::{OutputKind, TransactionDetails, ValidationOptions},
 };
 use quantum_link::{
     foundation_api::bitcoin::BroadcastTransaction,
@@ -34,7 +31,7 @@ use crate::{
     state::{AccountColor, AppState, PendingMultiSig, PendingSingleSig},
     store::AccountSource,
     CreateAccount, CreateAccountState, DisplayAmount, FileSaveState, MultiSigView, Navigate, NavigateOptions,
-    PsbtOutputKind, PsbtOutputView, PsbtView, ShowFiatValue, SignPsbt, SignPsbtState,
+    PsbtOutputKind, PsbtOutputView, PsbtValidationModal, PsbtView, ShowFiatValue, SignPsbt, SignPsbtState,
 };
 
 const FEE_WARNING_THRESHOLD: i32 = 25;
@@ -49,6 +46,7 @@ pub enum PendingPsbt {
         psbt: Psbt,
         details: TransactionDetails,
         origin: PsbtOrigin,
+        trust_witness_utxo: bool,
     },
     Signed {
         account_id: AccountId,
@@ -56,6 +54,11 @@ pub enum PendingPsbt {
         origin: PsbtOrigin,
     },
     NotSaved {
+        psbt: Psbt,
+        origin: PsbtOrigin,
+        trust_witness_utxo: bool,
+    },
+    Unverified {
         psbt: Psbt,
         origin: PsbtOrigin,
     },
@@ -79,10 +82,10 @@ impl From<&PsbtOrigin> for crate::PsbtOriginView {
 }
 
 impl PendingPsbt {
-    pub fn take_unsigned(&mut self) -> Option<(AccountId, Psbt, TransactionDetails, PsbtOrigin)> {
+    pub fn take_unsigned(&mut self) -> Option<(AccountId, Psbt, TransactionDetails, PsbtOrigin, bool)> {
         match std::mem::take(self) {
-            PendingPsbt::Unsigned { account_id, psbt, details, origin } => {
-                Some((account_id, psbt, details, origin))
+            PendingPsbt::Unsigned { account_id, psbt, details, origin, trust_witness_utxo } => {
+                Some((account_id, psbt, details, origin, trust_witness_utxo))
             }
             state => {
                 *self = state;
@@ -108,7 +111,28 @@ pub fn init(state: StoredValue<AppState>) {
         let _ = std::mem::take(&mut state.borrow_mut().pending_psbt);
         let ui = state.borrow().ui();
         let global = ui.global::<SignPsbt>();
+        global.set_validation_modal(PsbtValidationModal::None);
         global.set_state(SignPsbtState::Idle);
+    });
+
+    global.on_temporarily_disable_input_verification(move || {
+        let pending = {
+            let mut state = state.borrow_mut();
+            match std::mem::take(&mut state.pending_psbt) {
+                PendingPsbt::Unverified { psbt, origin } => Some((psbt, origin)),
+                pending => {
+                    state.pending_psbt = pending;
+                    None
+                }
+            }
+        };
+        let Some((psbt, origin)) = pending else {
+            return;
+        };
+
+        let ui = state.borrow().ui();
+        ui.global::<SignPsbt>().set_validation_modal(PsbtValidationModal::None);
+        spawn_local(verify::verify_parsed_psbt(state, psbt, origin, false, true)).detach();
     });
 
     global.on_sign_psbt(move || {
@@ -167,7 +191,7 @@ pub fn init(state: StoredValue<AppState>) {
         let sign_psbt_global = ui.global::<SignPsbt>();
         let create_account_global = ui.global::<CreateAccount>();
 
-        sign_psbt_global.set_show_account_not_found_modal(false);
+        sign_psbt_global.set_validation_modal(PsbtValidationModal::None);
         create_account_global.set_state(CreateAccountState::Idle);
 
         if sign_psbt_global.get_is_multisig_account() {
@@ -194,7 +218,7 @@ pub fn init(state: StoredValue<AppState>) {
         let ui = state.borrow().ui();
         let global = ui.global::<SignPsbt>();
 
-        global.set_show_account_archived_modal(false);
+        global.set_validation_modal(PsbtValidationModal::None);
 
         let account_id = state.borrow_mut().pending_archived_account_id.take();
         let pending_psbt = std::mem::take(&mut state.borrow_mut().pending_psbt);
@@ -204,9 +228,9 @@ pub fn init(state: StoredValue<AppState>) {
                 config.archived = false;
             });
 
-            if let PendingPsbt::NotSaved { psbt, origin } = pending_psbt {
+            if let PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo } = pending_psbt {
                 spawn_local(async move {
-                    verify::verify_psbt(state, psbt.serialize(), origin, true).await;
+                    verify::verify_parsed_psbt(state, psbt, origin, true, trust_witness_utxo).await;
                 })
                 .detach();
             }
@@ -251,7 +275,9 @@ pub enum SignPsbtError {
 }
 
 async fn sign_psbt(state: StoredValue<AppState>) -> Result<(), SignPsbtError> {
-    let Some((account_id, psbt, _details, origin)) = state.borrow_mut().pending_psbt.take_unsigned() else {
+    let Some((account_id, psbt, _details, origin, trust_witness_utxo)) =
+        state.borrow_mut().pending_psbt.take_unsigned()
+    else {
         return Err(SignPsbtError::NoPendingPsbt);
     };
 
@@ -264,7 +290,7 @@ async fn sign_psbt(state: StoredValue<AppState>) -> Result<(), SignPsbtError> {
     let (account_id, account, signed) = spawn_worker(async move {
         let (id, account) = load_account.await.context("load account")?;
         let mut signed_psbt = psbt;
-        let options = SignOptions::default();
+        let options = SignOptions { trust_witness_utxo, ..Default::default() };
         for wallet in account.wallets.read().unwrap().iter() {
             let bdk_wallet = wallet.bdk_wallet.lock().unwrap();
             bdk_wallet.sign(&mut signed_psbt, options.clone())?;
@@ -408,18 +434,55 @@ pub mod verify {
         let ui = state.borrow().ui();
         let nav = ui.global::<Navigate>();
         let route_state = ui.global::<RouteState>();
+        if route_state.get_active() != RouteOption::SignPsbt {
+            nav.invoke_sign_psbt(NavigateOptions { replace: nav_replace, ..Default::default() });
+        }
+        ui.global::<SignPsbt>().set_validation_modal(PsbtValidationModal::None);
+        ui.global::<SignPsbt>().set_state(SignPsbtState::Verifying);
+
+        let trust_witness_utxo = !state.borrow().settings.verify_inputs;
+        match spawn_worker(async move { Psbt::deserialize(&bytes) }).await {
+            Ok(psbt) => {
+                verify_parsed_psbt(state, psbt, origin, nav_replace, trust_witness_utxo).await;
+            }
+            Err(e) => {
+                log::error!("failed to deserialize psbt {e:?}");
+                let ui = state.borrow().ui();
+                let global = ui.global::<SignPsbt>();
+                global.set_origin((&origin).into());
+                global.set_state(SignPsbtState::Error);
+            }
+        }
+    }
+
+    pub async fn verify_parsed_psbt(
+        state: StoredValue<AppState>,
+        psbt: Psbt,
+        origin: PsbtOrigin,
+        nav_replace: bool,
+        trust_witness_utxo: bool,
+    ) {
+        let ui = state.borrow().ui();
+        let nav = ui.global::<Navigate>();
+        let route_state = ui.global::<RouteState>();
 
         if route_state.get_active() != RouteOption::SignPsbt {
             nav.invoke_sign_psbt(NavigateOptions { replace: nav_replace, ..Default::default() });
         }
 
-        match verify_inner(state, bytes, origin.clone()).await {
-            Ok(_) => (),
+        match verify_inner(state, psbt, origin.clone(), trust_witness_utxo).await {
+            Ok(VerifyOutcome::Verified) => (),
+            Ok(VerifyOutcome::UnableToVerifyInputs(psbt)) => {
+                let ui = state.borrow().ui();
+                let global = ui.global::<SignPsbt>();
+                state.borrow_mut().pending_psbt = PendingPsbt::Unverified { psbt, origin };
+                global.set_validation_modal(PsbtValidationModal::UnableToVerifyInputs);
+            }
             Err(VerifyPsbtError::AccountArchived { account_id, verified: psbt }) => {
                 let ui = state.borrow().ui();
                 let global = ui.global::<SignPsbt>();
 
-                state.borrow_mut().pending_psbt = PendingPsbt::NotSaved { psbt, origin };
+                state.borrow_mut().pending_psbt = PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo };
 
                 let is_multisig = account_id.is_multi();
 
@@ -429,11 +492,11 @@ pub mod verify {
                     account_id.index().map(|i| i.to_string()).unwrap_or_default()
                 };
 
-                global.set_show_account_archived_modal(true);
                 global.set_is_multisig_account(is_multisig);
                 global.set_account_index(account_index.into());
 
                 state.borrow_mut().pending_archived_account_id = Some(account_id);
+                global.set_validation_modal(PsbtValidationModal::AccountArchived);
             }
             Err(VerifyPsbtError::AccountNotFound { verified: psbt, details }) => {
                 let tx_descriptors: Vec<String> = details
@@ -453,24 +516,26 @@ pub mod verify {
                                 details: multisig_details.clone(),
                                 source: AccountSource::Generic,
                             });
-                            state.borrow_mut().pending_psbt = PendingPsbt::NotSaved { psbt, origin };
+                            state.borrow_mut().pending_psbt =
+                                PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo };
 
                             let multisig_view = MultiSigView::from(&multisig_details);
                             let create_account_global = ui.global::<CreateAccount>();
                             create_account_global.set_pending_multisig_account(multisig_view);
 
-                            global.set_show_account_not_found_modal(true);
                             global.set_is_multisig_account(true);
                             global.set_account_index(String::new().into());
+                            global.set_validation_modal(PsbtValidationModal::AccountNotFound);
                         }
                         InferredAccountDetails::SingleSig { account_index, network } => {
                             state.borrow_mut().pending_singlesig =
                                 Some(PendingSingleSig { index: account_index, network });
-                            state.borrow_mut().pending_psbt = PendingPsbt::NotSaved { psbt, origin };
+                            state.borrow_mut().pending_psbt =
+                                PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo };
 
-                            global.set_show_account_not_found_modal(true);
                             global.set_is_multisig_account(false);
                             global.set_account_index(account_index.to_string().into());
+                            global.set_validation_modal(PsbtValidationModal::AccountNotFound);
                         }
                     }
                 } else {
@@ -496,7 +561,7 @@ pub mod verify {
 
                 global.set_found_fingerprints(fingerprint_list.into());
                 global.set_needed_fingerprint(needed_fingerprint.into());
-                global.set_show_cant_sign_modal(true);
+                global.set_validation_modal(PsbtValidationModal::CantSign);
             }
             Err(e) => {
                 log::error!("failed to verify psbt {e:?}");
@@ -508,12 +573,15 @@ pub mod verify {
         }
     }
 
+    enum VerifyOutcome {
+        Verified,
+        UnableToVerifyInputs(Psbt),
+    }
+
     #[derive(Debug, thiserror::Error)]
     pub enum VerifyPsbtError {
         #[error(transparent)]
-        Deserialize(BdkPsbtError),
-        #[error(transparent)]
-        Validate(#[from] ngwallet::psbt::Error),
+        Validate(ngwallet::psbt::Error),
         #[error("account not found")]
         AccountNotFound { verified: Psbt, details: TransactionDetails },
         #[error("account archived")]
@@ -524,17 +592,17 @@ pub mod verify {
 
     async fn verify_inner(
         state: StoredValue<AppState>,
-        bytes: Vec<u8>,
+        psbt: Psbt,
         origin: PsbtOrigin,
-    ) -> Result<(), VerifyPsbtError> {
+        trust_witness_utxo: bool,
+    ) -> Result<VerifyOutcome, VerifyPsbtError> {
         let ui = state.borrow().ui();
         let global = ui.global::<crate::SignPsbt>();
 
         global.set_state(SignPsbtState::Verifying);
 
         let (psbt, network_kind) = spawn_worker(async move {
-            let psbt = Psbt::deserialize(&bytes).map_err(VerifyPsbtError::Deserialize)?;
-            let network_kind = ngwallet::psbt::validate_network(&psbt)?;
+            let network_kind = ngwallet::psbt::validate_network(&psbt).map_err(VerifyPsbtError::Validate)?;
             Ok::<_, VerifyPsbtError>((psbt, network_kind))
         })
         .await?;
@@ -548,18 +616,41 @@ pub mod verify {
         let xpriv = Xpriv::new_master(network, &master_key.key.0).context("get xpriv from master key")?;
         let secp = state.borrow().store.secp.clone();
 
-        // PSBT descriptors are untrusted but needed to find the account
-        // The stored account is the trust anchor for multisig inputs and change
-        // Revalidate multisig transactions with its registered configuration
-        let (psbt, discovery) = spawn_worker({
+        let validate = |psbt: Psbt, registered_multisig: Option<MultiSigDetails>| {
             let secp = secp.clone();
             let xpriv = xpriv.clone();
             async move {
-                let res = ngwallet::psbt::validate(&secp, &xpriv, &psbt, network, None)?;
-                Ok::<_, VerifyPsbtError>((psbt, res))
+                let (psbt, result) = spawn_worker(async move {
+                    let result = ngwallet::psbt::validate(
+                        &secp,
+                        &xpriv,
+                        &psbt,
+                        network,
+                        ValidationOptions {
+                            registered_multisig: registered_multisig.as_ref(),
+                            trust_witness_utxo,
+                        },
+                    );
+                    (psbt, result)
+                })
+                .await;
+
+                match result {
+                    Ok(details) => Ok((psbt, Some(details))),
+                    // retry validates the full PSBT again with witness UTXOs trusted
+                    Err(ngwallet::psbt::Error::UntrustedWitnessUtxo { .. }) => Ok((psbt, None)),
+                    Err(e) => Err(VerifyPsbtError::Validate(e)),
+                }
             }
-        })
-        .await?;
+        };
+
+        // PSBT descriptors are untrusted but needed to find the account
+        // The stored account is the trust anchor for multisig inputs and change
+        // Revalidate multisig transactions with its registered configuration
+        let (psbt, discovery) = validate(psbt, None).await?;
+        let Some(discovery) = discovery else {
+            return Ok(VerifyOutcome::UnableToVerifyInputs(psbt));
+        };
 
         let (account_id, acct) = {
             let tx_descriptors: Vec<String> = discovery
@@ -586,11 +677,11 @@ pub mod verify {
         }
 
         let (psbt, details) = if let Some(multisig) = acct.multisig.clone() {
-            spawn_worker(async move {
-                let res = ngwallet::psbt::validate(&secp, &xpriv, &psbt, network, Some(&multisig))?;
-                Ok::<_, VerifyPsbtError>((psbt, res))
-            })
-            .await?
+            let (psbt, details) = validate(psbt, Some(multisig)).await?;
+            let Some(details) = details else {
+                return Ok(VerifyOutcome::UnableToVerifyInputs(psbt));
+            };
+            (psbt, details)
         } else {
             (psbt, discovery)
         };
@@ -607,9 +698,10 @@ pub mod verify {
 
         global.set_pending_psbt(psbt_view);
         global.set_state(crate::SignPsbtState::Sign);
-        state.borrow_mut().pending_psbt = PendingPsbt::Unsigned { account_id, details, psbt, origin };
+        state.borrow_mut().pending_psbt =
+            PendingPsbt::Unsigned { account_id, details, psbt, origin, trust_witness_utxo };
 
-        Ok(())
+        Ok(VerifyOutcome::Verified)
     }
 
     fn normalize_descriptor(desc: &str) -> &str { desc.split('#').next().unwrap_or(desc) }

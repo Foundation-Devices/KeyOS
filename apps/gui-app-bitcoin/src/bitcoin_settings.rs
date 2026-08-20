@@ -15,6 +15,8 @@ pub struct BitcoinSettings {
     pub show_fiat_value: ShowFiatValue,
     pub import_policy: ImportPolicy,
     pub show_passphrase_warning: bool,
+    #[serde(default)]
+    pub verify_inputs: bool,
 }
 
 impl Default for BitcoinSettings {
@@ -25,6 +27,7 @@ impl Default for BitcoinSettings {
             show_fiat_value: ShowFiatValue::Disabled,
             import_policy: ImportPolicy::AskToImport,
             show_passphrase_warning: true,
+            verify_inputs: false,
         }
     }
 }
@@ -51,6 +54,7 @@ pub fn init_settings(state: StoredValue<AppState>) {
         ui.global::<Settings>().set_all_currencies(filter_search(""));
         ui.global::<Settings>().set_import_policy(settings.import_policy);
         ui.global::<Settings>().set_show_passphrase_warning(settings.show_passphrase_warning);
+        ui.global::<Settings>().set_verify_inputs(settings.verify_inputs);
     }
 
     ui.global::<Settings>().on_set_display_amount(move |amount| {
@@ -94,6 +98,13 @@ pub fn init_settings(state: StoredValue<AppState>) {
         let ui = state.ui();
         state.settings.guard().show_passphrase_warning = show;
         ui.global::<Settings>().set_show_passphrase_warning(show);
+    });
+
+    ui.global::<Settings>().on_set_verify_inputs(move |verify| {
+        let mut state = state.borrow_mut();
+        let ui = state.ui();
+        state.settings.guard().verify_inputs = verify;
+        ui.global::<Settings>().set_verify_inputs(verify);
     });
 }
 

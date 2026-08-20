@@ -65,6 +65,9 @@ export global Settings {
                 in-out property <bool> show-passphrase-warning;
                 callback set-show-passphrase-warning(show: bool);
 
+                in-out property <bool> verify-inputs;
+                callback set-verify-inputs(verify: bool);
+
                 public pure function display-amount-to-string(amount: DisplayAmount) -> string {
                     amount == DisplayAmount.Auto ? "Auto" : amount == DisplayAmount.Btc ? "BTC" : "Sats";
                 }
