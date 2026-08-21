@@ -94,9 +94,7 @@ fn ensure_casa_account(state: StoredValue<AppState>, id: &AccountId) -> anyhow::
     Ok(())
 }
 
-fn account_key(
-    state: StoredValue<AppState>,
-) -> anyhow::Result<(Network, MasterKey, ngwallet::bdk_wallet::bitcoin::bip32::DerivationPath)> {
+fn account_key(state: StoredValue<AppState>) -> anyhow::Result<(Network, MasterKey)> {
     let id_text = state.borrow().ui().global::<CasaHealth>().get_account_id();
     let id = id_text.as_str().parse::<AccountId>().context("invalid Casa account ID")?;
     ensure_casa_account(state, &id)?;
@@ -104,7 +102,7 @@ fn account_key(
     let config = state.store.get_account_config(&id).context("account not found")?;
     let network = config.network;
     let master = state.store.load_master_key(network).context("load active Master Key")?;
-    let signer = config
+    config
         .multisig
         .as_ref()
         .context("Casa account is not multisig")?
@@ -112,13 +110,12 @@ fn account_key(
         .iter()
         .find(|signer| signer.get_fingerprint() == master.fingerprint)
         .context("Casa multisig does not belong to the active Master Key")?;
-    let origin = signer.get_derivation().context("invalid Casa signer derivation")?;
-    Ok((network, master, origin))
+    Ok((network, master))
 }
 
 fn sign_challenge(state: StoredValue<AppState>, input: &[u8]) -> anyhow::Result<protocol::SignedResponse> {
-    let (network, master, origin) = account_key(state)?;
-    protocol::sign(&state.borrow().store.secp, &master, network, input, &[origin]).map_err(anyhow::Error::new)
+    let (network, master) = account_key(state)?;
+    protocol::sign(&state.borrow().store.secp, &master, network, input).map_err(anyhow::Error::new)
 }
 
 fn check_with_qr(state: StoredValue<AppState>) -> anyhow::Result<()> {

@@ -67,8 +67,8 @@ pub enum AccountSource {
     Casa,
 }
 
-fn is_casa_account_derivation(derivation: &DerivationPath, network: NetworkKind) -> bool {
-    let [purpose, coin_type, account] = derivation.as_ref() else { return false };
+pub(crate) fn is_casa_account_derivation(derivation: &[ChildNumber], network: NetworkKind) -> bool {
+    let [purpose, coin_type, account] = derivation else { return false };
     let expected_coin_type = match network {
         NetworkKind::Main => 0,
         NetworkKind::Test => 1,
@@ -102,7 +102,7 @@ fn validate_local_multisig_signer<C: Signing>(
         .find(|signer| signer.get_fingerprint() == master_key.fingerprint)
         .context("Casa multisig does not contain the active Master Key")?;
     let derivation = signer.get_derivation().context("invalid Casa signer derivation")?;
-    if !is_casa_account_derivation(&derivation, multisig.network_kind) {
+    if !is_casa_account_derivation(derivation.as_ref(), multisig.network_kind) {
         bail!("Casa signer does not use a supported account derivation");
     }
     let declared_xpub = signer.get_pubkey().context("invalid Casa signer xpub")?;

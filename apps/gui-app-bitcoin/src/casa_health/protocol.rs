@@ -4,7 +4,7 @@
 //! Casa Health Check protocol, compatible with Passport Core.
 
 use {
-    crate::sensitive_xpriv::SensitiveXpriv,
+    crate::{sensitive_xpriv::SensitiveXpriv, store::is_casa_account_derivation},
     foundation_urtypes::value::Value as UrValue,
     ngwallet::{
         bdk_wallet::bitcoin::{
@@ -16,6 +16,7 @@ use {
             Address, CompressedPublicKey, Network, PublicKey,
         },
         bip39::MasterKey,
+        config::NetworkKind,
     },
     std::{fmt, str::FromStr},
     zeroize::Zeroize,
@@ -195,20 +196,29 @@ fn normalize_path(path: &str) -> Result<String, Error> {
     Ok(normalized)
 }
 
-fn is_allowed_path(path: &DerivationPath, allowed_origins: &[DerivationPath]) -> bool {
+fn validate_path(path: &DerivationPath) -> Result<(), Error> {
     let path = path.as_ref();
     if path.is_empty() {
-        return true;
+        return Ok(());
     }
 
-    allowed_origins.iter().any(|origin| {
-        let origin = origin.as_ref();
-        if !path.starts_with(origin) {
-            return false;
-        }
-        let suffix = &path[origin.len()..];
-        suffix.len() <= 2 && suffix.iter().all(|child| matches!(child, ChildNumber::Normal { .. }))
-    })
+    if !(3..=5).contains(&path.len()) {
+        return Err(Error::PathNotAllowed);
+    }
+    if ![NetworkKind::Main, NetworkKind::Test]
+        .into_iter()
+        .any(|network| is_casa_account_derivation(&path[..3], network))
+    {
+        return Err(Error::PathNotAllowed);
+    }
+
+    let suffix = &path[3..];
+    if !suffix.iter().all(|child| matches!(child, ChildNumber::Normal { .. }))
+        || !suffix.first().map_or(true, |child| matches!(child, ChildNumber::Normal { index } if *index <= 1))
+    {
+        return Err(Error::PathNotAllowed);
+    }
+    Ok(())
 }
 
 pub fn decode_ur(ur_type: &str, cbor: &[u8]) -> Result<Vec<u8>, Error> {
@@ -225,12 +235,9 @@ pub fn sign(
     master_key: &MasterKey,
     network: Network,
     input: &[u8],
-    allowed_origins: &[DerivationPath],
 ) -> Result<SignedResponse, Error> {
     let challenge = parse(input)?;
-    if !is_allowed_path(&challenge.path, allowed_origins) {
-        return Err(Error::PathNotAllowed);
-    }
+    validate_path(&challenge.path)?;
     let root_xpriv =
         SensitiveXpriv(Xpriv::new_master(network, &master_key.key.0).map_err(|_| Error::KeyDerivation)?);
     let xpriv =
@@ -291,27 +298,34 @@ mod tests {
     }
 
     #[test]
-    fn restricts_signing_to_master_and_casa_origin_paths() {
-        let allowed = [DerivationPath::from_str("m/49/1/0").unwrap()];
-        assert!(is_allowed_path(&DerivationPath::master(), &allowed));
-        assert!(is_allowed_path(&DerivationPath::from_str("m/49/1/0").unwrap(), &allowed));
-        assert!(is_allowed_path(&DerivationPath::from_str("m/49/1/0/1/7").unwrap(), &allowed));
-        assert!(!is_allowed_path(&DerivationPath::from_str("m/84'/0'/0'/0/0").unwrap(), &allowed));
-        assert!(!is_allowed_path(&DerivationPath::from_str("m/49/1/0/1/7/2").unwrap(), &allowed));
-        assert!(!is_allowed_path(&DerivationPath::from_str("m/49/1/0/1'").unwrap(), &allowed));
-        let allowed = [DerivationPath::master()];
-        assert!(is_allowed_path(&DerivationPath::from_str("m/0/7").unwrap(), &allowed));
-        assert!(!is_allowed_path(&DerivationPath::from_str("m/0/7/2").unwrap(), &allowed));
-        assert!(!is_allowed_path(&DerivationPath::from_str("m/0'").unwrap(), &allowed));
+    fn allows_casa_health_check_paths_for_either_coin_type() {
+        assert!(validate_path(&DerivationPath::master()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/49/0/1").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/49/0/1/1").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/49/0/0/0/7").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/49/0/1/1/7").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/45'/0/1/0/7").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/49/1/1/0/7").unwrap()).is_ok());
+        assert!(validate_path(&DerivationPath::from_str("m/45'/1/1/1/7").unwrap()).is_ok());
+    }
+
+    #[test]
+    fn rejects_paths_outside_casa_health_check_policy() {
+        for path in ["m/49/0/0/2/0", "m/49/0/0/0'/0", "m/45'/0'/0/0/0", "m/45'/0/0/0/0/0", "m/84'/0'/0'/0/0"]
+        {
+            assert!(
+                matches!(validate_path(&DerivationPath::from_str(path).unwrap()), Err(Error::PathNotAllowed)),
+                "{path}"
+            );
+        }
     }
 
     #[test]
     fn rejects_signing_outside_casa_paths() {
         let secp = Secp256k1::new();
         let master = MasterKey::from_entropy(&secp, Network::Bitcoin, &[0x66; 16], "", None).unwrap();
-        let allowed = [DerivationPath::from_str("m/49/1/0").unwrap()];
         assert!(matches!(
-            sign(&secp, &master, Network::Bitcoin, b"Health check\nm/84'/0'/0'/0/0", &allowed,),
+            sign(&secp, &master, Network::Bitcoin, b"Health check\nm/84'/0'/0'/0/0"),
             Err(Error::PathNotAllowed)
         ));
     }
@@ -320,15 +334,8 @@ mod tests {
     fn supports_core_wrapped_segwit_address_type() {
         let secp = Secp256k1::new();
         let master = MasterKey::from_entropy(&secp, Network::Bitcoin, &[0x66; 16], "", None).unwrap();
-        let allowed = [DerivationPath::from_str("m/49'/0'/0'").unwrap()];
-        let signed = sign(
-            &secp,
-            &master,
-            Network::Bitcoin,
-            b"Health check\nm/49'/0'/0'/0/0\nAF_P2WPKH_P2SH\n",
-            &allowed,
-        )
-        .unwrap();
+        let signed =
+            sign(&secp, &master, Network::Bitcoin, b"Health check\nm/49/0/0/0/0\nAF_P2WPKH_P2SH\n").unwrap();
         let text = std::str::from_utf8(signed.as_bytes()).unwrap();
         assert!(text.lines().nth(3).unwrap().starts_with('3'));
     }
@@ -337,9 +344,7 @@ mod tests {
     fn emits_core_envelope() {
         let secp = Secp256k1::new();
         let master = MasterKey::from_entropy(&secp, Network::Bitcoin, &[0x66; 16], "", None).unwrap();
-        let allowed = [DerivationPath::from_str("m/44'/0'/0'").unwrap()];
-        let signed =
-            sign(&secp, &master, Network::Bitcoin, b"Health check\nm/44'/0'/0'/0/0", &allowed).unwrap();
+        let signed = sign(&secp, &master, Network::Bitcoin, b"Health check\nm/49/0/0/0/0").unwrap();
         let text = std::str::from_utf8(signed.as_bytes()).unwrap();
         assert!(text.starts_with("-----BEGIN BITCOIN SIGNED MESSAGE-----\n"));
         assert!(text.contains("\n-----BEGIN SIGNATURE-----\n"));

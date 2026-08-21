@@ -7,7 +7,10 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use ngwallet::{
     bdk_wallet::{
-        bitcoin::{amount::Amount, bip32::Xpriv, Network as NgNetwork, NetworkKind as NgNetworkKind, Psbt},
+        bitcoin::{
+            amount::Amount, bip32::Xpriv, psbt::Output as PsbtOutput, Network as NgNetwork,
+            NetworkKind as NgNetworkKind, Psbt, ScriptBuf, TxOut,
+        },
         signer::SignerError,
         SignOptions,
     },
@@ -36,6 +39,16 @@ use crate::{
 
 const FEE_WARNING_THRESHOLD: i32 = 25;
 const MAX_DISPLAY_DIGITS: usize = 9;
+const PSBT_MAGIC: &[u8] = b"psbt\xff";
+const GLOBAL_XPUB_KEY_TYPE: u8 = 0x01;
+const SERIALIZED_XPUB_LEN: usize = 78;
+const SERIALIZED_XPUB_DATA_LEN: usize = SERIALIZED_XPUB_LEN - 4;
+const XPUB_VERSION: [u8; 4] = [0x04, 0x88, 0xb2, 0x1e];
+const TPUB_VERSION: [u8; 4] = [0x04, 0x35, 0x87, 0xcf];
+const MULTISIG_YPUB_VERSION: [u8; 4] = [0x02, 0x95, 0xb4, 0x3f];
+const MULTISIG_ZPUB_VERSION: [u8; 4] = [0x02, 0xaa, 0x7e, 0xd3];
+const MULTISIG_UPUB_VERSION: [u8; 4] = [0x02, 0x42, 0x89, 0xef];
+const MULTISIG_VPUB_VERSION: [u8; 4] = [0x02, 0x57, 0x54, 0x83];
 
 #[derive(Default)]
 pub enum PendingPsbt {
@@ -65,18 +78,51 @@ pub enum PendingPsbt {
 }
 
 #[derive(Clone)]
-pub enum PsbtOrigin {
+enum PsbtTransport {
     Qr { ur_type: String },
     QuantumLink,
     File,
 }
 
+#[derive(Clone)]
+pub struct PsbtOrigin {
+    transport: PsbtTransport,
+    original_global_xpub_versions: Vec<OriginalGlobalXpubVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct OriginalGlobalXpubVersion {
+    key_data: [u8; SERIALIZED_XPUB_DATA_LEN],
+    version: [u8; 4],
+}
+
+impl PsbtOrigin {
+    pub(crate) fn qr(ur_type: String) -> Self {
+        Self { transport: PsbtTransport::Qr { ur_type }, original_global_xpub_versions: Vec::new() }
+    }
+
+    pub(crate) fn file() -> Self {
+        Self { transport: PsbtTransport::File, original_global_xpub_versions: Vec::new() }
+    }
+
+    fn quantum_link() -> Self {
+        Self { transport: PsbtTransport::QuantumLink, original_global_xpub_versions: Vec::new() }
+    }
+
+    fn serialize(&self, psbt: &Psbt) -> anyhow::Result<Vec<u8>> {
+        let mut serialized = psbt.serialize();
+        restore_global_xpub_versions(&mut serialized, &self.original_global_xpub_versions)
+            .context("restore global xpub versions")?;
+        Ok(serialized)
+    }
+}
+
 impl From<&PsbtOrigin> for crate::PsbtOriginView {
     fn from(origin: &PsbtOrigin) -> Self {
-        match origin {
-            PsbtOrigin::Qr { .. } => crate::PsbtOriginView::Qr,
-            PsbtOrigin::QuantumLink => crate::PsbtOriginView::Quantum,
-            PsbtOrigin::File => crate::PsbtOriginView::File,
+        match &origin.transport {
+            PsbtTransport::Qr { .. } => crate::PsbtOriginView::Qr,
+            PsbtTransport::QuantumLink => crate::PsbtOriginView::Quantum,
+            PsbtTransport::File => crate::PsbtOriginView::File,
         }
     }
 }
@@ -102,7 +148,7 @@ pub fn init(state: StoredValue<AppState>) {
     spawn_local(async move {
         let mut events = subscribe_archive::<QuantumLinkPermissions, _>(SubscribeSignPsbt);
         while let Some(msg) = events.next().await {
-            verify::verify_psbt(state, msg.psbt, PsbtOrigin::QuantumLink, false).await
+            verify::verify_psbt(state, msg.psbt, PsbtOrigin::quantum_link(), false).await
         }
     })
     .detach();
@@ -162,11 +208,18 @@ pub fn init(state: StoredValue<AppState>) {
             }
         };
 
-        let ur_type = match origin {
-            PsbtOrigin::Qr { ur_type } => ur_type.as_str(),
+        let ur_type = match &origin.transport {
+            PsbtTransport::Qr { ur_type } => ur_type.as_str(),
             _ => "psbt",
         };
-        let bytes = minicbor::bytes::ByteVec::from(signed.serialize());
+        let signed = match origin.serialize(signed) {
+            Ok(signed) => signed,
+            Err(e) => {
+                log::error!("failed to serialize signed PSBT: {e:?}");
+                return Default::default();
+            }
+        };
+        let bytes = minicbor::bytes::ByteVec::from(signed);
         let ur_bytes = minicbor::to_vec(bytes).unwrap();
         slint_keyos_platform::qrcode::encode_qr_parts(ur_type, ur_bytes, density)
     });
@@ -241,13 +294,12 @@ pub fn init(state: StoredValue<AppState>) {
 fn save_psbt_to_file(state: StoredValue<AppState>) -> anyhow::Result<String> {
     let pending = state.borrow().map(|s| &s.pending_psbt);
 
-    let signed = match &*pending {
-        PendingPsbt::Signed { psbt, .. } => psbt,
+    let bytes = match &*pending {
+        PendingPsbt::Signed { psbt, origin, .. } => origin.serialize(psbt)?,
         _ => {
             bail!("tried saving unsigned psbt")
         }
     };
-    let bytes = signed.serialize();
     let fs = crate::FileSystem::default();
 
     // TODO: use file browser ui for selecting a dir
@@ -303,7 +355,7 @@ async fn sign_psbt(state: StoredValue<AppState>) -> Result<(), SignPsbtError> {
     global.set_state(crate::SignPsbtState::Success);
     global.set_origin((&origin).into());
 
-    if let PsbtOrigin::QuantumLink = &origin {
+    if matches!(&origin.transport, PsbtTransport::QuantumLink) {
         let result = timeout(broadcast_signed_psbt(&account_id, &signed), Duration::from_secs(10)).await;
         if let Err(_) = result {
             return Err(SignPsbtError::PublishFailed);
@@ -317,7 +369,7 @@ async fn sign_psbt(state: StoredValue<AppState>) -> Result<(), SignPsbtError> {
         state.pending_psbt = PendingPsbt::Signed { account_id, psbt: signed, origin: origin.clone() }
     }
 
-    if let PsbtOrigin::File = &origin {
+    if matches!(&origin.transport, PsbtTransport::File) {
         match save_psbt_to_file(state) {
             Ok(path) => {
                 global.set_saved_file_path(path.into());
@@ -340,6 +392,127 @@ pub async fn broadcast_signed_psbt(account_id: &AccountId, psbt: &Psbt) {
         log::error!("failed to broadcast psbt {e:?}, retrying...");
     }
     log::info!("successfully broadcasted signed psbt");
+}
+
+fn read_compact_size(bytes: &[u8], cursor: &mut usize) -> anyhow::Result<usize> {
+    let marker = *bytes.get(*cursor).context("missing compact size")?;
+    *cursor += 1;
+
+    let (byte_count, minimum) = match marker {
+        0..=0xfc => return Ok(marker.into()),
+        0xfd => (2, 0xfd),
+        0xfe => (4, 0x1_0000),
+        0xff => (8, 0x1_0000_0000),
+    };
+    let end = (*cursor).checked_add(byte_count).context("compact size overflow")?;
+    let encoded = bytes.get(*cursor..end).context("truncated compact size")?;
+    *cursor = end;
+
+    let value = encoded
+        .iter()
+        .enumerate()
+        .fold(0_u64, |value, (shift, byte)| value | (u64::from(*byte) << (shift * 8)));
+    if value < minimum {
+        bail!("non-canonical compact size");
+    }
+    usize::try_from(value).context("compact size does not fit usize")
+}
+
+fn rewrite_global_xpub_versions(
+    psbt: &mut [u8],
+    mut replacement: impl FnMut([u8; 4], [u8; SERIALIZED_XPUB_DATA_LEN]) -> Option<[u8; 4]>,
+) -> anyhow::Result<()> {
+    if !psbt.starts_with(PSBT_MAGIC) {
+        return Ok(());
+    }
+
+    let mut cursor = PSBT_MAGIC.len();
+    loop {
+        let key_len = read_compact_size(psbt, &mut cursor)?;
+        if key_len == 0 {
+            return Ok(());
+        }
+
+        let key_start = cursor;
+        let key_end = key_start.checked_add(key_len).context("PSBT key length overflow")?;
+        if key_end > psbt.len() {
+            bail!("truncated PSBT key");
+        }
+
+        if key_len == SERIALIZED_XPUB_LEN + 1 && psbt[key_start] == GLOBAL_XPUB_KEY_TYPE {
+            let version = psbt[key_start + 1..key_start + 5].try_into().unwrap();
+            let key_data = psbt[key_start + 5..key_end].try_into().unwrap();
+            if let Some(replacement) = replacement(version, key_data) {
+                psbt[key_start + 1..key_start + 5].copy_from_slice(&replacement);
+            }
+        }
+
+        cursor = key_end;
+        let value_len = read_compact_size(psbt, &mut cursor)?;
+        cursor = cursor.checked_add(value_len).context("PSBT value length overflow")?;
+        if cursor > psbt.len() {
+            bail!("truncated PSBT value");
+        }
+    }
+}
+
+/// Casa PSBTs can use SLIP-132 versions for otherwise standard global xpub
+/// keys. Normalize a parsing copy while retaining enough information to emit
+/// the signed PSBT with the exact versions supplied by the coordinator.
+fn normalize_global_xpub_versions(psbt: &mut [u8]) -> anyhow::Result<Vec<OriginalGlobalXpubVersion>> {
+    let mut originals = Vec::new();
+    rewrite_global_xpub_versions(psbt, |version, key_data| {
+        let canonical = match version {
+            MULTISIG_YPUB_VERSION | MULTISIG_ZPUB_VERSION => XPUB_VERSION,
+            MULTISIG_UPUB_VERSION | MULTISIG_VPUB_VERSION => TPUB_VERSION,
+            _ => return None,
+        };
+        originals.push(OriginalGlobalXpubVersion { key_data, version });
+        Some(canonical)
+    })?;
+    Ok(originals)
+}
+
+fn restore_global_xpub_versions(
+    psbt: &mut [u8],
+    originals: &[OriginalGlobalXpubVersion],
+) -> anyhow::Result<()> {
+    rewrite_global_xpub_versions(psbt, |_, key_data| {
+        originals.iter().find(|original| original.key_data == key_data).map(|original| original.version)
+    })
+}
+
+fn restore_nested_output_redeem_script(output: &mut PsbtOutput, txout: &TxOut) -> bool {
+    if output.redeem_script.is_some() || !txout.script_pubkey.is_p2sh() {
+        return false;
+    }
+    let Some(witness_script) = output.witness_script.as_ref() else {
+        return false;
+    };
+
+    let redeem_script = ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+    if ScriptBuf::new_p2sh(&redeem_script.script_hash()) != txout.script_pubkey {
+        return false;
+    }
+
+    output.redeem_script = Some(redeem_script);
+    true
+}
+
+fn deserialize_psbt(mut bytes: Vec<u8>) -> anyhow::Result<(Psbt, Vec<OriginalGlobalXpubVersion>)> {
+    let original_global_xpub_versions =
+        normalize_global_xpub_versions(&mut bytes).context("normalize global xpubs")?;
+    let mut psbt = Psbt::deserialize(&bytes).context("deserialize PSBT")?;
+    let restored = psbt
+        .outputs
+        .iter_mut()
+        .zip(&psbt.unsigned_tx.output)
+        .map(|(output, txout)| usize::from(restore_nested_output_redeem_script(output, txout)))
+        .sum::<usize>();
+    if restored != 0 {
+        log::info!("restored {restored} nested PSBT output redeem script(s)");
+    }
+    Ok((psbt, original_global_xpub_versions))
 }
 
 pub mod verify {
@@ -428,7 +601,7 @@ pub mod verify {
     pub async fn verify_psbt(
         state: StoredValue<AppState>,
         bytes: Vec<u8>,
-        origin: PsbtOrigin,
+        mut origin: PsbtOrigin,
         nav_replace: bool,
     ) {
         let ui = state.borrow().ui();
@@ -441,8 +614,9 @@ pub mod verify {
         ui.global::<SignPsbt>().set_state(SignPsbtState::Verifying);
 
         let trust_witness_utxo = !state.borrow().settings.verify_inputs;
-        match spawn_worker(async move { Psbt::deserialize(&bytes) }).await {
-            Ok(psbt) => {
+        match spawn_worker(async move { deserialize_psbt(bytes) }).await {
+            Ok((psbt, original_global_xpub_versions)) => {
+                origin.original_global_xpub_versions = original_global_xpub_versions;
                 verify_parsed_psbt(state, psbt, origin, nav_replace, trust_witness_utxo).await;
             }
             Err(e) => {
@@ -971,7 +1145,65 @@ fn format_btc(amount: Amount, display_amount: DisplayAmount, locale: &str) -> Sh
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {
+        super::*,
+        ngwallet::bdk_wallet::bitcoin::{
+            bip32::{DerivationPath, Fingerprint, Xpub},
+            secp256k1::Secp256k1,
+        },
+    };
+
+    const EMPTY_PSBT_HEX: &str = "70736274ff01000a0200000000000000000000";
+
+    #[test]
+    fn preserves_slip132_global_xpubs_across_file_roundtrip() {
+        let mut psbt = Psbt::deserialize(&hex::decode(EMPTY_PSBT_HEX).unwrap()).unwrap();
+        let xpriv = Xpriv::new_master(NgNetwork::Bitcoin, &[42; 32]).unwrap();
+        let xpub = Xpub::from_priv(&Secp256k1::new(), &xpriv);
+        psbt.xpub.insert(xpub, (Fingerprint::default(), DerivationPath::default()));
+
+        let mut raw = psbt.serialize();
+        let version_offset =
+            raw.windows(XPUB_VERSION.len()).position(|window| window == XPUB_VERSION).unwrap();
+        raw[version_offset..version_offset + MULTISIG_YPUB_VERSION.len()]
+            .copy_from_slice(&MULTISIG_YPUB_VERSION);
+        assert!(Psbt::deserialize(&raw).is_err());
+
+        let original = raw.clone();
+        let (psbt, original_versions) = deserialize_psbt(raw).unwrap();
+        assert!(psbt.xpub.contains_key(&xpub));
+
+        let mut origin = PsbtOrigin::file();
+        origin.original_global_xpub_versions = original_versions;
+        assert_eq!(origin.serialize(&psbt).unwrap(), original);
+    }
+
+    #[test]
+    fn restores_matching_nested_output_redeem_script() {
+        let witness_script = ScriptBuf::from_bytes(vec![0x52, 0x51, 0x52, 0xae]);
+        let expected_redeem = ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+        let txout = TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: ScriptBuf::new_p2sh(&expected_redeem.script_hash()),
+        };
+        let mut output = PsbtOutput { witness_script: Some(witness_script), ..Default::default() };
+
+        assert!(restore_nested_output_redeem_script(&mut output, &txout));
+        assert_eq!(output.redeem_script, Some(expected_redeem));
+    }
+
+    #[test]
+    fn does_not_restore_mismatched_nested_output_redeem_script() {
+        let mut output =
+            PsbtOutput { witness_script: Some(ScriptBuf::from_bytes(vec![0x51])), ..Default::default() };
+        let txout = TxOut {
+            value: Amount::ZERO,
+            script_pubkey: ScriptBuf::new_p2sh(&ScriptBuf::new().script_hash()),
+        };
+
+        assert!(!restore_nested_output_redeem_script(&mut output, &txout));
+        assert!(output.redeem_script.is_none());
+    }
 
     #[test]
     fn test_format_sats_with_separators_en() {

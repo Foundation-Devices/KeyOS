@@ -252,7 +252,7 @@ pub fn execute_file_picker_psbt(state: StoredValue<AppState>) -> anyhow::Result<
     let bytes = execute_file_picker(state)?;
 
     if let Some(b) = bytes {
-        let fut = crate::psbt_signing::verify::verify_psbt(state, b, PsbtOrigin::File, false);
+        let fut = crate::psbt_signing::verify::verify_psbt(state, b, PsbtOrigin::file(), false);
         spawn_local(fut).detach();
     }
 
@@ -263,7 +263,7 @@ fn try_parse_psbt(scan: &ScanQrResult) -> anyhow::Result<(Vec<u8>, PsbtOrigin)> 
     if let ScanQrResult::Ur2 { ur_type, data, .. } = scan {
         match UrValue::from_ur(ur_type, data.as_slice())? {
             UrValue::Psbt(bytes) | UrValue::Bytes(bytes) => {
-                return Ok((bytes.to_vec(), PsbtOrigin::Qr { ur_type: ur_type.clone() }));
+                return Ok((bytes.to_vec(), PsbtOrigin::qr(ur_type.clone())));
             }
             _ => {}
         }
