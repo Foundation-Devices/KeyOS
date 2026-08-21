@@ -42,6 +42,7 @@ export component GenericAlertPage inherits Rectangle {
     width: UISize.screen-width;
     height: UISize.popup-app-height - Size.sz8;
     background: Palette.background-primary;
+    private property <bool> compact-icon: GenericAlertGlobal.button3-title != "";
 
     VerticalLayout {
         width: parent.width;
@@ -61,22 +62,25 @@ export component GenericAlertPage inherits Rectangle {
             alignment: stretch;
             spacing: Size.sz5;
 
-            // The jumbo circle is decorative, so it is the one element that gives way: it
-            // scales down when the text and buttons need the room. Otherwise a wrapped line
-            // pushes the last button below the popup edge, where it cannot be tapped.
+            // The decorative icon is the first element that gives way when text wraps. A
+            // three-action alert requests the compact circle at its designed size instead of
+            // resampling the jumbo circle, while the area can still shrink to keep buttons visible.
             icon-area := Rectangle {
-                preferred-height: IconSize.px184;
+                preferred-height: root.compact-icon ? IconSize.px128 : IconSize.px184;
                 min-height: 0;
                 vertical-stretch: 0;
                 clip: true;
 
                 WrappedIcon {
-                    width: min(icon-area.height, IconSize.px184);
+                    compact: root.compact-icon;
+                    width: min(icon-area.height, self.compact ? IconSize.px128 : IconSize.px184);
                     height: self.width;
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     outer-icon: "jumbo-circle";
-                    inner-icon: GenericAlertGlobal.icon;
+                    inner-icon: GenericAlertGlobal.icon == "alert"
+                        ? "alert-wrapped"
+                        : GenericAlertGlobal.icon;
                 }
             }
 

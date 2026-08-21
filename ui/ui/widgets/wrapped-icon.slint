@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { Palette } from "@ui/theme.slint";
+import { IconSize, Palette } from "@ui/theme.slint";
 import { JumboIcon } from "./jumbo-icon.slint";
 import { Icon } from "./icon.slint";
 
@@ -9,9 +9,13 @@ export component WrappedIcon inherits JumboIcon {
     // "jumbo-circle", "jumbo-shield", "jumbo-underbar"
     in property <string> outer-icon: "jumbo-circle";
     in property <string> inner-icon: "check";
-    private property <length> inner-icon-size: root.height * 96 / 184;
+    in property <bool> compact: false;
+    private property <length> inner-icon-size: min(
+        compact ? IconSize.px64 : IconSize.px96,
+        compact ? root.height / 2 : root.height * 96 / 184,
+    );
 
-    name: outer-icon;
+    name: compact && outer-icon == "jumbo-circle" ? "compact-circle" : outer-icon;
 
     Rectangle {
         width: root.inner-icon-size;
@@ -21,10 +25,6 @@ export component WrappedIcon inherits JumboIcon {
         Icon {
             name: root.inner-icon;
             size: parent.width;
-            // At 184px, a 10px lift makes all three alert-corner clearances round to 30px.
-            y: root.inner-icon == "alert" && root.name == "jumbo-circle"
-                ? -root.height * 10 / 184
-                : 0px;
             color: Palette.content-brand;
         }
     }

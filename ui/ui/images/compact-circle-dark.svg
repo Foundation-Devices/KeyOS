@@ -1,0 +1,9 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="64" cy="64" r="59.8261" stroke="url(#ring)" stroke-width="8.34783"/>
+  <defs>
+    <linearGradient id="ring" x1="64" y1="119.485" x2="64" y2="12.7605" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5A595A"/>
+      <stop offset="1" stop-color="#959394"/>
+    </linearGradient>
+  </defs>
+</svg>
