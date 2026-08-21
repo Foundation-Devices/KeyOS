@@ -1894,6 +1894,77 @@ fn setup_update_global(state: StoredValue<AppState>) {
         start_firmware_download(state);
     });
 
+    update_global.on_manual_update(move || {
+        let options = SelectFileOptions::default()
+            .with_hidden_allowed(false)
+            .with_search_allowed(false)
+            .with_start_location(Location::External)
+            .with_allowed_locations(AllowedLocations::specific([Location::External]))
+            .with_allowed_extensions(AllowedExtensions::specific(["tar"]));
+
+        let selected_file = select_file::<GuiPermissions>(options)
+            .context("failed to open file picker")
+            .and_then(|selection| {
+                let Some(selection) = selection else {
+                    return Ok(None);
+                };
+                let Some((path, Location::External)) = selection.files().first().cloned() else {
+                    log::info!("no update file was selected");
+                    return Ok(None);
+                };
+
+                let fs = FileSystem::default();
+                let mut source = fs
+                    .open_file(
+                        path,
+                        fs::Location::Usb,
+                        fs::OpenFlags { read: true, write: false, create: false },
+                    )
+                    .context("failed to open update file")?;
+
+                let update_temp_file = update_temp_file();
+                fs.ensure_parent_dir_exists(&update_temp_file, fs::Location::System)
+                    .context("failed to create update staging directory")?;
+                let mut destination = fs
+                    .open_file(
+                        &update_temp_file,
+                        fs::Location::System,
+                        fs::OpenFlags { read: false, write: true, create: true },
+                    )
+                    .context("failed to create staged update file")?;
+
+                source.copy_to(&mut destination).context("failed to copy update file")?;
+                drop(source);
+                drop(destination);
+
+                Ok(Some(update_temp_file))
+            });
+
+        let ui = state.borrow().ui();
+        let update_global = ui.global::<UpdateGlobal>();
+        match selected_file {
+            Ok(Some(file)) => {
+                update_global.set_fw_update_state(FwUpdateState::Verifying);
+                update_global.set_fw_update_progress(0.0);
+                update_global.set_fw_update_eta(SharedString::default());
+                update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
+                state.borrow().set_update_kiosk_enabled(false);
+                ui.global::<Navigate>()
+                    .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
+                state.borrow().update.start_update(vec![file]);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                log::error!("failed to stage update file: {e:?}");
+                FileSystem::default().remove(update_temp_file(), fs::Location::System).ok();
+                update_global.set_fw_update_state(FwUpdateState::Failed);
+                update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
+                ui.global::<Navigate>()
+                    .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
+            }
+        }
+    });
+
     ql_utils::on_update_sufficient_battery::<power_manager_ext_permissions::PowerManagerExtPermissions, _>(
         move |sufficient_battery| {
             log::info!("update sufficient_battery={}", sufficient_battery);
@@ -1989,6 +2060,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 ProgressUpdate::InstallError(error) => {
                     disconnect_monitor = None;
                     log::error!("failed to apply update {error:?}");
+                    FileSystem::default().remove(update_temp_file(), fs::Location::System).ok();
                     restore_update_exit_controls();
                     handle_update_error(
                         state,
@@ -2183,6 +2255,8 @@ async fn save_settings_file(state: StoredValue<AppState>) -> anyhow::Result<()> 
 
     Ok(())
 }
+
+fn update_temp_file() -> String { format!("{}/update.bin", fs::SYSTEM_STATE_ROOT) }
 
 fn erase_system_state() {
     let fs = FileSystem::default();
