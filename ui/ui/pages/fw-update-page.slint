@@ -258,6 +258,7 @@ component SuccessView inherits JumboIconPageBody {
 
 component FailedView inherits JumboIconPageBody {
         in property <FwUpdateError> error;
+        in property <string> error-detail: "";
 
         callback retry();
 
@@ -306,6 +307,12 @@ component FailedView inherits JumboIconPageBody {
                     vertical-alignment: center;
                 }
             }
+
+            if root.error-detail != "": TextSm {
+                text: root.error-detail;
+                color: Palette.content-tertiary;
+                horizontal-alignment: center;
+            }
         }
 
         ButtonSection {
@@ -322,6 +329,7 @@ component FailedView inherits JumboIconPageBody {
 export component FwUpdatePage inherits Rectangle {
         in property <FwUpdateState> state;
         in property <FwUpdateError> error;
+        in property <string> error-detail: "";
 
         in property <float> progress-percent;
         in property <string> eta;
@@ -348,6 +356,7 @@ export component FwUpdatePage inherits Rectangle {
         }
         if state == FwUpdateState.Failed: FailedView {
             error: error;
+            error-detail: root.error-detail;
             retry => {
                 retry-fw-update()
             }

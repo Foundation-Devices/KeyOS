@@ -1899,7 +1899,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
             .with_hidden_allowed(false)
             .with_search_allowed(false)
             .with_start_location(Location::External)
-            .with_allowed_locations(AllowedLocations::specific([Location::External]))
+            .with_allowed_locations(AllowedLocations::specific([Location::External, Location::Airlock]))
             .with_allowed_extensions(AllowedExtensions::specific(["tar"]));
 
         let selected_file = select_file::<GuiPermissions>(options)
@@ -1908,18 +1908,23 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 let Some(selection) = selection else {
                     return Ok(None);
                 };
-                let Some((path, Location::External)) = selection.files().first().cloned() else {
+                let Some((path, location)) = selection.files().first().cloned() else {
                     log::info!("no update file was selected");
                     return Ok(None);
                 };
 
+                let location = match location {
+                    Location::External => fs::Location::Usb,
+                    Location::Airlock => fs::Location::Airlock,
+                    Location::Internal => {
+                        log::warn!("unsupported update file location: {location:?}");
+                        return Ok(None);
+                    }
+                };
+
                 let fs = FileSystem::default();
                 let mut source = fs
-                    .open_file(
-                        path,
-                        fs::Location::Usb,
-                        fs::OpenFlags { read: true, write: false, create: false },
-                    )
+                    .open_file(path, location, fs::OpenFlags { read: true, write: false, create: false })
                     .context("failed to open update file")?;
 
                 let update_temp_file = update_temp_file();
@@ -1948,6 +1953,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 update_global.set_fw_update_progress(0.0);
                 update_global.set_fw_update_eta(SharedString::default());
                 update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
+                update_global.set_fw_update_error_detail(SharedString::default());
                 state.borrow().set_update_kiosk_enabled(false);
                 ui.global::<Navigate>()
                     .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
@@ -1959,6 +1965,7 @@ fn setup_update_global(state: StoredValue<AppState>) {
                 FileSystem::default().remove(update_temp_file(), fs::Location::System).ok();
                 update_global.set_fw_update_state(FwUpdateState::Failed);
                 update_global.set_fw_update_error(FwUpdateError::VerifyFailed);
+                update_global.set_fw_update_error_detail(e.to_string().into());
                 ui.global::<Navigate>()
                     .invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
             }
@@ -2104,6 +2111,7 @@ fn resume_update_if_needed(state: StoredValue<AppState>) {
     update_global.set_fw_update_state(FwUpdateState::Installing);
     update_global.set_fw_update_progress(0.0);
     update_global.set_fw_update_eta(SharedString::default());
+    update_global.set_fw_update_error_detail(SharedString::default());
 
     ui.global::<Navigate>().invoke_update_progress(NavigateOptions { animate: Animate::None, replace: true });
     state.update.continue_update();
@@ -2133,6 +2141,7 @@ fn start_firmware_download(state: StoredValue<AppState>) {
     update_global.set_fw_update_progress(0.0);
     update_global.set_fw_update_eta(SharedString::default());
     update_global.set_fw_update_error(FwUpdateError::DownloadFailed);
+    update_global.set_fw_update_error_detail(SharedString::default());
 
     let start_fw_update =
         state.borrow().ql_status.send_ql_archive_retry(StartFirmwareUpdate { chunk_offset: None }, |e| {
@@ -2155,6 +2164,7 @@ fn handle_update_error(
     let update_global = ui.global::<UpdateGlobal>();
     update_global.set_fw_update_state(FwUpdateState::Failed);
     update_global.set_fw_update_error(fw_error);
+    update_global.set_fw_update_error_detail(error.clone().into());
     notify_update_progress(state, FirmwareInstallEvent::Error { error, stage });
 }
 
