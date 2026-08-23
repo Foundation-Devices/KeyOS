@@ -46,6 +46,7 @@ async fn run() -> Result<()> {
         Commands::Theme(args) => commands::theme::execute(&args)?,
         Commands::Themes(args) => commands::themes::execute(&args)?,
         Commands::Doctor => commands::doctor::execute()?,
+        Commands::Docs(args) => commands::docs::execute(&args)?,
         Commands::Preview(args) => commands::preview::execute(&args)?,
         Commands::Logs(args) => commands::logs::execute(&args)?,
         #[cfg(feature = "experimental-plugins")]

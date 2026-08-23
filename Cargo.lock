@@ -16411,16 +16411,19 @@ dependencies = [
  "regex",
  "release-manifest",
  "sambuca",
+ "semver 1.0.23",
  "serde",
  "serde_json",
  "sha2",
  "slint-keyos-platform-build",
  "svd2utra",
  "tar",
+ "toml 0.8.23",
  "usb-debug-protocol",
  "utralib",
  "xmas-elf",
  "xous",
+ "zip",
 ]
 
 [[package]]

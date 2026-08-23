@@ -337,6 +337,11 @@ pre {
         flex-wrap: wrap;
     }
 
+    /* Rustdoc offsets anchor targets by its own 45px topbar, which the 88px sticky header covers. */
+    *[id] {
+        scroll-margin-top: 100px;
+    }
+
     .foundation-docs-header {
         align-self: flex-start;
         backdrop-filter: blur(18px);
@@ -397,6 +402,12 @@ pre {
         color: var(--foundation-muted);
         font-size: 0.95rem;
         font-weight: 500;
+        text-decoration: none;
+    }
+
+    .foundation-docs-title:hover {
+        color: var(--foundation-link);
+        text-decoration: none;
     }
 
     .foundation-docs-nav {

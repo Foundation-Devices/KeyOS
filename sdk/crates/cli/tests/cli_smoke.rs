@@ -21,6 +21,7 @@ fn built_in_commands_expose_help() {
         "theme",
         "themes",
         "doctor",
+        "docs",
         "preview",
         "logs",
         "completions",
@@ -128,6 +129,71 @@ fn environment_commands_work_in_smoke_env() {
     assert!(exit.status.success(), "exit failed: {}", stderr(&exit));
     assert!(env.home().join(".foundation").join("sdk").join("current").exists());
     assert!(!env.home().join(".cache").join("nix").exists());
+}
+
+#[test]
+fn docs_open_by_default_and_print_urls_on_request() {
+    let env = TestEnv::new();
+    let install_root = env.home().join(".foundation").join("sdk");
+    let current_docs = install_root.join("current").join("docs").join("api");
+    let sdk_root_docs = env.bundle_root().join("docs").join("api");
+    let version = "1.2.3-beta.1";
+    let target = match (std::env::consts::ARCH, std::env::consts::OS) {
+        ("aarch64", "macos") => "aarch64-apple-darwin",
+        ("x86_64", "macos") => "x86_64-apple-darwin",
+        ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
+        ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
+        platform => panic!("unsupported test platform: {platform:?}"),
+    };
+    let version_docs =
+        install_root.join(format!("foundation-sdk-{version}-{target}")).join("docs").join("api");
+    write_docs_bundle(&current_docs, "current docs");
+    write_docs_bundle(&sdk_root_docs, "development docs");
+    write_docs_bundle(&version_docs, "versioned docs");
+
+    let current = env.command().arg("docs").output().unwrap();
+    assert!(current.status.success(), "current docs failed: {}", stderr(&current));
+    let current_stdout = stdout(&current);
+    assert!(current_stdout.contains("current"));
+    let browser_log = env.read_log("browser-open.log");
+    assert!(browser_log.contains("file://"), "docs should open a file URL: {browser_log}");
+    assert!(
+        browser_log.contains(&sdk_root_docs.display().to_string()),
+        "docs should open the FOUNDATION_SDK_ROOT bundle: {browser_log}"
+    );
+    assert!(
+        !browser_log.contains(&current_docs.display().to_string()),
+        "docs should not open the global current bundle: {browser_log}"
+    );
+
+    let versioned = env.command().args(["docs", version, "--url"]).output().unwrap();
+    assert!(versioned.status.success(), "versioned docs failed: {}", stderr(&versioned));
+    let versioned_stdout = stdout(&versioned);
+    assert!(versioned_stdout.contains("file://"));
+    assert!(versioned_stdout.contains(version));
+    assert_eq!(env.read_log("browser-open.log"), browser_log, "--url must not open a browser");
+    assert_eq!(fs::read_to_string(version_docs.join("index.html")).unwrap(), "versioned docs");
+
+    let help = env.command().args(["docs", "--help"]).output().unwrap();
+    assert!(help.status.success(), "docs help failed: {}", stderr(&help));
+    assert!(!stdout(&help).contains("--port"));
+    assert!(!stdout(&help).contains("--kill"));
+    assert!(!stdout(&help).contains("--list"));
+    assert!(!stdout(&help).contains("--open"));
+    assert!(stdout(&help).contains("--url"));
+}
+
+fn write_docs_bundle(root: &Path, root_page: &str) {
+    fs::create_dir_all(root.join("v1.4.0")).unwrap();
+    fs::write(root.join("index.html"), root_page).unwrap();
+    fs::write(root.join("bundle-manifest.js"), "manifest").unwrap();
+    fs::write(root.join("version-selector.js"), "selector").unwrap();
+    fs::write(root.join("v1.4.0/index.html"), "KeyOS 1.4.0 docs").unwrap();
+    fs::write(
+        root.join("bundle-manifest.json"),
+        r#"{"schemaVersion":1,"defaultKeyosVersion":"1.4.0","versions":[{"keyosVersion":"1.4.0","path":"v1.4.0/"}]}"#,
+    )
+    .unwrap();
 }
 
 #[test]

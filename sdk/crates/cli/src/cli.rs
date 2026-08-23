@@ -100,6 +100,12 @@ pub enum Commands {
     )]
     Doctor,
 
+    /// Show the complete API docs bundle from an installed Foundation SDK
+    #[command(
+        long_about = "Opens the complete API documentation bundle in the current Foundation SDK, or in a specific installed SDK version. Use --url to print its file URL instead. Select the KeyOS API version inside the page."
+    )]
+    Docs(commands::docs::DocsArgs),
+
     /// Preview UI in foundation-slint-viewer
     #[command(
         long_about = "Opens the application UI in foundation-slint-viewer for quick preview without a full hardware build"

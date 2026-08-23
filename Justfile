@@ -271,64 +271,24 @@ clean:
     cargo clean
     cargo clean --manifest-path ui2/Cargo.toml
 
-# Build the local KeyOS API rustdoc site.
-docs-api:
-    cargo xtask docs-api
+# Build the SDK API documentation for this checkout's canonical KeyOS version.
+docs:
+    nix develop .#build --command cargo xtask docs-api
 
-# Alias for the singular form.
-doc-api: docs-api
+# Package that one self-contained KeyOS snapshot for release hosting.
+docs-package:
+    nix develop .#build --command cargo xtask docs-api --package
 
-# Build and copy the generated KeyOS API rustdoc site into a Docs-Site checkout.
-docs-api-copy docs_site:
-    #!/usr/bin/env bash
-    set -euo pipefail
+# Build, verify, and immutably upload one SDK docs release. Pass a release tag
+# only when it differs from the canonical KeyOS version.
+docs-publish *args:
+    just docs-package
+    nix develop .#build --command cargo xtask docs-publish {{args}}
 
-    if ! command -v rsync >/dev/null 2>&1; then
-        echo "ERROR: rsync is required to copy the generated API docs." >&2
-        exit 1
-    fi
-
-    docs_site={{quote(docs_site)}}
-    if ! docs_site_root="$(git -C "$docs_site" rev-parse --show-toplevel 2>/dev/null)"; then
-        echo "ERROR: '$docs_site' is not a Git checkout." >&2
-        exit 1
-    fi
-
-    destination="$docs_site_root/static/developers/api"
-    if [[ ! -d "$destination" || ! -f "$docs_site_root/content/developers/api-reference.md" ]]; then
-        echo "ERROR: '$docs_site_root' does not have the expected Docs-Site layout." >&2
-        exit 1
-    fi
-
-    if [[ -n "$(git -C "$docs_site_root" status --porcelain -- static/developers/api)" ]]; then
-        echo "ERROR: Docs-Site has uncommitted changes under static/developers/api." >&2
-        echo "Commit or discard those changes before copying generated docs." >&2
-        exit 1
-    fi
-
-    cargo xtask docs-api
-    rsync -a --delete --exclude='.lock' target/doc/ "$destination/"
-
-    printf 'Copied KeyOS API docs to %s\n' "$destination"
-    printf 'Docs-Site changes:\n'
-    git -C "$docs_site_root" status --short -- static/developers/api
-
-# Package the generated KeyOS API rustdoc site for hosting.
-docs-api-package: docs-api
-    tar -czf target/keyos-api-rustdoc.tar.gz -C target/doc .
-    printf 'Packaged KeyOS API docs at %s\n' 'target/keyos-api-rustdoc.tar.gz'
-
-# Serve the generated KeyOS API rustdoc site locally.
-docs-api-serve port="8765":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just docs-api
-    selected_port="{{port}}"
-    while lsof -nP -iTCP:"$selected_port" -sTCP:LISTEN >/dev/null 2>&1; do
-        selected_port=$((selected_port + 1))
-    done
-    printf 'Serving KeyOS API docs at http://127.0.0.1:%s/\n' "$selected_port"
-    python3 -m http.server "$selected_port" --bind 127.0.0.1 --directory target/doc
+# Build the generated bundle and open it with the Foundation CLI.
+docs-open:
+    just docs
+    FOUNDATION_DOCS_ROOT="{{justfile_directory()}}/target/sdk-docs/api" cargo run --manifest-path sdk/crates/cli/Cargo.toml -- docs
 
 list-subtrees:
     git log | grep git-subtree-dir | tr -d ' ' | cut -d ":" -f2 | sort | uniq | xargs -I {} bash -c 'if [ -d $(git rev-parse --show-toplevel)/{} ] ; then echo {}; fi'

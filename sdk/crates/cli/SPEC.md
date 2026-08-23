@@ -25,6 +25,7 @@ The currently implemented built-in commands are:
 - `theme`
 - `themes`
 - `doctor`
+- `docs`
 - `preview`
 - `completions`
 
@@ -581,6 +582,32 @@ Behavior:
   - app-config names and app icon size when run inside an app project
 - Prints pass/fail plus suggested fixes
 - Exits non-zero when any check fails, so scripts and CI can gate on it
+
+### `docs`
+
+Signatures:
+
+```text
+foundation docs [SDK_VERSION] [--url]
+```
+
+Behavior:
+
+- With no version, opens `~/.foundation/sdk/current/docs/api`; when that installed path is absent,
+  falls back to `<FOUNDATION_SDK_ROOT>/docs/api` for an unpacked SDK bundle
+- The positional version is always an SDK release version, not a KeyOS version
+- With an SDK semver version (including prereleases such as `1.2.3-beta.1`), opens
+  `~/.foundation/sdk/foundation-sdk-<version>-<host-target>/docs/api`
+- Honors `FOUNDATION_SDK_INSTALL_DIR` as the SDK installation root
+- Honors `FOUNDATION_DOCS_ROOT` as a development-only direct bundle override; `just docs-open`
+  uses it to open the freshly generated bundle
+- Requires the complete generated bundle: top-level `index.html`, `bundle-manifest.json`,
+  `bundle-manifest.js`, `version-selector.js`, and every KeyOS snapshot index named by the manifest
+- Opens exactly the bundle installed by the SDK builder. The selector embedded in every Rustdoc
+  page chooses among the KeyOS API versions in that bundle without changing the selected SDK
+- Opens the selected bundle's `file://` URL in the system's default web browser; it does not start a
+  server or retain state
+- `--url` prints that URL instead of opening it
 
 ### `preview`
 

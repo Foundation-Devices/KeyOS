@@ -26,6 +26,12 @@ const SOURCE_UI_RESOURCES_DIR: &str = "ui2/resources";
 const STAGED_SDK_UI_ROOT: &str = "ui/ui";
 const STAGED_KEYOS_SDK_UI_ROOT: &str = "lib/keyos/ui/ui";
 const STAGED_SDK_RESOURCES_ROOT: &str = "resources";
+const BT_PLACEHOLDER_DESTINATION: &str = "lib/keyos/api/bt";
+const BT_PLACEHOLDER_MANIFEST: &str = include_str!("../assets/bt-placeholder/Cargo.toml.template");
+const BT_PLACEHOLDER_LIB: &str = include_str!("../assets/bt-placeholder/lib.rs");
+const DOCS_BUNDLE_LOCK_PATH: &str = "target/docs-api.lock";
+const DOCS_BUNDLE_OUTPUT_PATH: &str = "target/sdk-docs/api";
+const DOCS_BUNDLE_LOCK_HELD_ENV: &str = "KEYOS_DOCS_BUNDLE_LOCK_HELD";
 const KEYOS_LEGACY_UI_SOURCE_ROOT: &str = "ui/ui";
 const KEYOS_LEGACY_UI_ASSET_DIRS: &[&str] = &["icons", "images", "fonts"];
 const SLINT_SDK_SEED_DIRS: &[&str] = &[
@@ -406,11 +412,12 @@ fn build_common_stage(
         copy_entry(root, &stage_dir, entry, resolver)?;
     }
 
+    stage_bt_error_placeholder(resolver.keyos_root(), &stage_dir)?;
     stage_keyos_workspace_root(root, config, &stage_dir, &config.expanded_copy_entries(), resolver)?;
     stage_shared_ui_artifact(resolver.keyos_root(), &stage_dir, args.verbose)?;
 
     if !args.skip_docs {
-        build_docs(root, &stage_dir, "common", config, args.verbose)?;
+        build_docs(root, &stage_dir, config, resolver, args.verbose)?;
     }
 
     util::copy_file(&root.join(SDK_USER_FLAKE_SOURCE), &stage_dir.join("flake.nix"))?;
@@ -480,6 +487,8 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
     let mut required_paths = vec![
         stage_dir.join("manifest.toml"),
         stage_dir.join("lib").join("keyos").join("Cargo.toml"),
+        stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("Cargo.toml"),
+        stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("src").join("error.rs"),
         stage_dir.join("ui").join("ui").join("theme.slint"),
         stage_dir
             .join("lib")
@@ -662,24 +671,6 @@ fn validate_layout(root: &Path, config: &Config, resolver: &SourceResolver) -> L
         report.errors.push(format!("docs guide source is missing at {}", guide_source.display()));
     }
 
-    for crate_path in &config.docs.api_crates {
-        match resolve_staged_source(root, resolver, &copy_entries, crate_path) {
-            Some(source) => {
-                let manifest_path = source.join("Cargo.toml");
-                if !manifest_path.exists() {
-                    report.warnings.push(format!(
-                        "staged API docs source '{}' does not contain Cargo.toml at {}",
-                        crate_path,
-                        manifest_path.display()
-                    ));
-                }
-            }
-            None => report
-                .warnings
-                .push(format!("staged API docs source '{}' does not map to any [[copy]] entry", crate_path)),
-        }
-    }
-
     report
 }
 
@@ -787,25 +778,6 @@ fn keyos_slint_pin_from_manifest_and_lock(manifest: &str, lockfile: &str) -> Res
 
 fn parse_git_source_commit(source: &str) -> Option<String> {
     source.rsplit_once('#').and_then(|(_, commit)| (!commit.is_empty()).then(|| commit.to_string()))
-}
-
-fn resolve_staged_source(
-    root: &Path,
-    resolver: &SourceResolver,
-    copies: &[CopyEntry],
-    staged_path: &str,
-) -> Option<PathBuf> {
-    let normalized = staged_path.trim_start_matches("./");
-
-    for entry in copies {
-        if normalized == entry.dest || normalized.starts_with(&format!("{}/", entry.dest)) {
-            let suffix = normalized.strip_prefix(&entry.dest).unwrap_or_default().trim_start_matches('/');
-            let source_root = resolver.resolve_source(root, &entry.source);
-            return Some(if suffix.is_empty() { source_root } else { source_root.join(suffix) });
-        }
-    }
-
-    None
 }
 
 fn compile_entry(
@@ -1336,6 +1308,222 @@ fn copy_entry(root: &Path, stage_dir: &Path, entry: &CopyEntry, resolver: &Sourc
         CopyFilter::SlintSdk => stage_slint_sdk_snapshot(&source, &destination)?,
     }
     Ok(())
+}
+
+fn stage_bt_error_placeholder(keyos_root: &Path, stage_dir: &Path) -> Result<()> {
+    let source_error = keyos_root.join("api/bt/src/error.rs");
+    if !source_error.is_file() {
+        return Err(boxed_err(format!(
+            "quantum-link requires the BluetoothError source at {}",
+            source_error.display()
+        )));
+    }
+
+    let destination = stage_dir.join(BT_PLACEHOLDER_DESTINATION);
+    util::ensure_clean_dir(&destination)?;
+    util::ensure_dir(&destination.join("src"))?;
+    fs::write(destination.join("Cargo.toml"), BT_PLACEHOLDER_MANIFEST)?;
+    fs::write(destination.join("src/lib.rs"), render_bt_placeholder_lib(keyos_root)?)?;
+    util::copy_file(&source_error, &destination.join("src/error.rs"))?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ScalarEnumVariant {
+    name: String,
+    discriminant: u32,
+}
+
+/// Render only the GPIO and SPI error payloads that BluetoothError needs for
+/// its serialized KeyOS-only variants. The definitions come from the selected
+/// source checkout, which keeps an overridden KEYOS_DIR wire-compatible.
+fn render_bt_placeholder_lib(keyos_root: &Path) -> Result<String> {
+    let gpio_source = read_bt_payload_source(keyos_root, "api/gpio/src/lib.rs")?;
+    let spi_source = read_bt_payload_source(keyos_root, "api/spi/src/error.rs")?;
+    let gpio = parse_scalar_error_enum(&gpio_source, "GpioApiError")?;
+    let spi = parse_scalar_error_enum(&spi_source, "SpiError")?;
+
+    Ok(format!(
+        "{BT_PLACEHOLDER_LIB}\n{}\n{}",
+        render_scalar_error_enum("GpioApiError", &gpio),
+        render_scalar_error_enum("SpiError", &spi),
+    ))
+}
+
+fn read_bt_payload_source(keyos_root: &Path, relative_path: &str) -> Result<String> {
+    let path = keyos_root.join(relative_path);
+    fs::read_to_string(&path).map_err(|error| {
+        boxed_err(format!("could not read BluetoothError payload source {}: {error}", path.display()))
+    })
+}
+
+fn parse_scalar_error_enum(source: &str, enum_name: &str) -> Result<Vec<ScalarEnumVariant>> {
+    let declaration = format!("pub enum {enum_name}");
+    let declaration_start = source
+        .find(&declaration)
+        .ok_or_else(|| boxed_err(format!("could not find {declaration} in selected KeyOS source")))?;
+    let opening_brace = source[declaration_start..]
+        .find('{')
+        .map(|offset| declaration_start + offset)
+        .ok_or_else(|| boxed_err(format!("{declaration} has no opening brace")))?;
+    let closing_brace = matching_closing_brace(source, opening_brace)
+        .ok_or_else(|| boxed_err(format!("{declaration} has no closing brace")))?;
+    let body = strip_rust_comments(&source[opening_brace + 1..closing_brace]);
+    let mut next_discriminant = 0_u32;
+    let mut variants = Vec::new();
+
+    for entry in body.split(',') {
+        let entry = entry
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("#["))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if entry.is_empty() {
+            continue;
+        }
+
+        let (name, discriminant) = match entry.split_once('=') {
+            Some((name, value)) => (name.trim(), parse_enum_discriminant(value, enum_name)?),
+            None => (entry.trim(), next_discriminant),
+        };
+        if !is_rust_identifier(name) {
+            return Err(boxed_err(format!(
+                "{enum_name} has unsupported non-unit variant '{entry}' in selected KeyOS source"
+            )));
+        }
+        if variants.iter().any(|variant: &ScalarEnumVariant| variant.name == name) {
+            return Err(boxed_err(format!("{enum_name} repeats variant '{name}' in selected KeyOS source")));
+        }
+        variants.push(ScalarEnumVariant { name: name.to_owned(), discriminant });
+        next_discriminant = discriminant.checked_add(1).ok_or_else(|| {
+            boxed_err(format!("{enum_name} variant '{name}' overflows its u32 discriminant"))
+        })?;
+    }
+
+    if variants.is_empty() {
+        return Err(boxed_err(format!("{enum_name} has no variants in selected KeyOS source")));
+    }
+    if !variants.iter().any(|variant| variant.name == "InternalError") {
+        return Err(boxed_err(format!("{enum_name} has no InternalError fallback in selected KeyOS source")));
+    }
+    Ok(variants)
+}
+
+fn matching_closing_brace(source: &str, opening_brace: usize) -> Option<usize> {
+    let mut depth = 0_usize;
+    for (offset, byte) in source.as_bytes()[opening_brace..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(opening_brace + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn strip_rust_comments(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut stripped = String::new();
+    let mut copied_from = 0;
+    let mut index = 0;
+
+    while index + 1 < bytes.len() {
+        match (bytes[index], bytes[index + 1]) {
+            (b'/', b'/') => {
+                stripped.push_str(&source[copied_from..index]);
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+                copied_from = index;
+            }
+            (b'/', b'*') => {
+                stripped.push_str(&source[copied_from..index]);
+                index += 2;
+                let mut depth = 1;
+                while index < bytes.len() && depth > 0 {
+                    if index + 1 < bytes.len() && bytes[index..].starts_with(b"/*") {
+                        depth += 1;
+                        index += 2;
+                    } else if index + 1 < bytes.len() && bytes[index..].starts_with(b"*/") {
+                        depth -= 1;
+                        index += 2;
+                    } else {
+                        if bytes[index] == b'\n' {
+                            stripped.push('\n');
+                        }
+                        index += 1;
+                    }
+                }
+                copied_from = index;
+            }
+            _ => index += 1,
+        }
+    }
+    stripped.push_str(&source[copied_from..]);
+    stripped
+}
+
+fn parse_enum_discriminant(value: &str, enum_name: &str) -> Result<u32> {
+    let value = value.trim();
+    if value.contains(char::is_whitespace) {
+        return Err(boxed_err(format!(
+            "{enum_name} has unsupported discriminant expression '{value}' in selected KeyOS source"
+        )));
+    }
+    let value = value.strip_suffix("u32").unwrap_or(value).replace('_', "");
+    value.parse::<u32>().map_err(|error| {
+        boxed_err(format!("{enum_name} has invalid discriminant '{value}' in selected KeyOS source: {error}"))
+    })
+}
+
+fn is_rust_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some(character) if character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn render_scalar_error_enum(enum_name: &str, variants: &[ScalarEnumVariant]) -> String {
+    let declarations = variants
+        .iter()
+        .map(|variant| format!("    {} = {},", variant.name, variant.discriminant))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let matches = variants
+        .iter()
+        .map(|variant| format!("            {} => Self::{},", variant.discriminant, variant.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        r#"#[cfg(keyos)]
+#[derive(Debug, Copy, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum {enum_name} {{
+{declarations}
+}}
+
+#[cfg(keyos)]
+impl server::AsScalar<1> for {enum_name} {{
+    fn as_scalar(&self) -> [u32; 1] {{ [*self as u32] }}
+}}
+
+#[cfg(keyos)]
+impl server::FromScalar<1> for {enum_name} {{
+    fn from_scalar([value]: [u32; 1]) -> Self {{
+        match value {{
+{matches}
+            _ => Self::InternalError,
+        }}
+    }}
+}}
+"#
+    )
 }
 
 fn stage_shared_ui_artifact(keyos_root: &Path, stage_dir: &Path, verbose: bool) -> Result<()> {
@@ -1954,7 +2142,13 @@ fn local_staged_workspace_dependency_override(
     Some(toml::Value::Table(table))
 }
 
-fn build_docs(root: &Path, stage_dir: &Path, target: &str, config: &Config, verbose: bool) -> Result<()> {
+fn build_docs(
+    root: &Path,
+    stage_dir: &Path,
+    config: &Config,
+    resolver: &SourceResolver,
+    verbose: bool,
+) -> Result<()> {
     let docs_dir = stage_dir.join("docs");
     let guide_dir = docs_dir.join("guide");
     let api_dir = docs_dir.join("api");
@@ -1972,72 +2166,68 @@ fn build_docs(root: &Path, stage_dir: &Path, target: &str, config: &Config, verb
         util::copy_dir_all(&guide_source, &guide_dir.join("src"))?;
     }
 
-    let doc_target_dir = root.join("target").join("xtask-docs").join(target);
-    util::ensure_clean_dir(&doc_target_dir)?;
+    // Keep the SDK's API docs identical to the release produced by `just docs`: invoke this
+    // checkout's generator and configuration, while allowing KEYOS_DIR to supply the KeyOS crate
+    // sources. An override checkout may predate docs-api or expose a different SDK crate set.
+    let generator_root = docs_generator_root(root)?;
+    // Keep the lock from before the child starts until its output is copied to
+    // this package stage. The child recognizes this private protocol variable
+    // and therefore does not deadlock trying to take the same lock.
+    let _docs_bundle_lock = acquire_docs_bundle_lock(&generator_root)?;
+    let keyos_root = resolver.keyos_root();
+    let mut command = docs_generator_command(&generator_root, keyos_root);
+    util::run_command(&mut command, verbose)?;
 
-    let mut generated_any_docs = false;
-    let mut skipped = Vec::new();
-
-    for crate_path in &config.docs.api_crates {
-        let manifest_path = stage_dir.join(crate_path).join("Cargo.toml");
-        if !manifest_path.exists() {
-            skipped.push(crate_path.clone());
-            continue;
-        }
-
-        let mut command = Command::new("cargo");
-        command
-            .arg("doc")
-            .arg("--no-deps")
-            .arg("--manifest-path")
-            .arg(&manifest_path)
-            .arg("--target-dir")
-            .arg(&doc_target_dir);
-        util::run_command(&mut command, verbose)?;
-        generated_any_docs = true;
+    let generated_docs = generator_root.join(DOCS_BUNDLE_OUTPUT_PATH);
+    if !generated_docs.join("index.html").is_file() {
+        return Err(boxed_err(format!(
+            "docs-api did not produce {}",
+            generated_docs.join("index.html").display()
+        )));
     }
-
-    for crate_name in &config.docs.api_crates_workspace {
-        let mut command = Command::new("cargo");
-        command
-            .arg("doc")
-            .arg("--no-deps")
-            .arg("-p")
-            .arg(crate_name)
-            .arg("--target-dir")
-            .arg(&doc_target_dir);
-        util::run_command(&mut command, verbose)?;
-        generated_any_docs = true;
-    }
-
-    if generated_any_docs {
-        let generated_docs = doc_target_dir.join("doc");
-        if generated_docs.exists() {
-            util::copy_dir_contents(&generated_docs, &api_dir)?;
-        }
-    } else {
-        fs::write(
-            api_dir.join("README.md"),
-            "# API Docs\n\nAPI docs will be generated here once the referenced crates are available.\n",
-        )?;
-    }
-
-    if !skipped.is_empty() {
-        fs::write(
-            api_dir.join("SKIPPED.md"),
-            format!(
-                "# Skipped API Crates\n\nThe following copied crates were not present during this build:\n\n{}\n",
-                skipped
-                    .iter()
-                    .map(|item| format!("- `{item}`"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ),
-        )?;
-    }
+    util::copy_dir_contents(&generated_docs, &api_dir)?;
 
     util::copy_file_if_exists(&root.join("AGENTS.md"), &docs_dir.join("AGENTS.md"))?;
     Ok(())
+}
+
+fn acquire_docs_bundle_lock(generator_root: &Path) -> Result<fs::File> {
+    let path = generator_root.join(DOCS_BUNDLE_LOCK_PATH);
+    let parent = path.parent().ok_or_else(|| boxed_err("docs bundle lock has no parent directory"))?;
+    fs::create_dir_all(parent).map_err(|error| {
+        boxed_err(format!("could not create docs bundle lock directory {}: {error}", parent.display()))
+    })?;
+    let file =
+        OpenOptions::new().create(true).read(true).write(true).open(&path).map_err(|error| {
+            boxed_err(format!("could not open docs bundle lock {}: {error}", path.display()))
+        })?;
+    file.lock()
+        .map_err(|error| boxed_err(format!("could not lock docs bundle {}: {error}", path.display())))?;
+    Ok(file)
+}
+
+fn docs_generator_root(sdk_root: &Path) -> Result<PathBuf> {
+    let root =
+        sdk_root.parent().ok_or_else(|| boxed_err("SDK workspace root has no parent KeyOS checkout"))?;
+    if !root.join("xtask/Cargo.toml").is_file() {
+        return Err(boxed_err(format!(
+            "SDK docs generator is missing from the current KeyOS checkout: {}",
+            root.join("xtask/Cargo.toml").display()
+        )));
+    }
+    Ok(root.to_path_buf())
+}
+
+fn docs_generator_command(generator_root: &Path, source_root: &Path) -> Command {
+    let mut command = Command::new("cargo");
+    command
+        .arg("xtask")
+        .arg("docs-api")
+        .arg("--source-root")
+        .arg(source_root)
+        .current_dir(generator_root)
+        .env(DOCS_BUNDLE_LOCK_HELD_ENV, "1");
+    command
 }
 
 fn render_manifest(
@@ -2186,19 +2376,23 @@ fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 mod tests {
     use std::env;
     use std::fs;
+    use std::fs::OpenOptions;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
     use super::{
-        cargo_target_linker_env, ensure_release_sources_are_pinned, git_dirty, is_strippable_binary_header,
+        acquire_docs_bundle_lock, cargo_target_linker_env, docs_generator_command,
+        ensure_release_sources_are_pinned, git_dirty, is_strippable_binary_header,
         keyos_slint_pin_from_manifest_and_lock, local_staged_workspace_dependency_override, nix_shell_active,
-        parse_git_source_commit, parse_toolchain_channel, prune_nested_member_dirs,
+        parse_git_source_commit, parse_scalar_error_enum, parse_toolchain_channel, prune_nested_member_dirs,
         render_staged_keyos_workspace_manifest, render_staged_slint_workspace_manifest,
         rust_toolchain_channel, should_disable_libusb_pkg_config_for_entry, should_scan_for_keyos_member,
-        should_stage_simulator_for_target, should_strip_packaged_binaries, stage_cargo_package_snapshot,
-        stage_shared_ui_artifact, stage_slint_sdk_snapshot, strip_program_candidates,
-        validate_release_slint_source, validate_release_slint_source_hash, verify_common_stage,
-        verify_target_stage, BuildArgs, SmokeCheckArgs, SourceOverrides, StageDirLock,
+        should_stage_simulator_for_target, should_strip_packaged_binaries, stage_bt_error_placeholder,
+        stage_cargo_package_snapshot, stage_shared_ui_artifact, stage_slint_sdk_snapshot,
+        strip_program_candidates, validate_release_slint_source, validate_release_slint_source_hash,
+        verify_common_stage, verify_target_stage, BuildArgs, ScalarEnumVariant, SmokeCheckArgs,
+        SourceOverrides, StageDirLock, BT_PLACEHOLDER_DESTINATION, DOCS_BUNDLE_LOCK_HELD_ENV,
+        DOCS_BUNDLE_LOCK_PATH,
     };
     use crate::config::{load, workspace_root};
 
@@ -2219,6 +2413,32 @@ mod tests {
         let third = StageDirLock::acquire(output_dir, &stage_root)
             .expect("lock should be reacquirable after release");
         drop(third);
+    }
+
+    #[test]
+    fn docs_generator_uses_current_checkout_with_resolved_keyos_sources() {
+        let generator_root = Path::new("/current/keyos");
+        let source_root = Path::new("/overrides/keyos");
+        let command = docs_generator_command(generator_root, source_root);
+        let args = command.get_args().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>();
+
+        assert_eq!(command.get_current_dir(), Some(generator_root));
+        assert_eq!(args, ["xtask", "docs-api", "--source-root", "/overrides/keyos"]);
+        assert!(command.get_envs().any(|(name, value)| name.to_string_lossy() == DOCS_BUNDLE_LOCK_HELD_ENV
+            && value.is_some_and(|value| value.to_string_lossy() == "1")));
+    }
+
+    #[test]
+    fn docs_bundle_lock_blocks_copy_until_generation_finishes() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = acquire_docs_bundle_lock(temp.path()).unwrap();
+        let second =
+            OpenOptions::new().read(true).write(true).open(temp.path().join(DOCS_BUNDLE_LOCK_PATH)).unwrap();
+
+        assert!(matches!(second.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+        first.unlock().unwrap();
+        second.try_lock().unwrap();
+        second.unlock().unwrap();
     }
 
     #[test]
@@ -2445,6 +2665,7 @@ mod tests {
             }
         }
         fs::create_dir_all(stage_dir.join("lib").join("keyos")).unwrap();
+        fs::create_dir_all(stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("src")).unwrap();
         fs::create_dir_all(stage_dir.join("lib").join("keyos").join("ui2").join("components")).unwrap();
         fs::create_dir_all(
             stage_dir
@@ -2475,6 +2696,8 @@ mod tests {
         for path in [
             stage_dir.join("manifest.toml"),
             stage_dir.join("lib").join("keyos").join("Cargo.toml"),
+            stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("Cargo.toml"),
+            stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("src").join("error.rs"),
             stage_dir.join("lib").join("keyos").join("ui2").join("components").join("Cargo.toml"),
             stage_dir
                 .join("lib")
@@ -2646,6 +2869,172 @@ source = "git+https://github.com/Foundation-Devices/slint.git?tag=v1.12.1-founda
             assert!(dependencies.contains_key(dependency));
         }
         assert!(dependencies.contains_key("slint"));
+    }
+
+    #[test]
+    fn stages_only_the_wire_compatible_bt_error_placeholder() {
+        let keyos_root = workspace_root().parent().unwrap().to_path_buf();
+        let stage = tempfile::tempdir().unwrap();
+        stage_bt_error_placeholder(&keyos_root, stage.path()).unwrap();
+
+        let placeholder = stage.path().join("lib/keyos/api/bt");
+        assert!(placeholder.join("Cargo.toml").is_file());
+        assert!(placeholder.join("src/lib.rs").is_file());
+        assert!(!placeholder.join("src/messages.rs").exists());
+        assert_eq!(
+            fs::read_to_string(placeholder.join("src/error.rs")).unwrap(),
+            fs::read_to_string(keyos_root.join("api/bt/src/error.rs")).unwrap()
+        );
+
+        let real_gpio = fs::read_to_string(keyos_root.join("api/gpio/src/lib.rs")).unwrap();
+        let real_spi = fs::read_to_string(keyos_root.join("api/spi/src/error.rs")).unwrap();
+        let placeholder_lib = fs::read_to_string(placeholder.join("src/lib.rs")).unwrap();
+        assert_eq!(
+            enum_variant_names(&real_gpio, "pub enum GpioApiError {"),
+            enum_variant_names(&placeholder_lib, "pub enum GpioApiError {")
+        );
+        assert_eq!(
+            enum_variant_names(&real_spi, "pub enum SpiError {"),
+            enum_variant_names(&placeholder_lib, "pub enum SpiError {")
+        );
+        assert!(
+            placeholder_lib.contains("12 => Self::InvalidWordSize,\n            _ => Self::InternalError,")
+        );
+        assert!(!placeholder_lib.contains("BluetoothApi"));
+        assert!(!placeholder_lib.contains("use_api"));
+    }
+
+    #[test]
+    fn bt_placeholder_uses_payload_enums_from_the_selected_keyos_root() {
+        let keyos = tempfile::tempdir().unwrap();
+        let gpio = keyos.path().join("api/gpio/src/lib.rs");
+        let spi = keyos.path().join("api/spi/src/error.rs");
+        let bluetooth_error = keyos.path().join("api/bt/src/error.rs");
+        fs::create_dir_all(gpio.parent().unwrap()).unwrap();
+        fs::create_dir_all(spi.parent().unwrap()).unwrap();
+        fs::create_dir_all(bluetooth_error.parent().unwrap()).unwrap();
+        fs::write(&gpio, "pub enum GpioApiError { SelectedGpio = 7, InternalError = 9, }").unwrap();
+        fs::write(&spi, "pub enum SpiError { SelectedSpi = 3, InternalError, }").unwrap();
+        fs::write(&bluetooth_error, "pub enum BluetoothError {} ").unwrap();
+        let stage = tempfile::tempdir().unwrap();
+        stage_bt_error_placeholder(keyos.path(), stage.path()).unwrap();
+        let rendered =
+            fs::read_to_string(stage.path().join(BT_PLACEHOLDER_DESTINATION).join("src/lib.rs")).unwrap();
+
+        assert!(rendered.contains("SelectedGpio = 7"));
+        assert!(rendered.contains("7 => Self::SelectedGpio"));
+        assert!(rendered.contains("SelectedSpi = 3"));
+        assert!(rendered.contains("4 => Self::InternalError"));
+        assert!(!rendered.contains("AlreadyClaimed"));
+    }
+
+    #[test]
+    fn bt_placeholder_rejects_unsupported_payload_enum_shapes() {
+        let error = parse_scalar_error_enum(
+            "pub enum GpioApiError { Structured { field: u32 }, InternalError, }",
+            "GpioApiError",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("unsupported non-unit variant"));
+    }
+
+    #[test]
+    fn bt_placeholder_ignores_comments_when_parsing_payload_enums() {
+        let variants = parse_scalar_error_enum(
+            "pub enum SpiError {\n    /// Busy, retry later.\n    AlreadyClaimed = 1,\n    /* Reserved, for a future protocol. */\n    InternalError,\n}",
+            "SpiError",
+        )
+        .unwrap();
+
+        assert_eq!(
+            variants,
+            vec![
+                ScalarEnumVariant { name: "AlreadyClaimed".to_owned(), discriminant: 1 },
+                ScalarEnumVariant { name: "InternalError".to_owned(), discriminant: 2 },
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "spawns nested Cargo checks for staged Quantum Link and bt"]
+    fn staged_quantum_link_accepts_bt_placeholder_and_bt_compiles_for_keyos() {
+        let keyos_root = workspace_root().parent().unwrap().to_path_buf();
+        let stage = tempfile::tempdir().unwrap();
+        stage_bt_error_placeholder(&keyos_root, stage.path()).unwrap();
+        let staged_keyos_root = stage.path().join("lib/keyos");
+        crate::util::copy_dir_all(
+            &keyos_root.join("api/quantum-link"),
+            &staged_keyos_root.join("api/quantum-link"),
+        )
+        .unwrap();
+
+        let manifest = render_staged_keyos_workspace_manifest(
+            &keyos_root,
+            &staged_keyos_root,
+            &["api/bt".to_string(), "api/quantum-link".to_string()],
+        )
+        .unwrap();
+        let mut manifest: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = manifest
+            .get_mut("workspace")
+            .and_then(toml::Value::as_table_mut)
+            .and_then(|workspace| workspace.get_mut("dependencies"))
+            .and_then(toml::Value::as_table_mut)
+            .unwrap();
+        for (name, path) in [
+            ("server", keyos_root.join("server")),
+            ("worker", keyos_root.join("worker")),
+            ("xous", keyos_root.join("xous/xous-rs")),
+        ] {
+            dependencies
+                .get_mut(name)
+                .unwrap()
+                .as_table_mut()
+                .unwrap()
+                .insert("path".to_string(), toml::Value::String(path.to_string_lossy().into_owned()));
+        }
+
+        fs::write(staged_keyos_root.join("Cargo.toml"), toml::to_string(&manifest).unwrap()).unwrap();
+
+        for (name, package, target) in
+            [("host", "quantum-link", None), ("keyos", "bt", Some("armv7a-unknown-xous-elf"))]
+        {
+            let mut command = Command::new("cargo");
+            command
+                .args(["check", "--manifest-path"])
+                .arg(staged_keyos_root.join("Cargo.toml"))
+                .args(["-p", package])
+                .env("CARGO_TARGET_DIR", stage.path().join(format!("target-{name}")));
+            if let Some(target) = target {
+                command.args(["--target", target]);
+            }
+            let status = command.status().unwrap();
+            assert!(status.success(), "staged {package} failed the {name} Cargo check");
+        }
+    }
+
+    fn enum_variant_names(source: &str, declaration: &str) -> Vec<String> {
+        let body = source
+            .split_once(declaration)
+            .unwrap_or_else(|| panic!("missing enum declaration {declaration}"))
+            .1
+            .split_once("\n}")
+            .unwrap_or_else(|| panic!("unterminated enum declaration {declaration}"))
+            .0;
+        body.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+                    return None;
+                }
+                let name = line.split(['(', '=', ',']).next().unwrap_or_default().trim();
+                name.chars()
+                    .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                    .then(|| name.to_string())
+            })
+            .collect()
     }
 
     #[test]

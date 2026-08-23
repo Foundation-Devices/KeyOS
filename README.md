@@ -217,6 +217,7 @@ it.
 | Command | Purpose |
 | --- | --- |
 | `foundation doctor` | Check SDK and app build readiness. |
+| `foundation docs [sdk-version] [--url]` | Open the complete static docs bundle from an installed SDK, or print its URL; choose the KeyOS API version in the page. |
 | `foundation new <name>` | Create an app from an SDK template. |
 | `foundation theme` | Edit the current app's visual theme. |
 | `foundation preview ui/app.slint` | Preview the Slint UI without a full app run. |
@@ -226,6 +227,9 @@ it.
 | `foundation logs` | View logs from a connected Passport Prime. |
 | `foundation cert gen <name>` | Create a local publisher signing identity. |
 | `foundation cert install <name>` | Trust that publisher certificate on a connected Passport Prime. |
+
+Maintainers: see [SDK API documentation bundles](docs/sdk-api-docs.md) for the crate allowlist,
+KeyOS-version snapshot configuration, packaging, and publication contract.
 
 For command behavior and agent safety guidance, see the
 [Foundation CLI agent guide](sdk/docs/foundation-cli.md). SDK maintainers should

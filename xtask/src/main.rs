@@ -16,6 +16,7 @@ mod bootimage;
 mod bootloader;
 mod builder;
 mod docs_api;
+mod docs_publish;
 mod elf;
 mod flash;
 mod hot_reload;
@@ -27,7 +28,7 @@ mod tests;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.4.0-beta1";
+const KEYOS_VERSION: &str = "1.4.0-beta2";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
@@ -293,6 +294,8 @@ enum Commands {
     },
     /// Build and annotate the public KeyOS API rustdoc site
     DocsApi(docs_api::DocsApiArgs),
+    /// Verify and upload one packaged KeyOS SDK documentation release
+    DocsPublish(docs_publish::DocsPublishArgs),
     /// Run hardware-backed test helpers
     Test(tests::TestArgs),
     /// Flash (parts of) the boot.bin file to the device using sam-ba
@@ -447,6 +450,12 @@ fn main() {
         Commands::DocsApi(args) => {
             if let Err(err) = docs_api::run(args) {
                 eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+        }
+        Commands::DocsPublish(args) => {
+            if let Err(err) = docs_publish::run(args) {
+                eprintln!("error: {err:#}");
                 std::process::exit(1);
             }
         }

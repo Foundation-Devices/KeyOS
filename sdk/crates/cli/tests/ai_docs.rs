@@ -14,6 +14,7 @@ const BUILT_IN_COMMANDS: &[&str] = &[
     "sim",
     "cert",
     "doctor",
+    "docs",
     "preview",
     "logs",
     "completions",

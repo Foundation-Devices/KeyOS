@@ -33,6 +33,7 @@ Command quick reference:
 - `foundation develop`: enter the SDK Nix shell.
 - `foundation exit`: clean SDK/Nix cache state without deleting signing identities.
 - `foundation doctor`: inspect SDK environment readiness.
+- `foundation docs`: open the complete static bundle from the current or a versioned SDK installation; the command's version selects the SDK, while the page selector chooses the KeyOS API version. Pass `--url` to print the bundle's `file://` URL instead of opening it.
 - `foundation build`: build and sign hardware artifacts.
 - `foundation clean`: remove generated app build and theme files (`target/`, `manifest.toml`, `ui/ui`); leaves authored source and `~/.foundation/themes` untouched.
 - `foundation preview`: open Slint UI in the SDK viewer.

@@ -8,6 +8,7 @@ pub mod cert;
 pub mod clean;
 pub mod completions;
 pub mod develop;
+pub mod docs;
 pub mod doctor;
 pub mod exit;
 #[cfg(feature = "experimental-plugins")]

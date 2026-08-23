@@ -4,7 +4,133 @@
 [sdk]
 version = "1.0.0"
 api_version = "1"
-keyos_api_interfaces = ["app-manager", "backup", "camera", "crypto", "fs", "gui-server", "haptics", "keycard", "nfc", "quantum-link", "rgb-led", "security", "settings"]
+
+# The public Rust crates copied into the SDK and included in the generated API
+# reference. This is the only allowlist for the SDK API surface.
+[[sdk.api_crates]]
+package = "server"
+crate_name = "server"
+workspace = "keyos"
+source = "../server"
+dest = "lib/keyos/server"
+description = "Type-safe server traits, checked connections, and IPC helpers."
+
+[[sdk.api_crates]]
+package = "app-manager"
+crate_name = "app_manager"
+workspace = "keyos"
+source = "../api/app-manager"
+dest = "lib/keyos/api/app-manager"
+description = "App launch, app metadata, QR acceptance criteria, and third-party certificates."
+permission_manifest = "api/app-manager/manifest.toml"
+
+[[sdk.api_crates]]
+package = "backup"
+crate_name = "backup"
+workspace = "keyos"
+source = "../api/backup"
+dest = "lib/keyos/api/backup"
+description = "Backup and restore operations."
+permission_manifest = "api/backup/manifest.toml"
+
+[[sdk.api_crates]]
+package = "camera"
+crate_name = "camera"
+workspace = "keyos"
+source = "../api/camera"
+dest = "lib/keyos/api/camera"
+description = "Camera frame subscription and camera configuration."
+permission_manifest = "api/camera/manifest.toml"
+
+[[sdk.api_crates]]
+package = "crypto"
+crate_name = "crypto"
+workspace = "keyos"
+source = "../api/crypto"
+dest = "lib/keyos/api/crypto"
+description = "Cryptographic server APIs."
+permission_manifest = "api/crypto/manifest.toml"
+
+[[sdk.api_crates]]
+package = "fs"
+crate_name = "fs"
+workspace = "keyos"
+source = "../api/fs"
+dest = "lib/keyos/api/fs"
+description = "Filesystem handles, directories, metadata, and mapped files."
+permission_manifest = "api/fs/manifest.toml"
+
+[[sdk.api_crates]]
+package = "gui-server-api"
+crate_name = "gui_server_api"
+workspace = "keyos"
+source = "../api/gui-server"
+dest = "lib/keyos/api/gui-server"
+description = "Rust API crate for the os/gui-server service."
+permission_manifest = "api/gui-server/manifest.toml"
+
+[[sdk.api_crates]]
+package = "haptics"
+crate_name = "haptics"
+workspace = "keyos"
+source = "../api/haptics"
+dest = "lib/keyos/api/haptics"
+description = "Haptic patterns and playback control."
+permission_manifest = "api/haptics/manifest.toml"
+
+[[sdk.api_crates]]
+package = "nfc"
+crate_name = "nfc"
+workspace = "keyos"
+source = "../api/nfc"
+dest = "lib/keyos/api/nfc"
+description = "NFC operations."
+permission_manifest = "api/nfc/manifest.toml"
+
+[[sdk.api_crates]]
+package = "quantum-link"
+crate_name = "quantum_link"
+workspace = "keyos"
+source = "../api/quantum-link"
+dest = "lib/keyos/api/quantum-link"
+description = "QuantumLink state, firmware fetch, pairing, PSBT, and account-sync helpers."
+permission_manifest = "api/quantum-link/manifest.toml"
+# The SDK builder stages a temporary error-only `bt` compatibility crate for
+# this package. The real Bluetooth API is neither copied nor documented.
+
+[[sdk.api_crates]]
+package = "rgb-led"
+crate_name = "rgb_led"
+workspace = "keyos"
+source = "../api/rgb-led"
+dest = "lib/keyos/api/rgb-led"
+description = "RGB LED color and animation control."
+permission_manifest = "api/rgb-led/manifest.toml"
+
+[[sdk.api_crates]]
+package = "security"
+crate_name = "security"
+workspace = "keyos"
+source = "../api/security"
+dest = "lib/keyos/api/security"
+description = "Authentication, seeds, keys, and device security state."
+permission_manifest = "api/security/manifest.toml"
+
+[[sdk.api_crates]]
+package = "settings"
+crate_name = "settings"
+workspace = "keyos"
+source = "../api/settings"
+dest = "lib/keyos/api/settings"
+description = "Typed settings get, set, and subscribe APIs."
+permission_manifest = "api/settings/manifest.toml"
+
+[[sdk.api_crates]]
+package = "foundation-manifest"
+crate_name = "foundation_manifest"
+workspace = "sdk"
+source = "crates/manifest"
+description = "Parse and inspect KeyOS application manifests."
 
 [submodules.slint]
 path = "external/slint"
@@ -114,20 +240,12 @@ source = "../keyos"
 dest = "lib/keyos/keyos"
 
 [[copy]]
-source = "../server"
-dest = "lib/keyos/server"
-
-[[copy]]
 source = "../os/app-manifest"
 dest = "lib/keyos/os/app-manifest"
 
 [[copy]]
 source = "../slint-keyos-platform"
 dest = "lib/keyos/slint-keyos-platform"
-
-[[copy]]
-source = "../api/bt"
-dest = "lib/keyos/api/bt"
 
 [[copy]]
 source = "../ui2/components"
@@ -209,8 +327,6 @@ dest = "share/99-passport.rules"
 
 [docs]
 guide_source = "docs"
-api_crates = []
-api_crates_workspace = ["foundation-manifest"]
 
 [signing]
 key_env = "FOUNDATION_SIGN_KEY"

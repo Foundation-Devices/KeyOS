@@ -63,6 +63,7 @@
           cmake
           curl
           gcc-arm-embedded
+          gh
           git
           gnumake
           just

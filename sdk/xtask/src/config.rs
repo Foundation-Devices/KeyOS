@@ -32,7 +32,28 @@ pub struct Config {
 pub struct SdkConfig {
     pub version: String,
     pub api_version: String,
-    pub keyos_api_interfaces: Vec<String>,
+    pub api_crates: Vec<ApiCrateConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ApiCrateConfig {
+    pub package: String,
+    pub crate_name: String,
+    pub workspace: ApiWorkspace,
+    pub source: String,
+    #[serde(default)]
+    pub dest: Option<String>,
+    pub description: String,
+    #[serde(default)]
+    pub permission_manifest: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiWorkspace {
+    Keyos,
+    Sdk,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -97,8 +118,6 @@ pub enum CopyFilter {
 #[derive(Clone, Debug, Default)]
 pub struct DocsConfig {
     pub guide_source: String,
-    pub api_crates: Vec<String>,
-    pub api_crates_workspace: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -128,7 +147,7 @@ struct RawConfig {
 struct RawSdk {
     version: String,
     api_version: String,
-    keyos_api_interfaces: Vec<String>,
+    api_crates: Vec<ApiCrateConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,10 +216,6 @@ struct RawCopy {
 #[serde(deny_unknown_fields)]
 struct RawDocs {
     guide_source: String,
-    #[serde(default)]
-    api_crates: Vec<String>,
-    #[serde(default)]
-    api_crates_workspace: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,9 +225,6 @@ struct RawSigning {
 }
 
 // ----- Helpers & loading ---------------------------------------------------
-
-const KEYOS_API_SOURCE_ROOT: &str = "../api";
-const KEYOS_API_DEST_ROOT: &str = "lib/keyos/api";
 
 pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask has a workspace parent").to_path_buf()
@@ -224,11 +236,12 @@ impl Config {
     pub fn expanded_copy_entries(&self) -> Vec<CopyEntry> {
         let mut entries = self
             .sdk
-            .keyos_api_interfaces
+            .api_crates
             .iter()
-            .map(|interface| CopyEntry {
-                source: format!("{KEYOS_API_SOURCE_ROOT}/{interface}"),
-                dest: format!("{KEYOS_API_DEST_ROOT}/{interface}"),
+            .filter_map(|api_crate| api_crate.dest.as_ref().map(|dest| (api_crate, dest)))
+            .map(|(api_crate, dest)| CopyEntry {
+                source: api_crate.source.clone(),
+                dest: dest.clone(),
                 bundle: CopyBundle::Common,
                 filter: CopyFilter::All,
                 optional: false,
@@ -292,7 +305,7 @@ pub fn load(path: &Path) -> Result<Config> {
         sdk: SdkConfig {
             version: raw.sdk.version,
             api_version: raw.sdk.api_version,
-            keyos_api_interfaces: raw.sdk.keyos_api_interfaces,
+            api_crates: raw.sdk.api_crates,
         },
         submodules: raw.submodules.into_iter().map(|(k, v)| (k, v.into())).collect(),
         targets: TargetsConfig {
@@ -301,11 +314,7 @@ pub fn load(path: &Path) -> Result<Config> {
         },
         compile: raw.compile.into_iter().map(Into::into).collect(),
         copy: raw.copy.into_iter().map(Into::into).collect(),
-        docs: DocsConfig {
-            guide_source: raw.docs.guide_source,
-            api_crates: raw.docs.api_crates,
-            api_crates_workspace: raw.docs.api_crates_workspace,
-        },
+        docs: DocsConfig { guide_source: raw.docs.guide_source },
         signing: SigningConfig { key_env: raw.signing.key_env },
     };
 
@@ -363,19 +372,49 @@ fn validate(config: &Config) -> Result<()> {
     if config.sdk.api_version.is_empty() {
         return Err(boxed_err("sdk.api_version is required"));
     }
-    if config.sdk.keyos_api_interfaces.is_empty() {
-        return Err(boxed_err("sdk.keyos_api_interfaces is required"));
+    if config.sdk.api_crates.is_empty() {
+        return Err(boxed_err("sdk.api_crates is required"));
     }
     if config.submodules.get("slint").is_some_and(|slint| slint.source_hash.is_empty()) {
         return Err(boxed_err("submodules.slint.source_hash is required"));
     }
-    let mut seen_interfaces = BTreeMap::new();
-    for interface in &config.sdk.keyos_api_interfaces {
-        if interface.is_empty() {
-            return Err(boxed_err("sdk.keyos_api_interfaces cannot contain empty interface names"));
+    let mut seen_packages = BTreeSet::new();
+    let mut seen_crates = BTreeSet::new();
+    let mut seen_destinations = BTreeSet::new();
+    for api_crate in &config.sdk.api_crates {
+        if api_crate.package.is_empty()
+            || api_crate.crate_name.is_empty()
+            || api_crate.source.is_empty()
+            || api_crate.description.is_empty()
+        {
+            return Err(boxed_err(
+                "each [[sdk.api_crates]] entry requires package, crate_name, source, and description",
+            ));
         }
-        if seen_interfaces.insert(interface, true).is_some() {
-            return Err(boxed_err(format!("sdk.keyos_api_interfaces contains duplicate entry: {interface}")));
+        if !seen_packages.insert(&api_crate.package) {
+            return Err(boxed_err(format!(
+                "sdk.api_crates contains duplicate package: {}",
+                api_crate.package
+            )));
+        }
+        if !seen_crates.insert(&api_crate.crate_name) {
+            return Err(boxed_err(format!(
+                "sdk.api_crates contains duplicate crate_name: {}",
+                api_crate.crate_name
+            )));
+        }
+        if api_crate.package == "bt"
+            || api_crate.crate_name == "bt"
+            || api_crate.dest.as_deref() == Some("lib/keyos/api/bt")
+        {
+            return Err(boxed_err("the real bt API must not be copied or included in SDK API docs"));
+        }
+        if let Some(dest) = &api_crate.dest {
+            if dest.is_empty() || !seen_destinations.insert(dest) {
+                return Err(boxed_err(format!("sdk.api_crates contains an empty or duplicate dest: {dest}")));
+            }
+        } else if api_crate.workspace == ApiWorkspace::Keyos {
+            return Err(boxed_err(format!("KeyOS API package '{}' requires an SDK dest", api_crate.package)));
         }
     }
     if config.targets.triples.is_empty() {
@@ -395,9 +434,21 @@ fn validate(config: &Config) -> Result<()> {
             return Err(boxed_err(format!("compile entry '{}' requires binary", entry.name)));
         }
     }
+    for entry in &config.copy {
+        if entry.dest == "lib/keyos/server" || entry.dest.starts_with("lib/keyos/api/") {
+            return Err(boxed_err(format!(
+                "public API destination '{}' must be declared in [[sdk.api_crates]], not [[copy]]",
+                entry.dest
+            )));
+        }
+    }
+    let mut seen_copy_destinations = BTreeSet::new();
     for entry in config.expanded_copy_entries() {
         if entry.source.is_empty() || entry.dest.is_empty() {
             return Err(boxed_err("each [[copy]] entry requires source and dest"));
+        }
+        if !seen_copy_destinations.insert(entry.dest.clone()) {
+            return Err(boxed_err(format!("copy destinations contain a duplicate: {}", entry.dest)));
         }
     }
     if config.docs.guide_source.is_empty() {
@@ -413,7 +464,7 @@ fn validate(config: &Config) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{load, selected_targets, workspace_root, CopyBundle, CopyFilter};
+    use super::{load, selected_targets, validate, workspace_root, CopyBundle, CopyFilter};
 
     #[test]
     fn loads_real_sdk_build_configuration() {
@@ -421,10 +472,10 @@ mod tests {
 
         assert_eq!(config.sdk.version, "1.0.0");
         assert_eq!(config.sdk.api_version, "1");
-        for expected in ["app-manager", "crypto", "fs", "gui-server", "settings"] {
+        for expected in ["app-manager", "crypto", "fs", "gui-server-api", "settings"] {
             assert!(
-                config.sdk.keyos_api_interfaces.iter().any(|interface| interface == expected),
-                "sdk-build.toml is missing the {expected} api interface"
+                config.sdk.api_crates.iter().any(|api_crate| api_crate.package == expected),
+                "sdk-build.toml is missing the {expected} API crate"
             );
         }
         let slint = config.submodules.get("slint").unwrap();
@@ -456,7 +507,8 @@ mod tests {
         assert_eq!(linux_arm.linker, "aarch64-unknown-linux-musl-gcc");
         assert_eq!(linux_arm.strip, "aarch64-unknown-linux-musl-strip");
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/api/gui-server"));
-        assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/api/bt"));
+        assert!(!config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/api/bt"));
+        assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/server"));
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/utils/defer"));
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/utils/whence"));
         assert!(config.expanded_copy_entries().iter().any(|entry| entry.dest == "lib/keyos/os/app-manifest"));
@@ -537,22 +589,38 @@ mod tests {
     }
 
     #[test]
-    fn expands_keyos_api_interface_allowlist_into_copy_entries() {
+    fn expands_public_api_crates_into_copy_entries() {
         let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
         let entries = config.expanded_copy_entries();
 
-        // Every allowlisted interface expands into exactly one `lib/keyos/api/<name>`
-        // copy entry, sourced from `../api/<name>` and bundled as Common/All.
-        for interface in &config.sdk.keyos_api_interfaces {
-            let dest = format!("lib/keyos/api/{interface}");
+        for api_crate in config.sdk.api_crates.iter().filter(|api_crate| api_crate.dest.is_some()) {
+            let dest = api_crate.dest.as_ref().unwrap();
             let entry = entries
                 .iter()
-                .find(|entry| entry.dest == dest)
-                .unwrap_or_else(|| panic!("missing copy entry for allowlisted interface {interface}"));
-            assert_eq!(entry.source, format!("../api/{interface}"));
+                .find(|entry| &entry.dest == dest)
+                .unwrap_or_else(|| panic!("missing copy entry for public API package {}", api_crate.package));
+            assert_eq!(entry.source, api_crate.source);
             assert_eq!(entry.bundle, CopyBundle::Common);
             assert_eq!(entry.filter, CopyFilter::All);
         }
+    }
+
+    #[test]
+    fn rejects_bt_and_parallel_public_api_copy_configuration() {
+        let mut config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        config.sdk.api_crates[0].package = "bt".to_string();
+        assert!(validate(&config).unwrap_err().to_string().contains("real bt API must not be copied"));
+
+        let mut config = load(&workspace_root().join("sdk-build.toml")).unwrap();
+        config.copy.push(super::CopyEntry {
+            source: "../api/extra".to_string(),
+            dest: "lib/keyos/api/extra".to_string(),
+            ..Default::default()
+        });
+        assert!(validate(&config)
+            .unwrap_err()
+            .to_string()
+            .contains("must be declared in [[sdk.api_crates]]"));
     }
 
     #[test]
@@ -565,7 +633,14 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
-            keyos_api_interfaces = ["gui-server"]
+
+            [[sdk.api_crates]]
+            package = "gui-server-api"
+            crate_name = "gui_server_api"
+            workspace = "keyos"
+            source = "../api/gui-server"
+            dest = "lib/keyos/api/gui-server"
+            description = "GUI API"
 
             [targets]
             triples = ["x86_64-unknown-linux-gnu"]
@@ -583,8 +658,6 @@ mod tests {
 
             [docs]
             guide_source = "docs"
-            api_crates = []
-            api_crates_workspace = []
 
             [signing]
             key_env = "FOUNDATION_SIGN_KEY"
@@ -608,15 +681,20 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
-            keyos_api_interfaces = ["gui-server"]
+
+            [[sdk.api_crates]]
+            package = "gui-server-api"
+            crate_name = "gui_server_api"
+            workspace = "keyos"
+            source = "../api/gui-server"
+            dest = "lib/keyos/api/gui-server"
+            description = "GUI API"
 
             [targets]
             triples = ["x86_64-unknown-linux-gnu"]
 
             [docs]
             guide_source = "docs"
-            api_crates = []
-            api_crates_workspace = []
 
             [signing]
             key_env = "FOUNDATION_SIGN_KEY"
@@ -649,8 +727,15 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
-            keyos_api_interfaces = ["gui-server"]
             mystery_field = "oops"
+
+            [[sdk.api_crates]]
+            package = "gui-server-api"
+            crate_name = "gui_server_api"
+            workspace = "keyos"
+            source = "../api/gui-server"
+            dest = "lib/keyos/api/gui-server"
+            description = "GUI API"
 
             [targets]
             triples = ["x86_64-unknown-linux-gnu"]

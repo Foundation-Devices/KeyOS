@@ -8,9 +8,21 @@ pub trait MessageAllowed<Message> {}
 pub struct GetThing;
 
 pub trait LocalTrait<P> {
+    /// Documented so rustdoc wraps this required method in a toggle.
     fn local(&self)
     where
         P: MessageAllowed<GetThing>;
+
+    fn undocumented(&self)
+    where
+        P: MessageAllowed<GetThing>;
+
+    /// Documented so rustdoc wraps this provided method in a toggle.
+    fn provided(&self)
+    where
+        P: MessageAllowed<GetThing>,
+    {
+    }
 }
 
 pub trait PlainTrait {
@@ -29,6 +41,7 @@ pub struct Api<P> {
 }
 
 impl<P> Api<P> {
+    /// Documented so rustdoc wraps this method in a toggle.
     pub fn read(&self)
     where
         P: MessageAllowed<GetThing>,
@@ -38,6 +51,12 @@ impl<P> Api<P> {
 
 impl<P> LocalTrait<P> for Api<P> {
     fn local(&self)
+    where
+        P: MessageAllowed<GetThing>,
+    {
+    }
+
+    fn undocumented(&self)
     where
         P: MessageAllowed<GetThing>,
     {
