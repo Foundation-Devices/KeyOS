@@ -39,6 +39,10 @@ pub struct DocsApiArgs {
     /// KeyOS source checkout to document while retaining this checkout's SDK configuration.
     #[arg(long, value_name = "PATH")]
     source_root: Option<PathBuf>,
+
+    /// Maximum number of KeyOS versions visible before the selector scrolls.
+    #[arg(long, default_value_t = 10)]
+    max_dropdown_items: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -148,6 +152,7 @@ const THIRD_PARTY: &str = "thirdParty";
 const NOT_USER_GRANTABLE: &str = "notUserGrantable";
 const FOUNDATION_CSS: &str = include_str!("../assets/docs-api/foundation.css");
 const FOUNDATION_HEADER: &str = include_str!("../assets/docs-api/header.html");
+const VERSION_SELECTOR: &str = include_str!("../assets/docs-api/version-selector.js");
 const TEMPLATE_ASSETS: &[(&str, &str)] = &[
     ("ui/ui/fonts/Montserrat-Light.ttf", "Montserrat-Light.ttf"),
     ("ui/ui/fonts/Montserrat-Regular.ttf", "Montserrat-Regular.ttf"),
@@ -214,6 +219,7 @@ struct FilteredDocs {
 }
 
 pub fn run(args: DocsApiArgs) -> Result<()> {
+    ensure!(args.max_dropdown_items > 0, "--max-dropdown-items must be greater than zero");
     let root = project_root();
     let _docs_bundle_lock =
         if docs_bundle_lock_is_held_by_parent() { None } else { Some(acquire_docs_bundle_lock(&root)?) };
@@ -235,9 +241,10 @@ pub fn run(args: DocsApiArgs) -> Result<()> {
         &destination,
         &current_keyos_version,
         &config.sdk.api_crates,
+        args.max_dropdown_items,
     )?;
 
-    fs::write(bundle_dir.join(SELECTOR_SCRIPT_NAME), include_str!("../assets/docs-api/version-selector.js"))
+    fs::write(bundle_dir.join(SELECTOR_SCRIPT_NAME), VERSION_SELECTOR)
         .context("writing docs version selector")?;
     let manifest = BundleManifest {
         schema_version: BUNDLE_SCHEMA_VERSION,
@@ -407,6 +414,7 @@ fn build_workspace_version(
     destination: &Path,
     keyos_version: &str,
     crates: &[CrateDoc],
+    max_dropdown_items: usize,
 ) -> Result<BundleVersion> {
     let target_dir = root.join("target/xtask-docs-api").join(version_dir_name(keyos_version));
     let doc_dir = run_rustdoc(root, source_root, &target_dir, crates)?;
@@ -414,7 +422,7 @@ fn build_workspace_version(
     verify_crate_outputs(&doc_dir, crates)?;
     write_index(&doc_dir, crates)?;
     rewrite_template_paths(&doc_dir)?;
-    inject_version_selector(&doc_dir)?;
+    inject_version_selector(&doc_dir, max_dropdown_items)?;
 
     let messages = build_message_map(source_root, crates)?;
     let records = annotate_html(&doc_dir, crates, &messages)?;
@@ -594,7 +602,7 @@ fn rewrite_template_paths(doc_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn inject_version_selector(doc_dir: &Path) -> Result<()> {
+fn inject_version_selector(doc_dir: &Path, max_dropdown_items: usize) -> Result<()> {
     for path in collect_files(doc_dir)?
         .into_iter()
         .filter(|path| path.extension().is_some_and(|extension| extension == "html"))
@@ -609,12 +617,19 @@ fn inject_version_selector(doc_dir: &Path) -> Result<()> {
         let tag = format!(
             "<script src=\"{asset_root}{UNAVAILABLE_DOCS_SCRIPT_NAME}\"></script>\n\
              <script src=\"{bundle_root}{BUNDLE_MANIFEST_SCRIPT_NAME}\"></script>\n\
-             <script defer src=\"{bundle_root}{SELECTOR_SCRIPT_NAME}\"></script>\n"
+             {}",
+            version_selector_tag(&bundle_root, max_dropdown_items),
         );
         let updated = format!("{}{}{}", &text[..body], tag, &text[body..]);
         fs::write(&path, updated).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(())
+}
+
+fn version_selector_tag(bundle_root: &str, max_dropdown_items: usize) -> String {
+    format!(
+        "<script defer src=\"{bundle_root}{SELECTOR_SCRIPT_NAME}\" data-max-visible-items=\"{max_dropdown_items}\"></script>\n"
+    )
 }
 
 fn version_dir_name(version: &str) -> String { format!("v{version}") }
@@ -2134,12 +2149,13 @@ mod tests {
             fs::write(path, "<html><body></body></html>").unwrap();
         }
 
-        inject_version_selector(&fixture).unwrap();
+        inject_version_selector(&fixture, 10).unwrap();
 
         let root = fs::read_to_string(fixture.join("index.html")).unwrap();
         assert!(root.contains(r#"src="./unavailable-docs.js""#));
         assert!(root.contains(r#"src="../bundle-manifest.js""#));
         assert!(root.contains(r#"src="../version-selector.js""#));
+        assert!(root.contains(r#"data-max-visible-items="10""#));
         let nested = fs::read_to_string(fixture.join("public/module/struct.Item.html")).unwrap();
         assert!(nested.contains(r#"src="../../unavailable-docs.js""#));
         assert!(nested.contains(r#"src="../../../bundle-manifest.js""#));
@@ -2385,6 +2401,26 @@ mod tests {
         }
 
         assert_eq!(referenced, destinations, "template assets and references differ");
+    }
+
+    #[test]
+    fn version_selector_uses_custom_scroll_limited_dropdown() {
+        assert!(VERSION_SELECTOR.contains("DEFAULT_MAX_VISIBLE_ITEMS = 10"));
+        assert!(VERSION_SELECTOR.contains("OPTION_HEIGHT_PX = 40"));
+        assert!(VERSION_SELECTOR.contains("data-max-visible-items"));
+        assert!(VERSION_SELECTOR.contains("maxVisibleItems * OPTION_HEIGHT_PX + 2"));
+        assert!(VERSION_SELECTOR.contains("aria-haspopup"));
+        assert!(VERSION_SELECTOR.contains("role\", \"listbox"));
+        assert!(VERSION_SELECTOR.contains("closeAndMoveFocus(event.shiftKey)"));
+        assert!(!VERSION_SELECTOR.contains("createElement(\"select\")"));
+    }
+
+    #[test]
+    fn generated_pages_configure_the_dropdown_limit() {
+        assert_eq!(
+            version_selector_tag("../../", 7),
+            "<script defer src=\"../../version-selector.js\" data-max-visible-items=\"7\"></script>\n"
+        );
     }
 
     #[test]
