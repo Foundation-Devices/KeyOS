@@ -87,6 +87,9 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
         LaunchAppStatus::PublisherCertificateNotYetActive => Some(
             "the matching publisher certificate is not valid yet; compare get_system_time with its start date in Settings > Apps > Allowed Publishers",
         ),
+        LaunchAppStatus::KeyOsVersionTooOld => {
+            Some("the app requires a newer KeyOS version; update KeyOS and try again")
+        }
         LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
         LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
     }
@@ -124,6 +127,14 @@ mod tests {
 
         assert!(message.contains("rebuild and reload"));
         assert!(message.contains("signing identity changed"));
+    }
+
+    #[test]
+    fn launch_app_failure_message_reports_keyos_upgrade_guidance() {
+        let message = launch_app_failure_message(LaunchAppStatus::KeyOsVersionTooOld).unwrap();
+
+        assert!(message.contains("newer KeyOS version"));
+        assert!(message.contains("update KeyOS"));
     }
 
     #[test]

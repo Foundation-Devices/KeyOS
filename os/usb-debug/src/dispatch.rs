@@ -183,17 +183,7 @@ impl DebugProtocol {
                 }
                 Ok(RunAppResponse::LaunchFailed { reason }) => {
                     log::warn!("debug: launch_app rejected: {reason:?}");
-                    let status = match reason {
-                        LaunchFailureReason::SignatureRejected => LaunchAppStatus::SignatureRejected,
-                        LaunchFailureReason::NoCertificate => LaunchAppStatus::NoCertificate,
-                        LaunchFailureReason::PublisherCertificateExpired => {
-                            LaunchAppStatus::PublisherCertificateExpired
-                        }
-                        LaunchFailureReason::PublisherCertificateNotYetActive => {
-                            LaunchAppStatus::PublisherCertificateNotYetActive
-                        }
-                        LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
-                    };
+                    let status = launch_status(reason);
                     Response::LaunchAck(LaunchAppResult::new(0, status).encode())
                 }
                 Ok(RunAppResponse::NotReady) => {
@@ -729,6 +719,19 @@ impl DebugProtocol {
         self.upload = None;
         log::info!("debug: load_app complete {app_dir}");
         Response::Ack
+    }
+}
+
+fn launch_status(reason: LaunchFailureReason) -> LaunchAppStatus {
+    match reason {
+        LaunchFailureReason::SignatureRejected => LaunchAppStatus::SignatureRejected,
+        LaunchFailureReason::NoCertificate => LaunchAppStatus::NoCertificate,
+        LaunchFailureReason::PublisherCertificateExpired => LaunchAppStatus::PublisherCertificateExpired,
+        LaunchFailureReason::PublisherCertificateNotYetActive => {
+            LaunchAppStatus::PublisherCertificateNotYetActive
+        }
+        LaunchFailureReason::KeyOsVersionTooOld => LaunchAppStatus::KeyOsVersionTooOld,
+        LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
     }
 }
 

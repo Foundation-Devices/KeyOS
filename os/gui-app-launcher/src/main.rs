@@ -1464,6 +1464,21 @@ fn handle_app_event(
             if let Some(reason) = publisher_blocked_reason(&error) {
                 clear_launching_state(&ui);
                 ui.global::<State>().set_app_blocked_reason(reason.into());
+            } else if let app_manager::LaunchError::Compatibility(
+                app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current },
+            ) = &error
+            {
+                error_message(
+                    &ui,
+                    tr::lookup_id(TrId::CommonAppCompatibilityUpdateKeyosTitle),
+                    &i18n::replace_placeholders(
+                        tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
+                        &[minimum.as_str(), current.as_str()],
+                    ),
+                    None,
+                    None,
+                    None,
+                );
             } else if matches!(error, app_manager::LaunchError::Verification(_)) {
                 error_message(
                     &ui,

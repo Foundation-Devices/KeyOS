@@ -32,6 +32,8 @@ publisher-fingerprint = { workspace = true }
 rand = "0.8"
 rkyv = { workspace = true }
 secp256k1 = "0.29"
+security = { workspace = true }
+semver = { version = "1.0", default-features = false }
 serde = { workspace = true }
 serde_json = "1.0.139"
 server = { path = "../../server" }

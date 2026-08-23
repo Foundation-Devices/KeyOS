@@ -250,6 +250,29 @@ mod tests {
     }
 
     #[test]
+    fn minimum_keyos_version_round_trips_as_camel_case() {
+        let manifest = try_from_bytes(v0_json(r#","minKeyosVersion":"1.4.0-beta1""#).as_bytes()).unwrap();
+        assert_eq!(manifest.min_keyos_version, Some(semver::Version::parse("1.4.0-beta1").unwrap()));
+        assert!(serde_json::to_string(&manifest).unwrap().contains(r#""minKeyosVersion":"1.4.0-beta1""#));
+    }
+
+    #[test]
+    fn manifest_versions_deserialize_as_semver() {
+        let manifest =
+            try_from_bytes(v0_json(r#","version":"2.1.0","minKeyosVersion":"1.2.3-beta1""#).as_bytes())
+                .unwrap();
+
+        assert_eq!(manifest.version, Some(semver::Version::parse("2.1.0").unwrap()));
+        assert_eq!(manifest.min_keyos_version, Some(semver::Version::parse("1.2.3-beta1").unwrap()));
+    }
+
+    #[test]
+    fn malformed_manifest_versions_are_rejected_during_deserialization() {
+        assert!(try_from_bytes(v0_json(r#","version":"banana""#).as_bytes()).is_err());
+        assert!(try_from_bytes(v0_json(r#","minKeyosVersion":"banana""#).as_bytes()).is_err());
+    }
+
+    #[test]
     fn try_from_bytes_missing_version_defaults_to_v0() {
         let json = format!(r#"{{"appName":{{"en":"Test"}},"appId":"{}"}}"#, VALID_APP_ID);
         let manifest = try_from_bytes(json.as_bytes()).unwrap();

@@ -5,7 +5,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar, WithAppId};
 use xous::{AppId, PID};
 
-use crate::error::{AppManagerError, LaunchError};
+use crate::error::{AppManagerError, CompatibilityError, LaunchError};
 
 #[derive(Debug, server::Message)]
 #[response(Result<PID, AppManagerError>)]
@@ -439,6 +439,8 @@ pub enum InstallError {
     PublisherMismatch,
     /// The app is already installed and running, so its bundle cannot be replaced.
     AppRunning,
+    /// The manifest is valid but incompatible with this KeyOS release.
+    Compatibility(CompatibilityError),
     /// The filesystem refused an operation the install needed.
     Fs(fs::Error),
     /// Anything else; the server logs what actually happened.

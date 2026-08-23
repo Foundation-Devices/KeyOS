@@ -150,6 +150,7 @@ mod tests {
             publisher: None,
             description: None,
             version: None,
+            min_keyos_version: None,
             servers: Default::default(),
             fixed_sids: Default::default(),
             permissions: Default::default(),

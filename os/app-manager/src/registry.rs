@@ -5,13 +5,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use app_archive::ELF_FILE;
 use app_manager::{
-    AppQrMatchRules, IconVariant, InstalledAppInfo, InstalledAppPermissionGroup,
+    AppQrMatchRules, CompatibilityError, IconVariant, InstalledAppInfo, InstalledAppPermissionGroup,
     InstalledAppPermissionSubgroup, LaunchError, PermissionRequestInfo, PermissionRequestInfoResult,
     ThirdPartyCertificateInfo, SIDELOADED_APPS_DIR,
 };
 use app_manifest::{Locale, Manifest, RequiredSignature};
 use fs::messages::AppResourcesRoot;
 use log::error;
+use semver::Version;
 use serde_json::to_vec;
 use xous::{AppId, PID};
 
@@ -156,13 +157,24 @@ impl AppRegistryDiff {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct AppRegistry {
     installed_apps: HashMap<AppId, AppInfo>,
     running_apps: HashMap<PID, RunningAppInfo>,
+    current_keyos_version: Version,
+}
+
+impl Default for AppRegistry {
+    fn default() -> Self { Self::new(semver::Version::new(u64::MAX, 0, 0)) }
 }
 
 impl AppRegistry {
+    pub(crate) fn new(current_keyos_version: Version) -> Self {
+        Self { installed_apps: HashMap::new(), running_apps: HashMap::new(), current_keyos_version }
+    }
+
+    pub(crate) fn current_keyos_version(&self) -> &Version { &self.current_keyos_version }
+
     pub(crate) fn scan_installed_apps(
         &mut self,
         fs: &FileSystem,
@@ -262,6 +274,9 @@ impl AppRegistry {
         let (manifest_json, signature) = check_manifest_signature(&manifest_raw, root)?;
         let manifest = app_manifest::try_from_bytes(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
+        if manifest.min_keyos_version.is_none() {
+            anyhow::bail!("manifest does not declare minKeyosVersion");
+        }
 
         let app_id = AppId(manifest.app_id);
         if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, root) {
@@ -305,7 +320,9 @@ impl AppRegistry {
         self.installed_apps
             .values()
             .filter(|app_info| app_ids.is_empty() || app_ids.contains(&app_info.id))
-            .filter(|app_info| app_info.publisher_and_launch_error(publishers).1.is_none())
+            .filter(|app_info| {
+                app_info.publisher_and_launch_error(&self.current_keyos_version, publishers).1.is_none()
+            })
             .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
             .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
                 Ok(rules_json) if !rules_json.is_empty() => {
@@ -336,7 +353,8 @@ impl AppRegistry {
             .filter(|app_info| filter.is_flux.map_or(true, |want| app_info.is_flux == want))
             .filter(|app_info| filter.sideloaded.map_or(true, |want| app_info.is_sideloaded() == want))
             .map(|app_info| {
-                let (publisher_fingerprint, launch_error) = app_info.publisher_and_launch_error(publishers);
+                let (publisher_fingerprint, launch_error) =
+                    app_info.publisher_and_launch_error(&self.current_keyos_version, publishers);
                 // The label is an identity, not the bundle's claim: a certified app shows the
                 // certificate name the user confirmed at import, a Foundation-signed app its
                 // manifest publisher (covered by the Foundation signature), an uncertified
@@ -362,7 +380,7 @@ impl AppRegistry {
                     launch_error,
                     can_remove: app_info.is_sideloaded(),
                     is_flux: app_info.is_flux,
-                    version: app_info.manifest.version.clone().unwrap_or_default(),
+                    version: app_info.manifest.version.as_ref().map(ToString::to_string).unwrap_or_default(),
                     size_bytes: app_info.binary_size,
                     app_hash: app_info.manifest.file_hashes.get(ELF_FILE).copied().unwrap_or_default(),
                     description: app_info.description(),
@@ -434,9 +452,9 @@ impl AppRegistry {
         app_id: AppId,
         publishers: &[ThirdPartyCertificateInfo],
     ) -> Option<LaunchError> {
-        self.installed_apps
-            .get(&app_id)
-            .map_or(Some(LaunchError::UnknownAppId), |app| app.publisher_and_launch_error(publishers).1)
+        self.installed_apps.get(&app_id).map_or(Some(LaunchError::UnknownAppId), |app| {
+            app.publisher_and_launch_error(&self.current_keyos_version, publishers).1
+        })
     }
 
     /// The bundle file hashes from the app's manifest, verified and stored at scan time. Launch
@@ -795,40 +813,54 @@ impl AppInfo {
         effective
     }
 
-    /// The publisher fingerprint to show and why a launch would fail, if it would. `publishers` is
-    /// every stored certificate rather than only the usable ones, so a signer that matches an
-    /// unusable certificate is reported under that certificate instead of as a missing one.
-    /// Neither built-in, Foundation-signed, nor hosted apps carry a publisher fingerprint. The
-    /// simulator signs nothing, so it launches everything.
+    /// The publisher fingerprint to show and why a launch would fail, if it would. Compatibility
+    /// takes precedence over publisher errors. `publishers` is every stored certificate rather
+    /// than only the usable ones, so a signer that matches an unusable certificate is reported
+    /// under that certificate instead of as a missing one. Neither built-in, Foundation-signed,
+    /// nor hosted apps carry a publisher fingerprint; the simulator ignores publisher signatures.
     fn publisher_and_launch_error(
         &self,
+        current_keyos_version: &Version,
         publishers: &[ThirdPartyCertificateInfo],
     ) -> (String, Option<LaunchError>) {
+        let minimum = self
+            .manifest
+            .min_keyos_version
+            .as_ref()
+            .expect("registered app manifests must declare minKeyosVersion");
+        let compatibility_error = (minimum > current_keyos_version).then(|| {
+            LaunchError::Compatibility(CompatibilityError::KeyOsVersionTooOld {
+                minimum: minimum.to_string(),
+                current: current_keyos_version.to_string(),
+            })
+        });
         #[cfg(all(not(keyos), not(test)))]
         {
             let _ = publishers;
-            (String::new(), None)
+            (String::new(), compatibility_error)
         }
         #[cfg(any(keyos, test))]
         {
-            let AppSignature::ThirdParty(Some(signer)) = self.signature else {
-                return (String::new(), self.is_third_party().then_some(LaunchError::NoCertificate));
+            let (publisher_fingerprint, publisher_error) = match self.signature {
+                AppSignature::Foundation => (String::new(), None),
+                AppSignature::ThirdParty(None) => (String::new(), Some(LaunchError::NoCertificate)),
+                AppSignature::ThirdParty(Some(signer)) => {
+                    let Some(publisher) = publishers.iter().find(|p| {
+                        crate::third_party_certs::decode_public_key_hex(&p.public_key) == Some(signer)
+                    }) else {
+                        return (String::new(), compatibility_error.or(Some(LaunchError::NoCertificate)));
+                    };
+                    let error = if publisher.has_expired() {
+                        Some(LaunchError::PublisherCertificateExpired)
+                    } else if publisher.is_not_yet_valid() {
+                        Some(LaunchError::PublisherCertificateNotYetActive)
+                    } else {
+                        None
+                    };
+                    (publisher.short_fingerprint.clone(), error)
+                }
             };
-            let Some(publisher) = publishers
-                .iter()
-                .find(|p| crate::third_party_certs::decode_public_key_hex(&p.public_key) == Some(signer))
-            else {
-                return (String::new(), Some(LaunchError::NoCertificate));
-            };
-
-            let error = if publisher.has_expired() {
-                Some(LaunchError::PublisherCertificateExpired)
-            } else if publisher.is_not_yet_valid() {
-                Some(LaunchError::PublisherCertificateNotYetActive)
-            } else {
-                None
-            };
-            (publisher.short_fingerprint.clone(), error)
+            (publisher_fingerprint, compatibility_error.or(publisher_error))
         }
     }
 
@@ -1083,6 +1115,9 @@ mod tests {
     const THIRD_PARTY_APP_ID: &str = "0x00112233445566778899aabbccddeeff";
     const THIRD_PARTY_APP_DIR: &str = "00112233445566778899aabbccddeeff";
     const THIRD_PARTY_ELF_PATH: &str = "/keyos/sideloaded-apps/00112233445566778899aabbccddeeff/app.elf";
+    const TEST_MINIMUM_KEYOS_VERSION: &str = "1.4.0-beta1";
+
+    fn latest_keyos_version() -> Version { Version::new(u64::MAX, 0, 0) }
 
     fn app_info(app_id: &str, name: &str, elf_path: Option<&str>) -> AppInfo {
         let (root, signature) = if elf_path.is_some() {
@@ -1127,6 +1162,7 @@ mod tests {
                 publisher: None,
                 description: None,
                 version: None,
+                min_keyos_version: Some(semver::Version::parse(TEST_MINIMUM_KEYOS_VERSION).unwrap()),
                 servers: BTreeMap::new(),
                 fixed_sids: BTreeMap::new(),
                 permissions: BTreeMap::new(),
@@ -1176,7 +1212,7 @@ mod tests {
     fn registry_with(apps: Vec<AppInfo>) -> AppRegistry {
         AppRegistry {
             installed_apps: apps.into_iter().map(|app| (app.id, app)).collect::<HashMap<_, _>>(),
-            running_apps: HashMap::new(),
+            ..AppRegistry::default()
         }
     }
 
@@ -1250,12 +1286,15 @@ mod tests {
         app.signature = AppSignature::ThirdParty(Some(signer_bytes()));
 
         // No matching publisher: not launchable and no publisher fingerprint to show.
-        assert_eq!(app.publisher_and_launch_error(&[]), (String::new(), Some(LaunchError::NoCertificate)));
+        assert_eq!(
+            app.publisher_and_launch_error(&latest_keyos_version(), &[]),
+            (String::new(), Some(LaunchError::NoCertificate))
+        );
 
         // A publisher whose key matches the stored signer makes it launchable under its fingerprint.
         let publishers = vec![publisher_cert(SIGNER_HEX, "Acme")];
         assert_eq!(
-            app.publisher_and_launch_error(&publishers),
+            app.publisher_and_launch_error(&latest_keyos_version(), &publishers),
             (publishers[0].short_fingerprint.clone(), None)
         );
     }
@@ -1268,7 +1307,7 @@ mod tests {
             vec![publisher_cert_valid_until(SIGNER_HEX, "Acme", app_manager::now_unix_seconds() - 1)];
 
         assert_eq!(
-            app.publisher_and_launch_error(&publishers),
+            app.publisher_and_launch_error(&latest_keyos_version(), &publishers),
             (publishers[0].short_fingerprint.clone(), Some(LaunchError::PublisherCertificateExpired))
         );
     }
@@ -1292,6 +1331,39 @@ mod tests {
             registry.launch_error(decode_app_id_str("0xffffffffffffffffffffffffffffffff").unwrap(), &[]),
             Some(LaunchError::UnknownAppId)
         );
+    }
+
+    #[test]
+    fn an_installed_app_is_blocked_after_a_keyos_downgrade() {
+        let mut app = app_info_with_trust(
+            THIRD_PARTY_APP_ID,
+            "Example App",
+            Some(THIRD_PARTY_ELF_PATH),
+            AppResourcesRoot::Sideloaded,
+            AppSignature::Foundation,
+        );
+        app.manifest.min_keyos_version = Some(semver::Version::parse(TEST_MINIMUM_KEYOS_VERSION).unwrap());
+        let app_id = app.id;
+        let mut registry = registry_with(vec![app]);
+        registry.current_keyos_version = Version::parse("1.3.1").unwrap();
+
+        assert_eq!(
+            registry.launch_error(app_id, &[]),
+            Some(LaunchError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld {
+                minimum: TEST_MINIMUM_KEYOS_VERSION.to_string(),
+                current: "1.3.1".to_string(),
+            }))
+        );
+        let apps = registry.list_apps(
+            "en",
+            &[],
+            &app_manager::AppFilter::sideloaded_only(),
+            &PermissionGrantStore::default(),
+        );
+        assert!(matches!(
+            apps[0].launch_error,
+            Some(LaunchError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld { .. }))
+        ));
     }
 
     /// A built-in app providing the camera server's manifest, so the message-id lookup does not
@@ -1466,7 +1538,7 @@ mod tests {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
-        app.manifest.version = Some("1.2.3".to_string());
+        app.manifest.version = Some(semver::Version::parse("1.2.3").unwrap());
         app.manifest.file_hashes.insert(ELF_FILE.to_string(), [0xab; 32]);
         let registry = registry_with(vec![app]);
 
@@ -1557,7 +1629,7 @@ mod tests {
         );
         app.manifest.publisher = Some("Different Publisher".to_string());
 
-        assert_eq!(app.publisher_and_launch_error(&[]), (String::new(), None));
+        assert_eq!(app.publisher_and_launch_error(&latest_keyos_version(), &[]), (String::new(), None));
     }
 
     #[test]
@@ -1585,6 +1657,32 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, requested_id);
         assert_eq!(registry.qr_match_rules(&[], &[]).len(), 2);
+    }
+
+    #[test]
+    fn qr_match_rules_exclude_apps_requiring_newer_keyos() {
+        let rule = QrMatchRule {
+            id: "test".to_string(),
+            priority: QrPriority::default(),
+            id_localizations: BTreeMap::new(),
+            sub_rules: BTreeMap::from([(
+                "qr".to_string(),
+                QrMatchSubRule::QR { min_len: None, max_len: None, regex_pattern: None },
+            )]),
+        };
+        let mut app = app_info_with_trust(
+            THIRD_PARTY_APP_ID,
+            "Legacy App",
+            Some(THIRD_PARTY_ELF_PATH),
+            AppResourcesRoot::Sideloaded,
+            AppSignature::Foundation,
+        );
+        app.manifest.min_keyos_version = Some(semver::Version::parse("1.5.0").unwrap());
+        app.manifest.qr_match_rules.push(rule);
+        let mut registry = registry_with(vec![app]);
+        registry.current_keyos_version = Version::parse("1.4.0").unwrap();
+
+        assert!(registry.qr_match_rules(&[], &[]).is_empty());
     }
 
     // ---------------------------------------------------------------------------------------------

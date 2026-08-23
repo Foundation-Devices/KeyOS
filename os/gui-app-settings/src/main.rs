@@ -801,6 +801,13 @@ fn launch_blocked_reason(state: &AppState, error: Option<LaunchError>) -> String
              it with the certificate's dates under Allowed Publishers.",
             device_date(state)
         ),
+        Some(LaunchError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld {
+            minimum,
+            current,
+        })) => i18n::replace_placeholders(
+            tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
+            &[minimum.as_str(), current.as_str()],
+        ),
         _ => String::new(),
     }
 }
@@ -1319,6 +1326,18 @@ async fn pick_and_install(state: StoredValue<AppState>) -> InstallAppResult {
             TrId::AppsModalInstallAppRunningHeader,
             TrId::AppsModalInstallAppRunningContent,
         ),
+        Ok(Err(app_manager::InstallError::Compatibility(
+            app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current },
+        ))) => InstallAppResult {
+            canceled: false,
+            success: false,
+            title: tr::lookup_id(TrId::CommonAppCompatibilityUpdateKeyosTitle).into(),
+            text: i18n::replace_placeholders(
+                tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
+                &[minimum.as_str(), current.as_str()],
+            )
+            .into(),
+        },
         Ok(Err(app_manager::InstallError::Fs(_) | app_manager::InstallError::Internal)) => {
             // app-manager may have dropped the app it was replacing before refusing, so the
             // cached list can name an app that is gone.

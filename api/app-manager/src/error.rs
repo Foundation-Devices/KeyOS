@@ -30,6 +30,9 @@ pub enum AppManagerError {
 
     #[error("Publisher Certificate Not Active Yet")]
     PublisherCertificateNotYetActive = 5,
+
+    #[error("KeyOS Version Too Old")]
+    KeyOsVersionTooOld = 6,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -37,6 +40,15 @@ pub enum VerificationError {
     Unverified,
     MissingCosign2Header,
     InternalError,
+}
+
+/// A manifest is well-formed but cannot run on the current KeyOS release.
+#[derive(
+    Debug, Clone, PartialEq, Eq, thiserror::Error, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub enum CompatibilityError {
+    #[error("app requires KeyOS {minimum}, but this device is running {current}")]
+    KeyOsVersionTooOld { minimum: String, current: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -47,6 +59,7 @@ pub enum LaunchError {
     NoCertificate,
     PublisherCertificateExpired,
     PublisherCertificateNotYetActive,
+    Compatibility(CompatibilityError),
     OutOfMemory,
     InternalError,
 }
@@ -73,6 +86,9 @@ impl From<LaunchError> for AppManagerError {
             LaunchError::PublisherCertificateExpired => AppManagerError::PublisherCertificateExpired,
             LaunchError::PublisherCertificateNotYetActive => {
                 AppManagerError::PublisherCertificateNotYetActive
+            }
+            LaunchError::Compatibility(CompatibilityError::KeyOsVersionTooOld { .. }) => {
+                AppManagerError::KeyOsVersionTooOld
             }
             _ => AppManagerError::InternalError,
         }

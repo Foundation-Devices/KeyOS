@@ -743,6 +743,9 @@ impl Builder {
         }
         // fileHashes must be taken after the icons are staged, so in-bundle icon files are covered.
         let mut manifest: Manifest = load_manifest(app_name);
+        manifest.min_keyos_version.get_or_insert_with(|| {
+            Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer")
+        });
         manifest.file_hashes = bundle_file_hashes(bundle_dir);
         let hashed_files = manifest.file_hashes.keys().cloned().collect();
         let manifest_path = bundle_dir.join("manifest.json");

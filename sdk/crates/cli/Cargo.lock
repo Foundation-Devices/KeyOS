@@ -90,6 +90,7 @@ dependencies = [
  "hex",
  "once_cell",
  "rkyv",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

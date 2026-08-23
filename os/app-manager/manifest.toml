@@ -30,3 +30,4 @@ template = ["fs-generic", "crypto-sha"]
     "RegisterAppResources",
 ]
 "os/nameserver" = ["AddManifest", "RemoveManifest"]
+"os/security" = ["GetOsVersionInfo"]

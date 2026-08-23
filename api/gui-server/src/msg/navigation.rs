@@ -36,6 +36,8 @@ pub enum LaunchFailureReason {
     PublisherCertificateExpired,
     /// The matching publisher certificate's validity window has not started yet.
     PublisherCertificateNotYetActive,
+    /// The app requires a newer KeyOS release.
+    KeyOsVersionTooOld,
     /// Anything else: app-manager-internal failure, IPC failure, etc.
     Internal,
 }

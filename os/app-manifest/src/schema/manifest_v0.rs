@@ -25,7 +25,10 @@ pub struct ManifestV0 {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub version: Option<String>,
+    pub version: Option<semver::Version>,
+    /// Oldest KeyOS release that may install and launch this app. Missing means no minimum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_keyos_version: Option<semver::Version>,
     #[serde(default)]
     pub servers: BTreeMap<String, BTreeMap<String, Message>>,
     #[serde(default)]

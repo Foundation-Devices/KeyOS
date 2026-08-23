@@ -76,6 +76,7 @@ pub enum LaunchAppStatus {
     InternalError = 7,
     PublisherCertificateExpired = 8,
     PublisherCertificateNotYetActive = 9,
+    KeyOsVersionTooOld = 10,
 }
 
 impl LaunchAppStatus {
@@ -740,6 +741,10 @@ mod tests {
         assert_eq!(LaunchAppResult::decode(&result.encode()).unwrap(), result);
         let failure = LaunchAppResult::new(0, LaunchAppStatus::NoCertificate);
         assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
+        for status in [LaunchAppStatus::KeyOsVersionTooOld] {
+            let failure = LaunchAppResult::new(0, status);
+            assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
+        }
         assert_eq!(
             LaunchAppResult::decode(&[0x34, 0x12]).unwrap(),
             LaunchAppResult::new(0x1234, LaunchAppStatus::Launched)

@@ -609,6 +609,7 @@ mod tests {
             publisher: None,
             description: None,
             version: None,
+            min_keyos_version: None,
             servers: BTreeMap::new(),
             fixed_sids: BTreeMap::new(),
             permissions: BTreeMap::new(),

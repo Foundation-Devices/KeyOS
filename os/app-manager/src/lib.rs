@@ -37,12 +37,14 @@ use app_manager::{
 };
 use fs::adapter::FsAdapter;
 use permission_grants::PermissionGrantStore;
+use semver::Version;
 use system_messages::{ChildCrashed, Disconnected};
 use third_party_certs::ThirdPartyCertificateStore;
 
 crypto::use_api!();
 fs::use_api!();
 gui_server_api::use_api!();
+security::use_api!();
 
 #[cfg(not(keyos))]
 use crate::launch::launch_app;
@@ -86,7 +88,7 @@ impl Default for AppManagerServer {
 
         Self {
             app_event_subscribers: Vec::default(),
-            app_registry: AppRegistry::default(),
+            app_registry: AppRegistry::new(running_keyos_version()),
             permission_grants: PermissionGrantStore::default(),
             transient_permission_denies: HashMap::new(),
             third_party_cert_store: ThirdPartyCertificateStore::new(fs.clone()),
@@ -97,6 +99,25 @@ impl Default for AppManagerServer {
             pending_close_removals: HashSet::new(),
         }
     }
+}
+
+#[cfg(keyos)]
+fn running_keyos_version() -> Version {
+    let info = Security::default()
+        .os_version_info()
+        .expect("securam must return the running KeyOS version")
+        .expect("securam must contain the running KeyOS version");
+    let end = info.keyos_version.iter().position(|byte| *byte == 0).unwrap_or(info.keyos_version.len());
+    let version = std::str::from_utf8(&info.keyos_version[..end])
+        .expect("securam's running KeyOS version must be UTF-8");
+    Version::parse(version.trim_start_matches('v'))
+        .expect("securam's running KeyOS version must be valid SemVer")
+}
+
+#[cfg(not(keyos))]
+fn running_keyos_version() -> Version {
+    // Hosted builds do not receive the bootloader's KeyOS version argument.
+    Version::new(u64::MAX, 0, 0)
 }
 
 impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {

@@ -88,26 +88,7 @@ impl Gui {
         {
             let pid = self.app_manager.launch_app_blocking(&app_id).map_err(|error| {
                 error!("Couldn't launch the app: {error:?}");
-                match error {
-                    app_manager::AppManagerError::UnknownAppId => RunAppResponse::AppIdNotFound,
-                    app_manager::AppManagerError::VerificationFailed => {
-                        RunAppResponse::LaunchFailed { reason: LaunchFailureReason::SignatureRejected }
-                    }
-                    app_manager::AppManagerError::NoCertificate => {
-                        RunAppResponse::LaunchFailed { reason: LaunchFailureReason::NoCertificate }
-                    }
-                    app_manager::AppManagerError::PublisherCertificateExpired => {
-                        RunAppResponse::LaunchFailed {
-                            reason: LaunchFailureReason::PublisherCertificateExpired,
-                        }
-                    }
-                    app_manager::AppManagerError::PublisherCertificateNotYetActive => {
-                        RunAppResponse::LaunchFailed {
-                            reason: LaunchFailureReason::PublisherCertificateNotYetActive,
-                        }
-                    }
-                    _ => RunAppResponse::LaunchFailed { reason: LaunchFailureReason::Internal },
-                }
+                app_manager_launch_failure(error)
             })?;
             Ok((pid, false))
         }
@@ -197,5 +178,35 @@ impl Gui {
         } else {
             self.notified_nav_request = None;
         }
+    }
+}
+
+fn app_manager_launch_failure(error: app_manager::AppManagerError) -> RunAppResponse {
+    let reason = match error {
+        app_manager::AppManagerError::UnknownAppId => return RunAppResponse::AppIdNotFound,
+        app_manager::AppManagerError::VerificationFailed => LaunchFailureReason::SignatureRejected,
+        app_manager::AppManagerError::NoCertificate => LaunchFailureReason::NoCertificate,
+        app_manager::AppManagerError::PublisherCertificateExpired => {
+            LaunchFailureReason::PublisherCertificateExpired
+        }
+        app_manager::AppManagerError::PublisherCertificateNotYetActive => {
+            LaunchFailureReason::PublisherCertificateNotYetActive
+        }
+        app_manager::AppManagerError::KeyOsVersionTooOld => LaunchFailureReason::KeyOsVersionTooOld,
+        _ => LaunchFailureReason::Internal,
+    };
+    RunAppResponse::LaunchFailed { reason }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatibility_failure_keeps_its_gui_navigation_reason() {
+        assert_eq!(
+            app_manager_launch_failure(app_manager::AppManagerError::KeyOsVersionTooOld),
+            RunAppResponse::LaunchFailed { reason: LaunchFailureReason::KeyOsVersionTooOld }
+        );
     }
 }

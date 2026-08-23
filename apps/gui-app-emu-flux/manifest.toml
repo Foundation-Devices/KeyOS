@@ -6,6 +6,7 @@ extends = "../../api/gui-app-emu-flux"
 publisher = "Foundation"
 description = "Legacy mode."
 version = "1.4.0"
+minKeyosVersion = "1.4.0-beta1"
 
 [appName]
 en = "Legacy"

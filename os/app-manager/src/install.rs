@@ -11,7 +11,7 @@
 use std::io::Read;
 
 use anyhow::Context;
-use app_manager::{ArchiveLocation, InstallError, SIDELOADED_APPS_DIR};
+use app_manager::{ArchiveLocation, CompatibilityError, InstallError, SIDELOADED_APPS_DIR};
 use app_manifest::Manifest;
 use fs::adapter::FsAdapter;
 use fs::messages::{
@@ -48,6 +48,7 @@ pub(crate) trait InstalledApps {
     fn is_running(&self, app_id: &AppId) -> bool;
     fn bundle_signer(&self, app_id: &AppId) -> Option<Option<[u8; 33]>>;
     fn flux_emulator_installed(&self) -> bool;
+    fn current_keyos_version(&self) -> &semver::Version;
 }
 
 impl InstalledApps for AppRegistry {
@@ -60,6 +61,8 @@ impl InstalledApps for AppRegistry {
     }
 
     fn flux_emulator_installed(&self) -> bool { AppRegistry::flux_emulator_installed(self) }
+
+    fn current_keyos_version(&self) -> &semver::Version { AppRegistry::current_keyos_version(self) }
 }
 
 /// Where an install put an app, so a caller that has to undo it does not have to guess.
@@ -115,8 +118,23 @@ pub(crate) fn install_archive(
     first.by_ref().take(size).read_to_end(&mut manifest_raw).map_err(|e| {
         install_error(InstallError::NotAnApp, format!("cannot read the archive manifest: {e:?}"))
     })?;
-    let (manifest, signer) = verify_manifest(&manifest_raw)
+    let (manifest_json, signature) = crate::registry::verified_sideload_manifest(&manifest_raw)
         .map_err(|e| install_error(InstallError::InvalidSignature, format!("{e:#}")))?;
+    let manifest = app_manifest::try_from_bytes(manifest_json)
+        .map_err(|e| install_error(InstallError::NotAnApp, format!("invalid manifest: {e}")))?;
+    let signer = signature.signer();
+    let minimum = manifest.min_keyos_version.as_ref().ok_or_else(|| {
+        install_error(InstallError::NotAnApp, "manifest does not declare minKeyosVersion".to_string())
+    })?;
+    let current = installed.current_keyos_version();
+    if minimum > current {
+        let error = CompatibilityError::KeyOsVersionTooOld {
+            minimum: minimum.to_string(),
+            current: current.to_string(),
+        };
+        let detail = error.to_string();
+        return Err(install_error(InstallError::Compatibility(error), detail));
+    }
 
     let app_id = AppId(manifest.app_id);
     let app_dir = format!("{SIDELOADED_APPS_DIR}/{}", hex::encode(app_id.0));
@@ -248,15 +266,6 @@ pub(crate) fn sweep_staged_bundles(fs: &impl InstallFs) {
     }
 }
 
-/// Verify an archive manifest as a sideloaded bundle, returning it with its signer (`None` for a
-/// Foundation-signed archive).
-fn verify_manifest(manifest_raw: &[u8]) -> anyhow::Result<(Manifest, Option<[u8; 33]>)> {
-    let (manifest_json, signature) = crate::registry::verified_sideload_manifest(manifest_raw)?;
-    let manifest =
-        app_manifest::try_from_bytes(manifest_json).map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
-    Ok((manifest, signature.signer()))
-}
-
 fn entry_name_and_size<R: Read>(entry: &tar::Entry<'_, R>) -> anyhow::Result<(String, u64)> {
     let path = entry.path().context("archive entry has an unreadable path")?;
     let name = path.to_str().context("archive entry path is not valid UTF-8")?.to_string();
@@ -313,12 +322,12 @@ mod tests {
     use fs::adapter::test_utils::FsTest;
 
     use super::*;
-
     const APP_ID: &str = "0x00112233445566778899aabbccddeeff";
     const APP_DIR: &str = "keyos/sideloaded-apps/00112233445566778899aabbccddeeff";
     const ARCHIVE: &str = "example.app";
     const ELF: &[u8] = b"signed elf bytes";
     const ICON: &[u8] = b"icon pixels";
+    const TEST_MINIMUM_KEYOS_VERSION: &str = "1.4.0-beta1";
 
     #[derive(Default)]
     struct FakeInstalledApps {
@@ -326,6 +335,7 @@ mod tests {
         running: bool,
         signer: Option<Option<[u8; 33]>>,
         emulator_installed: bool,
+        current_keyos_version: Option<semver::Version>,
     }
 
     impl InstalledApps for FakeInstalledApps {
@@ -336,6 +346,15 @@ mod tests {
         fn bundle_signer(&self, _app_id: &AppId) -> Option<Option<[u8; 33]>> { self.signer }
 
         fn flux_emulator_installed(&self) -> bool { self.emulator_installed }
+
+        fn current_keyos_version(&self) -> &semver::Version {
+            self.current_keyos_version.as_ref().unwrap_or_else(|| default_keyos_version())
+        }
+    }
+
+    fn default_keyos_version() -> &'static semver::Version {
+        static VERSION: std::sync::OnceLock<semver::Version> = std::sync::OnceLock::new();
+        VERSION.get_or_init(|| semver::Version::parse("1.4.0-beta1").unwrap())
     }
 
     fn app_id() -> AppId { AppId(app_manifest::parse_app_id_bytes(APP_ID).unwrap()) }
@@ -353,9 +372,28 @@ mod tests {
             "appName": { "en": "Example App" },
             "appId": APP_ID,
             "fileHashes": file_hashes,
+            "minKeyosVersion": TEST_MINIMUM_KEYOS_VERSION,
             "permissions": permissions,
         }))
         .unwrap()
+    }
+
+    fn with_minimum_keyos_version(manifest: Vec<u8>, minimum: &str) -> Vec<u8> {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        manifest["minKeyosVersion"] = minimum.into();
+        serde_json::to_vec(&manifest).unwrap()
+    }
+
+    fn without_minimum_keyos_version(manifest: Vec<u8>) -> Vec<u8> {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        manifest.as_object_mut().unwrap().remove("minKeyosVersion");
+        serde_json::to_vec(&manifest).unwrap()
+    }
+
+    fn with_app_version(manifest: Vec<u8>, version: &str) -> Vec<u8> {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        manifest["version"] = version.into();
+        serde_json::to_vec(&manifest).unwrap()
     }
 
     fn header(size: u64) -> tar::Header {
@@ -424,6 +462,99 @@ mod tests {
         assert_eq!(read(&fs, &format!("{APP_DIR}/icon.bin")).as_deref(), Some(ICON));
         assert_eq!(read(&fs, &format!("{APP_DIR}/icon-dark.bin")).as_deref(), Some(ICON));
         assert!(read(&fs, &format!("{APP_DIR}/manifest.json")).is_some());
+    }
+
+    #[test]
+    fn rejects_an_app_that_requires_a_newer_keyos_version() {
+        let manifest =
+            with_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]), TEST_MINIMUM_KEYOS_VERSION);
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+        let installed = FakeInstalledApps {
+            current_keyos_version: Some(semver::Version::parse("1.3.1").unwrap()),
+            ..Default::default()
+        };
+
+        let error = install(&fs, &installed).unwrap_err();
+
+        assert!(matches!(
+            error,
+            InstallError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld {
+                ref minimum,
+                ref current,
+            }) if minimum == TEST_MINIMUM_KEYOS_VERSION && current == "1.3.1"
+        ));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
+    }
+
+    #[test]
+    fn accepts_an_app_at_its_minimum_keyos_prerelease() {
+        let manifest =
+            with_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]), TEST_MINIMUM_KEYOS_VERSION);
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+
+        install(&fs, &FakeInstalledApps::default()).unwrap();
+
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
+    }
+
+    #[test]
+    fn rejects_an_invalid_minimum_keyos_version() {
+        let manifest = with_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]), "banana");
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+
+        let error = install(&fs, &FakeInstalledApps::default()).unwrap_err();
+
+        assert!(matches!(error, InstallError::NotAnApp));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
+    }
+
+    #[test]
+    fn accepts_an_app_that_also_supports_an_older_keyos() {
+        let manifest = with_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]), "1.3.1");
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+        let installed = FakeInstalledApps {
+            current_keyos_version: Some(semver::Version::parse("2.0.0").unwrap()),
+            ..Default::default()
+        };
+
+        install(&fs, &installed).unwrap();
+
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
+    }
+
+    #[test]
+    fn rejects_a_manifest_without_a_minimum() {
+        let manifest = without_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]));
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+
+        let error = install(&fs, &FakeInstalledApps::default()).unwrap_err();
+
+        assert!(matches!(error, InstallError::NotAnApp));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
+    }
+
+    #[test]
+    fn rejects_a_malformed_app_version_before_writing() {
+        let manifest = with_app_version(manifest_json(&[("app.elf", ELF)], &[]), "banana");
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+
+        let error = install(&fs, &FakeInstalledApps::default()).unwrap_err();
+
+        assert!(matches!(error, InstallError::NotAnApp));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
+    }
+
+    #[test]
+    fn accepts_the_minimum_when_running_keyos_is_newer() {
+        let fs = staged(&valid_archive());
+        let installed = FakeInstalledApps {
+            current_keyos_version: Some(semver::Version::parse("1.5.0").unwrap()),
+            ..Default::default()
+        };
+
+        install(&fs, &installed).unwrap();
+
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
     }
 
     #[test]
