@@ -42,15 +42,15 @@ impl server::MessageId for SetupPacketCallback {
 #[derive(Debug, server::Message, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<RegisteredInterfaceInfo, UsbError>)]
 pub struct RegisterInterface {
-    pub interface_number: u8,
+    pub interface_priority: u8,
     pub if_class: u8,
     pub if_subclass: u8,
     pub if_protocol: u8,
     pub endpoints: Vec<EndpointProperties>,
     pub interface_functional_descriptors: Vec<u8>,
-    pub associated_interface_count: u8,
     pub capabilities: Vec<DeviceCapability>,
     pub setup_responder: Option<xous::CID>,
+    pub msos20_features: Vec<u8>,
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -191,18 +191,18 @@ pub struct ResetController;
 #[derive(Debug, server::Message, Clone)]
 #[response(Result<(), UsbError>)]
 pub struct SetInterfaceEnabled {
-    pub interface_number: u8,
+    pub interface_priority: u8,
     pub enabled: bool,
 }
 
 impl FromScalar<2> for SetInterfaceEnabled {
     fn from_scalar(value: [u32; 2]) -> Self {
-        Self { interface_number: value[0] as u8, enabled: value[1] != 0 }
+        Self { interface_priority: value[0] as u8, enabled: value[1] != 0 }
     }
 }
 
 impl AsScalar<2> for SetInterfaceEnabled {
-    fn as_scalar(&self) -> [u32; 2] { [self.interface_number as u32, self.enabled as u32] }
+    fn as_scalar(&self) -> [u32; 2] { [self.interface_priority as u32, self.enabled as u32] }
 }
 
 impl AsScalar<4> for SetupPacket {

@@ -8122,18 +8122,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "log-usb-serial"
-version = "0.1.0"
-dependencies = [
- "log 0.4.27",
- "rkyv",
- "server",
- "usb",
- "xous",
- "xous-api-log",
-]
-
-[[package]]
 name = "loom"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14659,7 +14647,6 @@ dependencies = [
  "usb",
  "usb-debug-protocol",
  "utralib",
- "uuid",
  "xous",
  "xous-api-log",
  "xous-api-ticktimer",

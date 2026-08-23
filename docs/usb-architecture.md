@@ -12,13 +12,19 @@ central USB device server (`os/usb`).
 | Product | Passport Prime |
 | Max Power | 32 mA (self-powered) |
 
-Each KeyOS server calls `register_interface()` with a fixed interface number.
+Each KeyOS server calls `register_interface()` with a fixed interface priority.
+Priorities are ordering keys, not identifiers: `os/usb` numbers the enabled
+interfaces contiguously from zero in priority order, so `bInterfaceNumber` is a
+position in the current configuration descriptor and shifts as interfaces are
+enabled and disabled. `bInterfaceNumber` has to index an array of
+`bNumInterfaces`, so a disabled interface cannot be allowed to leave a gap.
 Class-specific setup responders are attached to interface registration and are
-routed by `wIndex`. Disabled interfaces are omitted from the active
-configuration descriptor, but enabled interfaces keep their fixed
-`bInterfaceNumber`; they are not compacted or renumbered. Endpoint numbers are
+routed by `wIndex` against that interface number. Endpoint numbers are
 allocated by `os/usb` when interfaces register, so diagrams below list endpoint
 types and directions rather than treating endpoint numbers as protocol constants.
+
+The interface numbers in the diagrams below are the numbers for the configuration
+each diagram shows.
 
 When Developer Mode is disabled, the debug interface is omitted from the active
 configuration descriptor and the device re-enumerates without it.
@@ -28,61 +34,52 @@ configuration descriptor and the device re-enumerates without it.
 ```mermaid
 graph TD
     DEV["<b>Device Descriptor</b><br/>VID: 0x1307 | PID: 0x0165<br/>Class: 0xEF · Sub: 0x02 · Proto: 0x01<br/>USB 2.1 · Self-Powered"]
-    CFG["<b>Configuration 1</b><br/>4 Interfaces<br/><i>3 when Developer Mode is off</i>"]
+    CFG["<b>Configuration 1</b><br/>3 Interfaces<br/><i>2 when Developer Mode is off</i>"]
 
     DEV --> CFG
 
-    IF0["<b>Interface 0 — Legacy HID</b><br/>Class 0x03 · Sub 0x00 · Proto 0x00<br/>Legacy APDU Transport"]
-    IF1["<b>Interface 1 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
-    IF2["<b>Interface 2 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
-    IF3["<b>Interface 3 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
+    IF0["<b>Interface 0 — Mass Storage</b><br/>Class 0x08 · Sub 0x06 · Proto 0x50<br/>SCSI / Bulk-Only"]
+    IF1["<b>Interface 1 — HID</b><br/>Class 0x03<br/>CTAP2 / U2F"]
+    IF2["<b>Interface 2 — Vendor Specific</b><br/>Class 0xFF<br/>Debug + Logs<br/><i>Developer Mode only</i>"]
 
     CFG --> IF0
     CFG --> IF1
     CFG --> IF2
-    CFG --> IF3
-
-    LEP_IN["Interrupt IN · 64 B · 1 ms"]
-    LEP_OUT["Interrupt OUT · 64 B · 1 ms"]
-    IF0 --> LEP_IN
-    IF0 --> LEP_OUT
-
-    LHID["HID Report Descriptor<br/>Usage Page: 0xFFA0 (Vendor)<br/>64-byte IN + OUT reports"]
-    IF0 --> LHID
 
     EP_MS_IN["Bulk IN · 512 B · DMA"]
     EP_MS_OUT["Bulk OUT · 512 B · DMA"]
-    IF1 --> EP_MS_IN
-    IF1 --> EP_MS_OUT
+    IF0 --> EP_MS_IN
+    IF0 --> EP_MS_OUT
 
     EP_CTAP_OUT["Interrupt OUT · 64 B · 5 ms"]
     EP_CTAP_IN["Interrupt IN · 64 B · 5 ms"]
-    IF2 --> EP_CTAP_OUT
-    IF2 --> EP_CTAP_IN
+    IF1 --> EP_CTAP_OUT
+    IF1 --> EP_CTAP_IN
 
     HID["HID Report Descriptor<br/>Usage Page: 0xF1D0 (FIDO Alliance)<br/>Usage: U2F Authenticator<br/>64-byte IN + OUT reports"]
-    IF2 --> HID
+    IF1 --> HID
 
     EP_DBG_OUT["Bulk OUT · 512 B"]
     EP_DBG_IN["Bulk IN · 512 B · DMA"]
-    IF3 --> EP_DBG_OUT
-    IF3 --> EP_DBG_IN
+    IF2 --> EP_DBG_OUT
+    IF2 --> EP_DBG_IN
 
-    style IF3 stroke-dasharray: 5 5
+    style IF2 stroke-dasharray: 5 5
 ```
 
-> Interface 3 (dashed) is only visible at runtime when Developer Mode is enabled.
-> Interface 0 is registered by `os/legacy-hid` in normal mode too, but host
-> wallet compatibility relies on the Legacy VID:PID described below.
+> Interface 2 (dashed) is only visible at runtime when Developer Mode is enabled.
+> Legacy HID is absent outside Legacy Mode. Mass Storage only registers after the
+> first unlock, before which the interfaces below it each move down by one.
 
 ## USB Descriptor Tree — Legacy Mode (Flux Emulator Active)
 
 When a Flux app launches, `gui-app-emu-flux` asks `os/legacy-hid` to switch the
-device to the Legacy Flux VID:PID. The interface layout does not shift: Legacy
-HID is already fixed at Interface 0, Mass Storage is Interface 1, CTAP HID is
-Interface 2, and usb-debug is Interface 3 when Developer Mode is enabled. The
-VID:PID change triggers a USB disconnect / re-enumeration. When the Flux app
-exits, the normal identity is restored (another re-enumeration).
+device to the Legacy Flux VID:PID. Legacy HID has the lowest priority, so it is
+Interface 0 whenever it is enabled, and the interfaces above it move up by one
+as it appears: Mass Storage 1, CTAP HID 2, and usb-debug 3 when Developer Mode
+is enabled. The interface is enabled before the identity switch, so both steps
+trigger a USB disconnect / re-enumeration. When the Flux app exits, the normal
+identity is restored (two more re-enumerations).
 
 ```mermaid
 graph TD
@@ -128,9 +125,9 @@ graph TD
     style LIF0 fill:#1d4ed8,stroke:#60a5fa,color:#fff
 ```
 
-> The Legacy HID interface (blue) is Interface 0 in both identities. The Legacy
-> VID:PID is what makes host wallets (e.g. MoneroGUI) treat it like a real
-> Legacy Flux.
+> The Legacy HID interface (blue) is Interface 0 whenever Legacy Mode is active,
+> because it has the lowest priority. The Legacy VID:PID is what makes host
+> wallets (e.g. MoneroGUI) treat it like a real Legacy Flux.
 
 ## KeyOS Server Mapping
 
@@ -170,9 +167,9 @@ graph LR
     style FLUX stroke-dasharray: 5 5
 ```
 
-> `os/legacy-hid` registers Interface 0 at startup. Flux activation toggles the
-> USB identity and subscribes to inbound APDUs; without a subscriber, inbound
-> APDUs are dropped.
+> `os/legacy-hid` registers its interface disabled at startup. Flux activation
+> enables it, toggles the USB identity and subscribes to inbound APDUs; without a
+> subscriber, inbound APDUs are dropped.
 
 ---
 
@@ -437,7 +434,3 @@ APDUs with. Present `0x70xx` (the low byte is a USB-interface bitmask the host
 ignores) so the device is seen as app-mode.
 
 The host tools try the normal VID:PID first, then fall back to the Legacy one.
-
-**CDC ACM serial** (`os/logging/usb-serial`): An optional logging transport that
-adds two extra interfaces (CDC control + CDC data). Excluded from normal builds;
-only enabled via the `--log-usb-serial` build flag for special production debugging.

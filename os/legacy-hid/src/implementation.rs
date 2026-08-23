@@ -27,7 +27,7 @@ const HID_INTERFACE_SUBCLASS: u8 = 0x00;
 #[cfg(keyos)]
 const HID_INTERFACE_PROTOCOL: u8 = 0x00;
 #[cfg(keyos)]
-const HID_INTERFACE_NUMBER: u8 = usb::device::interface_numbers::LEGACY_HID;
+const HID_INTERFACE_PRIORITY: u8 = usb::device::interface_priorities::LEGACY_HID;
 #[cfg(keyos)]
 const HID_ENDPOINTS: [EndpointProperties; 2] = [
     EndpointProperties {
@@ -63,9 +63,7 @@ const HID_REPORT_DESCRIPTOR: [u8; 34] = [
 
 #[cfg(keyos)]
 #[derive(Default)]
-pub(crate) struct SetupResponder {
-    pub(crate) interface_num: u16,
-}
+pub(crate) struct SetupResponder;
 
 #[cfg(keyos)]
 impl server::ServerMessages for SetupResponder {
@@ -88,19 +86,15 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _context: &mut ServerContext<Self>,
     ) -> Option<Vec<u8>> {
         log::debug!("Setup packet: {msg:02x?}");
-        if msg.index == self.interface_num {
-            if msg.request_type == 0x21 && msg.request == 0x0a {
-                Some(vec![]) // HID SET_IDLE
-            } else if msg.request_type == 0x81 && msg.request == 0x06 {
-                if msg.value == 0x2200 {
-                    let len = usize::min(msg.length as usize, HID_REPORT_DESCRIPTOR.len());
-                    Some(HID_REPORT_DESCRIPTOR[..len].to_vec())
-                } else if msg.value == 0x2100 {
-                    let len = usize::min(msg.length as usize, HID_FUNC_DESCRIPTOR.len());
-                    Some(HID_FUNC_DESCRIPTOR[..len].to_vec())
-                } else {
-                    None
-                }
+        if msg.request_type == 0x21 && msg.request == 0x0a {
+            Some(vec![]) // HID SET_IDLE
+        } else if msg.request_type == 0x81 && msg.request == 0x06 {
+            if msg.value == 0x2200 {
+                let len = usize::min(msg.length as usize, HID_REPORT_DESCRIPTOR.len());
+                Some(HID_REPORT_DESCRIPTOR[..len].to_vec())
+            } else if msg.value == 0x2100 {
+                let len = usize::min(msg.length as usize, HID_FUNC_DESCRIPTOR.len());
+                Some(HID_FUNC_DESCRIPTOR[..len].to_vec())
             } else {
                 None
             }
@@ -225,14 +219,14 @@ fn start_hid() -> (UsbRegisteredInterface, HidInEndpoint, EnabledGate) {
     let (hid_interface, [hid_ep_in, hid_ep_out]) = usb_api
         .register_interface(
             UsbInterfaceConfig::new(
-                HID_INTERFACE_NUMBER,
+                HID_INTERFACE_PRIORITY,
                 HID_INTERFACE_CLASS,
                 HID_INTERFACE_SUBCLASS,
                 HID_INTERFACE_PROTOCOL,
                 &HID_ENDPOINTS,
             )
             .with_functional_descriptors(&HID_FUNC_DESCRIPTOR)
-            .with_setup_responder(Some(SetupResponder { interface_num: HID_INTERFACE_NUMBER as u16 })),
+            .with_setup_responder(Some(SetupResponder)),
         )
         .unwrap();
 

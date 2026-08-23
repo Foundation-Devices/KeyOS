@@ -26,7 +26,6 @@ settings = { workspace = true }
 usb = { workspace = true }
 usb-debug-protocol = { workspace = true }
 utralib = { workspace = true }
-uuid = "1.10"
 xous = { workspace = true }
 xous-ticktimer = { workspace = true }
 

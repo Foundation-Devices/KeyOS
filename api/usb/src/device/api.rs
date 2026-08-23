@@ -33,45 +33,47 @@ macro_rules! use_device_api {
 pub struct UsbDeviceEmulation<P: CheckedPermissions>(CheckedConn<P>);
 
 pub struct UsbInterfaceConfig<'a, const N: usize> {
-    interface_number: u8,
+    interface_priority: u8,
     if_class: u8,
     if_subclass: u8,
     if_protocol: u8,
     endpoints: &'a [EndpointProperties; N],
     interface_functional_descriptors: &'a [u8],
-    associated_interface_count: u8,
     capabilities: Vec<DeviceCapability>,
     setup_responder: Option<Box<dyn FnOnce(xous::PID) -> Result<xous::CID, UsbError>>>,
+    msos20_features: &'a [u8],
 }
 
 impl<'a, const N: usize> UsbInterfaceConfig<'a, N> {
     pub fn new(
-        interface_number: u8,
+        interface_priority: u8,
         if_class: u8,
         if_subclass: u8,
         if_protocol: u8,
         endpoints: &'a [EndpointProperties; N],
     ) -> Self {
         Self {
-            interface_number,
+            interface_priority,
             if_class,
             if_subclass,
             if_protocol,
             endpoints,
             interface_functional_descriptors: &[],
-            associated_interface_count: 0,
             capabilities: Vec::new(),
             setup_responder: None,
+            msos20_features: &[],
         }
+    }
+
+    /// Attach Microsoft OS 2.0 feature descriptors, which Windows applies to this interface once
+    /// the USB server has wrapped them in a function subset naming its interface number.
+    pub fn with_msos20_features(mut self, features: &'a [u8]) -> Self {
+        self.msos20_features = features;
+        self
     }
 
     pub fn with_functional_descriptors(mut self, descriptors: &'a [u8]) -> Self {
         self.interface_functional_descriptors = descriptors;
-        self
-    }
-
-    pub fn with_associated_interface_count(mut self, count: u8) -> Self {
-        self.associated_interface_count = count;
         self
     }
 
@@ -127,18 +129,20 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
             None
         };
         let registered = self.0.send_blocking_archive(RegisterInterface {
-            interface_number: config.interface_number,
+            interface_priority: config.interface_priority,
             if_class: config.if_class,
             if_subclass: config.if_subclass,
             if_protocol: config.if_protocol,
             endpoints: config.endpoints.into(),
             interface_functional_descriptors: config.interface_functional_descriptors.into(),
-            associated_interface_count: config.associated_interface_count,
             capabilities: config.capabilities,
             setup_responder,
+            msos20_features: config.msos20_features.into(),
         })?;
-        let interface =
-            UsbRegisteredInterface { connection: self.0.clone(), interface_number: config.interface_number };
+        let interface = UsbRegisteredInterface {
+            connection: self.0.clone(),
+            interface_priority: config.interface_priority,
+        };
         let endpoints = core::array::from_fn(|i| UsbEmulatedEndpoint {
             connection: self.0.clone(),
             endpoint_number: registered.endpoints[i],
@@ -203,18 +207,16 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
 #[derive(Clone)]
 pub struct UsbRegisteredInterface<P: CheckedPermissions> {
     connection: CheckedConn<P>,
-    interface_number: u8,
+    interface_priority: u8,
 }
 
 impl<P: CheckedPermissions> UsbRegisteredInterface<P> {
-    pub fn number(&self) -> u8 { self.interface_number }
-
     pub fn set_enabled(&self, enabled: bool) -> Result<(), UsbError>
     where
         P: MessageAllowed<SetInterfaceEnabled>,
     {
         self.connection.try_send_blocking_scalar(SetInterfaceEnabled {
-            interface_number: self.interface_number,
+            interface_priority: self.interface_priority,
             enabled,
         })??;
         Ok(())

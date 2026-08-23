@@ -41,7 +41,7 @@ use usb_debug_protocol::{Response, USB_DEBUG_OUT_TRANSFER_MAX};
 usb::use_device_api!();
 settings::use_api!();
 
-const DEBUG_INTERFACE_NUMBER: u8 = usb::device::interface_numbers::USB_DEBUG;
+const DEBUG_INTERFACE_PRIORITY: u8 = usb::device::interface_priorities::USB_DEBUG;
 const DEBUG_OUT_BUFFER_SIZE: usize = USB_DEBUG_OUT_TRANSFER_MAX + 1;
 const DEBUG_OUT_READ_LEN: u16 = USB_DEBUG_OUT_TRANSFER_MAX as u16;
 
@@ -191,7 +191,7 @@ fn main() -> ! {
     let (debug_interface, [debug_ep_out, mut ep_in]) = usb_api
         .register_interface(
             UsbInterfaceConfig::new(
-                DEBUG_INTERFACE_NUMBER,
+                DEBUG_INTERFACE_PRIORITY,
                 0xFF, // Class: Vendor Specific
                 0x00,
                 0x00,
@@ -212,15 +212,7 @@ fn main() -> ! {
                     },
                 ],
             )
-            .with_setup_responder(Some(msos20::SetupResponder {
-                descriptor_set: msos20::descriptor_set(DEBUG_INTERFACE_NUMBER),
-            }))
-            .with_capability(
-                0x10, // bDescriptorType: DEVICE_CAPABILITY
-                0x05, // bDevCapabilityType: PLATFORM
-                msos20::PLATFORM_CAPABILITY_UUID,
-                &msos20::PLATFORM_CAPABILITY,
-            ),
+            .with_msos20_features(&msos20::FEATURES),
         )
         .expect("Error registering debug interface");
 

@@ -23,7 +23,7 @@ usb::use_device_api!();
 const INTERFACE_CLASS: u8 = 0x08; // Mass storage
 const INTERFACE_SUBCLASS: u8 = 0x06; // SCSI passthrough
 const INTERFACE_PROTOCOL: u8 = 0x50; // Bulk-only
-const INTERFACE_NUMBER: u8 = usb::device::interface_numbers::MASS_STORAGE;
+const INTERFACE_PRIORITY: u8 = usb::device::interface_priorities::MASS_STORAGE;
 
 #[cfg(feature = "production")]
 const EXPOSED_LOCATIONS: [Location; 1] = [Location::Airlock];
@@ -290,7 +290,7 @@ pub fn start() -> Result<(), crate::error::MassStorageEmulationError> {
     let mut usb_api = UsbDeviceEmulation::default();
     let (usb_interface, [mut ep_in, mut ep_out]) = usb_api.register_interface(
         UsbInterfaceConfig::new(
-            INTERFACE_NUMBER,
+            INTERFACE_PRIORITY,
             INTERFACE_CLASS,
             INTERFACE_SUBCLASS,
             INTERFACE_PROTOCOL,

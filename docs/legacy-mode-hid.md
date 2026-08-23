@@ -202,5 +202,6 @@ graph TD
 - **SEPH bridge:** APDUs enter the Flux app as `CapduEvent` (tag `0x16`) TLV packets
   via the SEPH FIFO, exactly as they would on real hardware. Responses exit
   as `Rapdu` (tag `0x53`) packets.
-- **Fixed IF 0:** Legacy HID registers with interface number 0 so host wallets see
-  the Legacy-compatible layout they expect.
+- **Fixed IF 0:** Legacy HID registers with the lowest interface priority, so it is
+  numbered 0 whenever it is enabled and host wallets see the Legacy-compatible
+  layout they expect.

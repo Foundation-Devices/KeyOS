@@ -18,7 +18,6 @@ target_excludes := '--exclude atsama5d27 ' + \
     '--exclude loader ' + \
     '--exclude cryptoauthlib ' + \
     '--exclude log-serial ' + \
-    '--exclude log-usb-serial ' + \
     '--exclude usb-debug'
 
 # Apps that link the external C SDK; they do not link on the host.

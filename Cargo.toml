@@ -95,7 +95,6 @@ members = [
     "os/logging/hosted",
     "os/logging/serial",
     "os/logging/usb-file",
-    "os/logging/usb-serial",
     "os/usb-debug",
     "os/usb-debug/protocol",
     "os/mass-storage-emulation",
