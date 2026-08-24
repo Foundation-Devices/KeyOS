@@ -16,7 +16,10 @@ use keyos::TOTAL_FLASH_BLOCKS;
 use sha2::Digest;
 use slint_keyos_platform_build::UI_ICON_SET;
 
-use crate::bootloader::{build_at91bootstrap, encrypt_bootloader, BootloaderBuildArgs, SambaCryptArgs};
+use crate::bootloader::{
+    build_at91bootstrap, encrypt_bootloader, recorded_on_device_bootloader_hash, BootloaderBuildArgs,
+    SambaCryptArgs,
+};
 use crate::builder::{project_root, Builder, APP_ICONS_DIR, KEYOS_APPS_DIR};
 use crate::system_disk::{render_common_assets, stage_system_volume, SystemVolume};
 use crate::{
@@ -246,9 +249,9 @@ pub fn build_charge_boot() {
     let fs = format_and_open(&mut boot_image, 0, BOOT_PARTITION_START_SECTOR, 0x1000, BOOT_VOLUME_NAME, true)
         .expect("error formatting partition");
 
-    let bootloader_bytes =
+    let bootloader =
         build_at91bootstrap(BootloaderBuildArgs::default(), crate::bootloader::BootloaderType::Charge);
-    fs.root_dir().create_file("boot.bin").unwrap().write_all(&bootloader_bytes).unwrap();
+    fs.root_dir().create_file("boot.bin").unwrap().write_all(&bootloader.bytes).unwrap();
 }
 
 /// Build the hosted simulator's FAT disk images that `os/fs` mounts. They are
@@ -335,9 +338,13 @@ pub(crate) fn print_hashes() {
     check_images_exist();
     println!("The SHA256 hashes of all binaries (without the cosign2 header)");
     let images_path = Builder::images_path();
-    let bootloader_digest: String =
-        sha2::Sha256::digest(fs::read(images_path.join(BOOTLOADER_IMAGE)).unwrap()).encode_hex();
-    println!("bootloader                     - {bootloader_digest}");
+    let bootloader_bytes = fs::read(images_path.join(BOOTLOADER_IMAGE)).unwrap();
+    let bootloader_digest: String = sha2::Sha256::digest(&bootloader_bytes).encode_hex();
+    println!("bootloader (raw plaintext)     - {bootloader_digest}");
+    let on_device_hash = recorded_on_device_bootloader_hash(&images_path, &bootloader_bytes)
+        .expect("read the on-device bootloader hash recorded during this build");
+    let digest: String = on_device_hash.encode_hex();
+    println!("bootloader (on-device)         - {digest}");
     print_digest_of_cosigned_file("app image", &images_path.join(APP_IMAGE));
     print_digest_of_cosigned_file("recovery image", &images_path.join(RECOVERY_IMAGE));
     let apps_dir_local =

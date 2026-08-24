@@ -3,7 +3,13 @@
 
 version = "0.2.5"
 
-# Built with KEYOS_SOURCE_DATE_EPOCH=1 so changes in this hash reflect changes
-# to the bootloader binary rather than the commit timestamp. This normalized
-# hash is for source-drift detection only; it is not a release artifact hash.
-normalized_sha256 = "6d26a2cd327dbdfe982f3e2e3c0d9517b227645d65117360720cf01e48b1d89d"
+# Built on AArch64 Linux with KEYOS_SOURCE_DATE_EPOCH=1 so changes in this hash
+# reflect changes to the bootloader binary rather than the canonical timestamp.
+# This normalized hash is for source-drift detection only; release builds use
+# the timestamp in boot/keyos-boot/SOURCE_DATE_EPOCH.
+normalized_sha256 = "407d6a41a68bcef1517dd82a08850f2ebe37612eaf852e3ba76ee2268a8d3f8d"
+
+# Exact AArch64 Linux hashes produced with boot/keyos-boot/SOURCE_DATE_EPOCH.
+# The on-device value models the plaintext SRAM image hashed by System Information.
+canonical_sha256 = "39c78a1e57df3518aee319ec9717a2a02c54e5ee3dfb11c9aeb18f6e2cd5b7a0"
+on_device_sha256 = "37276c98ecfbb970b58aad96983bfc04c76164233b28abe5380ede902e939dc5"

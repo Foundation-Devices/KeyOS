@@ -56,8 +56,10 @@ impl BlockingArchiveHandler<GetRecoveryInfo> for RecoveryWorkerServer {
 
 /// Hash the bootloader plaintext currently resident in SRAM.
 fn hash_bootloader<P: crypto::ShaPermissions>(crypto: &crypto::CryptoApi<P>) -> anyhow::Result<[u8; 32]> {
-    const BOOTLOADER_MAX_SIZE: usize = 1024 * 64; // 64KB
-    const BOOTLOADER_SIZE_IDX: usize = 5; // bootloader actual size is stored in its vector table at this location
+    const BOOTLOADER_MAX_SIZE: usize = 1024 * 64;
+    // The sixth vector contains the actual size. Keep this synchronized with
+    // BOOTLOADER_SIZE_VECTOR in xtask/src/bootloader.rs.
+    const BOOTLOADER_SIZE_IDX: usize = 5;
     let sram = xous::DropDeallocate::new(
         xous::map_memory(
             Some(std::num::NonZero::new(utralib::HW_SRAM0_MEM).expect("non-zero")),

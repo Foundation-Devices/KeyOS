@@ -16,10 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     generate_asset_metadata(&assets)?;
 
     // See https://reproducible-builds.org/docs/source-date-epoch/
-    if env::var("SOURCE_DATE_EPOCH").is_err() {
-        let epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        println!("cargo:rustc-env=SOURCE_DATE_EPOCH={epoch}");
-    }
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    let epoch = env::var("SOURCE_DATE_EPOCH")
+        .unwrap_or_else(|_| SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string());
+    println!("cargo:rustc-env=SOURCE_DATE_EPOCH={epoch}");
 
     Ok(())
 }
@@ -65,14 +65,21 @@ fn png_to_asset(path: PathBuf) -> Result<AssetFile, Box<dyn std::error::Error>> 
         pixel.swap(0, 2); // Swap R (index 0) and B (index 2)
     }
 
-    fs::write(&out_path, &image_data_rgba8888)?;
+    let raw_is_current = match fs::read(&out_path) {
+        Ok(current) => current == image_data_rgba8888,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    if !raw_is_current {
+        fs::write(&out_path, &image_data_rgba8888)?;
+    }
 
     use sha2::Digest;
-    let hash: [u8; 32] = sha2::Sha256::digest(fs::read(&out_path)?.as_slice()).as_slice().try_into().unwrap();
+    let hash: [u8; 32] = sha2::Sha256::digest(&image_data_rgba8888).as_slice().try_into().unwrap();
     let asset = AssetFile {
         name: file_name.to_string(),
         fs_name: format!("blassets/{file_name}.raw"),
-        size: File::open(&out_path)?.metadata()?.len() as usize,
+        size: image_data_rgba8888.len(),
         qr_url: recognize_qr_code(&path),
         hash,
     };

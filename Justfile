@@ -238,6 +238,17 @@ build-bl-unsigned:
 build-all args="":
     cargo xtask build-all {{args}}
 
+# Build only the production bootloader with the public entropy value used by
+# System Information, then print its raw and on-device-comparable SHA256 hashes.
+build-repro-bootloader:
+    cargo xtask build-bootloader --production-bootloader
+
+# Build an historical release twice in isolated worktrees, normalize the old
+# boot.bin with the current hash model, and require both builds to match.
+# Usage: just reproduce-bootloader v1.2.0 [--builds 1]
+reproduce-bootloader ref *args:
+    cargo xtask reproduce-bootloader "{{ref}}" {{args}}
+
 # Check upstream for a newer release of a Flux app and repin its build.rs.
 # Usage: just update-flux ethereum   (append --check to only report).
 update-flux app *args:

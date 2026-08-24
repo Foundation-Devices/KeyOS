@@ -4,10 +4,11 @@
 name: Bootloader hash
 
 on:
+  merge_group:
   pull_request:
 
 concurrency:
-  group: bootloader-hash-${{ github.event.pull_request.number || github.run_id }}
+  group: bootloader-hash-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -16,7 +17,7 @@ permissions:
 jobs:
   check:
     name: Require version update for bootloader changes
-    runs-on: [self-hosted, Linux]
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,4 +28,4 @@ jobs:
           setup-git-auth: 'false'
       - uses: ./.github/actions/check-bootloader-hash
         with:
-          base-ref: ${{ github.event.pull_request.base.sha }}
+          base-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}

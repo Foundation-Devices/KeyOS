@@ -14,5 +14,5 @@ runs:
     - name: Build and verify the bootloader
       shell: bash
       env:
-        BOOTLOADER_BASE_REF: ${{ inputs.base-ref }}
-      run: nix develop .#build --command "$GITHUB_ACTION_PATH/check.py"
+        BASE_REF: ${{ inputs.base-ref }}
+      run: nix develop .#build --command cargo xtask check-bootloader-hash --base-ref "$BASE_REF"

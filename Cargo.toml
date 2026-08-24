@@ -332,6 +332,7 @@ lto = true
 opt-level = "s"           # Optimize for size
 panic = "immediate-abort"
 codegen-units = 1
+incremental = false       # Required for byte-for-byte reproducibility across clean build machines
 
 [patch.crates-io]
 getrandom = { path = "imports/getrandom" }

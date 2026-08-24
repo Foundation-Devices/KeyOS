@@ -5,91 +5,132 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Reproducibility
 
-This document provides instructions for building KeyOS in a reproducible manner using Nix, allowing verification against official releases.
+KeyOS uses a pinned Nix environment and deterministic production build settings so published firmware can be compared with a local build.
 
 ## What Can Be Verified
 
-Not all binaries can be fully verified by external developers:
+| Artifact                         | Verifiable | Method                                                |
+| -------------------------------- | ---------- | ----------------------------------------------------- |
+| `boot.bin` (plaintext)           | Yes        | Compare its modeled SRAM hash with System Information |
+| `boot.cip`                       | No         | Encrypted and authenticated with release-only keys    |
+| `app.bin`                        | Yes        | Hash without the cosign2 signature header             |
+| `recovery.bin`                   | Yes        | Hash without the cosign2 signature header             |
+| Built-in application `app.elf`s | Yes        | Hash without the cosign2 signature header             |
 
-| Binary         | Verifiable | Reason                                 |
-| -------------- | ---------- | -------------------------------------- |
-| `app.bin`      | Yes        | Hash computed without signature header |
-| `recovery.bin` | Yes        | Hash computed without signature header |
-| `apps/*.elf`   | Yes        | Hash computed without signature header |
-| `boot.bin`     | No         | Is encrypted for secure boot           |
-
-The bootloader (boot.bin) is encrypted with a secret key to support the Passport Prime MCU’s secure boot mechanism and therefore cannot be reproduced or verified byte-for-byte by third parties. All other firmware images and application binaries are fully reproducible and can be verified using normal hashing techniques such as SHA256.
-
-We are investigating ways to make the bootloader verifiable in the future.
+The local build produces the plaintext bootloader as `boot.bin`. The published bootloader is `boot.cip`, which is encrypted and authenticated for the Passport Prime MCU's Secure Boot mechanism, so third parties cannot reproduce it byte-for-byte. The plaintext `boot.bin` can still be transformed into the plaintext SRAM image hashed by System Information on a production Secure Boot device.
 
 ## Prerequisites
 
-1. Install Nix and enable flakes as described in the [Nix install](DEVELOPMENT.md#nix-install) section of DEVELOPMENT.md.
+1. Install Nix and enable flakes as described in the [Nix install](DEVELOPMENT.md#nix-install) section of `DEVELOPMENT.md`.
 
-2. Ensure you're building on an aarch64 architecture for perfect reproducibility.
+2. Use an AArch64 Linux build machine for byte-for-byte reproducibility. The pinned dependencies are the same on AArch64 macOS, but the host-specific build tools do not produce an identical bootloader binary.
 
-3. Get the source code as described in the [Get the Source Code](DEVELOPMENT.md#get-the-source-code) section of DEVELOPMENT.md.
+3. To verify a release with the current build commands, check out its exact tag. To use the historical wrapper below, remain on a current checkout and give the wrapper the exact tag; it creates the historical checkout itself. Only tagged releases have corresponding binaries in the [KeyOS-Releases](https://github.com/Foundation-Devices/KeyOS-Releases) repository.
 
-## Building Locally
+4. Enter the pinned build environment:
 
-1. Checkout the release tag you want to verify (e.g., `v1.1.0`):
-
-   ```
-   git checkout v1.1.0
-   ```
-
-   Only tagged releases have corresponding official binaries in the [KeyOS-Releases](https://github.com/Foundation-Devices/KeyOS-Releases) repository.
-
-2. Enter the Nix development environment:
-
-   ```
+   ```console
    nix develop
    ```
 
-   This sets up the reproducible build environment with all required dependencies.
+## Verifying the Bootloader
 
-3. Build the production firmware and print the hashes:
+Build only the production bootloader and print its hashes:
 
-   ```
-   just build-repro
-   ```
+```console
+just build-repro-bootloader
+```
 
-   This builds all production components (bootloader, recovery, and main firmware) in a deterministic way, then outputs the SHA256 hashes of the built binaries. For signed binaries (`app.bin`, `recovery.bin`, app ELF files), the hash is computed **without** the cosign2 signature header (first 0x800 bytes), since signatures are non-deterministic.
+The command prints two hashes:
 
-## Verifying Reproducibility
+- `Raw bootloader SHA256` hashes the local plaintext `boot.bin`. This is useful for diagnosing a local build, but it is **not** the value displayed by the device.
+- `On-device bootloader SHA256` models the plaintext SRAM image after Secure Boot and bootloader cleanup. Compare this value with **System Information → Bootloader → SHA256 Hash** on a production Passport Prime with MCU Secure Boot enabled. On a development unit booting plaintext `boot.bin`, System Information instead displays the raw `boot.bin` hash because Secure Boot did not rewrite the size or add the padding and CMAC area.
 
-To verify that your local build produces the same binaries as the official release:
+The comparison build does not require the release encryption key, signing material, or secret `EXTRA_ENTROPY` value.
 
-1. Find the official release binaries:
-   - Go to the [KeyOS-Releases](https://github.com/Foundation-Devices/KeyOS-Releases) repository.
-   - Navigate to the version directory matching your tag (e.g., `1.1.0/` for tag `v1.1.0`).
-   - The release contains:
-     - `boot.bin` - bootloader binary (cannot be verified, see above)
-     - `app.bin` - main firmware binary
-     - `recovery.bin` - recovery firmware binary
-     - `apps/` - individual application binaries (`app.elf` files)
+The bootloader Cargo profile disables incremental compilation. Production release builds use the same setting, preventing cached compiler state from changing the binary compared with a clean verification build.
 
-2. Compute hashes of the official release binaries:
-   For signed binaries, you need to skip the cosign2 header (first 2048 bytes) when computing the hash:
+### Verifying a Historical Release
 
-   ```bash
-   # For app.bin, recovery.bin, or app ELF files:
-   tail -c +2049 <file> | sha256sum
-   ```
+Historical tags do not contain the current SRAM hash model, and changing their source would invalidate the comparison. Run the historical wrapper from a current KeyOS checkout instead:
 
-3. Compare hashes:
-   - Compare the hash output from your local `just build-repro` run with the hashes computed from the release binaries.
-   - The hashes for `app.bin`, `recovery.bin`, and all app ELF files should match.
-   - The `boot.bin` hash will differ due to the secret `EXTRA_ENTROPY` value.
+```console
+nix develop .#build --command just reproduce-bootloader v1.2.0
+```
 
-4. If hashes differ (for verifiable binaries):
-   - Ensure you're on the exact tag/commit corresponding to the release.
-   - Verify your Nix installation and configuration.
-   - Check that you're on an aarch64 architecture.
-   - Make sure you used `just build-repro`, which passes the production build flags.
+If already inside the pinned Nix environment, run `just reproduce-bootloader v1.2.0`. The Rust `cargo xtask reproduce-bootloader` command resolves the tag to an exact commit, creates two independent temporary Git worktrees, and builds each worktree with that tag's own `flake.lock`, `Cargo.lock`, build scripts, and commit-derived `SOURCE_DATE_EPOCH`. It deliberately leaves the original entropy marker in each historical `boot.bin`; the current Rust hash model then finds that unique slot, replaces it with the public runtime value in a copied artifact, and calculates both the normalized raw hash and the on-device hash. The historical worktrees are removed after each build.
 
-## Notes
+Artifacts and `report.json` are retained under `target/bootloader-reproductions/`. The command fails if the two independent builds differ. Use `--builds 1` for a single diagnostic build, but that does not test reproducibility.
 
-- Reproducibility guarantees that identical inputs produce identical outputs on the same CPU architecture.
-- The `just build-repro` recipe passes `--production-firmware`, which implies `--reproducible` and disables incremental compilation for deterministic builds.
-- You do not need to use `--dont-sign` for verification, as the hash comparison ignores the signature header anyway.
+Run the final comparison on AArch64 Linux. Other hosts are allowed so host-dependent behavior can be diagnosed, but the wrapper warns that their result may not match a release device.
+
+### Canonical Build Timestamp
+
+The bootloader includes a build date, so its `SOURCE_DATE_EPOCH` is a build input. KeyOS stores the canonical value for the current bootloader in `boot/keyos-boot/SOURCE_DATE_EPOCH`. Production and verification builds both read that file. This keeps the output stable when private KeyOS-dev changes are copied into squashed commits in the public KeyOS repository.
+
+When a bootloader change produces a different normalized or canonical hash, CI requires both the bootloader version and this timestamp to increase. Changing only the timestamp changes the canonical binary and therefore also requires a version increase. Unrelated commits and public-repository commit timestamps do not affect the bootloader.
+
+### How `EXTRA_ENTROPY` Is Handled
+
+Production releases build the bootloader with a secret 32-byte `EXTRA_ENTROPY` value. Before starting recovery, the bootloader replaces those bytes in SRAM with this fixed public 32-byte value:
+
+```text
+000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f
+```
+
+This is the Bitcoin genesis-block hash. The reproducible build uses the same public value; it must not use zeroes or leave the build marker in place.
+
+Secure SAM-BA also pads the plaintext to a 16-byte AES block, adds a 16-byte CMAC, and rewrites the sixth Arm vector with the resulting size. The bootloader cleanup clears the padding and CMAC area before recovery reads SRAM. The hash command models both transformations: it updates the size vector and extends the local image with the zeroes recovery will observe.
+
+No bytes from `boot.bin` are skipped. The Rust command makes a temporary, in-memory copy of the local file look like the plaintext image Recovery sees in SRAM, then hashes the complete copy. It does not modify `boot.bin` on disk.
+
+```text
+LOCAL VERIFICATION
+
+boot.bin with fixed EXTRA_ENTROPY
+        |
+        | Copy in memory
+        | Set size word at 0x14 to the Secure Boot size
+        | Append zeroes for the cleared padding and 16-byte CMAC area
+        v
+Expected plaintext SRAM image  ---------->  SHA256  ---------->  On-device bootloader SHA256
+
+
+PRODUCTION DEVICE
+
+boot.bin with secret EXTRA_ENTROPY
+        |
+        | Secure SAM-BA pads, authenticates, and encrypts it
+        | MCU Secure Boot decrypts it into SRAM
+        | Bootloader replaces EXTRA_ENTROPY with the fixed value
+        | Bootloader clears the padding and CMAC area
+        v
+Actual plaintext SRAM image    ---------->  SHA256  ---------->  System Information
+```
+
+The expected and actual plaintext SRAM images should be byte-for-byte identical when they were built from the same source tree, canonical bootloader timestamp, and reproducible build environment.
+
+## Building and Verifying All Firmware
+
+Build all production components and print their hashes:
+
+```console
+just build-repro
+```
+
+For `app.bin`, `recovery.bin`, and built-in application `app.elf` files, the printed hash excludes the first `0x800` bytes containing the non-deterministic cosign2 signature header. To calculate the same hash from a published file:
+
+```console
+tail -c +2049 <file> | sha256sum
+```
+
+Compare those values with the corresponding files from the matching release in KeyOS-Releases. For the bootloader, the summary prints two hashes: `bootloader (raw plaintext)` hashes the local `boot.bin` and is not device-comparable, while `bootloader (on-device)` is the value to compare with System Information. The build records the latter alongside `boot.bin` while the exact entropy slot is known, and the summary verifies that record belongs to the current file before printing it.
+
+## Troubleshooting
+
+- Confirm the source is at the exact release tag.
+- Confirm the build is running inside `nix develop`.
+- Confirm the build machine is AArch64.
+- Do not override `KEYOS_SOURCE_DATE_EPOCH`; normal builds use the value tracked in `boot/keyos-boot/SOURCE_DATE_EPOCH`.
+- Compare the device against an `on-device` hash; hashing `boot.bin` directly produces the raw hash rather than the on-device hash.
+- Do not set `EXTRA_ENTROPY` for the comparison build. The recipe deliberately uses the public runtime replacement value.

@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 
 use bootimage::print_hashes;
-use bootloader::{build_keyos_boot, BootloaderBuildArgs, SambaCryptArgs};
+use bootloader::{
+    build_keyos_boot, hash_historical_bootloader, BootloaderBuildArgs, HashBootloaderArgs, SambaCryptArgs,
+};
 use clap::{Args, Parser, Subcommand};
 
 use crate::bootimage::{build_charge_boot, create_boot_image};
@@ -15,12 +17,14 @@ use crate::symbolicate::SymbolicateArgs;
 mod bootimage;
 mod bootloader;
 mod builder;
+mod check_bootloader_hash;
 mod docs_api;
 mod docs_publish;
 mod elf;
 mod flash;
 mod hot_reload;
 mod release_generator;
+mod reproduce_bootloader;
 mod symbolicate;
 mod system_disk;
 mod tags;
@@ -207,6 +211,12 @@ struct XtaskArgs {
 enum Commands {
     /// Build the at91bootstrap bootloader
     BuildBootloader(BootloaderBuildArgs),
+    /// Verify the bootloader version and reproducible hashes against the tracked baseline
+    CheckBootloaderHash(check_bootloader_hash::CheckBootloaderHashArgs),
+    /// Normalize and hash a boot.bin built from historical KeyOS source
+    HashBootloader(HashBootloaderArgs),
+    /// Reproduce a historical bootloader in isolated worktrees
+    ReproduceBootloader(reproduce_bootloader::ReproduceBootloaderArgs),
     /// Build a tiny boot image for factory charging the device
     BuildChargeBoot,
     /// Build service+app+kernel binary images
@@ -397,6 +407,24 @@ fn main() {
 
     match args.command {
         Commands::BuildBootloader(args) => build_keyos_boot(args),
+        Commands::CheckBootloaderHash(args) => {
+            if let Err(error) = check_bootloader_hash::run(args) {
+                eprintln!("Error: {error:#}");
+                std::process::exit(1);
+            }
+        }
+        Commands::HashBootloader(args) => {
+            if let Err(error) = hash_historical_bootloader(args) {
+                eprintln!("Error: {error:#}");
+                std::process::exit(1);
+            }
+        }
+        Commands::ReproduceBootloader(args) => {
+            if let Err(error) = reproduce_bootloader::run(args) {
+                eprintln!("Error: {error:#}");
+                std::process::exit(1);
+            }
+        }
         Commands::BuildChargeBoot => build_charge_boot(),
         Commands::Build { build_args, dont_sign } => {
             build(build_args, dont_sign);
