@@ -27,6 +27,9 @@ spi::use_api!();
 
 pub const MAX_LAYERS: usize = 4;
 
+/// The LCDC register map ends with HEOCLUT255 at offset 0x15fc, so it occupies two pages.
+const LCDC_MMIO_SIZE: usize = xous::PAGE_SIZE * 2;
+
 /// Vertical front porch, in lines, applied at startup. Sized so the vertical
 /// blanking interval (~1.1 ms) outlasts typical in-kernel stalls observed at
 /// time of writing (~700 us) plus the commit handler, leaving the in-interrupt
@@ -106,7 +109,7 @@ impl PlatformDisplay {
         let lcdc_addr = xous::syscall::map_memory(
             xous::MemoryAddress::new(HW_LCDC_BASE),
             None,
-            4096 * 4,
+            LCDC_MMIO_SIZE,
             xous::MemoryFlags::W | xous::MemoryFlags::DEV,
         )
         .expect("Could not map LCDC");

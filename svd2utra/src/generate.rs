@@ -914,10 +914,10 @@ pub mod utra {
 }
 
 // Eagerly estimate the size of the memory region occupied by a peripheral by finding a register
-// with the highest offset.
+// with the highest byte offset and including that register's four bytes.
 fn estimate_peripheral_size(peripheral: &Peripheral) -> usize {
     let max_offset = peripheral.registers.iter().map(|r| r.offset).max().unwrap_or(0);
-    (max_offset + 1) * size_of::<u32>()
+    max_offset + size_of::<u32>()
 }
 
 fn print_memory_map<U: Write>(

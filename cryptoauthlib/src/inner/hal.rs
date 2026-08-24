@@ -11,7 +11,9 @@ use atsama5d27::{
 use dma::DmaTransfer;
 use server::{CheckedPermissions, MessageAllowed};
 use xous::{
-    arch::irq::IrqNumber, keyos::MASTER_CLOCK_SPEED, map_memory, MemoryAddress, MemoryFlags, MemoryRange,
+    arch::irq::IrqNumber,
+    keyos::{MASTER_CLOCK_SPEED, PAGE_SIZE},
+    map_memory, MemoryAddress, MemoryFlags, MemoryRange,
 };
 
 use super::bindings::{self, ATCAIfaceType, ATCA_NOT_INITIALIZED, ATCA_UNIMPLEMENTED};
@@ -114,9 +116,13 @@ impl Hal {
     }
 
     fn new() -> Result<Self, Error> {
-        let mem =
-            map_memory(MemoryAddress::new(HW_FLEXCOM2_BASE), None, 0x2000, MemoryFlags::W | MemoryFlags::DEV)
-                .expect("map FLEXCOM");
+        let mem = map_memory(
+            MemoryAddress::new(HW_FLEXCOM2_BASE),
+            None,
+            PAGE_SIZE, // FLEXCOM's last 32-bit register is at offset 0x6e8, so all registers fit one page
+            MemoryFlags::W | MemoryFlags::DEV,
+        )
+        .expect("map FLEXCOM");
         let addr = mem.as_ptr() as u32;
         log::info!("Mapped Flexcom to 0x{:08x}", addr);
         let mut flexcom = Flexcom::with_base_addr(addr);

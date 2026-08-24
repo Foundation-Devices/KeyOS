@@ -92,7 +92,7 @@ impl DmaServer {
         let xdmac_mem = xous::map_memory(
             xous::MemoryAddress::new(HW_XDMAC0_BASE),
             None,
-            0x2000,
+            PAGE_SIZE, // XDMAC's last 32-bit register starts at offset 0x444, so all registers fit one page
             xous::MemoryFlags::W | xous::MemoryFlags::DEV,
         )
         .expect("Could not map Xdmac0");
