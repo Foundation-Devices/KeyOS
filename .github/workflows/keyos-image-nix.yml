@@ -39,19 +39,6 @@ jobs:
           nix --version
           echo "Using existing Nix daemon"
 
-      - uses: actions/cache@v4
-        id: cache-cargo
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ github.workflow }}-cache-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ github.workflow }}-cache-${{ hashFiles('rust-toolchain.toml') }}
-        name: Cache cargo registry and target
-      
       - run: sed -i 's/rustflags = \[/rustflags = ["-D", "warnings", /g' .cargo/config.toml
         name: Disallow warnings
       
