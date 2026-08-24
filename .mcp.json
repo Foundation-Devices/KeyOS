@@ -4,6 +4,11 @@
       "command": "cargo",
       "args": ["run", "-p", "passport-drive", "--release", "--", "mcp"],
       "cwd": "."
+    },
+    "passport-sim": {
+      "command": "cargo",
+      "args": ["run", "-p", "passport-drive", "--release", "--", "--sim", "mcp"],
+      "cwd": "."
     }
   }
 }

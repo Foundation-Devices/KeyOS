@@ -335,7 +335,7 @@ Two checked-in tools communicate with the USB-debug interface from the host.
 A Rust CLI and MCP (Model Context Protocol) server for driving Passport Prime
 over USB. It is the most feature-complete host tool.
 
-- **Transport:** `usb-debug-protocol`'s `UsbDebugClient` (`rusb` under the
+- **Transport:** `usb-debug-protocol`'s `DebugClient` (`rusb` under the
   `client` feature). Auto-detects the vendor-specific interface (class `0xFF`)
   by iterating the USB config descriptor. A background reader thread demuxes IN
   frames into separate `log_rx` and `resp_rx` channels.
@@ -366,7 +366,7 @@ over USB. It is the most feature-complete host tool.
 A Rust TUI application built with `ratatui` for real-time log streaming, filtering,
 and search.
 
-- **Transport:** the shared `usb-debug-protocol` `UsbDebugClient`, with the same
+- **Transport:** the shared `usb-debug-protocol` `DebugClient`, with the same
   vendor interface auto-detection. Auto-reconnects on device disconnect.
 - **Debug commands used:** `0x06` only (`KERNEL_CMD` with character `'t'` for
   compact process list snapshots).

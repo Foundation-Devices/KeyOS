@@ -176,6 +176,8 @@ pub const SYSTEM_SERVICES_HOSTED: &[&str] = &[
     "update-server",
     "simulator",
     "simulator-cli",
+    // Serves the same debug protocol as on hardware, over a loopback socket instead of USB.
+    "usb-debug",
 ];
 
 const DEFAULT_SERVICES_HOSTED: &[&str] = &[
@@ -661,7 +663,7 @@ fn check_crates(crates: Vec<String>) {
 
     // Crates that only work on specific targets
     const HOST_ONLY_CRATES: &[&str] = &["simulator", "log-hosted", "simulator-cli"];
-    const ARM_ONLY_CRATES: &[&str] = &["log-serial", "usb-debug"];
+    const ARM_ONLY_CRATES: &[&str] = &["log-serial"];
 
     let crates_to_check = if crates.is_empty() {
         // Get all the crates that should work on both targets

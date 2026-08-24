@@ -4,7 +4,7 @@
 use security::{messages::*, AppSeed, PinEntryMode, Seed, MAX_LOGIN_ATTEMPTS};
 use security::{
     AccessDenied, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, LoginFailed, MasterKeyState,
-    ScProof, SecurityWord,
+    OsVersionInfo, ScProof, SecurityWord,
 };
 
 use crate::{seed_fingerprint, validate_raw_pin, CryptoApi};
@@ -422,7 +422,13 @@ impl server::BlockingArchiveHandler<GetOsVersionInfo> for Server {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <GetOsVersionInfo as server::BlockingArchive>::Response {
-        Ok(None)
+        // There is no SECURAM to read a flashed version from. The marker must still parse as
+        // SemVer, and order below any release, because quantum-link sends it as current_version
+        // in the firmware update checks.
+        Ok(Some(OsVersionInfo {
+            bootloader_version: *b"sim\0\0\0\0\0",
+            keyos_version: *b"0.0.0-sim\0\0\0\0\0\0\0\0\0\0\0",
+        }))
     }
 }
 

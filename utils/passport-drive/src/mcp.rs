@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -30,7 +30,7 @@ use rusb::UsbContext as _;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use usb_debug_protocol::{
-    Command, LaunchAppResult, LaunchAppStatus, OpenError, TransportError, UsbDebugClient,
+    Command, DebugClient, LaunchAppResult, LaunchAppStatus, OpenError, TransportError,
     INSTALL_CERTIFICATE_BYTES_MAX,
 };
 use x509_cert::{
@@ -63,16 +63,41 @@ Publisher certificates use a two-step decision flow: call install_certificate wi
 expected_fingerprint to receive the unverified-identity warning and actual fingerprint, then call
 again with that exact full fingerprint only after the user explicitly chooses to allow it.";
 
-/// One process drives one physical device, so the state is process-wide.
+/// One process drives one Passport, so the state is process-wide.
 static STATE: LazyLock<Mutex<McpState>> = LazyLock::new(|| Mutex::new(McpState::new()));
+
+/// The simulator address to drive, or `None` for a device over USB. Fixed at startup: which
+/// Passport a server drives is not something a tool call gets to change midway.
+static SIM_ADDR: OnceLock<Option<String>> = OnceLock::new();
 
 /// Recovers a poisoned lock, or else one panicking tool call bricks every later one.
 fn state() -> MutexGuard<'static, McpState> { STATE.lock().unwrap_or_else(|e| e.into_inner()) }
 
+fn sim_addr() -> Option<&'static str> { SIM_ADDR.get().and_then(Option::as_deref) }
+
+fn set_target(sim: Option<String>) {
+    if let Some(addr) = &sim {
+        eprintln!("Driving the simulator at {addr}.");
+    }
+    SIM_ADDR.set(sim).expect("the target is set once per process");
+}
+
+/// Refuse a tool no simulator can answer. The tool stays listed either way, so the surface does not
+/// change shape depending on what is plugged in.
+fn hardware_only(tool: &str) -> Result<(), String> {
+    match sim_addr() {
+        Some(addr) => Err(format!(
+            "{tool} needs a real device: this server drives the simulator at {addr}, which has no USB, \
+             no SAM-BA bootloader and no hardware kernel."
+        )),
+        None => Ok(()),
+    }
+}
+
 // MCP state
 
 struct McpState {
-    device: Option<UsbDebugClient>,
+    device: Option<DebugClient>,
     log_buffer: VecDeque<String>,
     record_buf: Vec<u8>,
     sambuca: Option<sambuca::Sambuca>,
@@ -101,10 +126,14 @@ impl McpState {
         }
     }
 
-    /// The open device, connecting first if nothing is open yet.
-    fn require_device(&mut self) -> Result<&UsbDebugClient, OpenError> {
+    /// The open transport, connecting first if nothing is open yet.
+    fn require_device(&mut self) -> Result<&DebugClient, OpenError> {
         if self.device.is_none() {
-            self.device = Some(UsbDebugClient::open()?);
+            let device = match sim_addr() {
+                Some(addr) => DebugClient::connect_sim(addr)?,
+                None => DebugClient::open()?,
+            };
+            self.device = Some(device);
         }
 
         Ok(self.device.as_ref().expect("opened above"))
@@ -126,6 +155,7 @@ impl McpState {
     }
 
     fn require_sambuca(&mut self) -> Result<&mut sambuca::Sambuca, String> {
+        hardware_only("The SAM-BA bootloader")?;
         self.sambuca.as_mut().ok_or_else(|| "SAM-BA not connected. Call samba_connect first.".to_string())
     }
 
@@ -319,6 +349,7 @@ impl PassportServer {
     /// List connected Passport Prime USB devices (normal, Flux/legacy, and SAM-BA modes).
     #[tool]
     fn list_ports(&self) -> Result<CallToolResult, String> {
+        hardware_only("list_ports")?;
         let context = rusb::Context::new().map_err(|e| format!("Failed to initialize USB context: {e}"))?;
         let devices = context.devices().map_err(|e| format!("Failed to enumerate USB devices: {e}"))?;
 
@@ -485,6 +516,7 @@ impl PassportServer {
         &self,
         Parameters(KernelCommandParams { command }): Parameters<KernelCommandParams>,
     ) -> Result<CallToolResult, String> {
+        hardware_only("send_kernel_command")?;
         let [cmd_byte] = command.as_bytes() else {
             return Err("command must be a single character (h/i/m/p/t/s/c/a/o/k)".to_string());
         };
@@ -499,6 +531,7 @@ impl PassportServer {
     /// (VID:PID 03eb:6124).
     #[tool]
     fn reboot_to_samba(&self) -> Result<CallToolResult, String> {
+        hardware_only("reboot_to_samba")?;
         let mut state = state();
         state
             .send(Command::RebootSamba, Duration::from_secs(5))
@@ -662,6 +695,7 @@ impl PassportServer {
     /// List SAM-BA bootloader devices (SAMA5D2, VID:PID 03eb:6124). Device must be in SAM-BA mode.
     #[tool]
     fn samba_list_devices(&self) -> Result<CallToolResult, String> {
+        hardware_only("samba_list_devices")?;
         let context = rusb::Context::new().map_err(|e| format!("Failed to initialize USB context: {e}"))?;
         let devices = context.devices().map_err(|e| format!("Failed to enumerate USB devices: {e}"))?;
 
@@ -690,6 +724,7 @@ impl PassportServer {
     /// Connect to a SAM-BA bootloader device. Auto-detects the port.
     #[tool]
     fn samba_connect(&self) -> Result<CallToolResult, String> {
+        hardware_only("samba_connect")?;
         let mut state = state();
         if state.sambuca.is_some() {
             return Err("Already connected to SAM-BA. Call samba_disconnect first.".to_string());
@@ -867,6 +902,7 @@ impl PassportServer {
         &self,
         Parameters(SendApduParams { apdu_hex }): Parameters<SendApduParams>,
     ) -> Result<CallToolResult, String> {
+        hardware_only("send_apdu")?;
         let hex_clean: String = apdu_hex.chars().filter(|c| !c.is_whitespace()).collect();
         let apdu = hex::decode(&hex_clean).map_err(|e| format!("Invalid hex in apdu_hex: {e}"))?;
         if apdu.len() < 4 {
@@ -913,6 +949,7 @@ impl PassportServer {
     /// Returns the compact process list.
     #[tool]
     fn get_process_list(&self) -> Result<CallToolResult, String> {
+        hardware_only("get_process_list")?;
         let payload = state()
             .send(Command::GetProcessList, Duration::from_secs(5))
             .map_err(|e| format!("Process list request failed: {e}"))?;
@@ -996,9 +1033,18 @@ impl PassportServer {
 #[tool_handler]
 impl ServerHandler for PassportServer {
     fn get_info(&self) -> ServerInfo {
+        let instructions = match sim_addr() {
+            Some(addr) => format!(
+                "{INSTRUCTIONS}\n\nThis server drives the hosted simulator at {addr} rather than a physical \
+                 device, so screen, touch, keys, apps and logs behave as on hardware, while USB, SAM-BA \
+                 and kernel debug commands are unavailable."
+            ),
+            None => INSTRUCTIONS.to_string(),
+        };
+
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+            .with_instructions(instructions)
     }
 }
 
@@ -1088,8 +1134,9 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
 }
 
 /// Serve MCP over stdio until the client disconnects.
-pub fn run(jail: Option<PathBuf>) -> Result<()> {
+pub fn run(jail: Option<PathBuf>, sim: Option<String>) -> Result<()> {
     crate::init_jail(jail)?;
+    set_target(sim);
     runtime()?.block_on(async {
         let service = PassportServer.serve(stdio()).await.context("Failed to start the MCP server")?;
         service.waiting().await.context("MCP server failed")?;
@@ -1101,8 +1148,9 @@ pub fn run(jail: Option<PathBuf>) -> Result<()> {
 ///
 /// Runs stateless: each request gets a fresh handler, which is safe because the device state is
 /// process-wide rather than per-handler.
-pub fn run_http(addr: SocketAddr, jail: Option<PathBuf>) -> Result<()> {
+pub fn run_http(addr: SocketAddr, jail: Option<PathBuf>, sim: Option<String>) -> Result<()> {
     crate::init_jail(jail)?;
+    set_target(sim);
     runtime()?.block_on(async move {
         let config = StreamableHttpServerConfig::default().with_stateful_mode(false).with_json_response(true);
         // Host validation blunts DNS rebinding, but its defaults are loopback only. The address we

@@ -7,7 +7,6 @@
 //! mapping from decoded `Command`s to keyOS API calls.
 
 use std::io::Write;
-use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fs::{Error as FsError, Location, OpenFlags};
@@ -78,22 +77,22 @@ impl DebugProtocol {
         }
     }
 
-    /// Decode a USB OUT packet (`[CMD][PAYLOAD...]`), dispatch it, and forward
+    /// Decode a command packet (`[CMD][PAYLOAD...]`), dispatch it, and forward
     /// the response. If the command requested a reboot, perform it once the
     /// response has been queued.
-    pub fn process(&mut self, data: &[u8], resp_tx: &mpsc::SyncSender<Response>) {
+    pub fn process(&mut self, data: &[u8], send: impl Fn(Response)) {
         let cmd = match Command::decode(data) {
             Ok(cmd) => cmd,
             Err(ProtocolError::Empty) => return,
             Err(e) => {
                 log::warn!("debug: {e}");
-                let _ = resp_tx.send(Response::Err);
+                send(Response::Err);
                 return;
             }
         };
         if !command_allowed(&cmd) {
             log::warn!("debug: command 0x{:02x} is not available in production firmware", cmd.cmd_byte());
-            let _ = resp_tx.send(Response::Err);
+            send(Response::Err);
             return;
         }
         #[cfg(feature = "production")]
@@ -102,18 +101,17 @@ impl DebugProtocol {
                 Ok(false) => {}
                 Ok(true) => {
                     log::warn!("debug: command 0x{:02x} rejected: device is locked", cmd.cmd_byte());
-                    let _ = resp_tx.send(Response::Locked);
+                    send(Response::Locked);
                     return;
                 }
                 Err(e) => {
                     log::error!("debug: lock-state check failed: {e:?}");
-                    let _ = resp_tx.send(Response::Err);
+                    send(Response::Err);
                     return;
                 }
             }
         }
-        let response = self.dispatch(cmd);
-        let _ = resp_tx.send(response);
+        send(self.dispatch(cmd));
         if self.reboot_after_answering {
             // Give the writer thread time to deliver the Ack before we
             // tear the system down.
@@ -215,28 +213,21 @@ impl DebugProtocol {
             Command::LoadAppFileBegin { filename, size } => self.load_app_file_begin(&filename, size),
             Command::LoadAppChunk(data) => self.load_app_chunk(&data),
             Command::LoadAppEnd => self.load_app_end(),
-            Command::GetProcessList => self.get_process_list(),
+            Command::GetProcessList => kernel_debug_command(b't'),
             Command::InstallCertificate { expected_fingerprint, certificate_pem } => {
                 self.install_certificate(expected_fingerprint, certificate_pem)
             }
             Command::GetAllowedPublisherCount => self.get_allowed_publisher_count(),
             Command::GetSystemTime => self.get_system_time(),
             Command::SetSystemTime { unix_seconds } => self.set_system_time(unix_seconds),
-            Command::KernelCmd { cmd_byte } => {
-                let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
-                    Ok(buf) => xous::DropDeallocate::new(buf),
-                    Err(e) => {
-                        log::error!("Could not allocate debug command buffer: {e:?}");
-                        return Response::Err;
-                    }
-                };
-                let len = xous::debug_command(*buf, cmd_byte).unwrap_or(0);
-                log::debug!("debug: kernel cmd '{}'", cmd_byte as char);
-                Response::KernelOutput(payload_from_mapped(buf, len))
-            }
+            Command::KernelCmd { cmd_byte } => kernel_debug_command(cmd_byte),
             Command::GetDeveloperMode => {
-                log::debug!("debug: get_developer_mode -> true");
-                Response::DeveloperMode(true)
+                // Being reachable at all is the answer on hardware, where the interface itself is
+                // gated. The simulator has no such gate, so there the setting is what governs the
+                // gated commands, and what a caller needs told.
+                let enabled = cfg!(keyos) || self.developer_mode_enabled();
+                log::debug!("debug: get_developer_mode -> {enabled}");
+                Response::DeveloperMode(enabled)
             }
         }
     }
@@ -282,27 +273,6 @@ impl DebugProtocol {
             Ok(()) | Err(FsError::FileNotFound) => {}
             Err(e) => log::warn!("{reason}: remove staged app {} failed: {e:?}", session.staging_dir),
         }
-    }
-
-    fn get_process_list(&mut self) -> Response {
-        let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
-            Ok(buf) => xous::DropDeallocate::new(buf),
-            Err(e) => {
-                log::error!("Could not allocate debug command buffer: {e:?}");
-                return Response::Err;
-            }
-        };
-
-        let len = match xous::debug_command(*buf, b't') {
-            Ok(len) => len,
-            Err(e) => {
-                log::error!("get process list syscall failed: {e:?}");
-                return Response::Err;
-            }
-        };
-
-        log::info!("debug: get process list 't'");
-        Response::KernelOutput(payload_from_mapped(buf, len))
     }
 
     fn install_certificate(
@@ -836,6 +806,37 @@ fn payload_from_mapped(buf: xous::DropDeallocate, len: usize) -> Payload { Paylo
 #[cfg(not(keyos))]
 fn payload_from_mapped(buf: xous::DropDeallocate, len: usize) -> Payload {
     Payload::from_vec(buf.as_slice::<u8>()[..len].to_vec())
+}
+
+/// Run a kernel debug command and return its output. `t` is the process list.
+#[cfg(keyos)]
+fn kernel_debug_command(cmd_byte: u8) -> Response {
+    let buf = match xous::map_memory(None, None, 0x40000, xous::MemoryFlags::W) {
+        Ok(buf) => xous::DropDeallocate::new(buf),
+        Err(e) => {
+            log::error!("Could not allocate debug command buffer: {e:?}");
+            return Response::Err;
+        }
+    };
+
+    match xous::debug_command(*buf, cmd_byte) {
+        Ok(len) => {
+            log::debug!("debug: kernel cmd '{}'", cmd_byte as char);
+            Response::KernelOutput(payload_from_mapped(buf, len))
+        }
+        Err(e) => {
+            log::error!("debug: kernel cmd '{}' failed: {e:?}", cmd_byte as char);
+            Response::Err
+        }
+    }
+}
+
+/// The kernel only answers debug commands on hardware, so the simulator has no process list to
+/// report and no `p`/`m`/`s` dumps to run.
+#[cfg(not(keyos))]
+fn kernel_debug_command(cmd_byte: u8) -> Response {
+    log::warn!("debug: kernel cmd '{}' needs the hardware kernel", cmd_byte as char);
+    Response::Err
 }
 
 fn interpolate_coord(start: u16, end: u16, step: u8, steps: u8) -> u16 {

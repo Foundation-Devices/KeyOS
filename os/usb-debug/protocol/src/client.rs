@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Host-side `rusb` transport. Gated behind the `client` feature so device
-//! builds of this crate don't pull in `rusb`.
+//! Host-side client. Gated behind the `client` feature so device builds of
+//! this crate don't pull in `rusb`.
+//!
+//! One [`DebugClient`] speaks to a device over USB bulk endpoints or to a
+//! hosted simulator over its loopback socket. The transports differ only in
+//! how byte frames travel, so that is the specialization boundary: a sink and
+//! a source per transport, everything above them written once.
 
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -13,9 +19,12 @@ use std::time::{Duration, Instant};
 use rusb::{DeviceHandle, GlobalContext};
 use thiserror::Error;
 
-use crate::{Command, FrameType, ProtocolError, RawResponse, Status, USB_DEBUG_BULK_MAX_PACKET_LEN};
+use crate::{
+    stream, Command, FrameType, ProtocolError, RawResponse, Status, MAX_FRAME_LEN,
+    USB_DEBUG_BULK_MAX_PACKET_LEN,
+};
 
-/// Why opening the debug interface failed.
+/// Why opening the debug channel failed.
 #[derive(Debug, Error)]
 pub enum OpenError {
     #[error("no USB device found with VID:PID {vid:04x}:{pid:04x}")]
@@ -26,6 +35,12 @@ pub enum OpenError {
     NoDebugInterface,
     #[error("claiming debug interface: {0}")]
     ClaimInterface(#[source] rusb::Error),
+    #[error("connecting to the simulator debug channel at {addr}: {source}")]
+    SimConnect {
+        addr: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Why a command exchange broke down. The device may still be part-way through reading a frame, so
@@ -44,9 +59,13 @@ pub enum OutOfSync {
     TimedOut(&'static str),
     #[error("no response to cmd 0x{cmd:02x}")]
     NoResponse { cmd: u8 },
+    #[error("simulator debug channel write: {0}")]
+    StreamWrite(#[source] std::io::Error),
+    #[error("the debug channel closed; the device disconnected or another client is driving it")]
+    Closed,
 }
 
-/// A failed `UsbDebugClient` command.
+/// A failed `DebugClient` command.
 #[derive(Debug, Error)]
 pub enum TransportError {
     #[error(transparent)]
@@ -75,18 +94,32 @@ pub const LEGACY_PID: u16 = 0x7011;
 /// accumulates chunks until a short packet or ZLP terminates the frame.
 const READ_CHUNK_LEN: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_millis(100);
-const MAX_IN_FRAME_LEN: usize = 2 * 1024 * 1024;
 
-pub struct UsbDebugClient {
-    handle: Arc<DeviceHandle<GlobalContext>>,
-    ep_out: u8,
+/// Host -> device half of a transport. Runs behind `&self`: commands are sent
+/// from whichever thread holds the client while the reader owns the source.
+trait FrameSink: Send + Sync {
+    fn send_frame(&self, frame: &[u8], deadline: Instant) -> Result<(), OutOfSync>;
+    /// Unblock the paired source, or the reader never returns.
+    fn disconnect(&self);
+}
+
+/// Device -> host half of a transport, owned by the reader thread.
+trait FrameSource: Send {
+    /// Next frame body. `None` ends the channel.
+    fn next_frame(&mut self) -> Option<Vec<u8>>;
+}
+
+/// Debug channel to one Passport, over USB or to a hosted simulator.
+///
+/// Constructed by [`DebugClient::open`] (USB) or [`DebugClient::connect_sim`].
+pub struct DebugClient {
+    sink: Box<dyn FrameSink>,
     log_rx: Receiver<Vec<u8>>,
     resp_rx: Receiver<RawResponse>,
-    reader_enabled: Arc<AtomicBool>,
     reader_thread: Option<JoinHandle<()>>,
 }
 
-impl UsbDebugClient {
+impl DebugClient {
     /// Try `PASSPORT_VID:PID`, then fall back to `LEGACY_VID:PID`. If both fail,
     /// returns the error from the primary attempt (legacy is the rarer case).
     pub fn open() -> Result<Self, OpenError> {
@@ -147,21 +180,36 @@ impl UsbDebugClient {
         handle.claim_interface(debug_iface).map_err(OpenError::ClaimInterface)?;
 
         let handle = Arc::new(handle);
-        let (log_tx, log_rx) = mpsc::channel();
-        let (resp_tx, resp_rx) = mpsc::channel();
         let reader_enabled = Arc::new(AtomicBool::new(true));
-
-        let reader_handle = handle.clone();
-        let reader_gate = reader_enabled.clone();
-        let reader_thread =
-            std::thread::spawn(move || reader_thread(reader_handle, ep_in, log_tx, resp_tx, reader_gate));
-
-        Ok(Self { handle, ep_out, log_rx, resp_rx, reader_enabled, reader_thread: Some(reader_thread) })
+        let sink = UsbSink { handle: handle.clone(), ep_out, reader_enabled: reader_enabled.clone() };
+        let source = UsbSource {
+            handle,
+            ep_in,
+            enabled: reader_enabled,
+            buf: vec![0u8; READ_CHUNK_LEN],
+            pending: Vec::with_capacity(READ_CHUNK_LEN),
+        };
+        Ok(Self::from_halves(Box::new(sink), Box::new(source)))
     }
 
-    /// Encode `cmd`, send it on the OUT endpoint, and wait up to `timeout` for
-    /// the matching `[STATUS][PAYLOAD]` response frame. Validates the status
-    /// byte and returns just the payload on success.
+    /// Connect to the debug channel a hosted simulator listens on.
+    pub fn connect_sim(addr: &str) -> Result<Self, OpenError> {
+        let connect_error = |source| OpenError::SimConnect { addr: addr.to_string(), source };
+        let stream = TcpStream::connect(addr).map_err(connect_error)?;
+        let reader = stream.try_clone().map_err(connect_error)?;
+        Ok(Self::from_halves(Box::new(SimSink(stream)), Box::new(SimSource(reader))))
+    }
+
+    fn from_halves(sink: Box<dyn FrameSink>, source: Box<dyn FrameSource>) -> Self {
+        let (log_tx, log_rx) = mpsc::channel();
+        let (resp_tx, resp_rx) = mpsc::channel();
+        let reader_thread = std::thread::spawn(move || reader_thread(source, log_tx, resp_tx));
+        Self { sink, log_rx, resp_rx, reader_thread: Some(reader_thread) }
+    }
+
+    /// Encode `cmd`, send its frame, and wait up to `timeout` for the matching
+    /// `[STATUS][PAYLOAD]` response frame. Validates the status byte and
+    /// returns just the payload on success.
     ///
     /// # Errors
     ///
@@ -178,31 +226,157 @@ impl UsbDebugClient {
         }
     }
 
-    /// Write the command frame and read back its response frame.
     fn exchange(&self, cmd: Command, timeout: Duration) -> Result<RawResponse, OutOfSync> {
         let mut out_buf = Vec::with_capacity(64);
         cmd.encode_into(&mut out_buf);
         let deadline = Instant::now() + timeout;
 
-        write_bulk_all(&out_buf, deadline, |remaining, write_timeout| {
-            self.handle.write_bulk(self.ep_out, remaining, write_timeout).map_err(OutOfSync::Write)
-        })?;
+        self.sink.send_frame(&out_buf, deadline)?;
 
-        if needs_out_zlp(out_buf.len()) {
-            let write_timeout = time_left(deadline, "bulk OUT ZLP write")?;
-            self.handle.write_bulk(self.ep_out, &[], write_timeout).map_err(OutOfSync::Write)?;
-        }
-
-        let response_timeout = time_left(deadline, "USB response")?;
-        self.resp_rx.recv_timeout(response_timeout).map_err(|_| OutOfSync::NoResponse { cmd: cmd.cmd_byte() })
+        let response_timeout = time_left(deadline, "response")?;
+        // The reader drops its sender when the channel ends, which separates a peer that hung up
+        // from one that is merely slow to answer.
+        self.resp_rx.recv_timeout(response_timeout).map_err(|e| match e {
+            RecvTimeoutError::Timeout => OutOfSync::NoResponse { cmd: cmd.cmd_byte() },
+            RecvTimeoutError::Disconnected => OutOfSync::Closed,
+        })
     }
 
     /// Block up to `timeout` for one log frame. Pass `Duration::ZERO` for a
-    /// non-blocking poll. `Disconnected` means the reader thread exited (USB
-    /// failure).
+    /// non-blocking poll. `Disconnected` means the reader thread exited
+    /// (transport failure).
     pub fn read_logs(&self, timeout: Duration) -> Result<Vec<u8>, RecvTimeoutError> {
         self.log_rx.recv_timeout(timeout)
     }
+}
+
+// For USB, DeviceHandle's Drop calls libusb_close, which releases all claimed
+// interfaces. Joining the reader after `disconnect` releases its transport
+// half before drop returns, so another process can claim the interface.
+impl Drop for DebugClient {
+    fn drop(&mut self) {
+        self.sink.disconnect();
+        if let Some(reader_thread) = self.reader_thread.take() {
+            let _ = reader_thread.join();
+        }
+    }
+}
+
+/// Split each device -> host frame to the channel its kind belongs on, until the transport or a
+/// receiver closes: either way the client is gone. A frame this build cannot name is dropped
+/// rather than resynchronized, since both transports delimit frames outside the payload.
+fn reader_thread(mut source: Box<dyn FrameSource>, log_tx: Sender<Vec<u8>>, resp_tx: Sender<RawResponse>) {
+    while let Some(frame) = source.next_frame() {
+        let Some((&kind, payload)) = frame.split_first() else { continue };
+        let delivered = match FrameType::from_byte(kind) {
+            Ok(FrameType::Log) => log_tx.send(payload.to_vec()).is_ok(),
+            Ok(FrameType::Response) => match payload.split_first() {
+                Some((&status, rest)) => resp_tx.send(RawResponse { status, payload: rest.to_vec() }).is_ok(),
+                None => true,
+            },
+            Err(_) => true,
+        };
+        if !delivered {
+            return;
+        }
+    }
+}
+
+// USB transport: frames are delimited by short packets and ZLPs.
+
+struct UsbSink {
+    handle: Arc<DeviceHandle<GlobalContext>>,
+    ep_out: u8,
+    reader_enabled: Arc<AtomicBool>,
+}
+
+impl FrameSink for UsbSink {
+    fn send_frame(&self, frame: &[u8], deadline: Instant) -> Result<(), OutOfSync> {
+        write_bulk_all(frame, deadline, |remaining, write_timeout| {
+            self.handle.write_bulk(self.ep_out, remaining, write_timeout).map_err(OutOfSync::Write)
+        })?;
+
+        if needs_out_zlp(frame.len()) {
+            let write_timeout = time_left(deadline, "bulk OUT ZLP write")?;
+            self.handle.write_bulk(self.ep_out, &[], write_timeout).map_err(OutOfSync::Write)?;
+        }
+        Ok(())
+    }
+
+    fn disconnect(&self) { self.reader_enabled.store(false, Ordering::Release); }
+}
+
+// The read timeout is what lets the source notice the disabled flag, since a
+// bulk read on an idle endpoint would otherwise block indefinitely.
+struct UsbSource {
+    handle: Arc<DeviceHandle<GlobalContext>>,
+    ep_in: u8,
+    enabled: Arc<AtomicBool>,
+    buf: Vec<u8>,
+    pending: Vec<u8>,
+}
+
+impl UsbSource {
+    fn take_pending(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.pending))
+    }
+}
+
+impl FrameSource for UsbSource {
+    fn next_frame(&mut self) -> Option<Vec<u8>> {
+        while self.enabled.load(Ordering::Acquire) {
+            match self.handle.read_bulk(self.ep_in, &mut self.buf, READ_TIMEOUT) {
+                Ok(0) => {
+                    if let Some(frame) = self.take_pending() {
+                        return Some(frame);
+                    }
+                }
+                Ok(n) => {
+                    self.pending.extend_from_slice(&self.buf[..n]);
+                    if self.pending.len() > MAX_FRAME_LEN {
+                        self.pending.clear();
+                        continue;
+                    }
+                    if n < READ_CHUNK_LEN {
+                        if let Some(frame) = self.take_pending() {
+                            return Some(frame);
+                        }
+                    }
+                }
+                Err(rusb::Error::Timeout) => continue,
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+// Simulator transport: the same frames behind a length prefix (see `stream`).
+
+struct SimSink(TcpStream);
+
+impl FrameSink for SimSink {
+    fn send_frame(&self, frame: &[u8], _deadline: Instant) -> Result<(), OutOfSync> {
+        // `impl Write for &TcpStream`, so the frame goes out without an exclusive borrow.
+        stream::write_frame(&mut (&self.0), frame, &[]).map_err(|e| match e.kind() {
+            // A refused or torn-down connection surfaces here when its FIN beats the write.
+            std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted => OutOfSync::Closed,
+            _ => OutOfSync::StreamWrite(e),
+        })
+    }
+
+    fn disconnect(&self) { let _ = self.0.shutdown(Shutdown::Both); }
+}
+
+struct SimSource(TcpStream);
+
+impl FrameSource for SimSource {
+    fn next_frame(&mut self) -> Option<Vec<u8>> { stream::read_frame(&mut self.0).ok().flatten() }
 }
 
 fn needs_out_zlp(len: usize) -> bool { len > 0 && len % USB_DEBUG_BULK_MAX_PACKET_LEN == 0 }
@@ -238,87 +412,9 @@ fn time_left(deadline: Instant, operation: &'static str) -> Result<Duration, Out
         .ok_or(OutOfSync::TimedOut(operation))
 }
 
-impl Drop for UsbDebugClient {
-    fn drop(&mut self) {
-        self.reader_enabled.store(false, Ordering::Release);
-        if let Some(reader_thread) = self.reader_thread.take() {
-            let _ = reader_thread.join();
-        }
-    }
-}
-
-// DeviceHandle's Drop calls libusb_close, which releases all claimed
-// interfaces. Gate the reader off on client drop so its Arc clone is released
-// before `disconnect` returns and another process can claim the interface.
-fn reader_thread(
-    handle: Arc<DeviceHandle<GlobalContext>>,
-    ep_in: u8,
-    log_tx: Sender<Vec<u8>>,
-    resp_tx: Sender<RawResponse>,
-    reader_enabled: Arc<AtomicBool>,
-) {
-    let mut buf = vec![0u8; READ_CHUNK_LEN];
-    let mut pending = Vec::with_capacity(READ_CHUNK_LEN);
-
-    while reader_enabled.load(Ordering::Acquire) {
-        match handle.read_bulk(ep_in, &mut buf, READ_TIMEOUT) {
-            Ok(0) => {
-                if !finish_pending_frame(&mut pending, &log_tx, &resp_tx) {
-                    return;
-                }
-            }
-            Ok(n) => {
-                pending.extend_from_slice(&buf[..n]);
-                if pending.len() > MAX_IN_FRAME_LEN {
-                    pending.clear();
-                    continue;
-                }
-                if n < READ_CHUNK_LEN && !finish_pending_frame(&mut pending, &log_tx, &resp_tx) {
-                    return;
-                }
-            }
-            Err(rusb::Error::Timeout) => continue,
-            Err(_) => return,
-        }
-    }
-}
-
-fn finish_pending_frame(
-    pending: &mut Vec<u8>,
-    log_tx: &Sender<Vec<u8>>,
-    resp_tx: &Sender<RawResponse>,
-) -> bool {
-    if pending.is_empty() {
-        return true;
-    }
-
-    let frame_byte = pending[0];
-    let payload = &pending[1..];
-    let keep_reading = match FrameType::from_byte(frame_byte) {
-        Ok(FrameType::Log) => log_tx.send(payload.to_vec()).is_ok(),
-        Ok(FrameType::Response) => {
-            if let Some((&status, rest)) = payload.split_first() {
-                resp_tx.send(RawResponse { status, payload: rest.to_vec() }).is_ok()
-            } else {
-                true
-            }
-        }
-        Err(_) => true, // unknown frame type -- drop silently
-    };
-    pending.clear();
-    keep_reading
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn frame(frame_type: FrameType, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(1 + payload.len());
-        out.push(frame_type as u8);
-        out.extend_from_slice(payload);
-        out
-    }
 
     #[test]
     fn bulk_write_retries_partial_progress_until_complete() {
@@ -355,40 +451,32 @@ mod tests {
         assert!(matches!(error, OutOfSync::NoProgress { written: 0, total: 11 }));
     }
 
-    #[test]
-    fn assembles_response_until_short_packet() {
-        let (log_tx, log_rx) = mpsc::channel();
-        let (resp_tx, resp_rx) = mpsc::channel();
-        let mut pending = Vec::new();
-        let mut response = frame(FrameType::Response, &[Status::Ok as u8]);
-        response.resize(READ_CHUNK_LEN + 4, 0xaa);
-        response[1] = Status::Ok as u8;
+    struct Frames(std::vec::IntoIter<Vec<u8>>);
 
-        pending.extend_from_slice(&response[..READ_CHUNK_LEN]);
-        assert!(resp_rx.try_recv().is_err());
-        assert!(log_rx.try_recv().is_err());
-
-        pending.extend_from_slice(&response[READ_CHUNK_LEN..]);
-        assert!(finish_pending_frame(&mut pending, &log_tx, &resp_tx));
-
-        let resp = resp_rx.try_recv().expect("response");
-        assert_eq!(resp.status, Status::Ok as u8);
-        assert_eq!(resp.payload, vec![0xaa; READ_CHUNK_LEN + 2]);
-        assert!(pending.is_empty());
+    impl FrameSource for Frames {
+        fn next_frame(&mut self) -> Option<Vec<u8>> { self.0.next() }
     }
 
     #[test]
-    fn zlp_terminates_max_packet_aligned_frame() {
+    fn reader_routes_frames_to_their_channels() {
         let (log_tx, log_rx) = mpsc::channel();
         let (resp_tx, resp_rx) = mpsc::channel();
-        let mut pending = Vec::new();
-        pending.extend_from_slice(&frame(FrameType::Log, &[0xaa; READ_CHUNK_LEN - 1]));
 
-        assert!(finish_pending_frame(&mut pending, &log_tx, &resp_tx));
+        let mut response = vec![FrameType::Response as u8, Status::Ok as u8];
+        response.extend_from_slice(&[0xaa; 4]);
+        let mut log = vec![FrameType::Log as u8];
+        log.extend_from_slice(b"record");
+        // The empty frame and the unknown type are dropped, not fatal: the log frame after them
+        // proves the reader kept going.
+        let frames = vec![response, vec![], vec![0x7f, 1, 2], log];
+        reader_thread(Box::new(Frames(frames.into_iter())), log_tx, resp_tx);
 
-        assert_eq!(log_rx.try_recv().expect("log"), vec![0xaa; READ_CHUNK_LEN - 1]);
+        let resp = resp_rx.try_recv().expect("response");
+        assert_eq!(resp.status, Status::Ok as u8);
+        assert_eq!(resp.payload, vec![0xaa; 4]);
+        assert_eq!(log_rx.try_recv().expect("log"), b"record");
+        assert!(log_rx.try_recv().is_err());
         assert!(resp_rx.try_recv().is_err());
-        assert!(pending.is_empty());
     }
 
     #[test]

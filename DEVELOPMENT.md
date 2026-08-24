@@ -150,6 +150,23 @@ Hot reload works for apps only. System services whose exit takes
 the hosted system down with them (see `SYSTEM_SERVICES_HOSTED` in `xtask/src/main.rs`,
 e.g. `gui-server` or `fs-server`) require a full simulator restart.
 
+### Driving the simulator
+
+The running simulator serves the same debug protocol as a device does over USB, on
+`127.0.0.1:7664` (override with `KEYOS_SIM_DEBUG_ADDR` on both ends). Point
+`passport-drive` at it with `--sim` to get the commands you would run against hardware:
+
+    cargo run -p passport-drive -- --sim screenshot -o /tmp/sim.png
+    cargo run -p passport-drive -- --sim tap 240 400
+
+The MCP server takes the same flag, and is registered in `.mcp.json` as `passport-sim`
+alongside the device server:
+
+    cargo run -p passport-drive -- --sim mcp
+
+Commands that need real hardware (SAM-BA, HID APDUs, USB enumeration, kernel debug
+commands) are refused with an explanation rather than attempted.
+
 ## Installation
 
 ### Full System Reprogram with SAM-BA

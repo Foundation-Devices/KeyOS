@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! passport-drive — Rust CLI to interact with Passport Prime over USB.
+//! passport-drive — Rust CLI to interact with Passport Prime.
 //!
-//! Uses raw USB bulk endpoints via `rusb` for all device interaction
-//! (screenshot, tap, logs, kernel debug commands).
+//! Speaks the usb-debug protocol (screenshot, tap, logs, kernel debug commands) over raw USB bulk
+//! endpoints via `rusb`, or with `--sim` over the loopback socket a hosted simulator listens on.
 
 mod hid;
 mod load_app;
@@ -21,7 +21,7 @@ use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use rusb::UsbContext;
 use serde::Deserialize;
-use usb_debug_protocol::{Command, LaunchAppResult, LaunchAppStatus, UsbDebugClient};
+use usb_debug_protocol::{Command, DebugClient, LaunchAppResult, LaunchAppStatus};
 
 // Screen / framebuffer constants (pub(crate) so mcp module can use them)
 pub(crate) const SCREEN_WIDTH: u32 = 480;
@@ -160,6 +160,21 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_sim_flag_leaves_the_address_to_resolve_later() {
+        // Pinning the default at parse time is what previously moved the listener without moving
+        // the client, so KEYOS_SIM_DEBUG_ADDR silently drove whichever simulator held the default.
+        assert_eq!(Cli::parse_from(["passport-drive", "--sim", "get_time"]).sim, Some(None));
+        assert_eq!(
+            Cli::parse_from(["passport-drive", "--sim=127.0.0.1:9000", "get_time"]).sim,
+            Some(Some("127.0.0.1:9000".to_string()))
+        );
+        assert_eq!(Cli::parse_from(["passport-drive", "get_time"]).sim, None);
+
+        assert_eq!(sim_target(Some(Some("127.0.0.1:9000".to_string()))), Some("127.0.0.1:9000".to_string()));
+        assert_eq!(sim_target(None), None);
+    }
+
+    #[test]
     fn launch_app_transport_error_explains_legacy_generic_status() {
         let message = launch_app_transport_error_message("device returned status 0x01");
 
@@ -169,8 +184,14 @@ mod tests {
 }
 
 #[derive(Parser)]
-#[command(name = "passport-drive", about = "Drive Passport Prime over USB")]
+#[command(name = "passport-drive", about = "Drive Passport Prime over USB, or a hosted simulator")]
 struct Cli {
+    /// Drive a running simulator over its loopback debug channel instead of a device over USB.
+    /// Resolves the address the simulator listens on, honouring KEYOS_SIM_DEBUG_ADDR; pass
+    /// `--sim=127.0.0.1:9000` to reach one somewhere else.
+    #[arg(long, global = true, value_name = "ADDR", num_args = 0..=1, require_equals = true)]
+    sim: Option<Option<String>>,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -370,9 +391,36 @@ fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-// USB transport helpers
+// Transport helpers
 
-fn open_usb() -> Result<UsbDebugClient> { UsbDebugClient::open().context("Failed to open USB device") }
+/// The simulator address to drive, or `None` to drive a device over USB. A bare `--sim` resolves
+/// through the shared address, so `KEYOS_SIM_DEBUG_ADDR` moves the client along with the listener;
+/// pinning the default at parse time would move only one end of the channel.
+fn sim_target(sim: Option<Option<String>>) -> Option<String> {
+    sim.map(|addr| addr.unwrap_or_else(usb_debug_protocol::stream::sim_addr))
+}
+
+fn open_transport(sim: Option<&str>) -> Result<DebugClient> {
+    match sim {
+        Some(addr) => DebugClient::connect_sim(addr)
+            .context("Failed to open the simulator debug channel. Is the simulator running?"),
+        None => DebugClient::open().context("Failed to open USB device"),
+    }
+}
+
+/// Refuse a command no simulator can answer, before it reaches the transport.
+fn reject_hardware_only(command: &CliCommand) -> Result<()> {
+    let name = match command {
+        CliCommand::Samba(_) => "The SAM-BA bootloader",
+        CliCommand::SendApdu { .. } => "send-apdu",
+        CliCommand::ListPorts => "list-ports",
+        CliCommand::RebootSamba => "reboot-samba",
+        CliCommand::GetProcessList => "get-process-list",
+        _ => return Ok(()),
+    };
+
+    bail!("{name} needs a real device: the simulator has no USB, no SAM-BA bootloader and no hardware kernel")
+}
 
 fn save_screenshot_png(payload: &[u8], output: &PathBuf) -> Result<()> {
     let png_data = screenshot::bgra_to_png(payload).map_err(|e| anyhow::anyhow!(e))?;
@@ -381,15 +429,15 @@ fn save_screenshot_png(payload: &[u8], output: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-// Higher-level actions (USB transport)
+// Higher-level actions
 
-fn do_screenshot(client: &UsbDebugClient, output: &PathBuf) -> Result<()> {
+fn do_screenshot(client: &DebugClient, output: &PathBuf) -> Result<()> {
     eprintln!("Taking screenshot...");
     let payload = client.send(Command::Screenshot, Duration::from_secs(20))?;
     save_screenshot_png(&payload, output)
 }
 
-fn do_tap(client: &UsbDebugClient, x: u16, y: u16) -> Result<()> {
+fn do_tap(client: &DebugClient, x: u16, y: u16) -> Result<()> {
     eprintln!("Tap ({x}, {y})...");
     client.send(
         Command::Swipe { start_x: x, start_y: y, end_x: x, end_y: y, duration_ms: TAP_HOLD_MS, steps: 0 },
@@ -400,7 +448,7 @@ fn do_tap(client: &UsbDebugClient, x: u16, y: u16) -> Result<()> {
 }
 
 fn do_swipe(
-    client: &UsbDebugClient,
+    client: &DebugClient,
     sx: u16,
     sy: u16,
     ex: u16,
@@ -417,34 +465,34 @@ fn do_swipe(
     Ok(())
 }
 
-fn do_input_text(client: &UsbDebugClient, text: &str) -> Result<()> {
+fn do_input_text(client: &DebugClient, text: &str) -> Result<()> {
     eprintln!("Typing {} chars...", text.chars().count());
     client.send(Command::InputText(text.to_string()), Duration::from_secs(10))?;
     eprintln!("Input text OK");
     Ok(())
 }
 
-fn do_get_version(client: &UsbDebugClient) -> Result<()> {
+fn do_get_version(client: &DebugClient) -> Result<()> {
     let payload = client.send(Command::GetVersion, Duration::from_secs(5))?;
     let version = String::from_utf8_lossy(&payload);
     println!("{version}");
     Ok(())
 }
 
-fn do_get_process_list(client: &UsbDebugClient) -> Result<()> {
+fn do_get_process_list(client: &DebugClient) -> Result<()> {
     let payload = client.send(Command::GetProcessList, Duration::from_secs(5))?;
     print!("{}", String::from_utf8_lossy(&payload));
     Ok(())
 }
 
-fn do_get_time(client: &UsbDebugClient) -> Result<()> {
+fn do_get_time(client: &DebugClient) -> Result<()> {
     let payload = client.send(Command::GetSystemTime, Duration::from_secs(5))?;
     let unix_seconds = decode_system_time(&payload)?;
     println!("{} (unix {unix_seconds})", format_utc(unix_seconds)?);
     Ok(())
 }
 
-fn do_set_time(client: &UsbDebugClient, timestamp: &str) -> Result<()> {
+fn do_set_time(client: &DebugClient, timestamp: &str) -> Result<()> {
     let unix_seconds = parse_timestamp(timestamp)?;
     client.send(Command::SetSystemTime { unix_seconds }, Duration::from_secs(5))?;
     println!("device clock set to {} (unix {unix_seconds})", format_utc(unix_seconds)?);
@@ -477,7 +525,7 @@ fn parse_timestamp(timestamp: &str) -> Result<u64> {
     u64::try_from(parsed.as_second()).context("timestamps before the Unix epoch cannot be set")
 }
 
-fn do_power(client: &UsbDebugClient, long: bool) -> Result<()> {
+fn do_power(client: &DebugClient, long: bool) -> Result<()> {
     eprintln!("Power button {} press...", if long { "long" } else { "short" });
     client.send(Command::PowerButton { long }, Duration::from_secs(5))?;
     eprintln!("Power OK");
@@ -539,7 +587,7 @@ fn do_list_ports() -> Result<()> {
 
 // Log streaming (USB vendor interface)
 
-fn do_logs_usb(client: &UsbDebugClient, max_lines: usize, filter: Option<&str>) -> Result<()> {
+fn do_logs(client: &DebugClient, max_lines: usize, filter: Option<&str>) -> Result<()> {
     let mut printed: usize = 0;
     let mut line_buf: Vec<u8> = Vec::with_capacity(4096);
 
@@ -591,7 +639,7 @@ enum Action {
     InputText(String),
 }
 
-fn run_actions(client: &UsbDebugClient, actions: &[Action]) -> Result<()> {
+fn run_actions(client: &DebugClient, actions: &[Action]) -> Result<()> {
     for (i, action) in actions.iter().enumerate() {
         match action {
             Action::Tap([x, y]) => {
@@ -721,6 +769,11 @@ fn do_samba_dump(output: &PathBuf, megabytes: usize, offset: usize) -> Result<()
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let sim = sim_target(cli.sim);
+
+    if sim.is_some() {
+        reject_hardware_only(&cli.command)?;
+    }
 
     // SAM-BA commands don't use USB debug mode
     match &cli.command {
@@ -763,8 +816,8 @@ fn main() -> Result<()> {
         }
         CliCommand::Mcp { http, jail } => {
             return match http {
-                Some(addr) => mcp::run_http(*addr, jail.clone()),
-                None => mcp::run(jail.clone()),
+                Some(addr) => mcp::run_http(*addr, jail.clone(), sim.clone()),
+                None => mcp::run(jail.clone(), sim.clone()),
             };
         }
         CliCommand::SendApdu { apdu_hex, timeout_ms } => {
@@ -776,32 +829,32 @@ fn main() -> Result<()> {
         _ => {}
     }
 
-    // All other commands use USB debug mode
-    let client = open_usb()?;
+    // All other commands speak the debug protocol, to a device or to a simulator
+    let client = &open_transport(sim.as_deref())?;
 
     match cli.command {
-        CliCommand::Screenshot { output } => do_screenshot(&client, &output)?,
-        CliCommand::Tap { x, y } => do_tap(&client, x, y)?,
+        CliCommand::Screenshot { output } => do_screenshot(client, &output)?,
+        CliCommand::Tap { x, y } => do_tap(client, x, y)?,
         CliCommand::Swipe { sx, sy, ex, ey, duration_ms, steps } => {
-            do_swipe(&client, sx, sy, ex, ey, duration_ms, steps)?;
+            do_swipe(client, sx, sy, ex, ey, duration_ms, steps)?;
         }
-        CliCommand::Power { long } => do_power(&client, long)?,
-        CliCommand::InputText { text } => do_input_text(&client, &text)?,
+        CliCommand::Power { long } => do_power(client, long)?,
+        CliCommand::InputText { text } => do_input_text(client, &text)?,
         CliCommand::TapScreenshot { x, y, output, wait } => {
-            do_tap(&client, x, y)?;
+            do_tap(client, x, y)?;
             std::thread::sleep(Duration::from_millis(wait));
-            do_screenshot(&client, &output)?;
+            do_screenshot(client, &output)?;
         }
         CliCommand::SwipeScreenshot { sx, sy, ex, ey, duration_ms, steps, output, wait } => {
-            do_swipe(&client, sx, sy, ex, ey, duration_ms, steps)?;
+            do_swipe(client, sx, sy, ex, ey, duration_ms, steps)?;
             std::thread::sleep(Duration::from_millis(wait));
-            do_screenshot(&client, &output)?;
+            do_screenshot(client, &output)?;
         }
         CliCommand::Run { file } => {
             let content =
                 std::fs::read_to_string(&file).with_context(|| format!("Cannot read {}", file.display()))?;
             let actions: Vec<Action> = serde_json::from_str(&content).context("Invalid JSON actions file")?;
-            run_actions(&client, &actions)?;
+            run_actions(client, &actions)?;
         }
         CliCommand::LaunchApp { app_id } => {
             let hex = app_id.strip_prefix("0x").unwrap_or(&app_id);
@@ -839,10 +892,10 @@ fn main() -> Result<()> {
             let _ = client.send(Command::RebootSamba, Duration::from_secs(5));
             eprintln!("Device rebooting into SAM-BA mode.");
         }
-        CliCommand::GetVersion => do_get_version(&client)?,
-        CliCommand::GetProcessList => do_get_process_list(&client)?,
-        CliCommand::GetTime => do_get_time(&client)?,
-        CliCommand::SetTime { timestamp } => do_set_time(&client, &timestamp)?,
+        CliCommand::GetVersion => do_get_version(client)?,
+        CliCommand::GetProcessList => do_get_process_list(client)?,
+        CliCommand::GetTime => do_get_time(client)?,
+        CliCommand::SetTime { timestamp } => do_set_time(client, &timestamp)?,
         CliCommand::LoadApp { app_path } => {
             eprintln!("Uploading app from {}...", app_path.display());
             let report = load_app::load_app(|cmd, timeout| client.send(cmd, timeout), &app_path)?;
@@ -862,7 +915,7 @@ fn main() -> Result<()> {
                 while client.read_logs(Duration::ZERO).is_ok() {}
             }
             eprintln!("Streaming logs (Ctrl+C to stop)...");
-            do_logs_usb(&client, max_lines, filter.as_deref())?;
+            do_logs(client, max_lines, filter.as_deref())?;
         }
         CliCommand::Mcp { .. }
         | CliCommand::SendApdu { .. }

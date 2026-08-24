@@ -14,19 +14,23 @@
 //! maximum requested transfer length. Keep that framing: it avoids a protocol
 //! length prefix and lets the USB transfer boundary carry the packet end marker.
 //!
+//! The simulator has no USB, so it carries the same frames over a loopback socket, delimited by a
+//! length prefix instead (see [`stream`]).
+//!
 //! Source of truth for command bytes, status bytes, and payload encoding.
-//! The `client` feature additionally exposes `UsbDebugClient`, a `rusb`-based
-//! host transport.
+//! The `client` feature additionally exposes `DebugClient`, the host-side
+//! client over either transport.
 
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive as _;
 
 #[cfg(feature = "client")]
 pub mod client;
+pub mod stream;
 
 #[cfg(feature = "client")]
 pub use client::{
-    OpenError, OutOfSync, TransportError, UsbDebugClient, LEGACY_PID, LEGACY_VID, PASSPORT_PID, PASSPORT_VID,
+    DebugClient, OpenError, OutOfSync, TransportError, LEGACY_PID, LEGACY_VID, PASSPORT_PID, PASSPORT_VID,
 };
 
 /// First byte of every device -> host transfer.
@@ -147,6 +151,9 @@ const CMD_GET_SYSTEM_TIME: u8 = 0x14;
 const CMD_SET_SYSTEM_TIME: u8 = 0x15;
 
 pub const USB_DEBUG_BULK_MAX_PACKET_LEN: usize = 512;
+/// Largest device -> host frame either transport accepts. A screenshot is the big one at
+/// 480 x 800 x 4 bytes; the rest of the headroom bounds what a corrupt length prefix can allocate.
+pub const MAX_FRAME_LEN: usize = 2 * 1024 * 1024;
 /// Maximum host -> device usb-debug transfer size. This is capped by the
 /// 16-bit length field in the device USB endpoint API.
 pub const USB_DEBUG_OUT_TRANSFER_MAX: usize = u16::MAX as usize;

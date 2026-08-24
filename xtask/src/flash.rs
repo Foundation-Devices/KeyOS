@@ -13,7 +13,7 @@ use anyhow::Context;
 use clap::Args;
 use colored::Colorize;
 use sambuca::flash::FlashProgress;
-use usb_debug_protocol::UsbDebugClient;
+use usb_debug_protocol::DebugClient;
 
 use crate::{
     bootimage::{BOOT_IMAGE, SECTOR_SIZE, SYSTEM_PARTITION_START_SECTOR},
@@ -85,7 +85,7 @@ fn enter_samba_mode(use_script: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let client = match UsbDebugClient::open() {
+    let client = match DebugClient::open() {
         Ok(c) => c,
         Err(_) => return Ok(()),
     };

@@ -3,14 +3,14 @@
 
 //! USB-debug transport thread.
 //!
-//! Owns a `UsbDebugClient`, reconnects on failure, forwards log records to
+//! Owns a `DebugClient`, reconnects on failure, forwards log records to
 //! the UI and processes outbound commands from the UI.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use usb_debug_protocol::{Command, UsbDebugClient};
+use usb_debug_protocol::{Command, DebugClient};
 
 use crate::AppEvent;
 
@@ -78,10 +78,10 @@ impl TransportState {
         }
     }
 
-    fn connect_with_retry(&mut self) -> Result<UsbDebugClient, TransportThreadError> {
+    fn connect_with_retry(&mut self) -> Result<DebugClient, TransportThreadError> {
         let retry_interval_secs = self.reconnect_timeout.as_secs().max(1);
         loop {
-            match UsbDebugClient::open() {
+            match DebugClient::open() {
                 Ok(client) => {
                     self.send_status("Connected via USB vendor interface")?;
                     return Ok(client);
@@ -97,7 +97,7 @@ impl TransportState {
         }
     }
 
-    fn read_loop(&mut self, client: &UsbDebugClient) -> TransportThreadError {
+    fn read_loop(&mut self, client: &DebugClient) -> TransportThreadError {
         loop {
             if let Err(e) = self.process_commands(client) {
                 return e;
@@ -116,7 +116,7 @@ impl TransportState {
         }
     }
 
-    fn process_commands(&mut self, client: &UsbDebugClient) -> Result<(), TransportThreadError> {
+    fn process_commands(&mut self, client: &DebugClient) -> Result<(), TransportThreadError> {
         loop {
             match self.command_receiver.try_recv() {
                 Ok(TransportCommand::RequestProcessList) => match client
