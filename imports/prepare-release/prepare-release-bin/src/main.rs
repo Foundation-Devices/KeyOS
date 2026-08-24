@@ -73,8 +73,8 @@ where
     writeln!(stdout, "{} Bootloader signed (boot.cip created)", "✓".green()).map_err(Error::Stdout)?;
     writeln!(stdout).map_err(Error::Stdout)?;
 
-    // Step 4: Push to KeyOS-Releases
-    writeln!(stdout, "{} Pushing to KeyOS-Releases...", "▶".blue()).map_err(Error::Stdout)?;
+    // Step 4: Push to KeyOS-Releases-private
+    writeln!(stdout, "{} Pushing to KeyOS-Releases-private...", "▶".blue()).map_err(Error::Stdout)?;
     let firmware_paths = build::verify_firmware_files_push()?;
     let summary = git::handle_release(&args, &firmware_paths, &mut stdout)?;
 

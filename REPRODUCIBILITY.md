@@ -25,7 +25,7 @@ The local build produces the plaintext bootloader as `boot.bin`. The published b
 
 2. Use an AArch64 Linux build machine for byte-for-byte reproducibility. The pinned dependencies are the same on AArch64 macOS, but the host-specific build tools do not produce an identical bootloader binary.
 
-3. To verify a release with the current build commands, check out its exact tag. To use the historical wrapper below, remain on a current checkout and give the wrapper the exact tag; it creates the historical checkout itself. Only tagged releases have corresponding binaries in the [KeyOS-Releases](https://github.com/Foundation-Devices/KeyOS-Releases) repository.
+3. To verify a release with the current build commands, check out its exact tag. To use the historical wrapper below, remain on a current checkout and give the wrapper the exact tag; it creates the historical checkout itself. Only tagged releases have corresponding binaries in the [KeyOS-Releases-private](https://github.com/Foundation-Devices/KeyOS-Releases-private) repository. Access to that repository is restricted to Foundation staff. There is currently no public self-service archive for external verifiers, who must obtain the exact published binaries from Foundation separately before performing the comparison below.
 
 4. Enter the pinned build environment:
 
@@ -124,7 +124,7 @@ For `app.bin`, `recovery.bin`, and built-in application `app.elf` files, the pri
 tail -c +2049 <file> | sha256sum
 ```
 
-Compare those values with the corresponding files from the matching release in KeyOS-Releases. For the bootloader, the summary prints two hashes: `bootloader (raw plaintext)` hashes the local `boot.bin` and is not device-comparable, while `bootloader (on-device)` is the value to compare with System Information. The build records the latter alongside `boot.bin` while the exact entropy slot is known, and the summary verifies that record belongs to the current file before printing it.
+Foundation staff can compare those values with the corresponding files from the matching release in KeyOS-Releases-private. External verifiers must first obtain those exact published binaries from Foundation because the release repository is not publicly readable. For the bootloader, the summary prints two hashes: `bootloader (raw plaintext)` hashes the local `boot.bin` and is not device-comparable, while `bootloader (on-device)` is the value to compare with System Information. The build records the latter alongside `boot.bin` while the exact entropy slot is known, and the summary verifies that record belongs to the current file before printing it.
 
 ## Troubleshooting
 

@@ -61,7 +61,7 @@ Rust publisher. The raw `cargo xtask docs-publish` command is only the second st
 recipe above: it verifies and uploads the ZIP and checksum already on disk, but does not rebuild
 them. The publisher refuses to replace an existing asset by default. Pass `--dry-run` to verify
 without uploading or `--replace` to overwrite both assets explicitly. The release tag defaults to
-the KeyOS version; pass it only when the storage tag differs. When KeyOS-Releases has a matching
+the KeyOS version; pass it only when the storage tag differs. When KeyOS-Releases-private has a matching
 draft—by its tag, or by its release title when it is untagged (for example, because its version
 branch has the same name as its eventual tag)—the publisher uses that draft's release ID. It can
 validate and upload assets to the draft without creating or publishing the tag.
@@ -99,8 +99,13 @@ sorted, use normalized permissions and timestamps, and are reproducible for iden
 3. Review and merge the Docs-Site pull request. Its main-branch deployment downloads every catalog
    entry and assembles the version selector site from those independent ZIPs.
 
-KeyOS-Releases is the current artifact store. The firmware release API can replace it without
+KeyOS-Releases-private is the current artifact store. The firmware release API can replace it without
 changing the per-version bundle format or the independent SDK/KeyOS version identities.
+Because that repository is private, every manual or automated asset download must authenticate with
+a GitHub token that has read access to `Foundation-Devices/KeyOS-Releases-private`. A repository-scoped
+`GITHUB_TOKEN` from Docs-Site cannot read this sibling private repository. Docs-Site does not yet pass
+a suitable cross-repository token to its downloader, so deployment from the private store remains
+blocked until that fetcher and its workflows are updated.
 
 The SDK builder copies its one generated snapshot into `docs/api`. `foundation docs [SDK_VERSION]`
 opens those installed bytes; pass `--url` to print their `file://` URL instead. `SDK_VERSION` selects

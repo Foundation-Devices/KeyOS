@@ -13,6 +13,9 @@ use {
     },
 };
 
+const RELEASES_REPO_NAME: &str = "KeyOS-Releases-private";
+const RELEASES_REPO_SLUG: &str = "Foundation-Devices/KeyOS-Releases-private";
+
 /// Summary of what happened during the git release operations
 #[derive(Debug, Clone)]
 pub struct ReleaseSummary {
@@ -42,19 +45,20 @@ pub fn handle_release(
     let keyos_dir = env::current_dir().map_err(Error::GetCurrentDir)?;
     writeln!(stdout, "Debug: keyOS directory is {}", keyos_dir.display()).map_err(Error::Stdout)?;
 
-    // Ensure the KeyOS-Releases repo exists
-    let releases_repo = keyos_dir.parent().ok_or(Error::NoParentDir)?.join("KeyOS-Releases");
+    // Ensure the KeyOS-Releases-private repo exists and cannot push to the public repository.
+    let releases_repo = keyos_dir.parent().ok_or(Error::NoParentDir)?.join(RELEASES_REPO_NAME);
 
     if !releases_repo.exists() {
         return Err(Error::ReleasesRepoNotFound(releases_repo));
     }
+    validate_releases_repo_origin(&releases_repo)?;
 
     // Change to releases repo directory
     env::set_current_dir(&releases_repo).map_err(Error::ChangeDir)?;
 
     // Make sure we're up to date with the remote before creating worktrees/branches
     writeln!(stdout, "Fetching latest from origin...").map_err(Error::Stdout)?;
-    let _ = Command::new("git").args(["fetch", "--all", "--prune"]).status();
+    let _ = Command::new("git").args(["fetch", "origin", "--prune"]).status();
 
     // We will operate in a temporary worktree, so do not switch the primary checkout's branch
     // Note: We don't check for unstaged changes in the main repo because we use a worktree
@@ -334,6 +338,83 @@ fn run_git_command_silent(args: &[&str]) -> Result<(), Error> {
     Ok(())
 }
 
+fn validate_releases_repo_origin(releases_repo: &Path) -> Result<(), Error> {
+    let fetch_urls = releases_repo_origin_urls(releases_repo, false)?;
+    let push_urls = releases_repo_origin_urls(releases_repo, true)?;
+    let mut urls = fetch_urls.iter().chain(&push_urls).cloned().collect::<Vec<_>>();
+    urls.sort();
+    urls.dedup();
+
+    if fetch_urls.is_empty()
+        || push_urls.is_empty()
+        || urls.iter().any(|url| !is_private_releases_repo_url(url))
+    {
+        return Err(Error::UnexpectedReleasesRepoOrigin { path: releases_repo.to_path_buf(), urls });
+    }
+
+    Ok(())
+}
+
+fn releases_repo_origin_urls(releases_repo: &Path, push: bool) -> Result<Vec<String>, Error> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(releases_repo).args(["remote", "get-url"]);
+    if push {
+        command.arg("--push");
+    }
+    let output = command.args(["--all", "origin"]).output().map_err(Error::GitCommand)?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(normalize_remote_url)
+        .filter(|url| !url.is_empty())
+        .collect())
+}
+
+fn is_private_releases_repo_url(url: &str) -> bool {
+    let url = normalize_remote_url(url);
+    let url = url.trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+
+    matches!(
+        url,
+        "git@github.com:Foundation-Devices/KeyOS-Releases-private"
+            | "ssh://git@github.com/Foundation-Devices/KeyOS-Releases-private"
+            | "https://github.com/Foundation-Devices/KeyOS-Releases-private"
+    )
+}
+
+fn normalize_remote_url(url: &str) -> String {
+    let url = url.trim();
+    let Some((scheme, remainder)) = url.split_once("://") else {
+        if let Some((username, location)) = url.split_once('@') {
+            let username = if username == "git" { username } else { "<redacted>" };
+            return format!("{username}@{location}");
+        }
+        return url.to_owned();
+    };
+
+    let (authority, path) = remainder.split_once('/').unwrap_or((remainder, ""));
+    let authority = if let Some((userinfo, host)) = authority.rsplit_once('@') {
+        if scheme == "ssh" && userinfo.split(':').next() == Some("git") {
+            format!("git@{host}")
+        } else {
+            host.to_owned()
+        }
+    } else {
+        authority.to_owned()
+    };
+
+    if path.is_empty() {
+        format!("{scheme}://{authority}")
+    } else {
+        format!("{scheme}://{authority}/{path}")
+    }
+}
+
 fn branch_exists(branch_name: &str) -> Result<bool, Error> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", branch_name])
@@ -549,6 +630,7 @@ pub enum Error {
     GetCurrentDir(std::io::Error),
     NoParentDir,
     ReleasesRepoNotFound(PathBuf),
+    UnexpectedReleasesRepoOrigin { path: PathBuf, urls: Vec<String> },
     ChangeDir(std::io::Error),
     GitCommand(std::io::Error),
     GitFailed(String),
@@ -567,7 +649,18 @@ impl std::fmt::Display for Error {
             Error::GetCurrentDir(e) => write!(f, "failed to get current directory: {}", e),
             Error::NoParentDir => write!(f, "current directory has no parent"),
             Error::ReleasesRepoNotFound(path) => {
-                write!(f, "KeyOS-Releases repository not found at {}", path.display())
+                write!(f, "{} repository not found at {}", RELEASES_REPO_NAME, path.display())
+            }
+            Error::UnexpectedReleasesRepoOrigin { path, urls } => {
+                let urls = if urls.is_empty() { "<missing>".to_owned() } else { urls.join(", ") };
+                write!(
+                    f,
+                    "{} repository at {} has unexpected origin URL(s): {}; expected {}",
+                    RELEASES_REPO_NAME,
+                    path.display(),
+                    urls,
+                    RELEASES_REPO_SLUG
+                )
             }
             Error::ChangeDir(e) => write!(f, "failed to change directory: {}", e),
             Error::GitCommand(e) => write!(f, "failed to execute git command: {}", e),
@@ -584,3 +677,88 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PRIVATE_SSH: &str = "git@github.com:Foundation-Devices/KeyOS-Releases-private.git";
+    const PRIVATE_HTTPS: &str = "https://github.com/Foundation-Devices/KeyOS-Releases-private.git";
+    const PUBLIC_SSH: &str = "git@github.com:Foundation-Devices/KeyOS-Releases.git";
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git").arg("-C").arg(repo).args(args).status().unwrap();
+        assert!(status.success(), "git {} failed", args.join(" "));
+    }
+
+    #[test]
+    fn release_repo_origin_requires_the_private_repository() {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "--quiet"]);
+
+        assert!(matches!(
+            validate_releases_repo_origin(repo.path()),
+            Err(Error::UnexpectedReleasesRepoOrigin { .. })
+        ));
+
+        git(repo.path(), &["remote", "add", "origin", PRIVATE_SSH]);
+        validate_releases_repo_origin(repo.path()).unwrap();
+
+        git(repo.path(), &["remote", "set-url", "origin", PRIVATE_HTTPS]);
+        validate_releases_repo_origin(repo.path()).unwrap();
+
+        git(
+            repo.path(),
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://x-access-token:super-secret@github.com/Foundation-Devices/KeyOS-Releases-private.git",
+            ],
+        );
+        validate_releases_repo_origin(repo.path()).unwrap();
+
+        git(
+            repo.path(),
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://x-access-token:super-secret@github.com/Foundation-Devices/KeyOS-Releases.git",
+            ],
+        );
+        let error = validate_releases_repo_origin(repo.path()).unwrap_err();
+        assert!(matches!(&error, Error::UnexpectedReleasesRepoOrigin { .. }));
+        assert!(!error.to_string().contains("super-secret"));
+    }
+
+    #[test]
+    fn release_repo_origin_rejects_any_public_push_url() {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "--quiet"]);
+        git(repo.path(), &["remote", "add", "origin", PRIVATE_SSH]);
+        git(repo.path(), &["remote", "set-url", "--push", "origin", PRIVATE_SSH]);
+        git(repo.path(), &["remote", "set-url", "--add", "--push", "origin", PUBLIC_SSH]);
+
+        assert!(matches!(
+            validate_releases_repo_origin(repo.path()),
+            Err(Error::UnexpectedReleasesRepoOrigin { .. })
+        ));
+    }
+
+    #[test]
+    fn release_repo_url_matching_is_exact() {
+        assert!(is_private_releases_repo_url(PRIVATE_SSH));
+        assert!(is_private_releases_repo_url(PRIVATE_HTTPS));
+        assert!(is_private_releases_repo_url(
+            "https://x-access-token:super-secret@github.com/Foundation-Devices/KeyOS-Releases-private.git"
+        ));
+        assert!(is_private_releases_repo_url(
+            "ssh://git@github.com/Foundation-Devices/KeyOS-Releases-private.git/"
+        ));
+        assert!(!is_private_releases_repo_url(PUBLIC_SSH));
+        assert!(!is_private_releases_repo_url(
+            "git@github.com:Foundation-Devices/KeyOS-Releases-private-fork.git"
+        ));
+    }
+}

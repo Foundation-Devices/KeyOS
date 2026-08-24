@@ -265,7 +265,7 @@ build-repro:
 #   1. Validate EXTRA_ENTROPY environment variable
 #   2. Build all firmware (bootloader, recovery, main OS)
 #   3. Sign the bootloader with SAM-BA cipher (creates boot.cip, removes boot.bin)
-#   4. Push to KeyOS-Releases and create a PR
+#   4. Push to KeyOS-Releases-private and create a PR
 #
 # Required environment variables:
 #   EXTRA_ENTROPY            - 64-character hex string for bootloader entropy

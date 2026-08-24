@@ -33,12 +33,12 @@ cargo run --bin prepare-release -- 1.2.3
    export EXTRA_ENTROPY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
    ```
 
-2. **KeyOS-Releases repository**: Must exist as a sibling directory to the keyOS repository
+2. **KeyOS-Releases-private repository**: Must exist as a sibling directory to the keyOS repository
 
    ```
    parent-directory/
    ├── keyOS/                 # Main keyOS repository
-   └── KeyOS-Releases/        # Releases repository
+   └── KeyOS-Releases-private/ # Private releases repository
    ```
 
 3. **Build tools**:
@@ -62,7 +62,7 @@ cargo run --bin prepare-release -- 1.2.3
    - Verifies all firmware files exist
 
 3. **Manages git operations**:
-   - Switches to KeyOS-Releases repository
+   - Switches to KeyOS-Releases-private repository
    - Creates new branch for the release
    - Copies firmware files, apps, and bootloader assets (blassets - .raw files only)
    - Commits and pushes changes

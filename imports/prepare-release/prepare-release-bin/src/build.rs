@@ -33,7 +33,7 @@ pub fn build_firmware(
         "xtask".to_string(),
         "build-all".to_string(),
         "--dont-sign".to_string(), /* --dont-sign because the files will be signed by a `signer` tool in
-                                    * KeyOS-Releases */
+                                    * KeyOS-Releases-private */
         "--production-bootloader".to_string(),
         "--production-firmware".to_string(),
         "--extra-entropy".to_string(),

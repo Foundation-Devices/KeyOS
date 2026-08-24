@@ -29,14 +29,14 @@ use crate::{
 
 #[cfg(test)]
 const MANIFEST_PATH: &str = "target/sdk-docs/api/bundle-manifest.json";
-const REPOSITORY: &str = "Foundation-Devices/KeyOS-Releases";
-const REPOSITORY_API: &str = "repos/Foundation-Devices/KeyOS-Releases";
+const REPOSITORY: &str = "Foundation-Devices/KeyOS-Releases-private";
+const REPOSITORY_API: &str = "repos/Foundation-Devices/KeyOS-Releases-private";
 const DRAFT_ASSET_LOOKUP_ATTEMPTS: usize = 3;
 const DRAFT_ASSET_LOOKUP_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Args, Debug)]
 pub struct DocsPublishArgs {
-    /// KeyOS-Releases tag, including a tagged draft, or the title of its untagged draft.
+    /// KeyOS-Releases-private tag, including a tagged draft, or the title of its untagged draft.
     #[arg(value_name = "RELEASE_TAG")]
     release_tag: Option<String>,
     /// Verify the docs release without uploading.
@@ -701,7 +701,10 @@ fn publish_from_root(
             args.replace && !collisions.is_empty(),
         )?;
         let action = if collisions.is_empty() { "Published" } else { "Replaced" };
-        format!("{action} SDK docs {} in KeyOS-Releases tag {}", release.docs_version, release.release_tag)
+        format!(
+            "{action} SDK docs {} in KeyOS-Releases-private tag {}",
+            release.docs_version, release.release_tag
+        )
     };
 
     let release_tag = if release.release_tag == release.docs_version {
@@ -1319,7 +1322,7 @@ mod tests {
         assert_eq!(host.inspected_tags, ["1.4.1"]);
         assert_eq!(host.uploads.len(), 1);
         assert!(host.uploads[0].3);
-        assert_eq!(outcome.summary, "Replaced SDK docs 1.4.0 in KeyOS-Releases tag 1.4.1");
+        assert_eq!(outcome.summary, "Replaced SDK docs 1.4.0 in KeyOS-Releases-private tag 1.4.1");
         assert_eq!(
             outcome.docs_site_command,
             "nix develop --command npm run docs:add -- 1.4.0 1.4.1 --replace"
@@ -1335,7 +1338,7 @@ mod tests {
 
         assert_eq!(host.uploads.len(), 1);
         assert!(!host.uploads[0].3);
-        assert_eq!(outcome.summary, "Published SDK docs 1.4.0 in KeyOS-Releases tag 1.4.0");
+        assert_eq!(outcome.summary, "Published SDK docs 1.4.0 in KeyOS-Releases-private tag 1.4.0");
         assert!(outcome.docs_site_command.ends_with(" --replace"));
     }
 
@@ -1404,7 +1407,7 @@ mod tests {
                 "Content-Type: application/octet-stream",
                 "--input",
                 "/tmp/keyos-sdk-docs.zip",
-                "https://uploads.github.com/repos/Foundation-Devices/KeyOS-Releases/releases/374250059/assets?name=keyos-sdk-docs.zip",
+                "https://uploads.github.com/repos/Foundation-Devices/KeyOS-Releases-private/releases/374250059/assets?name=keyos-sdk-docs.zip",
             ]
         );
     }

@@ -13,7 +13,7 @@ This command performs the complete release process:
   1. Validates EXTRA_ENTROPY environment variable
   2. Builds all firmware (bootloader, recovery, main OS)
   3. Signs the bootloader using SAM-BA cipher
-  4. Pushes to KeyOS-Releases and creates a PR
+  4. Pushes to KeyOS-Releases-private and creates a PR
 
 REQUIRED ENVIRONMENT VARIABLES:
   EXTRA_ENTROPY            64-character hex string for bootloader entropy
