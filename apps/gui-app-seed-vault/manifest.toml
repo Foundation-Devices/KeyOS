@@ -1,6 +1,5 @@
 manifestVersion = "0"
 appId = "0x53656564205661756c74000000000000"
-version = "1.4.0"
 
 [appName]
 en = "Vault"

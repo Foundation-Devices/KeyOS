@@ -13,17 +13,22 @@ use crate::sdk_mapping::ensure_project_sdk_mapping;
 const COMPILE_MANIFEST_FILE: &str = "manifest.toml";
 pub const UI_LIBRARY_PATH_ENV: &str = "FOUNDATION_UI_LIBRARY_PATH";
 
-pub fn prepare_project_for_build(project_root: &Path, sdk: &SdkRoot) -> Result<()> {
-    prepare_project_for_build_with_theme_dir(project_root, sdk, None)
+pub fn prepare_project_for_build(
+    project_root: &Path,
+    sdk: &SdkRoot,
+    app_version: &semver::Version,
+) -> Result<()> {
+    prepare_project_for_build_with_theme_dir(project_root, sdk, app_version, None)
 }
 
 fn prepare_project_for_build_with_theme_dir(
     project_root: &Path,
     sdk: &SdkRoot,
+    app_version: &semver::Version,
     themes_dir: Option<&Path>,
 ) -> Result<()> {
     ensure_project_sdk_mapping(project_root, sdk)?;
-    ensure_compile_manifest(project_root, Some(sdk))?;
+    ensure_compile_manifest(project_root, Some(sdk), Some(app_version))?;
     ensure_project_ui_mapping(project_root, sdk)?;
     maybe_generate_slint_artifacts(project_root, Some(sdk), CodegenMode::MissingOnly, themes_dir)
 }
@@ -46,7 +51,7 @@ fn prepare_slint_file_for_view_from(
 }
 
 fn prepare_project_for_view(project_root: &Path, sdk: Option<&SdkRoot>) -> Result<()> {
-    ensure_compile_manifest(&project_root, sdk)?;
+    ensure_compile_manifest(&project_root, sdk, None)?;
 
     if let Some(sdk) = sdk {
         ensure_project_sdk_mapping(&project_root, sdk)?;
@@ -58,7 +63,11 @@ fn prepare_project_for_view(project_root: &Path, sdk: Option<&SdkRoot>) -> Resul
     maybe_generate_slint_artifacts(&project_root, sdk, CodegenMode::AlwaysCheck, None)
 }
 
-fn ensure_compile_manifest(project_root: &Path, sdk: Option<&SdkRoot>) -> Result<()> {
+fn ensure_compile_manifest(
+    project_root: &Path,
+    sdk: Option<&SdkRoot>,
+    app_version: Option<&semver::Version>,
+) -> Result<()> {
     let config_path = project_root.join(APP_CONFIG_FILE);
     if !config_path.exists() {
         return Ok(());
@@ -69,7 +78,15 @@ fn ensure_compile_manifest(project_root: &Path, sdk: Option<&SdkRoot>) -> Result
     let permissions = config
         .resolved_permissions(project_root, sdk.map(|sdk| sdk.keyos_root().join("api")).as_deref())
         .with_context(|| format!("Failed to resolve permissions for {}", project_root.display()))?;
-    let manifest = app_manifest_from_config(&config, permissions);
+    // `use_api!` only consumes servers and permissions from this compatibility manifest. Build and
+    // sim provide their already-resolved Cargo version for consistency; preview omits the unused
+    // field so an editor-only workflow never depends on Cargo metadata or legacy-version matching.
+    let placeholder_version = semver::Version::new(0, 0, 0);
+    let mut manifest =
+        app_manifest_from_config(&config, app_version.unwrap_or(&placeholder_version), permissions);
+    if app_version.is_none() {
+        manifest.version = None;
+    }
     let rendered =
         toml::to_string_pretty(&manifest).context("Failed to serialize compatibility manifest.toml")?;
     let manifest_path = project_root.join(COMPILE_MANIFEST_FILE);
@@ -640,7 +657,9 @@ mod tests {
         let (_proj_dir, project_root) = make_codegen_project("build-project");
 
         let themes_dir = project_root.join("themes-cache");
-        prepare_project_for_build_with_theme_dir(&project_root, &sdk, Some(&themes_dir)).unwrap();
+        let app_version = semver::Version::new(2, 3, 4);
+        prepare_project_for_build_with_theme_dir(&project_root, &sdk, &app_version, Some(&themes_dir))
+            .unwrap();
 
         let project_ui = project_root.join("ui").join("ui");
         assert!(project_ui.exists());
@@ -655,6 +674,7 @@ mod tests {
         assert!(manifest_toml.contains("appId = \"0x00112233445566778899aabbccddeeff\""));
         assert!(manifest_toml.contains("en = \"Sample App\""));
         let manifest: Value = toml::from_str(&manifest_toml).unwrap();
+        assert_eq!(manifest["version"].as_str(), Some("2.3.4"));
         assert_eq!(
             manifest["permissions"]["os/gui-server"]
                 .as_array()
@@ -680,6 +700,27 @@ mod tests {
         prepare_slint_file_for_view(&slint_file, None).unwrap();
         assert_eq!(fs::read_to_string(gen_dir.join("router.slint")).unwrap(), "v2\n");
         assert_eq!(fs::read_to_string(gen_dir.join("tr.slint")).unwrap(), "v2\n");
+    }
+
+    #[test]
+    fn prepare_slint_file_for_view_does_not_resolve_the_app_version() {
+        let (_proj_dir, project_root) = make_codegen_project("view-version-project");
+        let config_path = project_root.join("app-config.toml");
+        let config = fs::read_to_string(&config_path).unwrap();
+        fs::write(
+            &config_path,
+            config.replace(
+                "min-keyos-version = \"1.0.0\"",
+                "version = \"9.9.9\"\n            min-keyos-version = \"1.0.0\"",
+            ),
+        )
+        .unwrap();
+
+        prepare_slint_file_for_view(&project_root.join("ui").join("app.slint"), None).unwrap();
+
+        let manifest: Value =
+            toml::from_str(&fs::read_to_string(project_root.join("manifest.toml")).unwrap()).unwrap();
+        assert!(manifest.get("version").is_none());
     }
 
     #[test]
@@ -717,7 +758,6 @@ mod tests {
             description = "Sample description"
             icon = "resources/icon.svg"
             app-id = "0x00112233445566778899aabbccddeeff"
-            version = "0.1.0"
             min-keyos-version = "1.0.0"
 
             [permissions]
@@ -737,7 +777,7 @@ mod tests {
         fs::write(root.join("resources").join("icon.svg"), r#"<svg width="110" height="110"></svg>"#)
             .unwrap();
 
-        fs::write(root.join("src").join("lib.rs"), "pub fn sample() {}\n").unwrap();
+        fs::write(root.join("src").join("main.rs"), "fn main() {}\n").unwrap();
         fs::write(root.join("stamp.txt"), "v1\n").unwrap();
         fs::write(
             root.join("ui").join("app.slint"),

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use foundation_core::{app_manifest_from_config, AppConfig, ProjectContext, SdkLayout, SdkRoot};
 
+use super::warn_legacy_app_config_version;
 use crate::assets::{stage_bundled_icon, stage_hardware_assets};
 use crate::cargo_support::{
     configure_host_build_environment, emit_cargo_messages, emit_stderr_if_present,
@@ -48,10 +49,12 @@ pub fn execute() -> Result<()> {
     let project = ProjectContext::discover()?;
     let project_root = project.root.as_path();
     let config = &project.config;
+    warn_legacy_app_config_version(config);
+    let app_version = config.resolved_version(project_root).context("Failed to resolve app version")?;
 
     // Mirror hardware builds and viewer flows: make sure shared @ui sources plus any
     // build.rs-generated router/translation files are ready before the hosted build.
-    prepare_project_for_build(project_root, &sdk)?;
+    prepare_project_for_build(project_root, &sdk, &app_version)?;
 
     // Ensure the app's theme Rust is generated and current (foundation_themes::include_theme!).
     let themes_rust_dir = crate::commands::themes::ensure_project_theme(&sdk, config, project_root)?;
@@ -68,13 +71,19 @@ pub fn execute() -> Result<()> {
     // sideloaded under sideloaded-apps); app-manager execs the dev app.elf here.
     let app_elf_root = simulator_app_elf_root(&sdk);
     println!("Copying application to KeyOS SDK...");
-    let dest_dir =
-        copy_to_sdk(config, project_root, &sdk, &app_elf_root.join("sideloaded-apps"), sideloaded_dir)?;
+    let dest_dir = copy_to_sdk(
+        config,
+        &app_version,
+        project_root,
+        &sdk,
+        &app_elf_root.join("sideloaded-apps"),
+        sideloaded_dir,
+    )?;
 
     // The dev app is read through fs like on device, so its manifest, icon, and
     // resources go into the simulator's system image (the app.elf does not; it is
     // exec'd from the host stage above).
-    inject_sideloaded_app(&sdk, config, project_root, sideloaded_dir)?;
+    inject_sideloaded_app(&sdk, config, &app_version, project_root, sideloaded_dir)?;
 
     println!("Starting KeyOS simulator...");
     launch_simulator(&sdk, &dest_dir, app_id_hex, project_root, &app_elf_root, &find_in_path)?;
@@ -120,6 +129,7 @@ fn build_for_simulator(
 /// resolves it; the binary is still the cargo package output.
 fn copy_to_sdk(
     config: &AppConfig,
+    app_version: &semver::Version,
     project_root: &Path,
     sdk: &SdkRoot,
     apps_dir: &Path,
@@ -139,7 +149,7 @@ fn copy_to_sdk(
     fs::copy(&binary_path, &dest_binary)
         .with_context(|| format!("Failed to copy binary to {}", dest_binary.display()))?;
 
-    let manifest_json = generate_manifest_json(config, project_root, sdk)?;
+    let manifest_json = generate_manifest_json(config, app_version, project_root, sdk)?;
     fs::write(dest_dir.join("manifest.json"), manifest_json)?;
 
     // Stage the icons next to app.elf so the simulator's app-manager serves them
@@ -155,6 +165,7 @@ fn copy_to_sdk(
 fn inject_sideloaded_app(
     sdk: &SdkRoot,
     config: &AppConfig,
+    app_version: &semver::Version,
     project_root: &Path,
     sideloaded_dir: &str,
 ) -> Result<()> {
@@ -165,7 +176,10 @@ fn inject_sideloaded_app(
     }
     fs::create_dir_all(&bundle_dir)?;
     stage_hardware_assets(config, project_root, &bundle_dir)?;
-    fs::write(bundle_dir.join("manifest.json"), generate_manifest_json(config, project_root, sdk)?)?;
+    fs::write(
+        bundle_dir.join("manifest.json"),
+        generate_manifest_json(config, app_version, project_root, sdk)?,
+    )?;
 
     let kernel_dir = simulator_kernel_dir(sdk);
     ensure_simulator_images(sdk, &kernel_dir)?;
@@ -760,8 +774,13 @@ mod tests {
 }
 
 /// Generate manifest.json content
-fn generate_manifest_json(config: &AppConfig, project_root: &Path, sdk: &SdkRoot) -> Result<String> {
+fn generate_manifest_json(
+    config: &AppConfig,
+    app_version: &semver::Version,
+    project_root: &Path,
+    sdk: &SdkRoot,
+) -> Result<String> {
     let permissions = config.resolved_permissions(project_root, Some(&sdk.keyos_root().join("api")))?;
-    let manifest = app_manifest_from_config(config, permissions);
+    let manifest = app_manifest_from_config(config, app_version, permissions);
     Ok(serde_json::to_string_pretty(&manifest)?)
 }

@@ -416,7 +416,7 @@ mod tests {
             theme: None,
             app_id: AppId::from_hex("0x00112233445566778899aabbccddeeff").unwrap(),
             permissions: PermissionsConfig::default(),
-            version: Version::parse("0.1.0").unwrap(),
+            version: Some(Version::parse("0.1.0").unwrap()),
             min_keyos_version: Version::parse("1.0.0").unwrap(),
             signing_identity: None,
             cosign2_config: None,

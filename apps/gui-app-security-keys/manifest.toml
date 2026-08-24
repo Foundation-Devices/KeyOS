@@ -1,6 +1,5 @@
 manifestVersion = "0"
 appId = "0x5365637572697479204b657973000000"
-version = "1.4.0"
 
 [appName]
 en = "Keys"

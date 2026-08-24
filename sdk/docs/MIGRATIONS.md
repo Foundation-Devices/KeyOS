@@ -94,7 +94,7 @@ foundation new my-app \
 
 **The app-id is also the domain-separation input to `GetAppSeed`** (`hmac256(app_id, master_seed)`), so it is not just install identity: change the app-id and every app-seed-derived key rotates with it, unrecoverably. Since gotcha 21 tells you to re-root your derivation in the app seed, treat the app-id as key material from here on.
 
-Pass your existing `app-id` so the device treats the migrated app as the same identity — but **bump the version**: the port must carry a version higher than the last 0.4.0 release (original `0.1.0` → port `0.2.0`), both in `app-config.toml` (`--app-version` / `version`) and in the crate `version` of `Cargo.toml`, so a sideload upgrades the installed original cleanly and the two builds are distinguishable in logs.
+Pass your existing `app-id` so the device treats the migrated app as the same identity — but **bump the Cargo package version**: the port must carry a version higher than the last 0.4.0 release (original `0.1.0` → port `0.2.0`). `Cargo.toml` is now the canonical source copied into the manifest and signing headers. If an older `app-config.toml` still has a duplicate `version`, remove it; while supported for migration, the build requires it to match Cargo exactly.
 
 **The publisher key is the other half of install identity.** A `.app` installed from Settings over an existing app is an update only when the same publisher key signed both; the new bundle is staged and swapped in whole, so an archive that fails to unpack costs the user nothing. Install checks the signed manifest and that the archive carries exactly the files it hashes, not the contents of those files: a bundle whose payload does not match its `fileHashes` installs and is refused at launch instead. The same app-id under a *different* key is refused (Settings reports it as installed from another publisher) until the user removes the installed app, and removal wipes that app's AppData and granted permissions with it. A running app is likewise refused until closed. So keep the signing identity as stable across releases as the app-id: rotating it turns every user's next update into a remove-and-reinstall that loses their data and grants.
 
@@ -233,7 +233,7 @@ Everything else — `seed()`, `use_api!()`, the permission model — is unchange
 
 - `ui/ui` — symlink to the SDK's Slint widget library, created by `foundation build`/`sim` (it targets the *versioned* SDK directory; after an SDK update run `foundation clean` then rebuild to refresh it).
 - `target/foundation/**` — new private staging tree: converted image assets, per-app generated theme `.slint` files, `sim-resources`. Never edit.
-- `manifest.toml` (app root) — generated from `app-config.toml` + `permission_templates.toml` on build, gitignored. 1.0.0 adds `publisher`, `description`, `version`, `qrMatchRules`, `fileHashes` (sha256 of each bundle file, covered by the signature) to the schema, which is now versioned (`manifestVersion = "0"`).
+- `manifest.toml` (app root) — generated from `app-config.toml` + the Cargo package version + `permission_templates.toml` on build, gitignored. 1.0.0 adds `publisher`, `description`, `version`, `qrMatchRules`, `fileHashes` (sha256 of each bundle file, covered by the signature) to the schema, which is now versioned (`manifestVersion = "0"`).
 - `AGENTS.md` (new) — agent guidance generated into every app.
 
 ### 3.3 build.rs
@@ -384,11 +384,13 @@ ui.global::<crate::Theme>().set_font_size_title(28.0);
 
 ### 7.1 app-config.toml
 
-Same keys as 0.4.0 (`app-name`, `friendly-app-name`, `launcher-app-name`, `description`, `icon`, `app-id`, `version`, `min-keyos-version`, `[publisher] name/contact-email/support-url`, `[permissions] template = ["gui-app"]`, optional `signing-identity`/`cosign2-config`) **plus one new required-by-template key**:
+Same keys as 0.4.0 (`app-name`, `friendly-app-name`, `launcher-app-name`, `description`, `icon`, `app-id`, `min-keyos-version`, `[publisher] name/contact-email/support-url`, `[permissions] template = ["gui-app"]`, optional `signing-identity`/`cosign2-config`) **plus one new required-by-template key**:
 
 ```toml
 theme = "resources/theme.json"
 ```
+
+The app version now lives only in the package section of `Cargo.toml`. A legacy `version` in `app-config.toml` remains temporarily accepted, but the build fails unless it matches Cargo exactly.
 
 ### 7.2 permission_templates.toml — regenerate, don't copy
 

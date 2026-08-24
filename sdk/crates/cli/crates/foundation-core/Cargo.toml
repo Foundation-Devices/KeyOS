@@ -15,6 +15,7 @@ serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 semver = { workspace = true }
+cargo_metadata = { workspace = true }
 dirs = { workspace = true }
 imagesize = "0.13"
 regex = { workspace = true }

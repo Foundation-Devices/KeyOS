@@ -4,7 +4,6 @@
 appId = "0x38a8f01a9eef414b7c2c6729a6b0c306"
 publisher = "Foundation"
 description = "Ethereum app running in Legacy Mode."
-version = "1.22.1"
 minKeyosVersion = "1.4.0-beta1"
 
 [appName]

@@ -524,6 +524,7 @@ name = "foundation-core"
 version = "1.0.0"
 dependencies = [
  "app-manifest",
+ "cargo_metadata",
  "dirs",
  "imagesize",
  "regex",

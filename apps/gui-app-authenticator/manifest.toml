@@ -1,6 +1,5 @@
 manifestVersion = "0"
 appId = "0x41757468656e74696361746f72203246"
-version = "1.4.0"
 [[qrMatchRules]]
 id = "otpauth"
 idLocalizations = { en = "OTP Auth" }

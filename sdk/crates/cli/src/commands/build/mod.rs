@@ -25,6 +25,7 @@ pub struct BuildArgs {
     pub release: bool,
 }
 
+use super::warn_legacy_app_config_version;
 use crate::assets::stage_hardware_assets;
 use crate::cargo_support::{emit_cargo_messages, emit_stderr_if_present, ensure_development_environment};
 use crate::signing_permissions::{
@@ -44,6 +45,8 @@ const RUSTFLAGS_PIC: &str = "--cfg keyos -C relocation-model=pic -C link-arg=-pi
 /// What a build left on disk, for the commands that run one before doing their own work.
 pub struct BuiltBundle {
     pub bundle_dir: PathBuf,
+    /// Cargo package version stamped into the manifest and both cosign2 headers.
+    pub version: semver::Version,
     /// Bundle-relative names of the files the manifest's `fileHashes` covers.
     pub hashed_files: Vec<String>,
 }
@@ -64,6 +67,8 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     let project = ProjectContext::discover()?;
     let project_root = project.root.as_path();
     let config = &project.config;
+    warn_legacy_app_config_version(config);
+    let app_version = config.resolved_version(project_root).context("Failed to resolve app version")?;
 
     // Build the bundle from a clean dir, or else a stray root file (a stale
     // artifact, a .DS_Store) gets hashed into the signed manifest.
@@ -75,7 +80,7 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     fs::create_dir_all(&output_dir)?;
 
     // Ensure shared @ui sources and generated router/translation files exist before cargo runs.
-    prepare_project_for_build(project_root, &sdk)?;
+    prepare_project_for_build(project_root, &sdk, &app_version)?;
 
     // Ensure the app's theme Rust is generated and current; theme.rs pulls it
     // in via foundation_themes::include_theme!, keyed on FOUNDATION_THEMES_RUST_DIR.
@@ -107,15 +112,16 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     let hashed_files = file_hashes.keys().cloned().collect();
     let app_hash = file_hashes.get(ELF_FILE).cloned().unwrap_or_default();
     let manifest_path = output_dir.join("manifest.json");
-    generate_manifest(config, project_root, &sdk, &manifest_path, file_hashes)?;
+    generate_manifest(config, &app_version, project_root, &sdk, &manifest_path, file_hashes)?;
 
     // Sign app.elf and the manifest. fileHashes was taken from the unsigned elf, so signing the
     // elf doesn't invalidate it and the two signatures are independent.
     println!("Signing app.elf and manifest...");
     let cosign2_config_path = get_cosign2_config(config, project_root)?;
-    sign_with_cosign2(&stripped_path, &cosign2_config_path, &config.version.to_string())?;
+    let app_version_string = app_version.to_string();
+    sign_with_cosign2(&stripped_path, &cosign2_config_path, &app_version_string)?;
     ensure_cosign2_header(&stripped_path)?;
-    sign_with_cosign2(&manifest_path, &cosign2_config_path, &config.version.to_string())?;
+    sign_with_cosign2(&manifest_path, &cosign2_config_path, &app_version_string)?;
 
     // Success message
     println!();
@@ -128,11 +134,11 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
         println!("  icon-dark.bin");
     }
     println!("  resources/");
-    println!("Version: {}", config.version);
+    println!("Version: {app_version}");
     println!("App hash: {}", hex::encode(app_hash));
     println!("Compare it with App Hash under Settings > Apps > {} on the device.", config.app_name);
 
-    Ok(BuiltBundle { bundle_dir: output_dir, hashed_files })
+    Ok(BuiltBundle { bundle_dir: output_dir, version: app_version, hashed_files })
 }
 
 /// Get the effective cosign2 config path for this app.
@@ -317,13 +323,14 @@ fn strip_binary(input: &Path, output: &Path) -> Result<()> {
 /// Generate manifest.json from app-config.toml, carrying the staged bundle's file hashes.
 fn generate_manifest(
     config: &AppConfig,
+    app_version: &semver::Version,
     project_root: &Path,
     sdk: &SdkRoot,
     output: &Path,
     file_hashes: BTreeMap<String, [u8; FILE_HASH_BYTE_LEN]>,
 ) -> Result<()> {
     let permissions = config.resolved_permissions(project_root, Some(&sdk.keyos_root().join("api")))?;
-    let mut manifest = app_manifest_from_config(config, permissions);
+    let mut manifest = app_manifest_from_config(config, app_version, permissions);
     manifest.file_hashes = file_hashes;
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(output, json)?;

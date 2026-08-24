@@ -3,6 +3,8 @@
 
 //! Built-in command implementations
 
+use foundation_core::AppConfig;
+
 pub mod build;
 pub mod cert;
 pub mod clean;
@@ -46,5 +48,13 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
         format!("{bytes} {unit}")
     } else {
         format!("{value:.1} {unit}")
+    }
+}
+
+pub(crate) fn warn_legacy_app_config_version(config: &AppConfig) {
+    if config.version.is_some() {
+        eprintln!(
+            "Warning: `version` in app-config.toml is deprecated; remove it and set the app version only in Cargo.toml."
+        );
     }
 }

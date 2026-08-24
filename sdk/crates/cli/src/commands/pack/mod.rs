@@ -42,7 +42,7 @@ pub fn execute(args: &PackArgs) -> Result<()> {
     println!("Pack complete!");
     println!("Output: {}", report.archive_path.display());
     println!("  {} files, {}", report.entries, format_bytes(report.archive_bytes));
-    println!("Version: {}", config.version);
+    println!("Version: {}", built.version);
     println!();
     println!("Copy the archive to a USB drive or the airlock, then install it on Passport Prime");
     println!("from Settings > Apps > Install App.");

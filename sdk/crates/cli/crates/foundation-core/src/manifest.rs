@@ -12,7 +12,11 @@ use crate::config::{AppConfig, PermissionEntries};
 pub type AppManifest = Manifest;
 pub use app_manifest::FILE_HASH_BYTE_LEN;
 
-pub fn app_manifest_from_config(config: &AppConfig, permissions: PermissionEntries) -> AppManifest {
+pub fn app_manifest_from_config(
+    config: &AppConfig,
+    app_version: &semver::Version,
+    permissions: PermissionEntries,
+) -> AppManifest {
     AppManifest {
         app_name: config
             .manifest_app_names()
@@ -22,7 +26,7 @@ pub fn app_manifest_from_config(config: &AppConfig, permissions: PermissionEntri
         app_id: config.app_id.as_bytes().try_into().expect("AppConfig validation enforces 16-byte app IDs"),
         publisher: config.publisher.name_value().map(ToOwned::to_owned),
         description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
-        version: Some(config.version.clone()),
+        version: Some(app_version.clone()),
         min_keyos_version: Some(config.min_keyos_version.clone()),
         servers: BTreeMap::new(),
         fixed_sids: BTreeMap::new(),
@@ -62,7 +66,7 @@ mod tests {
             theme: None,
             app_id: AppId::from_hex(app_id).unwrap(),
             permissions: PermissionsConfig::default(),
-            version: semver::Version::parse("0.1.0").unwrap(),
+            version: Some(semver::Version::parse("0.1.0").unwrap()),
             min_keyos_version: semver::Version::parse("1.0.0").unwrap(),
             signing_identity: None,
             cosign2_config: None,
@@ -76,7 +80,7 @@ mod tests {
         let permissions: PermissionEntries =
             BTreeMap::from([("os/settings".to_string(), vec!["GetDeviceName".to_string()])]);
 
-        let manifest = app_manifest_from_config(&config, permissions);
+        let manifest = app_manifest_from_config(&config, &semver::Version::new(1, 4, 0), permissions);
 
         assert_eq!(
             manifest.app_name,
@@ -88,7 +92,7 @@ mod tests {
         );
         assert_eq!(manifest.publisher.as_deref(), Some("Demo Corp"));
         assert_eq!(manifest.description.as_deref(), Some("Demo"));
-        assert_eq!(manifest.version, Some(semver::Version::parse("0.1.0").unwrap()));
+        assert_eq!(manifest.version, Some(semver::Version::parse("1.4.0").unwrap()));
         assert_eq!(manifest.min_keyos_version, Some(semver::Version::parse("1.0.0").unwrap()));
         assert_eq!(
             manifest.permissions,
@@ -113,7 +117,8 @@ mod tests {
             )]),
         });
 
-        let manifest = app_manifest_from_config(&config, PermissionEntries::default());
+        let manifest =
+            app_manifest_from_config(&config, &semver::Version::new(1, 4, 0), PermissionEntries::default());
 
         assert_eq!(
             manifest.qr_match_rules,

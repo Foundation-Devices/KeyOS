@@ -1,6 +1,5 @@
 manifestVersion = "0"
 appId = "0xc192b79230473875f159d4423d74d00f"
-version = "1.4.0"
 
 [appName]
 en = "Settings"

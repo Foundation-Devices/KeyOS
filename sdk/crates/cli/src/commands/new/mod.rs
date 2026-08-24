@@ -544,10 +544,12 @@ mod tests {
 
         // Supplied args flow all the way into the generated config.
         let config = fs::read_to_string(project_path.join("app-config.toml")).unwrap();
+        let cargo_toml = fs::read_to_string(project_path.join("Cargo.toml")).unwrap();
         assert!(config.contains(r#"app-name = "demo-app""#));
         assert!(config.contains(r#"friendly-app-name = "Demo App""#));
         assert!(config.contains(r#"description = "Demo app""#));
-        assert!(config.contains(r#"version = "0.1.0""#));
+        assert!(!config.lines().any(|line| line.trim_start().starts_with("version =")));
+        assert!(cargo_toml.contains(r#"version = "0.1.0""#));
         assert!(config.contains("0x00112233445566778899aabbccddeeff"));
     }
 
@@ -755,7 +757,7 @@ mod tests {
 
         create_project(&sample_args("demo-app"), &sdk, project_root).unwrap();
         let project_path = project_root.join("demo-app");
-        prepare_project_for_build(&project_path, &sdk).unwrap();
+        prepare_project_for_build(&project_path, &sdk, &semver::Version::new(0, 1, 0)).unwrap();
 
         // The scaffolded app's build.rs resolves FOUNDATION_THEMES_RUST_DIR,
         // falling back to <home>/.foundation/themes/rust, which is exactly where
@@ -832,7 +834,7 @@ mod tests {
         args.template = Some("multi-page-app".to_string());
         create_project(&args, &sdk, project_root).unwrap();
         let project_path = project_root.join("demo-app");
-        prepare_project_for_build(&project_path, &sdk).unwrap();
+        prepare_project_for_build(&project_path, &sdk, &semver::Version::new(0, 1, 0)).unwrap();
 
         let theme_rs = fs::read_to_string(project_path.join("src").join("theme.rs")).unwrap();
         assert!(theme_rs.contains("foundation_themes::include_theme!(app_theme);"));
@@ -875,7 +877,7 @@ mod tests {
         args.template = Some("kitchen-sink".to_string());
         create_project(&args, &sdk, project_root).unwrap();
         let project_path = project_root.join("demo-app");
-        prepare_project_for_build(&project_path, &sdk).unwrap();
+        prepare_project_for_build(&project_path, &sdk, &semver::Version::new(0, 1, 0)).unwrap();
 
         let theme_rs = fs::read_to_string(project_path.join("src").join("theme.rs")).unwrap();
         assert!(theme_rs.contains("foundation_themes::include_theme!(app_theme);"));

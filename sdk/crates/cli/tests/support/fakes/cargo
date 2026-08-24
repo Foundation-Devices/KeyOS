@@ -6,6 +6,9 @@ if [ "$1" = "--version" ]; then
   echo 'cargo 1.0.0-fake'
   exit 0
 fi
+if [ "$1" = "metadata" ]; then
+  exec "${FOUNDATION_REAL_CARGO:?FOUNDATION_REAL_CARGO is required for metadata}" "$@"
+fi
 cmd="$1"
 shift || true
 pkg=""

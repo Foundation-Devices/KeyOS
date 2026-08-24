@@ -9,7 +9,6 @@ description = "{{description}}"
 icon = "{{icon}}"
 theme = "resources/theme.json"
 app-id = "{{app_id}}"
-version = "{{version}}"
 min-keyos-version = "{{min_keyos_version}}"
 
 [publisher]

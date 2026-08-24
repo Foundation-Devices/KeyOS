@@ -4,7 +4,6 @@
 appId = "0x05a7b38cd1e94f2a8b6c3d0e7f12a459"
 publisher = "Foundation"
 description = "Solana app running in Legacy Mode."
-version = "1.16.0"
 minKeyosVersion = "1.4.0-beta1"
 
 [appName]

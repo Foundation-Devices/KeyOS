@@ -1,6 +1,5 @@
 manifestVersion = "0"
 appId = "0x426974636f696e2057616c6c65740000"
-version = "1.4.0"
 # PSBT: sign a transaction
 [[qrMatchRules]]
 id = "psbt"

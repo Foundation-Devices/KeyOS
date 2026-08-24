@@ -273,13 +273,24 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     let build =
         env.command_in(env.app_root()).env("FOUNDATION_DEVELOP_SHELL", "1").arg("build").output().unwrap();
     assert!(build.status.success(), "build failed: {}", stderr(&build));
+    assert!(
+        !stderr(&build).contains("`version` in app-config.toml is deprecated"),
+        "canonical config emitted a legacy-version warning: {}",
+        stderr(&build)
+    );
     let built_manifest = env.app_root().join("target").join("keyos").join("smoke-app").join("manifest.json");
     assert!(built_manifest.exists());
     // The build signs the manifest, prepending a 2048-byte cosign2 header; the JSON follows it.
     let built_manifest_bytes = fs::read(&built_manifest).unwrap();
     let built_manifest_json = std::str::from_utf8(&built_manifest_bytes[2048..]).unwrap();
+    assert!(built_manifest_json.contains("\"version\": \"0.1.0\""));
     assert!(built_manifest_json.contains("os/gui-server"));
     assert!(built_manifest_json.contains("os/settings"));
+    assert_cosign2_version(&built_manifest, "0.1.0");
+    assert_cosign2_version(
+        &env.app_root().join("target").join("keyos").join("smoke-app").join("app.elf"),
+        "0.1.0",
+    );
 
     let sideload = env
         .command_in(env.app_root())
@@ -301,6 +312,11 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
 
     let sim = env.command_in(env.app_root()).arg("sim").output().unwrap();
     assert!(sim.status.success(), "sim failed: {}", stderr(&sim));
+    assert!(
+        !stderr(&sim).contains("`version` in app-config.toml is deprecated"),
+        "canonical config emitted a legacy-version warning: {}",
+        stderr(&sim)
+    );
     let app_id_dir = "00112233445566778899aabbccddeeff";
     // The host-exec'd app.elf and reference manifest land under the simulator's
     // sideloaded-apps dir, keyed by the bare hex app id.
@@ -322,6 +338,7 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(env.read_log("simulator.log").contains(env.bundle_root().display().to_string().as_str()));
     assert!(env.read_log("simulator-stdin.log").contains("run 0x00112233445566778899aabbccddeeff"));
     let cargo_log = env.read_log("cargo.log");
+    assert!(cargo_log.contains("cmd=metadata "), "Cargo metadata bypassed the fake cargo shim: {cargo_log}");
     assert!(
         cargo_log
             .contains("cmd=build --package smoke-app --message-format json-render-diagnostics RUSTFLAGS=\n"),
@@ -330,6 +347,44 @@ fn build_sim_preview_sideload_and_gen_cert_work_in_smoke_env() {
     assert!(
         !cargo_log.contains("cmd=build --package smoke-app RUSTFLAGS=--cfg keyos"),
         "sim should not force hardware cfg for hosted builds: {cargo_log}"
+    );
+}
+
+#[test]
+fn legacy_app_config_versions_warn_and_must_match_cargo() {
+    let env = TestEnv::new();
+    env.write_smoke_app();
+
+    let config_path = env.app_root().join("app-config.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        config.replace(
+            "min-keyos-version = \"1.0.0\"",
+            "version = \"0.1.0\"\n            min-keyos-version = \"1.0.0\"",
+        ),
+    )
+    .unwrap();
+
+    let sim = env.command_in(env.app_root()).arg("sim").output().unwrap();
+    assert!(sim.status.success(), "legacy sim failed: {}", stderr(&sim));
+    assert!(
+        stderr(&sim).contains("`version` in app-config.toml is deprecated"),
+        "sim omitted the legacy-version warning: {}",
+        stderr(&sim)
+    );
+
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(&config_path, config.replace("version = \"0.1.0\"", "version = \"9.9.9\"")).unwrap();
+    let mismatch =
+        env.command_in(env.app_root()).env("FOUNDATION_DEVELOP_SHELL", "1").arg("build").output().unwrap();
+    assert!(!mismatch.status.success(), "mismatched legacy version unexpectedly built");
+    assert!(
+        stderr(&mismatch).contains("`version` in app-config.toml is deprecated")
+            && stderr(&mismatch).contains("Legacy version 9.9.9")
+            && stderr(&mismatch).contains("Cargo package version 0.1.0"),
+        "build warning or mismatched legacy version error was unclear: {}",
+        stderr(&mismatch)
     );
 }
 
@@ -644,6 +699,7 @@ struct TestEnv {
     home: PathBuf,
     bundle: PathBuf,
     app: PathBuf,
+    real_cargo: PathBuf,
     path: OsString,
 }
 
@@ -654,6 +710,15 @@ impl TestEnv {
         let bundle = root.path().join("sdk-bundle");
         let app = root.path().join("smoke-app");
         let fake_bin = Path::new(env!("FOUNDATION_FAKE_BIN"));
+        let real_cargo = std::env::var_os("CARGO")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .or_else(|| {
+                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .map(|entry| entry.join(format!("cargo{}", std::env::consts::EXE_SUFFIX)))
+                    .find(|path| path.is_file())
+            })
+            .expect("find real cargo before prepending the test fakes");
 
         fs::create_dir_all(home.join(".foundation").join("plugins")).unwrap();
         fs::create_dir_all(bundle.join("lib").join("keyos")).unwrap();
@@ -698,7 +763,7 @@ impl TestEnv {
         path_entries.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
         let path = std::env::join_paths(path_entries).unwrap();
 
-        Self { root, home, bundle, app, path }
+        Self { root, home, bundle, app, real_cargo, path }
     }
 
     fn home(&self) -> &Path { &self.home }
@@ -720,6 +785,8 @@ impl TestEnv {
         command
             .env("FOUNDATION_LANG", "en")
             .env("FOUNDATION_SDK_ROOT", &self.bundle)
+            .env("FOUNDATION_REAL_CARGO", &self.real_cargo)
+            .env("CARGO", Path::new(env!("FOUNDATION_FAKE_BIN")).join("cargo"))
             .env("HOME", &self.home)
             .env("SHELL", "/bin/bash")
             .env("PATH", &self.path)
@@ -752,6 +819,7 @@ impl TestEnv {
     }
 
     fn write_smoke_app(&self) {
+        fs::create_dir_all(self.app.join("src")).unwrap();
         fs::create_dir_all(self.app.join("resources")).unwrap();
         fs::create_dir_all(self.app.join("ui")).unwrap();
         fs::write(
@@ -764,6 +832,7 @@ impl TestEnv {
             "#,
         )
         .unwrap();
+        fs::write(self.app.join("src").join("main.rs"), "fn main() {}\n").unwrap();
         fs::write(
             self.app.join("build.rs"),
             r#"
@@ -788,7 +857,6 @@ impl TestEnv {
             description = "Smoke test app"
             icon = "resources/icon.svg"
             app-id = "0x00112233445566778899aabbccddeeff"
-            version = "0.1.0"
             min-keyos-version = "1.0.0"
 
             [publisher]
@@ -835,3 +903,10 @@ fn link(_src: &Path, _dst: &Path) {}
 fn stdout(output: &Output) -> String { String::from_utf8_lossy(&output.stdout).to_string() }
 
 fn stderr(output: &Output) -> String { String::from_utf8_lossy(&output.stderr).to_string() }
+
+fn assert_cosign2_version(path: &Path, expected: &str) {
+    let bytes = fs::read(path).unwrap();
+    let version = &bytes[22..42];
+    let version_end = version.iter().position(|byte| *byte == 0).unwrap_or(version.len());
+    assert_eq!(std::str::from_utf8(&version[..version_end]).unwrap(), expected);
+}

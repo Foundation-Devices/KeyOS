@@ -57,8 +57,8 @@ The guide's recommended path is to generate a new app and port into it, not to p
   which is silent in a non-interactive run. The app-id is the device's install identity *and* the
   domain-separation input to the app seed, so letting it default rotates every app-seed-derived key
   unrecoverably.
-- **Bump the version** above the last release of the original, in both `app-config.toml` and the crate
-  `version`, so a sideload upgrades the installed app cleanly.
+- **Bump the Cargo package version** above the last release of the original so a sideload upgrades the
+  installed app cleanly. `Cargo.toml` is the only canonical app version source.
 - Ask the user for any metadata you cannot read out of the old `app-config.toml` (publisher, contact, support
   URL). Do not invent it.
 - Keep the generated `Cargo.toml`, `build.rs`, `theme.rs`, `.gitignore` and `permission_templates.toml`, then

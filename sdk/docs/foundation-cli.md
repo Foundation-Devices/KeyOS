@@ -50,7 +50,8 @@ recommend plugin commands to SDK users.
 
 ## Project Files Agents Should Know
 
-- `app-config.toml`: app metadata, app ID, icon path, theme path, version, permissions, optional QR match rules, and optional signing identity. The `icon` file is converted into the bundled `icon.bin` placed next to `app.elf`. A `<stem>-dark.(svg|png)` sibling of the icon (e.g. `resources/icon-dark.svg`) is converted into `icon-dark.bin` beside it and used in dark theme; without one, the light icon serves both themes. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
+- `Cargo.toml`: the app package's canonical version. The build copies this version into the signed manifest and executable signing header.
+- `app-config.toml`: KeyOS app metadata, app ID, icon path, theme path, minimum KeyOS version, permissions, optional QR match rules, and optional signing identity. Older projects may still contain a duplicate `version`; it is accepted only when it matches `Cargo.toml` and should be removed. The `icon` file is converted into the bundled `icon.bin` placed next to `app.elf`. A `<stem>-dark.(svg|png)` sibling of the icon (e.g. `resources/icon-dark.svg`) is converted into `icon-dark.bin` beside it and used in dark theme; without one, the light icon serves both themes. The optional `theme` entry names an app-local theme JSON path, typically `resources/theme.json`.
 - `permission_templates.toml`: named permission bundles expanded by `app-config.toml`.
 - `.foundation-sdk/current`: generated SDK dependency mapping used by template `Cargo.toml` path dependencies. It is ignored and refreshed by `foundation new`, `build`, `sim`, and `preview`.
 - `ui/app.slint`: default UI entrypoint for `foundation preview`.
