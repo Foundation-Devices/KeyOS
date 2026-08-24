@@ -76,6 +76,8 @@ Medium:
 - Latent bugs that only trigger under uncommon conditions, or error paths that leave a service wedged with no recovery.
 - Filesystem ordering that a power loss would leave misread on the next boot, or data left sitting in the cache where a flush was available. See the filesystem section of `architecture-faq.md`.
 - New TODOs or technical debt added without a tracking ticket.
+- Tests which leave junk behind when failing (e.g. by manually deleting files at the end of the test instead of using `tempfile`'s `TempDir` or similar)
+- Tests which cannot be run concurrently because they set process-global state like statics, env vars, common config files. Just adding locks to these tests should not be accepted, and instead tests should be re-architected with concurrency in mind (e.g. with dependency injection, or splitting off the global-accessing parts of the code from the processing parts)
 
 Low:
 
