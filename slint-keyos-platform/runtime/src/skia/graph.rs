@@ -3,11 +3,14 @@
 
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use tiny_skia::{
-    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Point, Rect, SpreadMode, Stroke,
-    StrokeDash, Transform,
+    Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Mask, Paint, Path, PathBuilder, Point,
+    SpreadMode, Stroke, StrokeDash, Transform,
 };
 
-const BOTTOM_VERTICAL_MARGIN: u32 = 6;
+/// Gap between the lowest graph point and the bitmap's bottom edge. Exported so
+/// callers sizing the drawable span (e.g. the launcher's `GRAPH_MAX_HEIGHT`)
+/// stay in sync with the baseline used here.
+pub const GRAPH_BOTTOM_MARGIN: u32 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PricePoint {
@@ -17,8 +20,13 @@ pub struct PricePoint {
     pub is_pad: bool,
 }
 
-const GRAPH_BORDER_RADIUS: f32 = 14.0;
-const GRAPH_BORDER_STROKE_WIDTH: f32 = 2.0;
+// Must match the graph-strip clip radius in the launcher's page.slint so the
+// border curve and the Slint clip curve lie on top of each other.
+/// Corner radius of the graph bitmap's rounded-bottom mask and border.
+/// Exported so the launcher's Slint layer can clip overlays (e.g. the scrub
+/// marker) on the same curve instead of hard-coding a copy.
+pub const GRAPH_BORDER_RADIUS: f32 = 16.0;
+const GRAPH_BORDER_STROKE_WIDTH: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GraphPoint {
@@ -34,6 +42,30 @@ pub struct GraphStyle {
     pub is_dark_mode: bool,
 }
 
+/// Card silhouette: square top corners, rounded bottom corners. Shared by the
+/// clip mask (filled, implicitly closed across the top) and the border stroke
+/// (left open so the top edge is not stroked), keeping both on one curve.
+fn rounded_bottom_rect(left: f32, top: f32, right: f32, bottom: f32, radius: f32) -> Option<Path> {
+    let radius = radius.min((right - left) / 2.0).min(bottom - top);
+    let control = radius * 0.552_284_8;
+    let mut pb = PathBuilder::new();
+    pb.move_to(left, top);
+    pb.line_to(left, bottom - radius);
+    pb.cubic_to(left, bottom - radius + control, left + radius - control, bottom, left + radius, bottom);
+    pb.line_to(right - radius, bottom);
+    pb.cubic_to(right - radius + control, bottom, right, bottom - radius + control, right, bottom - radius);
+    pb.line_to(right, top);
+    pb.finish()
+}
+
+fn graph_clip_mask(w: u32, h: u32) -> Mask {
+    let mut mask = Mask::new(w, h).unwrap();
+    if let Some(clip) = rounded_bottom_rect(0.0, 0.0, w as f32, h as f32, GRAPH_BORDER_RADIUS) {
+        mask.fill_path(&clip, FillRule::Winding, true, Transform::identity());
+    }
+    mask
+}
+
 pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec<GraphPoint> {
     if data.len() < 2 {
         return Vec::new();
@@ -44,7 +76,7 @@ pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec
     let min_value = *prices.iter().min().unwrap_or(&0);
     let is_constant = max_value == min_value;
     let value_range = (max_value - min_value) as f32;
-    let max_y = h.saturating_sub(BOTTOM_VERTICAL_MARGIN) as f32;
+    let max_y = h.saturating_sub(GRAPH_BOTTOM_MARGIN) as f32;
 
     let min_timestamp = data.first().map(|point| point.timestamp).unwrap_or_default();
     let max_timestamp = data.last().map(|point| point.timestamp).unwrap_or(min_timestamp);
@@ -108,7 +140,7 @@ fn draw_flatline_graph(
     } else {
         Color::from_rgba8(0x95, 0x93, 0x94, 0xff)
     };
-    let max_y = h.saturating_sub(BOTTOM_VERTICAL_MARGIN);
+    let max_y = h.saturating_sub(GRAPH_BOTTOM_MARGIN);
     let adjusted_value = max_y as f32 - h as f32 * 0.25;
     let y = max_y as f32 - adjusted_value;
 
@@ -130,10 +162,6 @@ fn draw_flatline_graph(
 
     pb_line_stale.move_to(x0, y);
     pb_line_stale.line_to(x1, y);
-
-    let mut border_path = PathBuilder::default();
-    border_path.push_rect(Rect::from_xywh(0., 0., w as f32, h as f32).unwrap());
-    let border_path = border_path.finish().unwrap();
 
     let graph_stale_path = pb_line_stale.finish().unwrap();
     let fill_path_stale = pb_fill_stale.finish().unwrap();
@@ -161,8 +189,7 @@ fn draw_flatline_graph(
         dash: Some(StrokeDash::new(vec![10.0, 10.0], 0.0).unwrap()),
         ..Default::default()
     };
-    let mut mask = Mask::new(w, h).unwrap();
-    mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
+    let mask = graph_clip_mask(w, h);
 
     // Draw stale fill gradient
     pixmap.fill_path(
@@ -241,10 +268,6 @@ fn draw_normal_graph(
         last_segment_stale = Some(is_pad_segment);
     }
 
-    let mut border_path = PathBuilder::default();
-    border_path.push_rect(Rect::from_xywh(0., 0., w as f32, h as f32).unwrap());
-    let border_path = border_path.finish().unwrap();
-
     let graph_path = pb_line.finish();
     let graph_stale_path = pb_line_stale.finish();
     let fill_path_fresh = pb_fill_fresh.finish();
@@ -270,10 +293,13 @@ fn draw_normal_graph(
         ..Default::default()
     };
 
-    // Keep the existing 8%-to-80% opacity gradient while applying the sign color.
+    // 8% at the bottom towards the top; dark mode stays more translucent (60%
+    // vs 80%) so the line leads and the wallpaper pattern shows through,
+    // matching the launcher mock.
+    let fresh_top_alpha = if is_dark_mode { 0x99 } else { 0xcc };
     let fresh_stops = [
         (0.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0x14)),
-        (1.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0xcc)),
+        (1.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, fresh_top_alpha)),
     ];
     let fresh_stops: Vec<_> =
         fresh_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
@@ -282,9 +308,10 @@ fn draw_normal_graph(
         ..Default::default()
     };
 
-    let graph_stroke = Stroke { width: 2.0, ..Default::default() };
-    let mut mask = Mask::new(w, h).unwrap();
-    mask.fill_path(&border_path, FillRule::EvenOdd, false, Transform::identity());
+    // Round joins/caps: miter joins grow spikes on sharp price peaks.
+    let graph_stroke =
+        Stroke { width: 2.0, line_join: LineJoin::Round, line_cap: LineCap::Round, ..Default::default() };
+    let mask = graph_clip_mask(w, h);
 
     // Draw fill gradients
     if let Some(path) = &fill_path_stale {
@@ -312,30 +339,20 @@ fn draw_graph_border(pixmap: &mut tiny_skia::PixmapMut, w: u32, h: u32) {
     }
 
     let stroke_width = GRAPH_BORDER_STROKE_WIDTH;
-    let inset = stroke_width / 2.0 + 0.5;
-    let left = inset;
-    let right = w as f32 - inset;
-    let top = 0.0;
-    let bottom = h as f32 - inset;
-    let radius = GRAPH_BORDER_RADIUS.min((right - left) / 2.0).min(bottom - top);
-    let control = radius * 0.552_284_8;
-
-    let mut pb = PathBuilder::new();
-    pb.move_to(left, top);
-    pb.line_to(left, bottom - radius);
-    pb.cubic_to(left, bottom - radius + control, left + radius - control, bottom, left + radius, bottom);
-    pb.line_to(right - radius, bottom);
-    pb.cubic_to(right - radius + control, bottom, right, bottom - radius + control, right, bottom - radius);
-    pb.line_to(right, top);
-
-    let Some(path) = pb.finish() else {
+    // Half-pixel centre keeps the 1px hairline crisp in the outermost pixel
+    // column/row instead of smearing across two at half coverage.
+    let inset = stroke_width / 2.0;
+    let Some(path) =
+        rounded_bottom_rect(inset, 0.0, w as f32 - inset, h as f32 - inset, GRAPH_BORDER_RADIUS - inset)
+    else {
         return;
     };
 
+    // Hairline at 60% peak alpha: the mock shows a subtle copper edge, not a frame.
     let stops = vec![
         GradientStop::new(0.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
         GradientStop::new(0.25, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
-        GradientStop::new(1.0, Color::from_rgba8(0x73, 0x50, 0x45, 0xff)),
+        GradientStop::new(1.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x99)),
     ];
     let paint = Paint {
         shader: LinearGradient::new(

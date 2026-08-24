@@ -52,9 +52,13 @@ const EXPIRE_TIME_MINUTES: u64 = 60;
 const EXPIRE_TIME: Duration = Duration::from_secs(EXPIRE_TIME_MINUTES * 60); // 1 hour
 const GRAPH_WINDOW_MINUTES: u64 = 100;
 const REDRAW_TIME_SECS: u64 = 60; // 1 minute
-const GRAPH_WIDTH: u32 = 432;
-const GRAPH_HEIGHT: u32 = 88;
-const GRAPH_MAX_HEIGHT: u32 = GRAPH_HEIGHT - 10;
+
+// Figma component ".assests/Graph" (456x180 card): graph strip 456x120, price
+// line spanning at most 105px with 1px top headroom above the platform
+// renderer's bottom margin.
+const GRAPH_WIDTH: u32 = 456;
+const GRAPH_HEIGHT: u32 = 120;
+const GRAPH_MAX_HEIGHT: u32 = GRAPH_HEIGHT - slint_keyos_platform::skia::GRAPH_BOTTOM_MARGIN - 1;
 const APP_ICON_SIZE: u32 = 110;
 /// Pixel size for the per-app icons shown in the universal-QR match dropdown.
 const DROPDOWN_ICON_SIZE: u32 = 40;
@@ -344,6 +348,10 @@ fn sync_launcher_ui(ui: &AppWindow, launcher: &LauncherConfig) {
 fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
+
+    // The graph bitmap rounds its own corners; hand the renderer's radius to
+    // the Slint layer so overlay clips (scrub marker) follow the same curve.
+    ui.global::<GraphLayout>().set_strip_corner_radius(slint_keyos_platform::skia::GRAPH_BORDER_RADIUS);
 
     let state = StoredValue::new(AppState::new(cx.gui.clone(), ui.as_weak()));
 

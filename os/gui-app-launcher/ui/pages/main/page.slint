@@ -34,6 +34,30 @@ import {
 import { UIColors } from "@ui/palettes/ui-colors.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
 
+// Vertical rhythm of the launcher pages, from the Figma Backboard component
+// (node 12873-49676): the 180px graph card sits flush under the top bar with
+// a 24px gap to the icon grid; pages without the graph pad 20px instead.
+// Shared by LauncherPaginator (rendering) and MainPage (drop targets) so the
+// two cannot drift apart.
+export global GraphLayout {
+    out property <length> card-height: 180px;
+    out property <length> bottom-gap: 24px;
+    out property <length> no-graph-top-gap: 20px;
+    // Set from main.rs at startup to the platform crate's GRAPH_BORDER_RADIUS —
+    // the radius the graph bitmap's own corner mask is built with — so overlay
+    // clips follow the same curve without a hand-copied constant.
+    in property <length> strip-corner-radius: 16px;
+}
+
+// Transient icon motion: how far a pressed icon sinks, and the rearrange
+// jiggle's amplitude (the jiggle table is built from it in thirds). The
+// paginator derives its bottom clip bleed from these, so growing either
+// widens the clip with it instead of quietly cutting labels again.
+global IconMotion {
+    out property <length> press-offset: 4px;
+    out property <length> jiggle-amplitude: 1.5px;
+}
+
 component PageDot inherits Rectangle {
     in property <int> page-index;
     in property <bool> selected;
@@ -74,11 +98,11 @@ component PriceGraph inherits Rectangle {
     in property <length> content-width;
     in property <length> card-height;
     in property <length> shadow-top-overhang;
+    in property <length> shadow-horizontal-overhang: 12px;
 
     // Scrub marker coordinates arrive in the rendered bitmap's coordinate space.
     property <length> graph-width: max(1px, State.bitcoin-graph-image.width * 1px);
     property <length> graph-height: max(1px, State.bitcoin-graph-image.height * 1px);
-    property <length> shadow-horizontal-overhang: 12px;
     property <length> shadow-bottom-overhang: 18px;
     property <length> scrub-marker-size: 10px;
     property <bool> is-touch-active: false;
@@ -212,12 +236,10 @@ component PriceGraph inherits Rectangle {
         y: parent.height - self.height;
         width: root.graph-width;
         height: root.graph-height;
+        // No clip here: the graph bitmap already rounds its own bottom corners
+        // (transparent outside its radius-16 mask). Clipping again at the same
+        // curve would stack a second anti-aliased edge on top and rough it up.
         background: transparent;
-        border-top-left-radius: 0px;
-        border-top-right-radius: 0px;
-        border-bottom-left-radius: 16px;
-        border-bottom-right-radius: 16px;
-        clip: true;
 
         Image {
             width: parent.width;
@@ -225,11 +247,23 @@ component PriceGraph inherits Rectangle {
             source: State.bitcoin-graph-image;
         }
 
-        if State.bitcoin-scrub-active: Circle {
-            size: root.scrub-marker-size;
-            x: State.bitcoin-scrub-marker-x;
-            y: State.bitcoin-scrub-marker-y;
-            background: Palette.content-secondary;
+        // The marker gets its own rounded clip layer: clamped to the strip's
+        // edges it can overlap the transparent corners the bitmap's mask cut
+        // away, and clipping only this layer leaves the image's anti-aliased
+        // edge untouched.
+        if State.bitcoin-scrub-active: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-bottom-left-radius: GraphLayout.strip-corner-radius;
+            border-bottom-right-radius: GraphLayout.strip-corner-radius;
+            clip: true;
+
+            Circle {
+                size: root.scrub-marker-size;
+                x: State.bitcoin-scrub-marker-x;
+                y: State.bitcoin-scrub-marker-y;
+                background: Palette.content-secondary;
+            }
         }
     }
 
@@ -309,7 +343,7 @@ component LauncherCollectionItem inherits Rectangle {
     private property <brush> icon-foreground-color: CurrentTheme.is-dark ? #e0e0e0 : #404040;
     private property <length> visual-offset-x: State.rearrange-mode && !is-dragging ? jiggle-x : 0px;
     private property <length> visual-offset-y: State.rearrange-mode && !is-dragging ? jiggle-y : 0px;
-    private property <length> press-offset-y: touch.pressed && !is-dragging ? 4px : 0px;
+    private property <length> press-offset-y: touch.pressed && !is-dragging ? IconMotion.press-offset : 0px;
 
     animate opacity {
         duration: 180ms;
@@ -530,7 +564,14 @@ component LauncherCollection inherits Rectangle {
     private property <bool> drag-active: false;
     private property <int> dragged-index: -1;
     private property <int> target-index: -1;
-    private property <[length]> jiggle-table: [-1.5px, 1.0px, 0.5px, -0.5px, 1.5px, -1.0px];
+    private property <[length]> jiggle-table: [
+        -IconMotion.jiggle-amplitude,
+        IconMotion.jiggle-amplitude * 2 / 3,
+        IconMotion.jiggle-amplitude / 3,
+        -IconMotion.jiggle-amplitude / 3,
+        IconMotion.jiggle-amplitude,
+        -IconMotion.jiggle-amplitude * 2 / 3,
+    ];
     private property <bool> active-local-drag:
         drag-active && State.drag-overlay-visible && State.drag-source-collection-id == root.collection-id;
     private property <bool> external-hover-active:
@@ -901,8 +942,9 @@ component LauncherPaginator inherits Rectangle {
     in property <length> standard-collection-height: 528px;
     in property <length> content-width;
     in property <length> collection-inset-x: 12px;
-    in property <length> collection-offset-y: -3px;
+    in property <length> collection-offset-y: 0px;
     in property <length> graph-shadow-top-overhang;
+    in property <length> graph-shadow-horizontal-overhang;
     in property <DropTarget> dock-target: {
         id: "",
         left: 0px,
@@ -948,11 +990,16 @@ component LauncherPaginator inherits Rectangle {
         column-gap: 24px,
     };
     private property <length> rearrange-top-bleed: State.rearrange-mode ? 16px : 0px;
-    private property <length> graph-region-height: 198px;
+    // The last icon row ends flush with the viewport, but a pressed icon shifts
+    // shell and label down by the press offset (plus jiggle in rearrange mode)
+    // — bleed the clip past the bottom so that transient overshoot isn't cut off.
+    private property <length> press-bottom-bleed: Math.ceil((IconMotion.press-offset + IconMotion.jiggle-amplitude) / 1px) * 1px;
+    private property <length> graph-region-height: GraphLayout.card-height + GraphLayout.bottom-gap;
     private property <length> first-page-content-height: first-collection-height + graph-region-height;
-    private property <length> page-viewport-height: first-page-content-height > standard-collection-height ? first-page-content-height : standard-collection-height;
+    private property <length> standard-page-content-height: standard-collection-height + GraphLayout.no-graph-top-gap;
+    private property <length> page-viewport-height: first-page-content-height > standard-page-content-height ? first-page-content-height : standard-page-content-height;
     private property <length> page-span: content-width + page-gap;
-    private property <length> graph-card-height: 178px;
+    private property <length> graph-card-height: GraphLayout.card-height;
     private property <bool> source-is-only-item-on-last-page:
         root.pages.length > 0 && State.drag-source-collection-id == root.pages[root.pages.length - 1].id && root.pages[root.pages.length - 1].items.length == 1;
     // The price graph owns its scrub gesture; the page swipe hit area starts
@@ -990,7 +1037,7 @@ component LauncherPaginator inherits Rectangle {
     z: State.drag-source-collection-id != "" && State.drag-source-collection-id != "dock" ? 950 : 0;
 
     function page-collection-y(page-index: int) -> length {
-        page-index == 0 ? root.graph-region-height + root.collection-offset-y : 0px
+        page-index == 0 ? root.graph-region-height + root.collection-offset-y : GraphLayout.no-graph-top-gap
     }
     function page-collection-height(page-index: int) -> length {
         page-index == 0 ? root.first-collection-height : root.standard-collection-height
@@ -1021,9 +1068,12 @@ component LauncherPaginator inherits Rectangle {
             clip: false;
 
             Rectangle {
+                // Bleed the clip region so the graph card's drop shadow is not
+                // cut off at the top or at the screen-side margins.
+                x: -root.graph-shadow-horizontal-overhang;
                 y: -root.rearrange-top-bleed - root.graph-shadow-top-overhang;
-                width: parent.width;
-                height: root.page-viewport-height + root.rearrange-top-bleed + root.graph-shadow-top-overhang;
+                width: parent.width + root.graph-shadow-horizontal-overhang * 2;
+                height: root.page-viewport-height + root.rearrange-top-bleed + root.graph-shadow-top-overhang + root.press-bottom-bleed;
                 background: transparent;
                 clip: true;
 
@@ -1031,7 +1081,7 @@ component LauncherPaginator inherits Rectangle {
 
                 rearrange-sgr := SwipeGestureHandler {
                     enabled: State.rearrange-mode && State.drag-source-collection-id == "";
-                    x: 0px;
+                    x: root.graph-shadow-horizontal-overhang;
                     y: parent.swipe-area-top;
                     width: root.content-width;
                     height: max(0px, root.page-viewport-height - root.swipe-hit-top);
@@ -1070,7 +1120,7 @@ component LauncherPaginator inherits Rectangle {
 
                 sgr := SwipeGestureHandler {
                     enabled: !State.rearrange-mode && State.drag-source-collection-id == "";
-                    x: 0px;
+                    x: root.graph-shadow-horizontal-overhang;
                     y: parent.swipe-area-top;
                     width: root.content-width;
                     height: max(0px, root.page-viewport-height - root.swipe-hit-top);
@@ -1116,6 +1166,7 @@ component LauncherPaginator inherits Rectangle {
                                 content-width: root.content-width;
                                 card-height: root.graph-card-height;
                                 shadow-top-overhang: root.graph-shadow-top-overhang;
+                                shadow-horizontal-overhang: root.graph-shadow-horizontal-overhang;
                             }
 
                             LauncherCollection {
@@ -1179,8 +1230,9 @@ export component MainPage inherits BasePage {
     private property <length> grid-side-padding: 24px;
     private property <length> frame-side-padding: 12px;
     private property <length> page-collection-inset: grid-side-padding - frame-side-padding;
-    private property <length> page-collection-offset-y: -3px;
-    private property <length> paginator-top: 12px;
+    private property <length> page-collection-offset-y: 0px;
+    // Flush under the top bar, like the Figma Backboard's grid.
+    private property <length> paginator-top: 0px;
     private property <length> content-width: root.width - frame-side-padding * 2;
     private property <length> dock-left: 0px;
     private property <length> dock-height: 164px;
@@ -1190,14 +1242,15 @@ export component MainPage inherits BasePage {
     private property <length> icon-row-gap: 24px;
     private property <int> graph-page-grid-rows: 2;
     private property <int> standard-page-grid-rows: 3;
-    private property <length> graph-height: 178px;
-    private property <length> graph-bottom-gap: 20px;
     private property <length> graph-shadow-top-overhang: 6px;
+    private property <length> graph-shadow-horizontal-overhang: 12px;
     private property <length> graph-page-height: graph-page-grid-rows * icon-row-height + Math.max(0, graph-page-grid-rows - 1) * icon-row-gap;
     private property <length> standard-page-height: standard-page-grid-rows * icon-row-height + Math.max(0, standard-page-grid-rows - 1) * icon-row-gap;
     private property <length> active-page-left: frame-side-padding + page-collection-inset;
     private property <length> active-page-top:
-        paginator-top + (State.current-page == 0 ? graph-height + graph-bottom-gap + page-collection-offset-y : 0px);
+        paginator-top + (State.current-page == 0
+        ? GraphLayout.card-height + GraphLayout.bottom-gap + page-collection-offset-y
+        : GraphLayout.no-graph-top-gap);
     private property <length> active-page-width: content-width - page-collection-inset * 2;
     private property <length> active-page-height: State.current-page == 0 ? graph-page-height : standard-page-height;
     private property <bool> active-page-is-new-page: State.current-page >= State.pages.length;
@@ -1254,6 +1307,7 @@ export component MainPage inherits BasePage {
         collection-inset-x: root.page-collection-inset;
         collection-offset-y: root.page-collection-offset-y;
         graph-shadow-top-overhang: root.graph-shadow-top-overhang;
+        graph-shadow-horizontal-overhang: root.graph-shadow-horizontal-overhang;
         first-collection-height: root.graph-page-height;
         standard-collection-height: root.standard-page-height;
         pages: State.pages;
