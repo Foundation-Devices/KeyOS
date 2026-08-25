@@ -155,35 +155,40 @@ component PriceGraph inherits Rectangle {
             }
         }
 
-        if !State.bitcoin-scrub-active && !State.is-price-stale: Rectangle {
-            width: pill-content.preferred-width;
-            height: 32px;
+        if !State.bitcoin-scrub-active && !State.is-price-stale: VerticalLayout {
+            alignment: start;
             vertical-stretch: 0;
-            border-radius: self.height / 2;
-            background: State.is-price-positive ? Palette.content-positive : Palette.content-negative;
+            padding-top: 17px - Size.sz2_5;
 
-            pill-content := HorizontalLayout {
-                alignment: center;
-                spacing: Size.sz2;
-                padding-top: Size.sz1;
-                padding-bottom: Size.sz1;
-                padding-left: Size.sz3;
-                padding-right: Size.sz3;
+            Rectangle {
+                width: pill-content.preferred-width;
+                height: 32px;
+                border-radius: self.height / 2;
+                background: State.is-price-positive ? Palette.content-positive : Palette.content-negative;
 
-                VerticalLayout {
+                pill-content := HorizontalLayout {
                     alignment: center;
+                    spacing: Size.sz2;
+                    padding-top: Size.sz1;
+                    padding-bottom: Size.sz1;
+                    padding-left: Size.sz3;
+                    padding-right: Size.sz3;
 
-                    Icon {
-                        name: State.is-price-positive ? "trend-up" : "trend-down";
-                        size: Size.sz6;
-                        color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
+                    VerticalLayout {
+                        alignment: center;
+
+                        Icon {
+                            name: State.is-price-positive ? "trend-up" : "trend-down";
+                            size: Size.sz6;
+                            color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
+                        }
                     }
-                }
 
-                TextSm {
-                    text: State.bitcoin-price-change-percent;
-                    color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
-                    vertical-alignment: center;
+                    TextSm {
+                        text: State.bitcoin-price-change-percent;
+                        color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
