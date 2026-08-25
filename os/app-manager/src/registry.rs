@@ -161,19 +161,19 @@ impl AppRegistryDiff {
 pub(crate) struct AppRegistry {
     installed_apps: HashMap<AppId, AppInfo>,
     running_apps: HashMap<PID, RunningAppInfo>,
-    current_keyos_version: Version,
+    current_keyos_version: Option<Version>,
 }
 
 impl Default for AppRegistry {
-    fn default() -> Self { Self::new(semver::Version::new(u64::MAX, 0, 0)) }
+    fn default() -> Self { Self::new(Some(semver::Version::new(u64::MAX, 0, 0))) }
 }
 
 impl AppRegistry {
-    pub(crate) fn new(current_keyos_version: Version) -> Self {
+    pub(crate) fn new(current_keyos_version: Option<Version>) -> Self {
         Self { installed_apps: HashMap::new(), running_apps: HashMap::new(), current_keyos_version }
     }
 
-    pub(crate) fn current_keyos_version(&self) -> &Version { &self.current_keyos_version }
+    pub(crate) fn current_keyos_version(&self) -> Option<&Version> { self.current_keyos_version.as_ref() }
 
     pub(crate) fn scan_installed_apps(
         &mut self,
@@ -274,9 +274,6 @@ impl AppRegistry {
         let (manifest_json, signature) = check_manifest_signature(&manifest_raw, root)?;
         let manifest = app_manifest::try_from_bytes(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e}"))?;
-        if manifest.min_keyos_version.is_none() {
-            anyhow::bail!("manifest does not declare minKeyosVersion");
-        }
 
         let app_id = AppId(manifest.app_id);
         if !sideloaded_app_dir_matches_app_id(Some(app_dir), &app_id, root) {
@@ -321,7 +318,10 @@ impl AppRegistry {
             .values()
             .filter(|app_info| app_ids.is_empty() || app_ids.contains(&app_info.id))
             .filter(|app_info| {
-                app_info.publisher_and_launch_error(&self.current_keyos_version, publishers).1.is_none()
+                app_info
+                    .publisher_and_launch_error(self.current_keyos_version.as_ref(), publishers)
+                    .1
+                    .is_none()
             })
             .filter(|app_info| !app_info.manifest.qr_match_rules.is_empty())
             .filter_map(|app_info| match to_vec(&app_info.manifest.qr_match_rules) {
@@ -354,7 +354,7 @@ impl AppRegistry {
             .filter(|app_info| filter.sideloaded.map_or(true, |want| app_info.is_sideloaded() == want))
             .map(|app_info| {
                 let (publisher_fingerprint, launch_error) =
-                    app_info.publisher_and_launch_error(&self.current_keyos_version, publishers);
+                    app_info.publisher_and_launch_error(self.current_keyos_version.as_ref(), publishers);
                 // The label is an identity, not the bundle's claim: a certified app shows the
                 // certificate name the user confirmed at import, a Foundation-signed app its
                 // manifest publisher (covered by the Foundation signature), an uncertified
@@ -453,7 +453,7 @@ impl AppRegistry {
         publishers: &[ThirdPartyCertificateInfo],
     ) -> Option<LaunchError> {
         self.installed_apps.get(&app_id).map_or(Some(LaunchError::UnknownAppId), |app| {
-            app.publisher_and_launch_error(&self.current_keyos_version, publishers).1
+            app.publisher_and_launch_error(self.current_keyos_version.as_ref(), publishers).1
         })
     }
 
@@ -820,20 +820,21 @@ impl AppInfo {
     /// nor hosted apps carry a publisher fingerprint; the simulator ignores publisher signatures.
     fn publisher_and_launch_error(
         &self,
-        current_keyos_version: &Version,
+        current_keyos_version: Option<&Version>,
         publishers: &[ThirdPartyCertificateInfo],
     ) -> (String, Option<LaunchError>) {
-        let minimum = self
-            .manifest
-            .min_keyos_version
-            .as_ref()
-            .expect("registered app manifests must declare minKeyosVersion");
-        let compatibility_error = (minimum > current_keyos_version).then(|| {
-            LaunchError::Compatibility(CompatibilityError::KeyOsVersionTooOld {
-                minimum: minimum.to_string(),
-                current: current_keyos_version.to_string(),
-            })
-        });
+        let compatibility_error = match (self.manifest.min_keyos_version.as_ref(), current_keyos_version) {
+            (Some(_), None) if self.is_sideloaded() => {
+                Some(LaunchError::Compatibility(CompatibilityError::RunningKeyOsVersionUnavailable))
+            }
+            (Some(minimum), Some(current)) if minimum > current => {
+                Some(LaunchError::Compatibility(CompatibilityError::KeyOsVersionTooOld {
+                    minimum: minimum.to_string(),
+                    current: current.to_string(),
+                }))
+            }
+            _ => None,
+        };
         #[cfg(all(not(keyos), not(test)))]
         {
             let _ = publishers;
@@ -1287,14 +1288,14 @@ mod tests {
 
         // No matching publisher: not launchable and no publisher fingerprint to show.
         assert_eq!(
-            app.publisher_and_launch_error(&latest_keyos_version(), &[]),
+            app.publisher_and_launch_error(Some(&latest_keyos_version()), &[]),
             (String::new(), Some(LaunchError::NoCertificate))
         );
 
         // A publisher whose key matches the stored signer makes it launchable under its fingerprint.
         let publishers = vec![publisher_cert(SIGNER_HEX, "Acme")];
         assert_eq!(
-            app.publisher_and_launch_error(&latest_keyos_version(), &publishers),
+            app.publisher_and_launch_error(Some(&latest_keyos_version()), &publishers),
             (publishers[0].short_fingerprint.clone(), None)
         );
     }
@@ -1307,7 +1308,7 @@ mod tests {
             vec![publisher_cert_valid_until(SIGNER_HEX, "Acme", app_manager::now_unix_seconds() - 1)];
 
         assert_eq!(
-            app.publisher_and_launch_error(&latest_keyos_version(), &publishers),
+            app.publisher_and_launch_error(Some(&latest_keyos_version()), &publishers),
             (publishers[0].short_fingerprint.clone(), Some(LaunchError::PublisherCertificateExpired))
         );
     }
@@ -1345,7 +1346,7 @@ mod tests {
         app.manifest.min_keyos_version = Some(semver::Version::parse(TEST_MINIMUM_KEYOS_VERSION).unwrap());
         let app_id = app.id;
         let mut registry = registry_with(vec![app]);
-        registry.current_keyos_version = Version::parse("1.3.1").unwrap();
+        registry.current_keyos_version = Some(Version::parse("1.3.1").unwrap());
 
         assert_eq!(
             registry.launch_error(app_id, &[]),
@@ -1364,6 +1365,61 @@ mod tests {
             apps[0].launch_error,
             Some(LaunchError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld { .. }))
         ));
+    }
+
+    #[test]
+    fn legacy_installed_app_without_a_minimum_remains_manageable() {
+        let mut app = app_info_with_trust(
+            THIRD_PARTY_APP_ID,
+            "Legacy App",
+            Some(THIRD_PARTY_ELF_PATH),
+            AppResourcesRoot::Sideloaded,
+            AppSignature::Foundation,
+        );
+        app.manifest.min_keyos_version = None;
+        let app_id = app.id;
+        let mut registry = registry_with(vec![app]);
+        registry.current_keyos_version = None;
+
+        assert_eq!(registry.launch_error(app_id, &[]), None);
+        let apps = registry.list_apps(
+            "en",
+            &[],
+            &app_manager::AppFilter::sideloaded_only(),
+            &PermissionGrantStore::default(),
+        );
+        assert_eq!(apps.len(), 1);
+        assert!(apps[0].can_remove);
+    }
+
+    #[test]
+    fn sideloaded_app_is_blocked_when_the_running_version_is_unavailable() {
+        let app = app_info_with_trust(
+            THIRD_PARTY_APP_ID,
+            "Example App",
+            Some(THIRD_PARTY_ELF_PATH),
+            AppResourcesRoot::Sideloaded,
+            AppSignature::Foundation,
+        );
+        let app_id = app.id;
+        let mut registry = registry_with(vec![app]);
+        registry.current_keyos_version = None;
+
+        assert_eq!(
+            registry.launch_error(app_id, &[]),
+            Some(LaunchError::Compatibility(app_manager::CompatibilityError::RunningKeyOsVersionUnavailable))
+        );
+    }
+
+    #[test]
+    fn built_in_app_remains_launchable_when_the_running_version_is_unavailable() {
+        let app_id = "0x426974636f696e2057616c6c65740000";
+        let app = built_in_app_info(app_id, "Bitcoin Wallet", Some("/keyos/apps/bitcoin/app.elf"));
+        let app_id = decode_app_id_str(app_id).unwrap();
+        let mut registry = registry_with(vec![app]);
+        registry.current_keyos_version = None;
+
+        assert_eq!(registry.launch_error(app_id, &[]), None);
     }
 
     /// A built-in app providing the camera server's manifest, so the message-id lookup does not
@@ -1538,7 +1594,7 @@ mod tests {
         let mut app = app_info(THIRD_PARTY_APP_ID, "Example App", Some(THIRD_PARTY_ELF_PATH));
         app.manifest.publisher = Some("Example Publisher".to_string());
         app.manifest.description = Some("Example description".to_string());
-        app.manifest.version = Some(semver::Version::parse("1.2.3").unwrap());
+        app.manifest.version = Some("1.2.3".to_string());
         app.manifest.file_hashes.insert(ELF_FILE.to_string(), [0xab; 32]);
         let registry = registry_with(vec![app]);
 
@@ -1629,7 +1685,7 @@ mod tests {
         );
         app.manifest.publisher = Some("Different Publisher".to_string());
 
-        assert_eq!(app.publisher_and_launch_error(&latest_keyos_version(), &[]), (String::new(), None));
+        assert_eq!(app.publisher_and_launch_error(Some(&latest_keyos_version()), &[]), (String::new(), None));
     }
 
     #[test]
@@ -1680,7 +1736,7 @@ mod tests {
         app.manifest.min_keyos_version = Some(semver::Version::parse("1.5.0").unwrap());
         app.manifest.qr_match_rules.push(rule);
         let mut registry = registry_with(vec![app]);
-        registry.current_keyos_version = Version::parse("1.4.0").unwrap();
+        registry.current_keyos_version = Some(Version::parse("1.4.0").unwrap());
 
         assert!(registry.qr_match_rules(&[], &[]).is_empty());
     }

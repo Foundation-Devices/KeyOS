@@ -81,6 +81,7 @@ pub enum LaunchAppStatus {
     PublisherCertificateExpired = 8,
     PublisherCertificateNotYetActive = 9,
     KeyOsVersionTooOld = 10,
+    RunningKeyOsVersionUnavailable = 11,
 }
 
 impl LaunchAppStatus {
@@ -748,7 +749,7 @@ mod tests {
         assert_eq!(LaunchAppResult::decode(&result.encode()).unwrap(), result);
         let failure = LaunchAppResult::new(0, LaunchAppStatus::NoCertificate);
         assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
-        for status in [LaunchAppStatus::KeyOsVersionTooOld] {
+        for status in [LaunchAppStatus::KeyOsVersionTooOld, LaunchAppStatus::RunningKeyOsVersionUnavailable] {
             let failure = LaunchAppResult::new(0, status);
             assert_eq!(LaunchAppResult::decode(&failure.encode()).unwrap(), failure);
         }

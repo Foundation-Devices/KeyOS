@@ -193,6 +193,9 @@ fn app_manager_launch_failure(error: app_manager::AppManagerError) -> RunAppResp
             LaunchFailureReason::PublisherCertificateNotYetActive
         }
         app_manager::AppManagerError::KeyOsVersionTooOld => LaunchFailureReason::KeyOsVersionTooOld,
+        app_manager::AppManagerError::RunningKeyOsVersionUnavailable => {
+            LaunchFailureReason::RunningKeyOsVersionUnavailable
+        }
         _ => LaunchFailureReason::Internal,
     };
     RunAppResponse::LaunchFailed { reason }
@@ -207,6 +210,10 @@ mod tests {
         assert_eq!(
             app_manager_launch_failure(app_manager::AppManagerError::KeyOsVersionTooOld),
             RunAppResponse::LaunchFailed { reason: LaunchFailureReason::KeyOsVersionTooOld }
+        );
+        assert_eq!(
+            app_manager_launch_failure(app_manager::AppManagerError::RunningKeyOsVersionUnavailable),
+            RunAppResponse::LaunchFailed { reason: LaunchFailureReason::RunningKeyOsVersionUnavailable }
         );
     }
 }

@@ -40,6 +40,8 @@ pub enum LaunchFailureReason {
     KeyOsVersionTooOld,
     /// Anything else: app-manager-internal failure, IPC failure, etc.
     Internal,
+    /// The running KeyOS version could not be determined, so compatibility cannot be checked.
+    RunningKeyOsVersionUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

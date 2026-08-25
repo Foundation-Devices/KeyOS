@@ -24,7 +24,7 @@
     {
       "name": "launcher",
       "path": "os/gui-app-launcher",
-      "include": ["common.appCompatibility", "common.button", "common.time"]
+      "include": ["common.button", "common.time", "common.updateProgress.restart"]
     },
     {
       "name": "legacy",
@@ -73,7 +73,13 @@
     {
       "name": "settings",
       "path": "os/gui-app-settings",
-      "include": ["common", "keycardBackup", "onboarding.enterPassword.content"]
+      "include": [
+        "common",
+        "keycardBackup",
+        "launcher.main.updateResumeDescription",
+        "launcher.main.updateResumeHeader",
+        "onboarding.enterPassword.content"
+      ]
     },
     {
       "name": "switcher",

@@ -82,6 +82,8 @@ Medium:
 Low:
 
 - Typos in user-facing strings, rustdoc, or code comments.
+- Tests that manually create directories under `std::env::temp_dir` instead of using a cleanup guard
+  such as `tempfile::tempdir`, because a panic leaves the manual directory behind.
 
 ## Do not comment on
 

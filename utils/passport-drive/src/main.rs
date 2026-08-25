@@ -90,6 +90,9 @@ pub(crate) fn launch_app_failure_message(status: LaunchAppStatus) -> Option<&'st
         LaunchAppStatus::KeyOsVersionTooOld => {
             Some("the app requires a newer KeyOS version; update KeyOS and try again")
         }
+        LaunchAppStatus::RunningKeyOsVersionUnavailable => {
+            Some("the running KeyOS version is unavailable; restart Passport normally and try again")
+        }
         LaunchAppStatus::NotReady => Some("launcher is not ready yet; unlock the device and try again"),
         LaunchAppStatus::InternalError => Some("internal launch error; check device logs"),
     }
@@ -135,6 +138,14 @@ mod tests {
 
         assert!(message.contains("newer KeyOS version"));
         assert!(message.contains("update KeyOS"));
+    }
+
+    #[test]
+    fn launch_app_failure_message_reports_unavailable_keyos_version_guidance() {
+        let message = launch_app_failure_message(LaunchAppStatus::RunningKeyOsVersionUnavailable).unwrap();
+
+        assert!(message.contains("version is unavailable"));
+        assert!(message.contains("restart Passport normally"));
     }
 
     #[test]

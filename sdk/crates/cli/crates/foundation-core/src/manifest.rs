@@ -26,7 +26,7 @@ pub fn app_manifest_from_config(
         app_id: config.app_id.as_bytes().try_into().expect("AppConfig validation enforces 16-byte app IDs"),
         publisher: config.publisher.name_value().map(ToOwned::to_owned),
         description: (!config.description.trim().is_empty()).then(|| config.description.clone()),
-        version: Some(app_version.clone()),
+        version: Some(app_version.to_string()),
         min_keyos_version: Some(config.min_keyos_version.clone()),
         servers: BTreeMap::new(),
         fixed_sids: BTreeMap::new(),
@@ -92,7 +92,7 @@ mod tests {
         );
         assert_eq!(manifest.publisher.as_deref(), Some("Demo Corp"));
         assert_eq!(manifest.description.as_deref(), Some("Demo"));
-        assert_eq!(manifest.version, Some(semver::Version::parse("1.4.0").unwrap()));
+        assert_eq!(manifest.version.as_deref(), Some("1.4.0"));
         assert_eq!(manifest.min_keyos_version, Some(semver::Version::parse("1.0.0").unwrap()));
         assert_eq!(
             manifest.permissions,

@@ -102,22 +102,27 @@ impl Default for AppManagerServer {
 }
 
 #[cfg(keyos)]
-fn running_keyos_version() -> Version {
+fn running_keyos_version() -> Option<Version> {
     let info = Security::default()
         .os_version_info()
         .expect("securam must return the running KeyOS version")
-        .expect("securam must contain the running KeyOS version");
+        // Bootloaders before 0.2.6 omit NormalMode arguments when booting UpdatedMain during
+        // interrupted-update recovery. Keep accepting that state so deployed devices can finish
+        // recovery; RecoveryMode also intentionally has no running KeyOS version.
+        ?;
     let end = info.keyos_version.iter().position(|byte| *byte == 0).unwrap_or(info.keyos_version.len());
     let version = std::str::from_utf8(&info.keyos_version[..end])
         .expect("securam's running KeyOS version must be UTF-8");
-    Version::parse(version.trim_start_matches('v'))
-        .expect("securam's running KeyOS version must be valid SemVer")
+    Some(
+        Version::parse(version.trim_start_matches('v'))
+            .expect("securam's running KeyOS version must be valid SemVer"),
+    )
 }
 
 #[cfg(not(keyos))]
-fn running_keyos_version() -> Version {
+fn running_keyos_version() -> Option<Version> {
     // Hosted builds do not receive the bootloader's KeyOS version argument.
-    Version::new(u64::MAX, 0, 0)
+    Some(Version::new(u64::MAX, 0, 0))
 }
 
 impl BlockingArchiveHandler<GetQrMatchRules> for AppManagerServer {

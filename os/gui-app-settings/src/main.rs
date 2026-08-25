@@ -622,7 +622,7 @@ fn installed_app(state: &AppState, app: app_manager::InstalledAppInfo, lang: &st
         launch_blocked_reason: launch_blocked_reason(state, app.launch_error).into(),
         can_remove: app.can_remove,
         is_flux: app.is_flux,
-        version: app.version.into(),
+        version: sanitize_app_version(&app.version).into(),
         size: format_app_size(app.size_bytes, lang).into(),
         app_hash: format_hex_groups(
             &hex::encode(app.app_hash),
@@ -801,14 +801,53 @@ fn launch_blocked_reason(state: &AppState, error: Option<LaunchError>) -> String
              it with the certificate's dates under Allowed Publishers.",
             device_date(state)
         ),
-        Some(LaunchError::Compatibility(app_manager::CompatibilityError::KeyOsVersionTooOld {
-            minimum,
-            current,
-        })) => i18n::replace_placeholders(
-            tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
-            &[minimum.as_str(), current.as_str()],
-        ),
+        Some(LaunchError::Compatibility(error)) => {
+            let update_in_progress = compatibility_update_in_progress(state, &error);
+            compatibility_message(&error, update_in_progress)
+        }
         _ => String::new(),
+    }
+}
+
+fn compatibility_update_in_progress(state: &AppState, error: &app_manager::CompatibilityError) -> bool {
+    if !matches!(error, app_manager::CompatibilityError::RunningKeyOsVersionUnavailable) {
+        return false;
+    }
+
+    let status = state.update.update_status();
+    status.needs_continue || status.installing
+}
+
+fn compatibility_message(error: &app_manager::CompatibilityError, update_in_progress: bool) -> String {
+    match error {
+        app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current } => {
+            // TODO(SFT-7925): Replace this 1.4 fallback with the dev.json-backed translation.
+            format!("This app requires KeyOS {minimum} or newer. This device is running KeyOS {current}.")
+        }
+        app_manager::CompatibilityError::RunningKeyOsVersionUnavailable if update_in_progress => {
+            tr::lookup_id(TrId::LauncherMainUpdateResumeDescription).to_string()
+        }
+        app_manager::CompatibilityError::RunningKeyOsVersionUnavailable => {
+            tr::lookup_id(TrId::CommonUpdateProgressRestart).to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_version_inline_message_is_one_state_appropriate_instruction() {
+        let error = app_manager::CompatibilityError::RunningKeyOsVersionUnavailable;
+
+        let message = compatibility_message(&error, true);
+        assert_eq!(message, tr::lookup_id(TrId::LauncherMainUpdateResumeDescription));
+        assert!(!message.contains('\n'));
+
+        let message = compatibility_message(&error, false);
+        assert_eq!(message, tr::lookup_id(TrId::CommonUpdateProgressRestart));
+        assert!(!message.contains('\n'));
     }
 }
 
@@ -842,6 +881,20 @@ fn sanitize_publisher_claim(value: &str) -> String {
     }
 
     sanitized
+}
+
+const APP_VERSION_MAX_CHARS: usize = 64;
+
+/// Keep an app-provided version from injecting layout controls or overwhelming its UI field.
+fn sanitize_app_version(value: &str) -> String {
+    let sanitized = sanitize_publisher_claim(value);
+    let mut chars = sanitized.chars();
+    let prefix = chars.by_ref().take(APP_VERSION_MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}…", prefix.trim_end())
+    } else {
+        sanitized
+    }
 }
 
 /// Invisible Unicode formatting characters can make a non-empty claim render as blank or consume
@@ -936,9 +989,9 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod publisher_claim_tests {
     use super::{
-        confirmation_publisher_claim, format_distinguished_name, format_hex_groups, sanitize_publisher_claim,
-        CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS, PUBLISHER_DATE_FORMAT, PUBLISHER_HEX_GROUPS_PER_LINE,
-        PUBLISHER_HEX_GROUP_LENGTH,
+        confirmation_publisher_claim, format_distinguished_name, format_hex_groups, sanitize_app_version,
+        sanitize_publisher_claim, APP_VERSION_MAX_CHARS, CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS,
+        PUBLISHER_DATE_FORMAT, PUBLISHER_HEX_GROUPS_PER_LINE, PUBLISHER_HEX_GROUP_LENGTH,
     };
 
     #[test]
@@ -968,6 +1021,16 @@ mod publisher_claim_tests {
         let bounded = confirmation_publisher_claim(&long_claim);
         assert_eq!(bounded, format!("{}…", "é".repeat(CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS)));
         assert_eq!(bounded.chars().count(), CONFIRMATION_PUBLISHER_CLAIM_MAX_CHARS + 1);
+    }
+
+    #[test]
+    fn app_version_is_single_line_bidi_safe_and_bounded() {
+        assert_eq!(sanitize_app_version("1.0\n\u{202e}evil\u{202c}"), "1.0 evil");
+
+        let long_version = "x".repeat(APP_VERSION_MAX_CHARS + 1);
+        let sanitized = sanitize_app_version(&long_version);
+        assert_eq!(sanitized.chars().count(), APP_VERSION_MAX_CHARS + 1);
+        assert!(sanitized.ends_with('…'));
     }
 
     #[test]
@@ -1326,18 +1389,20 @@ async fn pick_and_install(state: StoredValue<AppState>) -> InstallAppResult {
             TrId::AppsModalInstallAppRunningHeader,
             TrId::AppsModalInstallAppRunningContent,
         ),
-        Ok(Err(app_manager::InstallError::Compatibility(
-            app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current },
-        ))) => InstallAppResult {
-            canceled: false,
-            success: false,
-            title: tr::lookup_id(TrId::CommonAppCompatibilityUpdateKeyosTitle).into(),
-            text: i18n::replace_placeholders(
-                tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
-                &[minimum.as_str(), current.as_str()],
-            )
-            .into(),
-        },
+        Ok(Err(app_manager::InstallError::Compatibility(error))) => {
+            let state = state.borrow();
+            let update_in_progress = compatibility_update_in_progress(&state, &error);
+            InstallAppResult {
+                canceled: false,
+                success: false,
+                title: if update_in_progress {
+                    tr::lookup_id(TrId::LauncherMainUpdateResumeHeader).into()
+                } else {
+                    tr::lookup_id(TrId::AppsModalInstallFailedHeader).into()
+                },
+                text: compatibility_message(&error, update_in_progress).into(),
+            }
+        }
         Ok(Err(app_manager::InstallError::Fs(_) | app_manager::InstallError::Internal)) => {
             // app-manager may have dropped the app it was replacing before refusing, so the
             // cached list can name an app that is gone.

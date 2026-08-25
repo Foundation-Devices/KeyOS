@@ -48,7 +48,7 @@ pub(crate) trait InstalledApps {
     fn is_running(&self, app_id: &AppId) -> bool;
     fn bundle_signer(&self, app_id: &AppId) -> Option<Option<[u8; 33]>>;
     fn flux_emulator_installed(&self) -> bool;
-    fn current_keyos_version(&self) -> &semver::Version;
+    fn current_keyos_version(&self) -> Option<&semver::Version>;
 }
 
 impl InstalledApps for AppRegistry {
@@ -62,7 +62,7 @@ impl InstalledApps for AppRegistry {
 
     fn flux_emulator_installed(&self) -> bool { AppRegistry::flux_emulator_installed(self) }
 
-    fn current_keyos_version(&self) -> &semver::Version { AppRegistry::current_keyos_version(self) }
+    fn current_keyos_version(&self) -> Option<&semver::Version> { AppRegistry::current_keyos_version(self) }
 }
 
 /// Where an install put an app, so a caller that has to undo it does not have to guess.
@@ -126,7 +126,11 @@ pub(crate) fn install_archive(
     let minimum = manifest.min_keyos_version.as_ref().ok_or_else(|| {
         install_error(InstallError::NotAnApp, "manifest does not declare minKeyosVersion".to_string())
     })?;
-    let current = installed.current_keyos_version();
+    let Some(current) = installed.current_keyos_version() else {
+        let error = CompatibilityError::RunningKeyOsVersionUnavailable;
+        let detail = error.to_string();
+        return Err(install_error(InstallError::Compatibility(error), detail));
+    };
     if minimum > current {
         let error = CompatibilityError::KeyOsVersionTooOld {
             minimum: minimum.to_string(),
@@ -329,13 +333,24 @@ mod tests {
     const ICON: &[u8] = b"icon pixels";
     const TEST_MINIMUM_KEYOS_VERSION: &str = "1.4.0-beta1";
 
-    #[derive(Default)]
     struct FakeInstalledApps {
         built_in: bool,
         running: bool,
         signer: Option<Option<[u8; 33]>>,
         emulator_installed: bool,
         current_keyos_version: Option<semver::Version>,
+    }
+
+    impl Default for FakeInstalledApps {
+        fn default() -> Self {
+            Self {
+                built_in: false,
+                running: false,
+                signer: None,
+                emulator_installed: false,
+                current_keyos_version: Some(semver::Version::parse(TEST_MINIMUM_KEYOS_VERSION).unwrap()),
+            }
+        }
     }
 
     impl InstalledApps for FakeInstalledApps {
@@ -347,14 +362,7 @@ mod tests {
 
         fn flux_emulator_installed(&self) -> bool { self.emulator_installed }
 
-        fn current_keyos_version(&self) -> &semver::Version {
-            self.current_keyos_version.as_ref().unwrap_or_else(|| default_keyos_version())
-        }
-    }
-
-    fn default_keyos_version() -> &'static semver::Version {
-        static VERSION: std::sync::OnceLock<semver::Version> = std::sync::OnceLock::new();
-        VERSION.get_or_init(|| semver::Version::parse("1.4.0-beta1").unwrap())
+        fn current_keyos_version(&self) -> Option<&semver::Version> { self.current_keyos_version.as_ref() }
     }
 
     fn app_id() -> AppId { AppId(app_manifest::parse_app_id_bytes(APP_ID).unwrap()) }
@@ -534,14 +542,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_malformed_app_version_before_writing() {
-        let manifest = with_app_version(manifest_json(&[("app.elf", ELF)], &[]), "banana");
+    fn accepts_a_legacy_non_semver_app_version() {
+        let manifest = with_app_version(manifest_json(&[("app.elf", ELF)], &[]), "2026.08-beta");
         let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
 
-        let error = install(&fs, &FakeInstalledApps::default()).unwrap_err();
+        install(&fs, &FakeInstalledApps::default()).unwrap();
 
-        assert!(matches!(error, InstallError::NotAnApp));
-        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
     }
 
     #[test]
@@ -555,6 +562,21 @@ mod tests {
         install(&fs, &installed).unwrap();
 
         assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")).as_deref(), Some(ELF));
+    }
+
+    #[test]
+    fn rejects_install_when_the_running_version_is_unavailable() {
+        let manifest = with_minimum_keyos_version(manifest_json(&[("app.elf", ELF)], &[]), "99.0.0");
+        let fs = staged(&archive(&[("manifest.json", &manifest), ("app.elf", ELF)]));
+        let installed = FakeInstalledApps { current_keyos_version: None, ..Default::default() };
+
+        let error = install(&fs, &installed).unwrap_err();
+
+        assert!(matches!(
+            error,
+            InstallError::Compatibility(app_manager::CompatibilityError::RunningKeyOsVersionUnavailable)
+        ));
+        assert_eq!(read(&fs, &format!("{APP_DIR}/app.elf")), None);
     }
 
     #[test]

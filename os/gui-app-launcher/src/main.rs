@@ -1472,21 +1472,16 @@ fn handle_app_event(
             if let Some(reason) = publisher_blocked_reason(&error) {
                 clear_launching_state(&ui);
                 ui.global::<State>().set_app_blocked_reason(reason.into());
-            } else if let app_manager::LaunchError::Compatibility(
-                app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current },
-            ) = &error
-            {
-                error_message(
-                    &ui,
-                    tr::lookup_id(TrId::CommonAppCompatibilityUpdateKeyosTitle),
-                    &i18n::replace_placeholders(
-                        tr::lookup_id(TrId::CommonAppCompatibilityRequiresNewerKeyos),
-                        &[minimum.as_str(), current.as_str()],
-                    ),
-                    None,
-                    None,
-                    None,
-                );
+            } else if let app_manager::LaunchError::Compatibility(error) = &error {
+                let update_in_progress =
+                    if matches!(error, app_manager::CompatibilityError::RunningKeyOsVersionUnavailable) {
+                        let status = UpdateApi::default().update_status();
+                        status.needs_continue || status.installing
+                    } else {
+                        false
+                    };
+                let (title, message) = compatibility_modal(error, update_in_progress);
+                error_message(&ui, &title, &message, None, None, None);
             } else if matches!(error, app_manager::LaunchError::Verification(_)) {
                 error_message(
                     &ui,
@@ -1567,6 +1562,27 @@ fn handle_app_event(
         }
 
         app_manager::AppEvent::AllowedPublishersChanged => refresh_launcher_apps(state),
+    }
+}
+
+fn compatibility_modal(
+    error: &app_manager::CompatibilityError,
+    update_in_progress: bool,
+) -> (String, String) {
+    match error {
+        app_manager::CompatibilityError::KeyOsVersionTooOld { minimum, current } => (
+            tr::lookup_id(TrId::AppBlockedModalHeader).to_string(),
+            // TODO(SFT-7925): Replace this 1.4 fallback with the dev.json-backed translation.
+            format!("This app requires KeyOS {minimum} or newer. This device is running KeyOS {current}."),
+        ),
+        app_manager::CompatibilityError::RunningKeyOsVersionUnavailable if update_in_progress => (
+            tr::lookup_id(TrId::MainUpdateResumeHeader).to_string(),
+            tr::lookup_id(TrId::MainUpdateResumeDescription).to_string(),
+        ),
+        app_manager::CompatibilityError::RunningKeyOsVersionUnavailable => (
+            tr::lookup_id(TrId::AppBlockedModalHeader).to_string(),
+            tr::lookup_id(TrId::CommonUpdateProgressRestart).to_string(),
+        ),
     }
 }
 
@@ -1722,6 +1738,19 @@ mod tests {
     use app_manifest::QrPriority;
 
     use super::*;
+
+    #[test]
+    fn unavailable_version_modal_matches_the_recovery_state() {
+        let error = app_manager::CompatibilityError::RunningKeyOsVersionUnavailable;
+
+        let (title, message) = compatibility_modal(&error, true);
+        assert_eq!(title, tr::lookup_id(TrId::MainUpdateResumeHeader));
+        assert_eq!(message, tr::lookup_id(TrId::MainUpdateResumeDescription));
+
+        let (title, message) = compatibility_modal(&error, false);
+        assert_eq!(title, tr::lookup_id(TrId::AppBlockedModalHeader));
+        assert_eq!(message, tr::lookup_id(TrId::CommonUpdateProgressRestart));
+    }
 
     #[test]
     fn format_price_test() {

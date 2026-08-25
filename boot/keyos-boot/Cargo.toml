@@ -7,7 +7,7 @@ description = "FFI from at91bootstrap to Foundation's rustlang modules"
 license = "GPL-3.0-or-later"
 edition = "2021"
 name = "keyos-boot"
-version = "0.2.5"
+version = "0.2.6"
 publish = false
 
 [lib]

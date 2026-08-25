@@ -5,9 +5,11 @@ use {
     crate::{
         boot_screen::{set_continue_boot, set_curr_page, BootScreenPage},
         gui::{Page, QrCode},
+        securam::set_os_arguments,
         select_recovery_image,
         splash::hide_image_overlay,
         system_errors::{get_system_error, CtaAction, SystemErrorCode},
+        verify::get_bootloader_version_and_date,
     },
     arrayvec::ArrayVec,
     boot_common::{
@@ -21,6 +23,7 @@ use {
         theme::UISize,
         HEIGHT, WIDTH,
     },
+    securam_manager::OsArguments,
 };
 
 const QR_SIZE_PX: i32 = 380;
@@ -196,6 +199,12 @@ impl SystemErrorPage {
                         }
                     }
                     CtaAction::StartRecoveryOS => || {
+                        let (bootloader_version, bootloader_build_date) = get_bootloader_version_and_date();
+                        set_os_arguments(&OsArguments::RecoveryMode {
+                            bootloader_version,
+                            bootloader_build_date,
+                        })
+                        .ok();
                         select_recovery_image();
                         set_continue_boot(true);
                     },

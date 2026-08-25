@@ -171,9 +171,11 @@ pub(crate) fn cleanup_and_jump_firmware() -> ! {
 }
 
 fn set_normal_os_arguments() {
-    if !matches!(selected_boot_image_kind(), BootImageKind::Main) {
-        // If the user selected a different boot image, don't set the OS arguments.
-        return;
+    match selected_boot_image_kind() {
+        BootImageKind::Main | BootImageKind::UpdatedMain => {}
+        // Recovery and System Information run the recovery image. Its version is not the running
+        // main-KeyOS version, and their mode-specific arguments must remain intact.
+        BootImageKind::Recovery => return,
     }
 
     let Some(keyos_version) = (unsafe { OS_VERSION }) else {

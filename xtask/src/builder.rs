@@ -1222,7 +1222,7 @@ fn generated_bundle_manifest(
     app_version: &Version,
     file_hashes: BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]>,
 ) -> Manifest {
-    manifest.version = Some(app_version.clone());
+    manifest.version = Some(app_version.to_string());
     manifest.min_keyos_version.get_or_insert_with(|| {
         Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer")
     });
@@ -1326,7 +1326,7 @@ mod tests {
         let generated_json = serde_json::to_string(&generated).unwrap();
         let packaged: Manifest = serde_json::from_str(&generated_json).unwrap();
 
-        assert_eq!(packaged.version, Some(cargo_version));
+        assert_eq!(packaged.version, Some(cargo_version.to_string()));
         assert_eq!(
             packaged.min_keyos_version,
             Some(Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer"))

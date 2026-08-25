@@ -257,18 +257,19 @@ mod tests {
     }
 
     #[test]
-    fn manifest_versions_deserialize_as_semver() {
+    fn app_version_stays_opaque_while_minimum_keyos_is_semver() {
         let manifest =
             try_from_bytes(v0_json(r#","version":"2.1.0","minKeyosVersion":"1.2.3-beta1""#).as_bytes())
                 .unwrap();
 
-        assert_eq!(manifest.version, Some(semver::Version::parse("2.1.0").unwrap()));
+        assert_eq!(manifest.version.as_deref(), Some("2.1.0"));
         assert_eq!(manifest.min_keyos_version, Some(semver::Version::parse("1.2.3-beta1").unwrap()));
     }
 
     #[test]
-    fn malformed_manifest_versions_are_rejected_during_deserialization() {
-        assert!(try_from_bytes(v0_json(r#","version":"banana""#).as_bytes()).is_err());
+    fn app_version_accepts_legacy_formats_but_minimum_keyos_requires_semver() {
+        let manifest = try_from_bytes(v0_json(r#","version":"2026.08-beta""#).as_bytes()).unwrap();
+        assert_eq!(manifest.version.as_deref(), Some("2026.08-beta"));
         assert!(try_from_bytes(v0_json(r#","minKeyosVersion":"banana""#).as_bytes()).is_err());
     }
 

@@ -33,6 +33,9 @@ pub enum AppManagerError {
 
     #[error("KeyOS Version Too Old")]
     KeyOsVersionTooOld = 6,
+
+    #[error("Running KeyOS Version Unavailable")]
+    RunningKeyOsVersionUnavailable = 7,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -49,6 +52,8 @@ pub enum VerificationError {
 pub enum CompatibilityError {
     #[error("app requires KeyOS {minimum}, but this device is running {current}")]
     KeyOsVersionTooOld { minimum: String, current: String },
+    #[error("the running KeyOS version is unavailable")]
+    RunningKeyOsVersionUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -90,8 +95,26 @@ impl From<LaunchError> for AppManagerError {
             LaunchError::Compatibility(CompatibilityError::KeyOsVersionTooOld { .. }) => {
                 AppManagerError::KeyOsVersionTooOld
             }
+            LaunchError::Compatibility(CompatibilityError::RunningKeyOsVersionUnavailable) => {
+                AppManagerError::RunningKeyOsVersionUnavailable
+            }
             _ => AppManagerError::InternalError,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_running_version_remains_a_compatibility_error() {
+        assert!(matches!(
+            AppManagerError::from(LaunchError::Compatibility(
+                CompatibilityError::RunningKeyOsVersionUnavailable
+            )),
+            AppManagerError::RunningKeyOsVersionUnavailable
+        ));
     }
 }
 

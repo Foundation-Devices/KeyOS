@@ -701,6 +701,9 @@ fn launch_status(reason: LaunchFailureReason) -> LaunchAppStatus {
             LaunchAppStatus::PublisherCertificateNotYetActive
         }
         LaunchFailureReason::KeyOsVersionTooOld => LaunchAppStatus::KeyOsVersionTooOld,
+        LaunchFailureReason::RunningKeyOsVersionUnavailable => {
+            LaunchAppStatus::RunningKeyOsVersionUnavailable
+        }
         LaunchFailureReason::Internal => LaunchAppStatus::InternalError,
     }
 }

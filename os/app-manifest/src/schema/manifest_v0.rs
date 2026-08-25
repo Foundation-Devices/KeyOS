@@ -25,8 +25,9 @@ pub struct ManifestV0 {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub version: Option<semver::Version>,
-    /// Oldest KeyOS release that may install and launch this app. Missing means no minimum.
+    pub version: Option<String>,
+    /// Oldest KeyOS release that may install and launch this app. New installs must declare it;
+    /// missing is retained as "no minimum" for bundles installed by older KeyOS releases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_keyos_version: Option<semver::Version>,
     #[serde(default)]
