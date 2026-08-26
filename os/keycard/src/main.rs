@@ -77,7 +77,6 @@ impl KeycardServer {
         self.active_scheme = None;
         self.expected_seed_fingerprint = [0; 32];
         self.expected_timestamp = None;
-        log::debug!("Shards in pool: {:02x?}", self.shards);
     }
 
     fn set_shamir_scheme(&mut self, scheme: ShamirScheme) -> Result<(), KeycardError> {
@@ -133,13 +132,11 @@ impl KeycardServer {
 
     fn pop_shard(&mut self) -> Result<Shard, KeycardError> {
         let shard = self.shards.pop().ok_or(KeycardError::NoShardLeft)?;
-        log::debug!("Poped shard: {:02x?}", shard);
-        log::debug!("Shards in pool: {:02x?}", self.shards);
+        log::debug!("Popped shard {} ({} left in pool)", shard.seed_shamir_share_index(), self.shards.len());
         if shard.part_of_magic_backup() {
             Ok(shard)
         } else {
             self.shards.push(shard);
-            log::debug!("Shards in pool: {:02x?}", self.shards);
             Err(KeycardError::NotMagicBackupShard)
         }
     }
@@ -175,19 +172,17 @@ impl KeycardServer {
             self.expected_timestamp = Some(shard_timestamp);
         }
 
-        log::debug!("Pushed shard: {:02x?}", shard);
         self.shards.push(shard);
-        log::debug!("Shards in pool: {:02x?}", self.shards);
+        log::debug!("Pushed shard {} ({} in pool)", shard_index, self.shards.len());
         Ok(())
     }
 
     fn identify_keycard(&mut self) -> Result<(Vec<u8>, Option<KeycardIdentifyError>), KeycardError> {
         let (uid, raw_msg) = self.nfc.read_ndef_raw_msg(NFC_READ_TIMEOUT)?;
-        log::debug!("Read raw message: {:02x?}", raw_msg);
+        log::debug!("Read raw message ({} bytes)", raw_msg.len());
         let Ok(ndef_msg) = ndef::Message::try_from(raw_msg.as_slice()) else {
             return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
         };
-        log::debug!("Read NDEF message: {:02x?}", ndef_msg);
         if ndef_msg.records.len() != 1 {
             return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
         }
@@ -198,7 +193,6 @@ impl KeycardServer {
         let Ok(shard) = Shard::decode(&payload) else {
             return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
         };
-        log::debug!("Read shard: {:02x?}", shard);
         if &hmac(&self.security, &shard, &uid)? != shard.hmac() {
             return Ok((uid, Some(KeycardIdentifyError::HmacMismatch)));
         }
@@ -216,14 +210,12 @@ impl KeycardServer {
 
     fn store_shard_to_keycard(&mut self, uid: Vec<u8>) -> Result<(), KeycardError> {
         let mut shard = self.shards.pop().ok_or(KeycardError::NoShardLeft)?;
-        log::debug!("Poped shard: {:02x?}", shard);
-        log::debug!("Shards in pool: {:02x?}", self.shards);
+        log::debug!("Storing shard {} ({} left in pool)", shard.seed_shamir_share_index(), self.shards.len());
         let original_shard = shard.clone();
         shard.set_hmac(hmac(&self.security, &shard, &uid)?);
         let mut ndef_msg = ndef::Message::default();
         let mut ndef_rec1 = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
         ndef_msg.append_record(&mut ndef_rec1);
-        log::debug!("Store NDEF message: {:02x?}", ndef_msg);
         match self.nfc.write_ndef_raw_msg(uid, ndef_msg.to_vec(), NFC_WRITE_TIMEOUT) {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -245,8 +237,6 @@ impl KeycardServer {
         let mut ndef_msg = ndef::Message::default();
         let mut ndef_rec = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
         ndef_msg.append_record(&mut ndef_rec);
-        log::debug!("Format NDEF message: {:02x?}", ndef_msg);
-
         match self.nfc.write_ndef_raw_msg(uid, ndef_msg.to_vec(), NFC_WRITE_TIMEOUT) {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
@@ -255,12 +245,11 @@ impl KeycardServer {
 
     fn load_shard_from_keycard(&mut self) -> Result<LoadedShard, KeycardError> {
         let (uid, raw_msg) = self.nfc.read_ndef_raw_msg(NFC_READ_TIMEOUT)?;
-        log::debug!("Load raw message: {:02x?}", raw_msg);
+        log::debug!("Load raw message ({} bytes)", raw_msg.len());
         if raw_msg.is_empty() {
             return Err(KeycardError::BlankTag);
         }
         let ndef_msg = ndef::Message::try_from(raw_msg.as_slice()).map_err(|_| KeycardError::Ndef)?;
-        log::debug!("Load NDEF message: {:02x?}", ndef_msg);
         if ndef_msg.records.len() != 1 {
             return Err(KeycardError::InvalidData);
         }
@@ -269,7 +258,6 @@ impl KeycardServer {
         }
         let payload = ndef_msg.records[0].payload();
         let shard = Shard::decode(&payload).map_err(|_| KeycardError::InvalidData)?;
-        log::debug!("Load shard: {:02x?}", shard);
         if &hmac(&self.security, &shard, &uid)? != shard.hmac() {
             return Err(KeycardError::HmacMismatch);
         }
@@ -326,7 +314,7 @@ impl KeycardServer {
             return Err(KeycardError::DuplicateShardIndex { index: shard_index });
         }
         self.shards.push(shard);
-        log::debug!("Shards in pool: {:02x?}", self.shards);
+        log::debug!("Shards in pool: {}", self.shards.len());
         Ok(LoadedShard {
             id: KeycardId(uid),
             has_magic_backup: part_of_magic_backup,
@@ -352,7 +340,6 @@ impl KeycardServer {
 
         let recovered = self.crypto.recover_secret(indexes, shares)?;
         let seed = Seed::from_bytes(&recovered);
-        log::debug!("Restored master seed: {:02x?}", seed.bytes());
 
         let seed_fingerprint = self.security.fingerprint(&seed)?;
         log::debug!("Restored master seed fingerprint: {:02x?}", seed_fingerprint);

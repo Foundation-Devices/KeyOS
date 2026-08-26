@@ -139,8 +139,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                             let mut nfc_api = NfcApi::default();
                             while start.elapsed() < interval {
                                 match nfc_api.read_ndef_raw_msg(Duration::from_millis(300)) {
-                                    Ok(raw_msg) => {
-                                        log::debug!("Read raw message: {:x?}", raw_msg);
+                                    Ok((_, raw_msg)) => {
+                                        log::debug!("Read NDEF message ({} bytes)", raw_msg.len());
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to read NDEF message: {:?}", e);
@@ -253,8 +253,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                             });
                         }
                         match nfc_api.read_ndef_raw_msg(Duration::from_millis(300)) {
-                            Ok(raw_msg) => {
-                                log::debug!("Read raw message: {:x?}", raw_msg);
+                            Ok((_, raw_msg)) => {
+                                log::debug!("Read NDEF message ({} bytes)", raw_msg.len());
                             }
                             Err(e) => {
                                 log::warn!("Failed to read NDEF message: {:?}", e);
@@ -402,8 +402,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                             let mut nfc_api = NfcApi::default();
                             while start.elapsed() < interval {
                                 match nfc_api.read_ndef_raw_msg(Duration::from_millis(300)) {
-                                    Ok(raw_msg) => {
-                                        log::debug!("Read raw message: {:x?}", raw_msg);
+                                    Ok((_, raw_msg)) => {
+                                        log::debug!("Read NDEF message ({} bytes)", raw_msg.len());
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to read NDEF message: {:?}", e);
@@ -449,8 +449,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                             });
                         }
                         match nfc_api.read_ndef_raw_msg(Duration::from_millis(300)) {
-                            Ok(raw_msg) => {
-                                log::debug!("Read raw message: {:x?}", raw_msg);
+                            Ok((_, raw_msg)) => {
+                                log::debug!("Read NDEF message ({} bytes)", raw_msg.len());
                             }
                             Err(e) => {
                                 log::warn!("Failed to read NDEF message: {:?}", e);

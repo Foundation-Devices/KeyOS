@@ -169,7 +169,6 @@ impl Default for BluetoothServer {
             challenge_secret.secret = [0x0; 32]
         }
 
-        log::debug!("Challenge secret: {challenge_secret:02x?}");
         Self {
             packet_subscribers: Default::default(),
             state_subscribers: Vec::new(),
@@ -247,7 +246,6 @@ impl BluetoothServer {
 
         loop {
             let mut tx_msg = postcard::to_allocvec(&req)?;
-            log::debug!(">>> {:02x?}", req);
             log::trace!(">>> {:02x?}", &tx_msg);
             self.spi_peripheral.transfer_in_place(&mut tx_msg)?;
 
@@ -292,7 +290,6 @@ impl BluetoothServer {
         match postcard::from_bytes(&rx_msg) {
             Ok(resp) => {
                 log::trace!("<<< {:02x?}", &rx_msg);
-                log::debug!("<<< {:02x?}", resp);
                 Ok(resp)
             }
             Err(e) => {
@@ -739,7 +736,6 @@ impl BluetoothServer {
         for (i, chunk) in self.challenge_secret.secret.chunks(4).enumerate() {
             secret[i] = u32::from_le_bytes(chunk.try_into().unwrap());
         }
-        log::debug!("Secret: {secret:02x?}");
         return match self.send_protocol_msg(
             HostProtocolMessage::Bootloader(host_protocol::Bootloader::ChallengeSet { secret }),
             WRITE_FIRMWARE_TIMEOUT,
@@ -773,7 +769,6 @@ impl BluetoothServer {
         self.challenge_last_check = Instant::now();
         let mut buf = [0u8; 8];
         getrandom::getrandom(&mut buf).map_err(|_| BluetoothError::Random)?;
-        log::debug!("Nonce: {buf:02x?}");
         let nonce = u64::from_be_bytes(buf);
         log::debug!("Nonce: {nonce}");
         return match self
@@ -784,7 +779,6 @@ impl BluetoothServer {
                     .crypto
                     .hmac256(self.challenge_secret.secret.to_vec(), nonce.to_be_bytes().to_vec())
                     .map_err(|_| BluetoothError::Crypto)?;
-                log::debug!("Expected: {expected:02x?}, Got: {result:02x?}");
                 if expected != result {
                     log::error!("Challenge failed.");
                     Err(BluetoothError::UnknownError)

@@ -15,7 +15,6 @@ pub fn main() -> () {
     let mut ndef_msg = ndef::Message::default();
     let mut ndef_rec1 = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
     ndef_msg.append_record(&mut ndef_rec1);
-    log::info!("NDEF message: {:x?}", ndef_msg);
     match nfc.write_ndef_raw_msg(vec![], ndef_msg.to_vec(), Duration::from_millis(10000)) {
         Ok(()) => {
             log::info!("Wrote message");
@@ -26,10 +25,10 @@ pub fn main() -> () {
     }
     match nfc.read_ndef_raw_msg(Duration::from_millis(10000)) {
         Ok((_, raw_msg)) => {
-            log::info!("Read raw message: {:x?}", raw_msg);
+            log::info!("Read NDEF message ({} bytes)", raw_msg.len());
             match ndef::Message::try_from(raw_msg.as_slice()) {
                 Ok(ndef_msg) => {
-                    log::info!("Parsed NDEF message: {:x?}", ndef_msg);
+                    log::info!("Parsed {} NDEF record(s)", ndef_msg.records.len());
                 }
                 Err(e) => {
                     log::error!("Failed to parse NDEF message: {:?}", e);

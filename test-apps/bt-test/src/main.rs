@@ -29,7 +29,7 @@ impl server::Server for ListenerServer {
 
 impl ArchiveEventHandler<BlePacket> for ListenerServer {
     fn handle(&mut self, packet: server::Owned<BlePacket>, _sender: PID, _context: &mut ServerContext<Self>) {
-        info!("[+] BLE: {:?}", hex::encode(&packet.0));
+        info!("[+] BLE: {} bytes", packet.0.len());
     }
 }
 
