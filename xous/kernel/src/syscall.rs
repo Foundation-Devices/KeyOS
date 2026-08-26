@@ -340,7 +340,12 @@ fn return_memory(
             }
             WaitingMessage::ForgetMemory(range) => {
                 #[cfg(keyos)]
-                MemoryManager::with_mut(|mm| mm.unmap_range(range.as_ptr(), range.len()))?;
+                MemoryManager::with_mut(|mm| {
+                    // A forgotten `BlockingMove` keeps no buffer to check the returned range
+                    // against, so the range is whatever the caller passed in.
+                    mm.check_range_accessible(range)?;
+                    mm.unmap_range(range.as_ptr(), range.len())
+                })?;
                 // The client is gone, so the returned bytes go nowhere; free the buffer.
                 // (`range` is either stale or `buf` itself, so don't free it separately.)
                 #[cfg(not(keyos))]
