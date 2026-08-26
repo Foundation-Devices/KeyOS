@@ -260,9 +260,7 @@ impl AppState {
         let (device_serial, master_key, secp) = {
             let state = state.borrow();
             let master_key = state.store.load_master_key(create.network)?;
-            if create.source == AccountSource::Casa {
-                state.store.validate_casa_multisig_account(&master_key, &create.multisig)?;
-            }
+            state.store.validate_multisig_import(&master_key, &create.multisig, create.source)?;
             (state.store.device_serial.clone(), master_key, state.store.secp.clone())
         };
 

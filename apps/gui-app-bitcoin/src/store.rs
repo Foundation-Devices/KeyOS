@@ -91,33 +91,49 @@ pub(crate) fn is_casa_account_derivation(derivation: &[ChildNumber], network: Ne
     )
 }
 
-fn validate_local_multisig_signer<C: Signing>(
+fn validate_local_multisig_signer<'a, C: Signing>(
     secp: &Secp256k1<C>,
     master_key: &MasterKey,
-    multisig: &MultiSigDetails,
-) -> anyhow::Result<()> {
-    let signer = multisig
-        .get_signers()
-        .iter()
-        .find(|signer| signer.get_fingerprint() == master_key.fingerprint)
-        .context("Casa multisig does not contain the active Master Key")?;
-    let derivation = signer.get_derivation().context("invalid Casa signer derivation")?;
-    if !is_casa_account_derivation(derivation.as_ref(), multisig.network_kind) {
-        bail!("Casa signer does not use a supported account derivation");
+    multisig: &'a MultiSigDetails,
+) -> anyhow::Result<&'a MultiSigSigner> {
+    let mut local_signers =
+        multisig.get_signers().iter().filter(|signer| signer.get_fingerprint() == master_key.fingerprint);
+    let signer = local_signers.next().context("multisig does not contain the active Master Key")?;
+    if local_signers.next().is_some() {
+        bail!("multisig contains multiple signers for the active Master Key");
     }
-    let declared_xpub = signer.get_pubkey().context("invalid Casa signer xpub")?;
+    let derivation = signer.get_derivation().context("invalid local signer derivation")?;
+    let declared_xpub = signer.get_pubkey().context("invalid local signer xpub")?;
     let root_xpriv = SensitiveXpriv(
         Xpriv::new_master(multisig.network_kind, &master_key.key.0)
-            .context("derive Casa validation root key")?,
+            .context("derive local signer validation root key")?,
     );
     let signer_xpriv =
-        SensitiveXpriv(root_xpriv.0.derive_priv(secp, &derivation).context("derive Casa signer key")?);
+        SensitiveXpriv(root_xpriv.0.derive_priv(secp, &derivation).context("derive local signer key")?);
     let expected_xpub = Xpub::from_priv(secp, &signer_xpriv.0);
     if declared_xpub.public_key != expected_xpub.public_key
         || declared_xpub.chain_code != expected_xpub.chain_code
     {
-        bail!("Casa signer xpub does not match the active Master Key");
+        bail!("local signer xpub does not match the active Master Key");
     }
+
+    Ok(signer)
+}
+
+fn validate_multisig_import<C: Signing>(
+    secp: &Secp256k1<C>,
+    master_key: &MasterKey,
+    multisig: &MultiSigDetails,
+    source: AccountSource,
+) -> anyhow::Result<()> {
+    let signer = validate_local_multisig_signer(secp, master_key, multisig)?;
+    if source == AccountSource::Casa {
+        let derivation = signer.get_derivation().context("invalid Casa signer derivation")?;
+        if !is_casa_account_derivation(derivation.as_ref(), multisig.network_kind) {
+            bail!("Casa signer does not use a supported account derivation");
+        }
+    }
+
     Ok(())
 }
 
@@ -466,12 +482,13 @@ impl AccountStore {
         }
     }
 
-    pub fn validate_casa_multisig_account(
+    pub fn validate_multisig_import(
         &self,
         master_key: &MasterKey,
         multisig: &MultiSigDetails,
+        source: AccountSource,
     ) -> anyhow::Result<()> {
-        validate_local_multisig_signer(&self.secp, master_key, multisig)
+        validate_multisig_import(&self.secp, master_key, multisig, source)
     }
 
     pub fn validate_label(&self, label: &str) -> Option<String> {
@@ -669,23 +686,45 @@ mod tests {
     }
 
     #[test]
-    fn casa_multisig_requires_the_local_xpub_for_its_fingerprint() {
+    fn multisig_import_requires_the_local_xpub_for_its_fingerprint() {
         let secp = Secp256k1::new();
         let local = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[0; 16], "", None).unwrap();
         let attacker = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[1; 16], "", None).unwrap();
         let cosigner = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[2; 16], "", None).unwrap();
 
-        let valid = details(vec![
-            signer(&secp, &local, local.fingerprint, "m/45'/0/0"),
-            signer(&secp, &cosigner, cosigner.fingerprint, "m/45'/0/0"),
-        ]);
-        validate_local_multisig_signer(&secp, &local, &valid).unwrap();
+        for (source, derivation) in
+            [(AccountSource::Generic, "m/48'/0'/0'/1'"), (AccountSource::Casa, "m/45'/0/0")]
+        {
+            let valid = details(vec![
+                signer(&secp, &local, local.fingerprint, derivation),
+                signer(&secp, &cosigner, cosigner.fingerprint, derivation),
+            ]);
+            validate_multisig_import(&secp, &local, &valid, source).unwrap();
 
-        let spoofed = details(vec![
-            signer(&secp, &attacker, local.fingerprint, "m/45'/0/0"),
-            signer(&secp, &cosigner, cosigner.fingerprint, "m/45'/0/0"),
+            let spoofed = details(vec![
+                signer(&secp, &attacker, local.fingerprint, derivation),
+                signer(&secp, &cosigner, cosigner.fingerprint, derivation),
+            ]);
+            assert!(validate_multisig_import(&secp, &local, &spoofed, source).is_err());
+        }
+    }
+
+    #[test]
+    fn multisig_import_rejects_a_substituted_local_chain_code() {
+        let secp = Secp256k1::new();
+        let local = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[0; 16], "", None).unwrap();
+        let cosigner = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[1; 16], "", None).unwrap();
+        let derivation: DerivationPath = "m/48'/0'/0'/1'".parse().unwrap();
+        let root = SensitiveXpriv(Xpriv::new_master(NgNetwork::Bitcoin, &local.key.0).unwrap());
+        let derived = SensitiveXpriv(root.0.derive_priv(&secp, &derivation).unwrap());
+        let mut substituted = Xpub::from_priv(&secp, &derived.0);
+        substituted.chain_code = [0x42; 32].into();
+        let multisig = details(vec![
+            MultiSigSigner::new(&derivation, &local.fingerprint, &substituted),
+            signer(&secp, &cosigner, cosigner.fingerprint, "m/48'/0'/0'/1'"),
         ]);
-        assert!(validate_local_multisig_signer(&secp, &local, &spoofed).is_err());
+
+        assert!(validate_multisig_import(&secp, &local, &multisig, AccountSource::Generic).is_err());
     }
 
     #[test]
@@ -699,14 +738,14 @@ mod tests {
                 signer(&secp, &local, local.fingerprint, derivation),
                 signer(&secp, &cosigner, cosigner.fingerprint, derivation),
             ]);
-            validate_local_multisig_signer(&secp, &local, &multisig).unwrap();
+            validate_multisig_import(&secp, &local, &multisig, AccountSource::Casa).unwrap();
         }
 
         let unrelated = details(vec![
             signer(&secp, &local, local.fingerprint, "m/84'/0'/0'"),
             signer(&secp, &cosigner, cosigner.fingerprint, "m/84'/0'/0'"),
         ]);
-        assert!(validate_local_multisig_signer(&secp, &local, &unrelated).is_err());
+        assert!(validate_multisig_import(&secp, &local, &unrelated, AccountSource::Casa).is_err());
     }
 
     #[test]
@@ -726,7 +765,7 @@ mod tests {
             MultiSigSigner::new(&derivation, &local.fingerprint, &reconstructed),
             signer(&secp, &cosigner, cosigner.fingerprint, "m/45'/0/0"),
         ]);
-        validate_local_multisig_signer(&secp, &local, &multisig).unwrap();
+        validate_multisig_import(&secp, &local, &multisig, AccountSource::Casa).unwrap();
     }
 
     #[test]
