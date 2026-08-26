@@ -1,6 +1,6 @@
 manifestVersion = "0"
 appId = "0x786f75732d6e616d6573000000000000"
-syscall = ["AllowMessagesCID", "SetThreadPriority"]
+syscall = ["AllowMessagesCID", "SetThreadPriority", "CreateServerWithAddress"]
 
 [appName]
 en = "Xous Names"

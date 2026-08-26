@@ -479,15 +479,11 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::ReceiveMessage(..)
         | SysCall::TryReceiveMessage(..)
         | SysCall::GetRemoteProcessId(..)
+        | SysCall::GetServerOwner(..)
         | SysCall::ReturnMemory(..)
         | SysCall::ReturnScalar1(..)
         | SysCall::ReturnScalar2(..)
         | SysCall::ReturnScalar5(..) => Ok(()),
-
-        // XXX: Ideally this should be privileged, so that system servers with well-known SIDs can only be
-        // registered by privileged processes (and the rest goes through the nameserver), but this is used in
-        // various cases, like in the nameserver itself.
-        SysCall::CreateServerWithAddress(..) => Ok(()),
 
         // Memory mapping has its own, more granular permission system
         SysCall::MapMemory(..) | SysCall::UnmapMemory(..) | SysCall::UpdateMemoryFlags(..) => Ok(()),
@@ -531,6 +527,7 @@ fn check_syscall_permission(call: &SysCall) -> core::result::Result<(), Error> {
         | SysCall::ClaimInterrupt(..)
         | SysCall::FreeInterrupt(..)
         | SysCall::CreateProcess(..)
+        | SysCall::CreateServerWithAddress(..)
         | SysCall::Shutdown(..)
         | SysCall::PowerManagement(..)
         | SysCall::TerminatePid(..)
@@ -836,6 +833,9 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             };
             let sidx = *sidx as usize;
             Ok(Result::ProcessID(ss.server_from_sidx(sidx).ok_or(Error::ServerNotFound)?.pid))
+        }),
+        SysCall::GetServerOwner(sid) => SystemServices::with(|ss| {
+            Ok(Result::ProcessID(ss.server_owner(sid).ok_or(Error::ServerNotFound)?))
         }),
         SysCall::UpdateMemoryFlags(range, flags, pid) => {
             // We do not yet support modifying flags for other processes.

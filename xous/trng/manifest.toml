@@ -1,7 +1,7 @@
 manifestVersion = "0"
 appId = "0x74726e67000000000000000000000000"
 memory = ["ADC", "TRNG"]
-syscall = ["SetThreadPriority"]
+syscall = ["SetThreadPriority", "CreateServerWithAddress"]
 
 [appName]
 en = "TRNG Server"

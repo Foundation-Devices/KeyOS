@@ -248,6 +248,10 @@ impl NameServer {
         if !self.register_permissions.get(&app_id).ok_or(xous::Error::AccessDenied)?.contains(&server_name) {
             return Err(xous::Error::AccessDenied);
         }
+        if xous::get_server_owner(sid) != Ok(pid) {
+            log::warn!("PID {pid:?} tried to register a server it doesn't own as '{server_name}'");
+            return Err(xous::Error::AccessDenied);
+        }
         if self.name_table.contains_key(&server_name) {
             return Err(xous::Error::MemoryInUse);
         }

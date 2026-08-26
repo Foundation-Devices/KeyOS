@@ -1,6 +1,6 @@
 manifestVersion = "0"
 appId = "0x6e288a4d8dcb24639917c285728e30c0"
-syscall = [ "CreateProcess",]
+syscall = [ "CreateProcess", "CreateServerWithAddress",]
 
 [appName]
 en = "Sandbox test (worker process)"

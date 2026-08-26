@@ -758,6 +758,9 @@ impl SystemServices {
         initial_permissions: core::ops::Range<xous::MessageId>,
     ) -> Result<SID, Error> {
         let pid = current_pid();
+        if self.servers.iter().flatten().any(|s| s.sid == sid) {
+            return Err(Error::ServerExists);
+        }
         for entry in self.servers.iter_mut() {
             if entry.is_none() {
                 #[cfg(keyos)]
@@ -862,6 +865,11 @@ impl SystemServices {
     /// Retrieve the server ID index from the specified SID and PID
     pub fn sidx_from_sid(&self, sid: SID, pid: PID) -> Option<usize> {
         self.servers.iter().position(|s| s.as_ref().is_some_and(|s| s.sid == sid && s.pid == pid))
+    }
+
+    /// Retrieve the process that owns the server with the specified SID
+    pub fn server_owner(&self, sid: SID) -> Option<PID> {
+        self.servers.iter().flatten().find(|s| s.sid == sid).map(|s| s.pid)
     }
 
     /// Return a server based on the connection id and the current process

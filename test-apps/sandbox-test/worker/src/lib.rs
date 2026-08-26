@@ -5,7 +5,7 @@ use std::{thread::sleep, time::Duration};
 
 use xous::{MemoryAddress, MemoryFlags, MemoryRange, CID, SID};
 
-pub const WORKER_SID: SID = SID::from_u32(0x1234, 0x5678, 0x9abc, 0xdef0);
+pub const RUNNER_SID: SID = SID::from_u32(0x1234, 0x5678, 0x9abc, 0xdef0);
 pub const TEST_SID: SID = SID::from_u32(0xa, 0xb, 0xc, 0xd);
 
 pub const TEST_PATTERN: u32 = 0x1337abcd;

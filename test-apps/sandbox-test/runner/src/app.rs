@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use sandbox_test_worker::{TESTS, WORKER_SID};
+use sandbox_test_worker::{RUNNER_SID, TESTS};
 
 // Cargo doesn't seem to set any useful env vars for us, so we include the file with a hardcoded path.
 const WORKER_ELF: &[u8] =
@@ -13,6 +13,7 @@ pub fn main() {
     xous::set_thread_priority(xous::ThreadPriority::AppHigh0).unwrap();
 
     let cth_server = xous::create_server().unwrap();
+    let rendezvous = xous::create_server_with_sid(RUNNER_SID, 0..1).unwrap();
 
     xous::register_system_event_handler(xous::SystemEvent::ChildTerminated, cth_server, 0).unwrap();
 
@@ -30,7 +31,11 @@ pub fn main() {
         println!();
         println!("=== {} ===", test.name);
         xous::create_process(args).unwrap();
-        let cid = xous::connect(WORKER_SID).unwrap();
+        let announcement = xous::receive_message(rendezvous).unwrap();
+        let sid = announcement.body.scalar_message().expect("worker announces its server as a scalar");
+        let worker_sid =
+            xous::SID::from_u32(sid.arg1 as u32, sid.arg2 as u32, sid.arg3 as u32, sid.arg4 as u32);
+        let cid = xous::connect(worker_sid).unwrap();
         xous::send_message(
             cid,
             xous::Message::Scalar(xous::ScalarMessage { id: step, ..Default::default() }),

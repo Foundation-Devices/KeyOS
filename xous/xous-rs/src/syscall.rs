@@ -295,6 +295,9 @@ pub enum SysCall {
     // Get the Process ID of the other end of the connection
     GetRemoteProcessId(CID),
 
+    /// Get the Process ID that owns the given server.
+    GetServerOwner(SID),
+
     /// Get the current Thread ID
     GetThreadId,
 
@@ -462,7 +465,7 @@ pub enum SysCallNumber {
     Disconnect = 35,
     JoinThread = 36,
     GetRemoteProcessId = 37,
-    // 38 is unused
+    GetServerOwner = 38,
     VirtToPhys = 39,
     ReturnScalar5 = 40,
     // 41 is unused
@@ -527,7 +530,7 @@ impl SysCallNumber {
             35 => Disconnect,
             36 => JoinThread,
             37 => GetRemoteProcessId,
-            // 38 is unused
+            38 => GetServerOwner,
             39 => VirtToPhys,
             40 => ReturnScalar5,
             // 41 is unused
@@ -744,6 +747,10 @@ impl SysCall {
             SysCall::JoinThread(tid) => [SysCallNumber::JoinThread as usize, *tid, 0, 0, 0, 0, 0, 0],
             SysCall::GetRemoteProcessId(cid) => {
                 [SysCallNumber::GetRemoteProcessId as usize, *cid as usize, 0, 0, 0, 0, 0, 0]
+            }
+            SysCall::GetServerOwner(sid) => {
+                let s = sid.to_u32();
+                [SysCallNumber::GetServerOwner as usize, s.0 as _, s.1 as _, s.2 as _, s.3 as _, 0, 0, 0]
             }
 
             #[cfg(keyos)]
@@ -1039,6 +1046,9 @@ impl SysCall {
             SysCallNumber::Disconnect => SysCall::Disconnect(a1 as _),
             SysCallNumber::JoinThread => SysCall::JoinThread(a1 as _),
             SysCallNumber::GetRemoteProcessId => SysCall::GetRemoteProcessId(a1 as _),
+            SysCallNumber::GetServerOwner => {
+                SysCall::GetServerOwner(SID::from_u32(a1 as _, a2 as _, a3 as _, a4 as _))
+            }
             #[cfg(keyos)]
             SysCallNumber::VirtToPhys => SysCall::VirtToPhys(a1 as _),
             #[cfg(keyos)]
@@ -1643,6 +1653,21 @@ pub fn connect_for_process(pid: PID, sid: SID) -> core::result::Result<CID, Erro
 #[inline]
 pub fn get_remote_pid(cid: CID) -> core::result::Result<PID, Error> {
     let result = rsyscall(SysCall::GetRemoteProcessId(cid));
+    match result {
+        Ok(Result::ProcessID(pid)) => Ok(pid),
+        Err(e) => Err(e),
+        v => panic!("Unexpected return value: {:?}", v),
+    }
+}
+
+/// Retrieves the process ID (PID) of the process owning the server identified by `sid`.
+///
+/// # Errors
+///
+/// * **ServerNotFound**: No server with that SID exists
+#[inline]
+pub fn get_server_owner(sid: SID) -> core::result::Result<PID, Error> {
+    let result = rsyscall(SysCall::GetServerOwner(sid));
     match result {
         Ok(Result::ProcessID(pid)) => Ok(pid),
         Err(e) => Err(e),
