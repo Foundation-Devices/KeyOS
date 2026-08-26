@@ -32,6 +32,12 @@ pub enum NavigationError {
 
     #[error("The navigation was cancelled by the user")]
     CanceledByUser,
+
+    #[error("The navigation request is invalid")]
+    InvalidRequest,
+
+    #[error("The navigation request is not permitted")]
+    PermissionDenied,
 }
 
 impl AsScalar<3> for NavigationError {
@@ -46,6 +52,8 @@ impl AsScalar<3> for NavigationError {
             NavigationError::Locked => [7, 0, 0],
             NavigationError::CanceledBySystem => [8, 0, 0],
             NavigationError::CanceledByUser => [9, 0, 0],
+            NavigationError::InvalidRequest => [10, 0, 0],
+            NavigationError::PermissionDenied => [11, 0, 0],
         }
     }
 }
@@ -66,6 +74,8 @@ impl FromScalar<3> for NavigationError {
             7 => NavigationError::Locked,
             8 => NavigationError::CanceledBySystem,
             9 => NavigationError::CanceledByUser,
+            10 => NavigationError::InvalidRequest,
+            11 => NavigationError::PermissionDenied,
             _ => NavigationError::InternalError,
         }
     }

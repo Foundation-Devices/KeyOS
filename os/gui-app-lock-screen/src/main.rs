@@ -128,6 +128,7 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
         let ui_state = ui.global::<State>();
         match input.msg {
             InputMessage::NavigationFocused => {
+                reset_request_state(&ui_state);
                 let Ok(Some(nav_bytes)) = state.gui.navigate_pending() else {
                     log::error!("Navigation focused but no pending nav request");
                     return;
@@ -146,7 +147,7 @@ fn set_input_handler(cx: &AppContext, state: StoredValue<AppState>) {
             InputMessage::NavigationCancelled => {
                 // how is this possible?
                 ui_state.set_title("".into());
-                ui_state.set_nav_request(false);
+                reset_request_state(&ui_state);
                 reset_input_state(&ui_state, ui_state.get_remaining_attempts() as _);
                 log::info!("Navigation cancelled");
             }
@@ -290,4 +291,7 @@ fn reset_input_state(ui_state: &State, remaining_attempts: u32) {
     ui_state.set_security_words(Default::default());
 }
 
-fn reset_request_state(ui_state: &State) { ui_state.set_nav_request(false); }
+fn reset_request_state(ui_state: &State) {
+    ui_state.set_nav_request(false);
+    ui_state.set_want_security_words(false);
+}

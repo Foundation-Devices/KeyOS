@@ -4,6 +4,7 @@
 use gui_server_api::{
     error::NavigationError,
     msg::{LaunchFailureReason, NavigateTo, NavigationResult, RunApp, RunAppResponse, ShowModal},
+    navigation::{lockscreen::VerifyPinOptions, LOCK_SCREEN_APP_ID, SETTINGS_APP_ID},
     InputMessage,
 };
 use log::{debug, error, warn};
@@ -16,6 +17,19 @@ impl Gui {
     pub(crate) fn handle_show_modal_request(&mut self, request: ArchiveRequest<ShowModal>) {
         if self.is_locked() {
             request.response.respond(Err(NavigationError::Locked)).ok();
+            return;
+        }
+
+        let sender = request.response.pid();
+        let sender_app_id = xous::get_app_id(sender).ok().flatten();
+        if let Err(error) =
+            try_authorize_lockscreen_request(request.message.app_id, &request.message.args, sender_app_id)
+        {
+            warn!(
+                "Rejected modal request for app {:?} from PID {sender} ({sender_app_id:?}): {error}",
+                request.message.app_id
+            );
+            request.response.respond(Err(error)).ok();
             return;
         }
 
@@ -34,6 +48,20 @@ impl Gui {
             request.response.respond(Err(NavigationError::Locked)).ok();
             return;
         }
+
+        let sender = request.response.pid();
+        let sender_app_id = xous::get_app_id(sender).ok().flatten();
+        if let Err(error) =
+            try_authorize_lockscreen_request(request.message.app_id, &request.message.args, sender_app_id)
+        {
+            warn!(
+                "Rejected navigation request for app {:?} from PID {sender} ({sender_app_id:?}): {error}",
+                request.message.app_id
+            );
+            request.response.respond(Err(error)).ok();
+            return;
+        }
+
         let NavigateTo { app_id, .. } = &request.message;
 
         let Some(pid) = self.launch_app(*app_id) else {
@@ -181,6 +209,24 @@ impl Gui {
     }
 }
 
+/// If the navigation request is towards the lock screen, restrict security words to Settings.
+fn try_authorize_lockscreen_request(
+    destination: AppId,
+    args: &[u8],
+    caller_app_id: Option<AppId>,
+) -> Result<(), NavigationError> {
+    if destination != LOCK_SCREEN_APP_ID {
+        return Ok(());
+    }
+
+    let options = VerifyPinOptions::from_slice(args).ok_or(NavigationError::InvalidRequest)?;
+    if options.want_security_words && caller_app_id != Some(SETTINGS_APP_ID) {
+        Err(NavigationError::PermissionDenied)
+    } else {
+        Ok(())
+    }
+}
+
 fn app_manager_launch_failure(error: app_manager::AppManagerError) -> RunAppResponse {
     let reason = match error {
         app_manager::AppManagerError::UnknownAppId => return RunAppResponse::AppIdNotFound,
@@ -205,6 +251,12 @@ fn app_manager_launch_failure(error: app_manager::AppManagerError) -> RunAppResp
 mod tests {
     use super::*;
 
+    const UNTRUSTED_APP_ID: AppId = AppId([0xff; 16]);
+
+    fn pin_options(want_security_words: bool) -> Vec<u8> {
+        VerifyPinOptions { title: None, want_security_words }.serialize()
+    }
+
     #[test]
     fn compatibility_failure_keeps_its_gui_navigation_reason() {
         assert_eq!(
@@ -215,5 +267,45 @@ mod tests {
             app_manager_launch_failure(app_manager::AppManagerError::RunningKeyOsVersionUnavailable),
             RunAppResponse::LaunchFailed { reason: LaunchFailureReason::RunningKeyOsVersionUnavailable }
         );
+    }
+
+    #[test]
+    fn settings_can_request_pin_verification_with_or_without_security_words() {
+        assert!(try_authorize_lockscreen_request(
+            LOCK_SCREEN_APP_ID,
+            &pin_options(false),
+            Some(SETTINGS_APP_ID),
+        )
+        .is_ok());
+        assert!(try_authorize_lockscreen_request(
+            LOCK_SCREEN_APP_ID,
+            &pin_options(true),
+            Some(SETTINGS_APP_ID),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn other_apps_can_verify_pin_but_cannot_request_security_words() {
+        for caller in [Some(UNTRUSTED_APP_ID), None] {
+            assert!(try_authorize_lockscreen_request(LOCK_SCREEN_APP_ID, &pin_options(false), caller).is_ok());
+            assert!(matches!(
+                try_authorize_lockscreen_request(LOCK_SCREEN_APP_ID, &pin_options(true), caller),
+                Err(NavigationError::PermissionDenied)
+            ));
+        }
+    }
+
+    #[test]
+    fn malformed_lock_screen_requests_are_rejected() {
+        assert!(matches!(
+            try_authorize_lockscreen_request(LOCK_SCREEN_APP_ID, b"not a request", Some(SETTINGS_APP_ID)),
+            Err(NavigationError::InvalidRequest)
+        ));
+    }
+
+    #[test]
+    fn other_destinations_do_not_require_lock_screen_authorization() {
+        assert!(try_authorize_lockscreen_request(SETTINGS_APP_ID, b"opaque args", None).is_ok());
     }
 }
