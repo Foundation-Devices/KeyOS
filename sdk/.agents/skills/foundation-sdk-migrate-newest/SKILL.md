@@ -112,7 +112,8 @@ over it in silence.
 
 Then work up the ladder, and only as far as the user asked:
 
-1. `cargo check` (after one `foundation build`, with `FOUNDATION_THEMES_RUST_DIR` set as the chapter describes).
+1. `cargo check` (after one `foundation build`, with `FOUNDATION_UI_LIBRARY_PATH`, `FOUNDATION_THEMES_SLINT_DIR`
+   and `FOUNDATION_THEMES_RUST_DIR` all pointed under `$PWD/target/foundation/`, as the chapter describes).
 2. `foundation preview` for UI, `foundation sim` for the hosted runtime.
 3. `foundation build` for a signed artifact.
 

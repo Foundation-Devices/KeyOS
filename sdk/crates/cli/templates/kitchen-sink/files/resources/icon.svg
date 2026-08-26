@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 SPDX-License-Identifier: MIT
 -->
 <svg width="110" height="110" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="disc" x1="128" y1="6" x2="128" y2="250" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#273549"/>
-      <stop offset="1" stop-color="#0B1220"/>
-    </linearGradient>
-  </defs>
-  <circle cx="128" cy="128" r="124" fill="url(#disc)" stroke="#3C4A60" stroke-width="3"/>
-  <rect x="48" y="58" width="160" height="124" rx="28" fill="#EEF2FF"/>
-  <path d="M72 156L105 121C111 115 121 115 127 121L143 137C148 142 156 143 162 139L184 122" stroke="#2563EB" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="98" cy="91" r="15" fill="#14B8A6"/>
-  <path d="M193 58L201 40L209 58L227 66L209 74L201 92L193 74L175 66L193 58Z" fill="#F59E0B"/>
-  <path d="M63 201H193" stroke="#EEF2FF" stroke-width="16" stroke-linecap="round"/>
+  <!-- No background element: the launcher composites its own 144 px badge
+       plate (silver ring, copper accent, near-black disc) behind this icon,
+       so any full-canvas fill would render as a slab over that plate.
+       The glyph is scaled to ~58% of the canvas and centred, per the icon
+       rules in the SDK migration guide. -->
+  <g transform="translate(13.88 24.67) scale(0.83)">
+    <rect x="48" y="58" width="160" height="124" rx="28" fill="#EEF2FF"/>
+    <path d="M72 156L105 121C111 115 121 115 127 121L143 137C148 142 156 143 162 139L184 122" stroke="#2563EB" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="98" cy="91" r="15" fill="#14B8A6"/>
+    <path d="M193 58L201 40L209 58L227 66L209 74L201 92L193 74L175 66L193 58Z" fill="#F59E0B"/>
+    <path d="M63 201H193" stroke="#EEF2FF" stroke-width="16" stroke-linecap="round"/>
+  </g>
 </svg>

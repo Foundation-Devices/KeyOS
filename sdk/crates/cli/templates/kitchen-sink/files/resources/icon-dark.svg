@@ -1,14 +1,14 @@
 <svg width="110" height="110" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="disc" x1="128" y1="6" x2="128" y2="250" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#E2E8F0"/>
-      <stop offset="1" stop-color="#94A3B8"/>
-    </linearGradient>
-  </defs>
-  <circle cx="128" cy="128" r="124" fill="url(#disc)" stroke="#F8FAFC" stroke-width="3"/>
-  <rect x="48" y="58" width="160" height="124" rx="28" fill="#111827"/>
-  <path d="M72 156L105 121C111 115 121 115 127 121L143 137C148 142 156 143 162 139L184 122" stroke="#A78BFA" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="98" cy="91" r="15" fill="#34D399"/>
-  <path d="M193 58L201 40L209 58L227 66L209 74L201 92L193 74L175 66L193 58Z" fill="#FB7185"/>
-  <path d="M63 201H193" stroke="#111827" stroke-width="16" stroke-linecap="round"/>
+  <!-- Dark-theme sibling: the same drawing, brightened. The badge plate is
+       near-black in BOTH themes, so this variant is not an inversion — the
+       body stays light so it does not sink into the plate, and the accents
+       are the brighter dark-theme tones. No background element, same rule
+       as icon.svg. -->
+  <g transform="translate(13.88 24.67) scale(0.83)">
+    <rect x="48" y="58" width="160" height="124" rx="28" fill="#F8FAFC"/>
+    <path d="M72 156L105 121C111 115 121 115 127 121L143 137C148 142 156 143 162 139L184 122" stroke="#38BDF8" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="98" cy="91" r="15" fill="#2DD4BF"/>
+    <path d="M193 58L201 40L209 58L227 66L209 74L201 92L193 74L175 66L193 58Z" fill="#FBBF24"/>
+    <path d="M63 201H193" stroke="#F8FAFC" stroke-width="16" stroke-linecap="round"/>
+  </g>
 </svg>
