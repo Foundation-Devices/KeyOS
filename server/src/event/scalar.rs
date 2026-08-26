@@ -6,7 +6,7 @@ use std::{any::type_name, marker::PhantomData};
 use rkyv::bytecheck::CheckBytes;
 use whence::WhenceExt;
 
-use crate::{Error, EventSubscriptionMessage, ScalarCodec, Server, ServerContext};
+use crate::{check_caller_cid, Error, EventSubscriptionMessage, ScalarCodec, Server, ServerContext};
 use crate::{XousDeserializer, XousValidator};
 
 /// Handle for a single event subscriber
@@ -137,6 +137,7 @@ where
 {
     let mem = crate::lend_mut::borrow_mut(&mut raw).whence()?;
     let msg: EventSubscriptionMessage<M> = crate::Buffer::deserialize(mem).whence()?;
+    check_caller_cid(msg.cid, pid)?;
     let res = handler.handle(
         msg.msg,
         ScalarEventSubscriber::<M::Event> {

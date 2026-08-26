@@ -11,7 +11,7 @@ use rkyv::{
 };
 use whence::WhenceExt;
 
-use crate::{AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
+use crate::{check_caller_cid, AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
 use crate::{SizeOfSerializer, XousDeserializer, XousSerializer, XousValidator};
 
 // ==================== core ====================
@@ -207,6 +207,7 @@ where
         xous::Message::Move(mem) => {
             // async case - extract async wrapper
             let init: AsyncMessageInit<M> = crate::Buffer::deserialize(mem).whence()?;
+            check_caller_cid(init.cid, pid)?;
             let request = ArchiveResponse {
                 responder: Some(Responder::Async { cid: init.cid, msg_id: init.msg_id }),
                 pid,

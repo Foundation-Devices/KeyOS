@@ -877,9 +877,6 @@ pub fn handle(tid: TID, call: SysCall) -> SysCallResult {
             ss.server_from_sidx_mut(sidx).unwrap().default_permissions.add(messages)
         }),
         SysCall::AllowMessagesCID(pid, cid, messages) => {
-            if cid < 2 {
-                return Err(Error::ServerNotFound);
-            }
             SystemServices::with_mut(|ss| match ss.process_mut(pid)?.connection_mut(cid) {
                 Ok(ConnectionSlot::Connected { permissions, .. }) => permissions.add(messages),
                 _ => Err(Error::ServerNotFound),

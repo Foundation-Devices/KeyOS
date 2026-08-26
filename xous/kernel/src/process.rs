@@ -16,6 +16,13 @@ const MEMORY_PERMISSION_COUNT: usize = 8;
 
 pub const MAX_CONNECTIONS: usize = 64;
 
+/// A CID is `(generation << CID_INDEX_BITS) | (index + CID_INDEX_BIAS)`, so 0 and 1 are never valid.
+const CID_INDEX_BITS: u32 = 8;
+const CID_INDEX_MASK: CID = (1 << CID_INDEX_BITS) - 1;
+const CID_INDEX_BIAS: CID = 2;
+const MAX_GENERATION: u32 = (u32::MAX >> CID_INDEX_BITS) - 1;
+const _: () = assert!(MAX_CONNECTIONS as CID + CID_INDEX_BIAS - 1 <= CID_INDEX_MASK);
+
 /// Maximum size of the panic message buffer
 pub const PANIC_MESSAGE_SIZE: usize = 1024;
 
@@ -75,18 +82,44 @@ struct ProcessPermissions {
     syscall: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+/// A slot in a process's connection table.
+///
+/// The generation rises every time the slot is reallocated and is carried in the CID, so a CID
+/// that outlives its connection fails instead of naming the next owner. A slot that runs out of
+/// generations is condemned rather than reused, since wrapping would revive those stale CIDs.
+#[derive(Debug, Clone)]
 pub enum ConnectionSlot {
-    #[default]
-    Free,
-    Tombstone {
-        refcount: usize,
-    },
-    Connected {
-        sidx: u8,
-        refcount: usize,
-        permissions: MessagePermissions,
-    },
+    Free { generation: u32 },
+    Tombstone { refcount: usize, generation: u32 },
+    Connected { sidx: u8, refcount: usize, generation: u32, permissions: MessagePermissions },
+    Condemned,
+}
+
+impl Default for ConnectionSlot {
+    fn default() -> Self { ConnectionSlot::Free { generation: 0 } }
+}
+
+impl ConnectionSlot {
+    /// The state a slot returns to once its last reference is dropped.
+    pub fn free_or_condemn(generation: u32) -> Self {
+        if generation >= MAX_GENERATION {
+            ConnectionSlot::Condemned
+        } else {
+            ConnectionSlot::Free { generation }
+        }
+    }
+}
+
+fn pack_cid(cidx: usize, generation: u32) -> CID {
+    (generation << CID_INDEX_BITS) | (cidx as CID + CID_INDEX_BIAS)
+}
+
+fn unpack_cid(cid: CID) -> Result<(usize, u32), Error> {
+    let index = cid & CID_INDEX_MASK;
+    if index < CID_INDEX_BIAS {
+        return Err(Error::ServerNotFound);
+    }
+    Ok(((index - CID_INDEX_BIAS) as usize, cid >> CID_INDEX_BITS))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +176,7 @@ impl Process {
             thread_priorities: [ThreadPriority::AppDefault; MAX_THREAD_COUNT],
             app_id,
             permissions: Default::default(),
-            connection_map: [const { ConnectionSlot::Free }; MAX_CONNECTIONS],
+            connection_map: [const { ConnectionSlot::Free { generation: 0 } }; MAX_CONNECTIONS],
             allocation_hint: MMAP_AREA_VIRT,
             next_mirror_address: MEMORY_MIRROR_AREA_VIRT,
             #[cfg(keyos)]
@@ -373,9 +406,10 @@ impl Process {
     pub fn tombstone_connection_by_sidx(&mut self, dead_sidx: usize) -> Option<CID> {
         for (cidx, connection_slot) in self.connection_map.iter_mut().enumerate() {
             match connection_slot {
-                ConnectionSlot::Connected { sidx, refcount, .. } if *sidx == dead_sidx as u8 => {
-                    *connection_slot = ConnectionSlot::Tombstone { refcount: *refcount };
-                    return Some(cidx as CID + 2);
+                ConnectionSlot::Connected { sidx, refcount, generation, .. } if *sidx == dead_sidx as u8 => {
+                    let (refcount, generation) = (*refcount, *generation);
+                    *connection_slot = ConnectionSlot::Tombstone { refcount, generation };
+                    return Some(pack_cid(cidx, generation));
                 }
                 _ => (),
             }
@@ -392,39 +426,59 @@ impl Process {
     ) -> Result<(CID, bool), Error> {
         for (cidx, connection) in self.connection_map.iter_mut().enumerate() {
             match connection {
-                ConnectionSlot::Connected { sidx: sidx_other, refcount, .. } if *sidx_other == sidx as u8 => {
-                    *refcount += 1;
-                    return Ok((cidx as CID + 2, false));
+                ConnectionSlot::Connected { sidx: sidx_other, refcount, generation, .. }
+                    if *sidx_other == sidx as u8 =>
+                {
+                    *refcount = refcount.checked_add(1).ok_or(Error::KernelTableFull)?;
+                    return Ok((pack_cid(cidx, *generation), false));
                 }
                 _ => {}
             }
         }
-        if let Some(cidx) = self.connection_map.iter().position(|c| matches!(c, ConnectionSlot::Free)) {
-            self.connection_map[cidx] =
-                ConnectionSlot::Connected { sidx: sidx as u8, permissions, refcount: 1 };
-            Ok(((cidx as CID) + 2, true))
-        } else {
-            Err(Error::KernelTableFull)
+        for (cidx, connection) in self.connection_map.iter_mut().enumerate() {
+            let ConnectionSlot::Free { generation } = *connection else { continue };
+            let generation = generation + 1;
+            *connection =
+                ConnectionSlot::Connected { sidx: sidx as u8, permissions, refcount: 1, generation };
+            return Ok((pack_cid(cidx, generation), true));
         }
+        Err(Error::KernelTableFull)
     }
 
     pub fn connection(&self, cid: CID) -> Result<&ConnectionSlot, Error> {
-        if cid < 2 {
-            return Err(Error::ServerNotFound);
+        let (cidx, generation) = unpack_cid(cid)?;
+        let slot = self.connection_map.get(cidx).ok_or(Error::ServerNotFound)?;
+        match slot {
+            ConnectionSlot::Connected { generation: slot_generation, .. }
+            | ConnectionSlot::Tombstone { generation: slot_generation, .. }
+                if *slot_generation == generation =>
+            {
+                Ok(slot)
+            }
+            _ => Err(Error::ServerNotFound),
         }
-        self.connection_map.get(cid as usize - 2).ok_or(Error::ServerNotFound)
     }
 
     pub fn connection_mut(&mut self, cid: CID) -> Result<&mut ConnectionSlot, Error> {
-        if cid < 2 {
-            return Err(Error::ServerNotFound);
+        let (cidx, generation) = unpack_cid(cid)?;
+        let slot = self.connection_map.get_mut(cidx).ok_or(Error::ServerNotFound)?;
+        match slot {
+            ConnectionSlot::Connected { generation: slot_generation, .. }
+            | ConnectionSlot::Tombstone { generation: slot_generation, .. }
+                if *slot_generation == generation =>
+            {
+                Ok(slot)
+            }
+            _ => Err(Error::ServerNotFound),
         }
-        self.connection_map.get_mut(cid as usize - 2).ok_or(Error::ServerNotFound)
     }
 
     #[allow(dead_code)]
     pub fn number_of_connections(&self) -> usize {
-        self.connection_map.iter().filter(|c| !matches!(c, ConnectionSlot::Free)).count()
+        self.connection_map
+            .iter()
+            .filter(|c| matches!(c, ConnectionSlot::Connected { .. } | ConnectionSlot::Tombstone { .. }))
+            .count()
     }
 
     pub fn connected_sidxes(&self) -> impl Iterator<Item = usize> {

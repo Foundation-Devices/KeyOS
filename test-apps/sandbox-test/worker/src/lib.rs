@@ -551,6 +551,64 @@ pub const TESTS: &[Test] = &[
         },
         runner_fn: |_| {},
     },
+    Test {
+        name: "Repeated connect returns one CID",
+        crash: false,
+        worker_fn: |sid| {
+            let first = xous::connect(sid).unwrap();
+            let second = xous::connect(sid).unwrap();
+            if first != second {
+                panic!("Connecting twice gave {first} and {second}");
+            }
+            xous::disconnect(first).unwrap();
+            xous::disconnect(second).unwrap();
+        },
+        runner_fn: |_| {},
+    },
+    Test {
+        name: "Disconnected CID is not handed out again",
+        crash: false,
+        worker_fn: |sid| {
+            let first = xous::connect(sid).unwrap();
+            xous::disconnect(first).unwrap();
+            let second = xous::connect(sid).unwrap();
+            if first == second {
+                panic!("Disconnected CID {first} was handed out again");
+            }
+            xous::disconnect(second).unwrap();
+        },
+        runner_fn: |_| {},
+    },
+    Test {
+        name: "Stale CID is rejected",
+        crash: false,
+        worker_fn: |sid| {
+            let stale = xous::connect(sid).unwrap();
+            xous::disconnect(stale).unwrap();
+            let live = xous::connect(sid).unwrap();
+            let msg = xous::Message::Scalar(xous::ScalarMessage::default());
+            if xous::try_send_message(stale, msg).is_ok() {
+                panic!("Stale CID {stale} still sent, aliasing {live}");
+            }
+            xous::disconnect(live).unwrap();
+        },
+        runner_fn: |_| {},
+    },
+    Test {
+        name: "Forged CID generation is rejected",
+        crash: false,
+        worker_fn: |sid| {
+            let cid = xous::connect(sid).unwrap();
+            // The low byte of a CID is the slot, so this keeps the slot and forges the generation.
+            let forged = cid ^ 0x100;
+            let msg = xous::Message::Scalar(xous::ScalarMessage::default());
+            if xous::try_send_message(forged, msg).is_ok() {
+                panic!("Forged CID {forged} was accepted for the slot of {cid}");
+            }
+            xous::disconnect(cid).unwrap();
+        },
+        runner_fn: |_| {},
+    },
     Test { name: "Ending Smoke test", worker_fn: |_| {}, runner_fn: |_| {}, crash: false },
 ];
 

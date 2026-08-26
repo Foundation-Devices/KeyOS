@@ -404,6 +404,10 @@ impl Gui {
     }
 
     fn handle_register_app(&mut self, pid: PID, msg: RegisterApp) -> Result<(), GuiServerError> {
+        if self.windows.contains_key(&pid) {
+            log::error!("PID {pid:?} tried to register a second app window");
+            return Err(xous::Error::AccessDenied.into());
+        }
         if msg.height != SCREEN_HEIGHT {
             log::error!("App tried to register with invalid height: {} != {}", msg.height, SCREEN_HEIGHT);
             return Err(GuiServerError::InternalError);

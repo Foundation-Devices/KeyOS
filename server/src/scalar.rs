@@ -8,7 +8,7 @@ use std::any::type_name;
 use rkyv::rancor::{self, Source as _};
 use whence::WhenceExt;
 
-use crate::{AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
+use crate::{check_caller_cid, AsyncMessageInit, Error, Server, ServerContext, WrongMessageTypeError};
 
 // ==================== core ====================
 
@@ -230,6 +230,7 @@ where
             // async case - extract async wrapper
             let init: AsyncMessageInit<[u32; 4]> = crate::Buffer::deserialize(mem).whence()?;
             let AsyncMessageInit { cid, msg_id, msg } = init;
+            check_caller_cid(cid, pid)?;
             let request = BlockingScalarResponse {
                 responder: Some(Responder::Async { cid, msg_id }),
                 pid,

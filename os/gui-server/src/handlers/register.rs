@@ -1,11 +1,19 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gui_server_api::msg;
+use gui_server_api::{msg, GuiServerError};
 use server::{BlockingArchive, BlockingArchiveHandler, BlockingScalarHandler, ServerContext};
-use xous::PID;
+use xous::{CID, PID};
 
 use crate::{registry::AppRole, Gui};
+
+fn check_input_cid(cid: CID, pid: PID) -> Result<(), GuiServerError> {
+    if xous::get_remote_pid(cid) != Ok(pid) {
+        log::error!("PID {pid:?} tried to register CID {cid}, which it does not own");
+        return Err(xous::Error::AccessDenied.into());
+    }
+    Ok(())
+}
 
 impl BlockingArchiveHandler<msg::RegisterAppMessage> for Gui {
     fn handle(
@@ -14,7 +22,15 @@ impl BlockingArchiveHandler<msg::RegisterAppMessage> for Gui {
         sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> <msg::RegisterAppMessage as BlockingArchive>::Response {
-        self.handle_register_app(sender, reg)
+        check_input_cid(reg.cid, sender)?;
+        let cid = reg.cid;
+        let result = self.handle_register_app(sender, reg);
+        if result.is_err() {
+            // The app connected this CID to us before asking, so a refusal has to release
+            // it or it holds one of our 64 slots until reboot.
+            xous::disconnect(cid).ok();
+        }
+        result
     }
 }
 
@@ -25,6 +41,7 @@ impl BlockingArchiveHandler<msg::RegisterControlCenter> for Gui {
         sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> <msg::RegisterControlCenter as BlockingArchive>::Response {
+        check_input_cid(reg.cid, sender)?;
         self.handle_register_control_center_app(sender, reg.cid, reg.height)
     }
 }
@@ -36,6 +53,7 @@ impl BlockingArchiveHandler<msg::RegisterKeyboard> for Gui {
         sender: PID,
         _context: &mut ServerContext<Self>,
     ) -> <msg::RegisterKeyboard as BlockingArchive>::Response {
+        check_input_cid(reg.cid, sender)?;
         self.handle_register_keyboard_app(sender, reg.cid, reg.height)
     }
 }

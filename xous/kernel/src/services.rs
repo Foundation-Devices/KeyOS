@@ -829,19 +829,19 @@ impl SystemServices {
         // yet connected.
         let connection_slot = self.current_process_mut().connection_mut(cid)?;
         match connection_slot {
-            ConnectionSlot::Free => return Err(Error::ServerNotFound),
-            ConnectionSlot::Tombstone { refcount } | ConnectionSlot::Connected { refcount, .. }
+            ConnectionSlot::Free { .. } | ConnectionSlot::Condemned => return Err(Error::ServerNotFound),
+            ConnectionSlot::Tombstone { refcount, .. } | ConnectionSlot::Connected { refcount, .. }
                 if *refcount > 1 =>
             {
                 *refcount -= 1
             }
-            ConnectionSlot::Tombstone { .. } => {
-                *connection_slot = ConnectionSlot::Free;
+            ConnectionSlot::Tombstone { generation, .. } => {
+                *connection_slot = ConnectionSlot::free_or_condemn(*generation);
                 klog!("Removing server from connection map");
             }
-            ConnectionSlot::Connected { sidx, .. } => {
+            ConnectionSlot::Connected { sidx, generation, .. } => {
                 let sidx = *sidx as usize;
-                *connection_slot = ConnectionSlot::Free;
+                *connection_slot = ConnectionSlot::free_or_condemn(*generation);
                 // A permission request parked on this slot must never be granted to whatever
                 // the slot is reconnected to; release each waiting sender now with an error
                 // rather than leave it blocked on a connection that is gone.

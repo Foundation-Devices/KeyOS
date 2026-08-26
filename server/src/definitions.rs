@@ -43,6 +43,14 @@ where
         Ok(())
     }
 }
+
+pub(crate) fn check_caller_cid(cid: xous::CID, sender: xous::PID) -> whence::Result<(), crate::Error> {
+    if xous::get_remote_pid(cid) != Ok(sender) {
+        return Err(xous::Error::AccessDenied).whence();
+    }
+    Ok(())
+}
+
 pub trait MessageId {
     /// unique message identifier
     const ID: xous::MessageId;
