@@ -73,6 +73,9 @@ Claiming an interrupt is a privileged syscall, and in practice nothing ever
 frees one. Handlers all live in system processes, which cannot die without
 taking the kernel down with them.
 
+Interrupts are disabled in kernel mode and in the user-mode interrupt handlers
+(i.e. they are not reentrant).
+
 ## IPC and permissions
 
 Messaging permissions are declared in manifests and enforced at runtime by
