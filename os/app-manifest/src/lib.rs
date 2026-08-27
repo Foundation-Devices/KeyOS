@@ -58,7 +58,9 @@ pub struct Message {
     /// Permission subgroup this message belongs to, as `"<group>.<subgroup>"` (e.g.
     /// `"peripherals.camera-use"`); groups the message in the permission UI. Use a
     /// group that exists in the app manager's `GROUP_LABELS`, or the UI falls back
-    /// to showing the raw key.
+    /// to showing the raw key. Its presence also drives the
+    /// [`Message::required_signature`] default, so adding a group opens the message
+    /// to third-party apps.
     #[serde(rename = "permissionGroup", default, skip_serializing_if = "Option::is_none")]
     pub permission_group: Option<String>,
     /// The signature a sender must carry to hold this permission. Absent defaults from
@@ -89,7 +91,9 @@ impl Message {
     }
 }
 
-/// The signature a sender must carry to be granted a message permission.
+/// The signature a sender must carry to be granted a message permission. A manifest that
+/// omits it gets a default derived from `permissionGroup`; see
+/// [`Message::required_signature`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RequiredSignature {
@@ -103,9 +107,10 @@ pub enum RequiredSignature {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ApprovalBehavior {
-    /// Granted automatically when the sender policy is satisfied.
+    /// Granted without a prompt. Not the same as open to anyone: the sender still has to
+    /// declare the message in its own manifest and pass the signature gate.
     AutoAllow,
-    /// The user is prompted once; the answer persists.
+    /// The user is prompted once per permission subgroup, not per message; the answer persists.
     GrantOnFirstUse,
     /// Never grantable through the permission UI. The default when a message declares no
     /// `approval`.

@@ -86,6 +86,11 @@ does not need to check who sent it. The check covers neither of two other
 things: a server with several legitimate callers still has to tell them apart by
 capability, and the message contents are unvalidated either way.
 
+The manifest fields behind those grants (`permissionGroup`, `requiredSignature`,
+`approval`) interact in a way none of them shows on its own, and `autoAllow` in
+particular does not mean any app may send the message. Read `ApprovalBehavior`
+in `os/app-manifest` before taking a policy off a manifest.
+
 ## App IDs
 
 App manifests are either signed and vetted by Foundation, or installed with a
