@@ -1,7 +1,7 @@
 manifestVersion = "0"
 appId = "0x6775692d6170702d63616d6572610000"
 memory = ["ISC"]
-syscall = ["ClaimInterrupt", "VirtToPhys", "MirrorMemoryToPid"]
+syscall = ["ClaimInterrupt", "VirtToPhys", "MirrorMemoryToPid", "SetThreadPriority"]
 extends = "../../api/camera"
 
 [appName]

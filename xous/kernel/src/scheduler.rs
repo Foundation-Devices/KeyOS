@@ -201,6 +201,13 @@ impl Scheduler {
         Ok(xous::Result::ResumeProcess)
     }
 
+    /// Records `ticks` of runtime against the process being measured.
+    #[cfg(keyos)]
+    pub fn record_cpu_usage(&mut self, ticks: usize) {
+        self.cpu_usage_index = (self.cpu_usage_index + 1) % self.cpu_usage.len();
+        self.cpu_usage[self.cpu_usage_index] = (self.currently_measuring, ticks);
+    }
+
     #[cfg(keyos)]
     pub fn activate_current(&mut self, services: &mut SystemServices) -> SysCallResult {
         if self.in_irq_handler {
@@ -227,8 +234,7 @@ impl Scheduler {
             // where we were so fast that the timer couldn't even reset in time
             // (it waits for the next valid clock edge before actually resetting to 0)
             if usage > 1 && usage != self.cpu_usage[self.cpu_usage_index].1 {
-                self.cpu_usage_index = (self.cpu_usage_index + 1) % self.cpu_usage.len();
-                self.cpu_usage[self.cpu_usage_index] = (self.currently_measuring, usage);
+                self.record_cpu_usage(usage);
             }
             if next_pid.get() == 1 {
                 start_measuring_idle();

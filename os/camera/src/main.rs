@@ -23,5 +23,8 @@ impl server::Server for CameraServer {
 fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
+
+    xous::set_thread_priority(xous::ThreadPriority::System0).unwrap();
+
     server::listen(CameraServer::default());
 }

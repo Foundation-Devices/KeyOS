@@ -103,7 +103,6 @@ impl Default for CameraServer {
         isc.enable_clock();
         isc.configure(true);
         isc.set_cropping_area(0, 0, CAMERA_WIDTH as u32, CAMERA_HEIGHT as u32);
-        isc.enable_interrupt(ISCStatus::DDONE);
         log::trace!("ISC initialized");
 
         let bufs = array::from_fn(|_| {
@@ -199,6 +198,7 @@ impl CameraServer {
     fn enable_hw(&mut self) {
         self.power_manager.enable_peripheral(atsama5d27::pmc::PeripheralId::Isi).unwrap();
         self.isc.enable_clock();
+        self.isc.enable_interrupt(ISCStatus::DDONE);
         self.gpio.set_pin(GpioPin::CamPwdn, false).unwrap();
         self.gpio.set_pin(GpioPin::CamLdoPwdnB, true).unwrap();
         thread::sleep(Duration::from_millis(1));
@@ -209,6 +209,9 @@ impl CameraServer {
     }
 
     fn disable_hw(&mut self) {
+        // An unclocked ISC cannot be acknowledged, so mask rather than trust the stopped
+        // DMA to stay quiet.
+        self.isc.disable_interrupt(ISCStatus::DDONE);
         self.isc.disable_clock();
         PowerManagerApi::default().disable_peripheral(atsama5d27::pmc::PeripheralId::Isi).unwrap();
         self.gpio.set_pin(GpioPin::CamLdoPwdnB, false).unwrap();

@@ -336,8 +336,14 @@ impl Isc {
     pub fn enable_clock(&mut self) {
         let mut csr = CSR::new(self.base_addr as *mut u32);
         self.wait_for_sync_clk();
-        csr.wfo(CLKEN_MCEN, 1); // Enable master clock to provide the cam chip with the clock
-        csr.wfo(CLKEN_ICEN, 1); // Enable ISP clock
+        // Both clocks in one write, because the second would land while the first is still
+        // synchronizing across clock domains, which is forbidden (52.5.1.1). The master
+        // clock is what provides the cam chip with its clock.
+        let reg = csr.ms(CLKEN_MCEN, 1) | csr.ms(CLKEN_ICEN, 1);
+        csr.wo(CLKEN, reg);
+
+        // The status below reads the pre-write state until the synchronization is over.
+        self.wait_for_sync_clk();
 
         assert_ne!(csr.rf(CLKSR_MCSR), 0);
         assert_ne!(csr.rf(CLKSR_ICSR), 0);
@@ -347,8 +353,13 @@ impl Isc {
     pub fn disable_clock(&mut self) {
         let mut csr = CSR::new(self.base_addr as *mut u32);
         self.wait_for_sync_clk();
-        csr.wfo(CLKDIS_ICDIS, 0); // Disable ISP clock
-        csr.wfo(CLKDIS_MCDIS, 0); // Master clock
+        // Both clocks in one write, because the second would land while the first is still
+        // synchronizing across clock domains, which is forbidden (52.5.1.1).
+        let reg = csr.ms(CLKDIS_ICDIS, 1) | csr.ms(CLKDIS_MCDIS, 1);
+        csr.wo(CLKDIS, reg);
+
+        // Returns with the clocks off, not merely requested off.
+        self.wait_for_sync_clk();
     }
 
     fn wait_for_sync(&self) {
@@ -435,6 +446,12 @@ impl Isc {
     pub fn enable_interrupt(&mut self, isr: ISCStatus) {
         let mut csr = CSR::new(self.base_addr as *mut u32);
         csr.wo(INTEN, isr.bits());
+    }
+
+    #[inline]
+    pub fn disable_interrupt(&mut self, isr: ISCStatus) {
+        let mut csr = CSR::new(self.base_addr as *mut u32);
+        csr.wo(INTDIS, isr.bits());
     }
 
     #[inline]
