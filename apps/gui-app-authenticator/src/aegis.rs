@@ -25,7 +25,7 @@ pub enum AegisError {
     PasswordMismatch,
     #[error("Aegis vault contents failed authentication")]
     AuthenticationFailed,
-    #[error("{0:?}")]
+    #[error(transparent)]
     GenericError(#[from] anyhow::Error),
 }
 
@@ -88,7 +88,7 @@ struct AegisEntryInfo {
 }
 
 pub fn parse_export(bytes: &[u8]) -> Result<ParsedAegisExport, AegisError> {
-    let envelope: AegisExportEnvelope = serde_json::from_slice(bytes).context("Invalid Aegis export JSON")?;
+    let envelope: AegisExportEnvelope = crate::from_import_json(bytes, "Invalid Aegis export JSON")?;
     if envelope.version != AEGIS_EXPORT_VERSION {
         return Err(anyhow!("Unsupported Aegis export version {}", envelope.version).into());
     }
@@ -119,8 +119,9 @@ pub fn parse_export(bytes: &[u8]) -> Result<ParsedAegisExport, AegisError> {
                         == Some(1)
                 })
                 .map(|slot| {
-                    serde_json::from_value(slot)
-                        .context("Encrypted Aegis export password slot is missing required fields")
+                    serde_json::from_value(slot).map_err(|_| {
+                        anyhow!("Encrypted Aegis export password slot is missing required fields")
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if password_slots.len() != REQUIRED_AEGIS_PASSWORD_SLOTS {
@@ -244,7 +245,7 @@ pub fn ingest_plaintext_db(bytes: &[u8]) -> Result<Vec<Auth>, AegisError> {
         entries: Vec<AegisEntry>,
     }
 
-    let db: PlainDb = serde_json::from_slice(bytes).context("Invalid plaintext Aegis db")?;
+    let db: PlainDb = crate::from_import_json(bytes, "Invalid plaintext Aegis db")?;
     if db.version != AEGIS_DB_VERSION {
         return Err(anyhow!("Unsupported Aegis db version {}", db.version).into());
     }
@@ -277,8 +278,8 @@ fn parse_uri_entry(line: &str) -> Result<Auth, AegisError> {
 }
 
 fn parse_plaintext_entry(entry: AegisEntry) -> Result<Auth, AegisError> {
-    let info: AegisEntryInfo =
-        serde_json::from_value(entry.info).context("Aegis TOTP entry is missing required info fields")?;
+    let info: AegisEntryInfo = serde_json::from_value(entry.info)
+        .map_err(|_| anyhow!("Aegis TOTP entry is missing required info fields"))?;
 
     let issuer = (!entry.issuer.is_empty()).then_some(entry.issuer.as_str());
     let url = build_totp_url(&info.secret, &entry.name, issuer, &info.algo, info.digits, info.period)?;
@@ -675,7 +676,9 @@ mod tests {
         }"#;
 
         let error = ingest_plaintext_db(db).unwrap_err().to_string();
-        assert!(error.contains("missing field"));
+        assert!(error.contains("Invalid plaintext Aegis db"));
+        // Data, not Syntax: the JSON parses and the entry is the thing that does not fit.
+        assert!(error.contains("Data"), "{error}");
     }
 
     #[test]

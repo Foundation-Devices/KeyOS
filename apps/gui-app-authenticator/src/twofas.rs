@@ -93,7 +93,7 @@ struct Otp {
 }
 
 pub fn parse_export(bytes: &[u8]) -> Result<ParsedTwoFasExport, TwoFasError> {
-    let probe: ExportProbe = serde_json::from_slice(bytes).context("Invalid 2FAS export JSON")?;
+    let probe: ExportProbe = crate::from_import_json(bytes, "Invalid 2FAS export JSON")?;
     validate_metadata(probe.schema_version, &probe.app_origin)?;
 
     match (probe.services_encrypted, probe.reference) {
@@ -120,12 +120,12 @@ pub async fn decrypt_export(
 }
 
 pub fn ingest_plaintext_export(bytes: &[u8]) -> Result<Vec<Auth>, TwoFasError> {
-    let export: PlainExport = serde_json::from_slice(bytes).context("Invalid 2FAS services JSON")?;
+    let export: PlainExport = crate::from_import_json(bytes, "Invalid 2FAS services JSON")?;
     ingest_services(export.services)
 }
 
 pub fn ingest_decrypted_services(bytes: &[u8]) -> Result<Vec<Auth>, TwoFasError> {
-    let services = serde_json::from_slice(bytes).context("Invalid decrypted 2FAS services JSON")?;
+    let services = crate::from_import_json(bytes, "Invalid decrypted 2FAS services JSON")?;
     ingest_services(services)
 }
 

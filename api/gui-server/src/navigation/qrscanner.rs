@@ -3,6 +3,8 @@
 
 //! QR code scanner navigation request and response formats.
 
+use std::fmt;
+
 use app_manifest::QrPriority;
 use server::WithAppId;
 use xous::AppId;
@@ -109,13 +111,36 @@ impl MatchedQrResult {
     pub fn serialize(&self) -> Vec<u8> { rkyv::to_bytes::<rkyv::rancor::Error>(self).unwrap().to_vec() }
 }
 
-#[derive(Debug, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[derive(Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 pub enum ScanQrResult {
     Qr { data: Vec<u8>, matching_apps: Option<Vec<ScanQrMatchingApp>> },
     Ur2 { ur_type: String, data: Vec<u8>, matching_apps: Option<Vec<ScanQrMatchingApp>> },
     LeftClicked,
     RightClicked,
     ButtonClicked,
+}
+
+// A scan can be a seed phrase or a private key, so Debug must not render the bytes.
+// The type and the matched apps are enough to tell why a payload went unhandled.
+impl fmt::Debug for ScanQrResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Qr { data, matching_apps } => formatter
+                .debug_struct("Qr")
+                .field("data_len", &data.len())
+                .field("matching_apps", matching_apps)
+                .finish_non_exhaustive(),
+            Self::Ur2 { ur_type, data, matching_apps } => formatter
+                .debug_struct("Ur2")
+                .field("ur_type", ur_type)
+                .field("data_len", &data.len())
+                .field("matching_apps", matching_apps)
+                .finish_non_exhaustive(),
+            Self::LeftClicked => formatter.write_str("LeftClicked"),
+            Self::RightClicked => formatter.write_str("RightClicked"),
+            Self::ButtonClicked => formatter.write_str("ButtonClicked"),
+        }
+    }
 }
 
 impl ScanQrResult {

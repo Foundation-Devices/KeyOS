@@ -74,7 +74,7 @@ impl BluetoothServer {
         if !self.state.is_enabled() {
             return Err(BluetoothError::InvalidState);
         }
-        log::debug!("Send({data:02x?}) called in hosted mode");
+        log::trace!("Send({data:02x?}) called in hosted mode");
         Ok(())
     }
 

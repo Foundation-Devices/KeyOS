@@ -279,14 +279,25 @@ impl Seed {
     }
 }
 
-#[derive(Debug, thiserror::Error, Clone)]
+#[derive(thiserror::Error, Clone)]
 pub enum SeedEditField {
     #[error("label: {0:?}")]
     Label(String),
     #[error("account: {0:?}")]
     Account(String),
-    #[error("password: {0:?}")]
+    #[error("password")]
     Password(String),
+}
+
+// Labels and accounts are worth seeing; the password is the thing being stored.
+impl std::fmt::Debug for SeedEditField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Label(val) => f.debug_tuple("Label").field(val).finish(),
+            Self::Account(val) => f.debug_tuple("Account").field(val).finish(),
+            Self::Password(_) => f.debug_tuple("Password").field(&"<redacted>").finish(),
+        }
+    }
 }
 
 impl SeedEditField {

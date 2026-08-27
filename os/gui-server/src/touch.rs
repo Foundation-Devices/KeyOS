@@ -193,7 +193,7 @@ impl Gui {
                 if let Some(kw) = &self.keyboard_window {
                     let h = self.with_active_app(|w| w.keyboard_state.height().unwrap_or(0)).unwrap_or(0);
                     let touch = touch.translate_pos(0, SCREEN_HEIGHT - h);
-                    log::debug!("Touching keyboard: {touch:?}");
+                    log::trace!("Touching keyboard: {touch:?}");
                     xous::try_send_message(
                         kw.input_cid,
                         touch.as_input_message(InputMessage::Touch as usize),

@@ -237,8 +237,16 @@ impl<T: TableEntry, P: Persistence> OrderedTable<T, P> {
         self.table = if table_string.is_empty() {
             Vec::new()
         } else {
-            serde_json::from_str(table_string.as_str())
-                .map_err(|e| PersistenceError::LoadError(e.to_string()))?
+            // The table holds whatever the app stores, so keep serde's category and position
+            // and drop its message: only the message quotes the value it choked on.
+            serde_json::from_str(table_string.as_str()).map_err(|e| {
+                PersistenceError::LoadError(format!(
+                    "invalid JSON ({:?}) at line {} column {}",
+                    e.classify(),
+                    e.line(),
+                    e.column()
+                ))
+            })?
         };
 
         for (i, e) in self.table.iter().enumerate() {

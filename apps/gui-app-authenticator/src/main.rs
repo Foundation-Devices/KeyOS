@@ -162,6 +162,19 @@ impl DetectedImportFile {
     }
 }
 
+/// Deserialize JSON from an import file, keeping serde's category and position and dropping
+/// its message.
+///
+/// An import file can be a plaintext vault, and only the message quotes the value it failed on.
+pub fn from_import_json<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    what: &'static str,
+) -> anyhow::Result<T> {
+    serde_json::from_slice(bytes).map_err(|e| {
+        anyhow::anyhow!("{what} ({:?}) at line {} column {}", e.classify(), e.line(), e.column())
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("QR scanning was canceled")]
@@ -176,11 +189,11 @@ pub enum AuthError {
     UnknownQrResultError,
     #[error("No new auth code to save")]
     NoNewAuthError,
-    #[error("OrderedTableError: {0:?}")]
+    #[error("OrderedTableError: {0}")]
     OrderedTableError(OrderedTableError<Auth>),
-    #[error("ValidationError: {0:?}")]
+    #[error("ValidationError: {0}")]
     ValidationError(AuthValidationError),
-    #[error("DuplicateError: {0:?}")]
+    #[error("DuplicateError: {0}")]
     DuplicateError(AuthDuplicateReason),
     #[error("Could not use negative index")]
     IndexError,
@@ -200,7 +213,7 @@ pub enum AuthError {
     NoPendingImportsError,
     #[error("No pending encrypted import")]
     NoPendingEncryptedImportError,
-    #[error("{0:?}")]
+    #[error(transparent)]
     GenericError(#[from] anyhow::Error),
 }
 
@@ -218,20 +231,6 @@ impl From<AuthDuplicateReason> for AuthError {
 
 impl From<MigrationError> for AuthError {
     fn from(value: MigrationError) -> Self { AuthError::MigrationParseError(value.to_string()) }
-}
-
-fn log_import_error_redacted(prefix: &str, error: &AuthError) {
-    let category = match error {
-        AuthError::UnsupportedImportFile(_) => "unsupported import file",
-        AuthError::DecryptPasswordMismatch => "decrypt password mismatch",
-        AuthError::AegisImportError(_) => "Aegis import error",
-        AuthError::GenericError(_) => "generic import error",
-        AuthError::ValidationError(_) => "validation error",
-        AuthError::DuplicateError(_) => "duplicate entry",
-        AuthError::MigrationParseError(_) => "migration parse error",
-        _ => "internal import error",
-    };
-    log::warn!("{prefix}: {category}");
 }
 
 #[cfg_attr(test, allow(dead_code))]
@@ -779,7 +778,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                         ui_state.set_decrypt_password_failed(true);
                     }
                     Err(e) => {
-                        log_import_error_redacted("Import decrypt failed", &e);
+                        log::warn!("Import decrypt failed: {e}");
                         ui_state.set_decrypt_generic_failure(true);
                     }
                 }
@@ -1107,7 +1106,7 @@ impl AppState {
                 )
             }
             Err(e) => {
-                log_import_error_redacted("Import file rejected before decrypt", &e);
+                log::warn!("Import file rejected before decrypt: {e}");
                 ui_state.set_main_result(CallbackResult::unsupported_import_file_error());
             }
         }
@@ -1235,7 +1234,7 @@ fn adapt_import_multiple(app_state: &mut AppState) -> Result<(), AuthError> {
 
         app_state.auth_table.separate_categories(|a| a.get_category());
         if let Err(e) = app_state.auth_table.push_categorized(|a| a.get_category(), import_auth) {
-            log::warn!("Failed to import entry: {:?}", e);
+            log::warn!("Failed to import entry: {e}");
         } else {
             occupied_labels.insert(label);
         }

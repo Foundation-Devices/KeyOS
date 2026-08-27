@@ -6,7 +6,7 @@ use {
     bip39::{Error as Bip39Error, Language, Mnemonic},
     crypto::error::CryptoError,
     messages::*,
-    std::{num::ParseIntError, str::Utf8Error},
+    std::{fmt, num::ParseIntError, str::Utf8Error},
     zeroize::ZeroizeOnDrop,
 };
 
@@ -26,15 +26,30 @@ pub struct Security<P: server::CheckedPermissions> {
     conn: server::CheckedConn<P>,
 }
 
-#[derive(Debug, Clone, ZeroizeOnDrop, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, ZeroizeOnDrop, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Pin(pub [u8; 32]);
 
-#[derive(Debug, Clone, ZeroizeOnDrop, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+impl fmt::Debug for Pin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Pin").field(&"<redacted>").finish()
+    }
+}
+
+#[derive(Clone, ZeroizeOnDrop, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Seed {
     /// Twelve word seed.
     Twelve([u8; 16]),
     /// Twenty-four word seed.
     TwentyFour([u8; 32]),
+}
+
+impl fmt::Debug for Seed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Twelve(_) => f.debug_tuple("Twelve").field(&"<redacted>").finish(),
+            Self::TwentyFour(_) => f.debug_tuple("TwentyFour").field(&"<redacted>").finish(),
+        }
+    }
 }
 
 impl Seed {
@@ -608,10 +623,19 @@ impl std::fmt::Display for DeviceId {
     }
 }
 
-#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct BluetoothChallengeSecret {
     pub secret: [u8; 32],
     pub sent: bool,
+}
+
+impl fmt::Debug for BluetoothChallengeSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BluetoothChallengeSecret")
+            .field("secret", &"<redacted>")
+            .field("sent", &self.sent)
+            .finish()
+    }
 }
 
 #[cfg(test)]

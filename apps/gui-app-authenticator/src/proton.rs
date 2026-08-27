@@ -151,7 +151,7 @@ pub fn parse_authenticator_export(bytes: &[u8]) -> anyhow::Result<ParsedAuthenti
     }
 
     let export: ProtonAuthenticatorPlainProbe =
-        serde_json::from_slice(bytes).context("Invalid Proton Authenticator export JSON")?;
+        crate::from_import_json(bytes, "Invalid Proton Authenticator export JSON")?;
     if export.version != LEGACY_VERSION {
         return Err(anyhow::anyhow!("Unsupported Proton Authenticator export version").into());
     }
@@ -213,7 +213,7 @@ pub async fn decrypt_authenticator_export(
 }
 
 pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
-    let export: ProtonExport = serde_json::from_slice(bytes).context("Invalid Proton export JSON")?;
+    let export: ProtonExport = crate::from_import_json(bytes, "Invalid Proton export JSON")?;
     let mut entries = Vec::new();
 
     for vault in export.vaults.into_values() {
@@ -237,7 +237,7 @@ pub fn ingest_json_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
 
 pub fn ingest_authenticator_plain_export(bytes: &[u8]) -> anyhow::Result<Vec<Auth>> {
     let export: ProtonAuthenticatorPlainExport =
-        serde_json::from_slice(bytes).context("Invalid Proton Authenticator export JSON")?;
+        crate::from_import_json(bytes, "Invalid Proton Authenticator export JSON")?;
     if export.version != LEGACY_VERSION {
         bail!("Unsupported Proton Authenticator export version");
     }
@@ -262,7 +262,7 @@ pub fn ingest_authenticator_plain_export(bytes: &[u8]) -> anyhow::Result<Vec<Aut
 pub fn probe_csv_export(bytes: &[u8]) -> anyhow::Result<()> {
     let mut reader =
         ReaderBuilder::new().has_headers(true).trim(csv::Trim::All).from_reader(Cursor::new(bytes));
-    let headers = reader.byte_headers().context("Invalid Proton CSV headers")?.clone();
+    let headers = reader.byte_headers().map_err(|_| anyhow::anyhow!("Invalid Proton CSV headers"))?.clone();
 
     let type_index = headers
         .iter()
@@ -274,7 +274,7 @@ pub fn probe_csv_export(bytes: &[u8]) -> anyhow::Result<()> {
         .context("Proton CSV export is missing totp column")?;
 
     for row in reader.byte_records() {
-        let row = row.context("Invalid Proton CSV row")?;
+        let row = row.map_err(|_| anyhow::anyhow!("Invalid Proton CSV row"))?;
         let item_type = row.get(type_index).unwrap_or_default();
         let totp_uri = row.get(totp_index).unwrap_or_default();
         if item_type == b"login" && !totp_uri.is_empty() {
@@ -309,7 +309,7 @@ fn parse_authenticator_entry(entry: ProtonAuthenticatorEntry) -> anyhow::Result<
 }
 
 fn parse_csv_entry(row: Result<ProtonCsvItem, csv::Error>) -> anyhow::Result<Option<Auth>> {
-    let row = row.context("Invalid Proton CSV row")?;
+    let row = row.map_err(|_| anyhow::anyhow!("Invalid Proton CSV row"))?;
     if row.item_type != "login" || row.totp_uri.is_empty() {
         return Ok(None);
     }

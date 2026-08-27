@@ -85,7 +85,7 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
     ) -> Option<Vec<u8>> {
-        log::debug!("Setup packet: {msg:02x?}");
+        log::trace!("Setup packet: {msg:02x?}");
         if msg.request_type == 0x21 && msg.request == 0x0a {
             Some(vec![]) // HID SET_IDLE
         } else if msg.request_type == 0x81 && msg.request == 0x06 {
@@ -135,7 +135,7 @@ fn out_thread(mut ep_out: UsbEmulatedEndpoint, gate: EnabledGate) {
         match ep_out.read_buf(*out_buffer, hid::REPORT_SIZE as u16) {
             Ok(l) => {
                 let report = &out_buffer.as_slice::<u8>()[..l];
-                log::debug!(
+                log::trace!(
                     "Read {l} bytes from endpoint 0x{:02x}: {:02x?}",
                     ep_out.endpoint_number(),
                     report
@@ -143,7 +143,7 @@ fn out_thread(mut ep_out: UsbEmulatedEndpoint, gate: EnabledGate) {
 
                 match reassembler.feed(report) {
                     Ok(Some((channel_id, apdu))) => {
-                        log::debug!("HID reassembled APDU ({} bytes): {:02x?}", apdu.len(), apdu);
+                        log::trace!("HID reassembled APDU ({} bytes): {:02x?}", apdu.len(), apdu);
                         if let Err(e) = api.deliver_hid_apdu(channel_id, apdu) {
                             log::error!("Failed to deliver HID APDU to server: {e:?}");
                         }
@@ -186,7 +186,7 @@ impl HidInEndpoint {
     fn write_apdu(&mut self, channel_id: u16, apdu: &[u8]) {
         match hid::fragment(channel_id, apdu) {
             Ok(reports) => {
-                log::debug!(
+                log::trace!(
                     "Response APDU out ({} bytes) as {} HID reports: {:02x?}",
                     apdu.len(),
                     reports.len(),

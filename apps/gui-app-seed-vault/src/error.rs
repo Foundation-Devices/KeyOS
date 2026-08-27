@@ -13,17 +13,17 @@ use {
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
-    #[error("OrderedTableError: {0:?}")]
+    #[error("OrderedTableError: {0}")]
     OrderedTableError(#[from] OrderedTableError<Seed>),
-    #[error("ValidationError: {0:?}")]
+    #[error("ValidationError: {0}")]
     ValidationError(#[from] SeedValidationError),
-    #[error("DuplicateError: {0:?}")]
+    #[error("DuplicateError: {0}")]
     DuplicateError(#[from] SeedDuplicateReason),
     #[error("Invalid index could not be parsed: {0:?}")]
     IndexError(#[from] TryFromIntError),
     #[error("Unknwon QR data payload type")]
     UnknownQrDataType,
-    #[error("{0:?}")]
+    #[error(transparent)]
     GenericError(#[from] anyhow::Error),
 }
 

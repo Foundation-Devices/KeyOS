@@ -87,7 +87,8 @@ pub struct Lockout {
 #[response(Result<[u8; 64], AccessDenied>)]
 pub struct SignWithSecurityCheckKey(pub [u8; 32]);
 
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+// Don't derive Debug: the prefix is the first four characters of the PIN.
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<[SecurityWord; 2], AccessDenied>)]
 pub struct GetSecurityWords {
     pub pin_prefix: Vec<u8>,

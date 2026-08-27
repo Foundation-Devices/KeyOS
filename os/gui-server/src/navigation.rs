@@ -7,7 +7,7 @@ use gui_server_api::{
     navigation::{lockscreen::VerifyPinOptions, LOCK_SCREEN_APP_ID, SETTINGS_APP_ID},
     InputMessage,
 };
-use log::{debug, error, warn};
+use log::{debug, error, trace, warn};
 use server::ArchiveRequest;
 use xous::{AppId, PID};
 
@@ -142,7 +142,7 @@ impl Gui {
             }
             _ => {
                 warn!("Response got while no navigation present");
-                debug!("{response:?}");
+                trace!("{response:?}");
             }
         }
     }

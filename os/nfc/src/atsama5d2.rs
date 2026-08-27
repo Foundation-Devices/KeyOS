@@ -276,7 +276,7 @@ impl Implementation {
                         return Err(NfcError::Internal);
                     }
                 };
-                log::debug!("[>] rx_data: {:x?}", rx_data);
+                log::trace!("[>] rx_data: {:x?}", rx_data);
                 if rx_data.is_empty() {
                     log::debug!("No more data from reader, ending session");
                     break;
@@ -287,7 +287,7 @@ impl Implementation {
 
                 let mut resp = self.handle_apdu_cmd(&rx_data, &mut remaining_data);
                 transceive_done = resp.transceive_done;
-                log::debug!("[>] reply: {:02x?}", resp);
+                log::trace!("[>] reply: {:02x?}", resp);
                 resp.data.extend_from_slice(&resp.status.to_u16().to_be_bytes());
                 if let Err(e) = self.transceive_blocking(Some(&mut resp.data), rfal::RFAL_FWT_NONE) {
                     return Err(e);
@@ -339,7 +339,7 @@ impl Implementation {
         let Ok(cmd) = Command::<256>::try_from(rx_data) else {
             return ApduResponse { status: Status::CorruptedData, data: vec![], transceive_done: false };
         };
-        log::debug!("[>] cmd: {:x?}", cmd);
+        log::trace!("[>] cmd: {:x?}", cmd);
 
         let cla = cmd.class();
         let ins = cmd.instruction();
@@ -422,7 +422,7 @@ impl Implementation {
     fn handle_u2f_apdu(&mut self, cmd: &Command<256>, remaining_data: &mut Vec<u8>) -> ApduResponse {
         let command = U2fApduCommand::from_command_view(cmd.as_view());
         let mut resp = self.fido.as_ref().unwrap().u2f_process_apdu(command, Transport::Nfc);
-        log::debug!("[>] U2F reply: {:02x?}, len={}", resp, resp.len());
+        log::trace!("[>] U2F reply: {:02x?}, len={}", resp, resp.len());
 
         if cmd.extended {
             // Specification says authenticator MUST respond using the extended length APDU response

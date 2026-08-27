@@ -31,7 +31,7 @@ impl FidoServer {
         transport: Transport,
         is_repeat: bool,
     ) -> Result<(Vec<u8>, Option<OperationOutcome>), Error> {
-        log::debug!("process_apdu({:02x?},{:?})", command, transport);
+        log::trace!("process_apdu({:02x?},{:?})", command, transport);
         let instruction = command.instruction;
         let p1 = command.p1;
         let p2 = command.p2;
@@ -57,7 +57,7 @@ impl FidoServer {
                 // directly from a RP-initiated Register request.
 
                 let req = RegisterRequest::from_apdu_data(body)?;
-                log::debug!("{req:02x?}");
+                log::trace!("{req:02x?}");
 
                 // NFC can't stay in card emulation across the CNS retry loop, so we can't
                 // drive a presence prompt there. Require a pre-selected key and treat the
@@ -111,7 +111,7 @@ impl FidoServer {
                     log::info!("Authenticate");
                 }
                 let req = AuthenticateRequest::from_apdu_data(body)?;
-                log::debug!("{req:02x?}");
+                log::trace!("{req:02x?}");
                 let security_key_index = req.key_handle.security_key_index;
                 let registered_key_index = req.key_handle.registered_key_index;
 
@@ -201,7 +201,7 @@ impl FidoServer {
                 signature_base.extend_from_slice(&req.challenge_parameter);
                 (resp.signature, _) =
                     self.sign_der(security_key_index, registered_key_index, &signature_base)?;
-                log::debug!("{resp:02x?}");
+                log::trace!("{resp:02x?}");
 
                 Ok((resp.to_vec(), Some(OperationOutcome { security_key_index, is_registration: false })))
             }

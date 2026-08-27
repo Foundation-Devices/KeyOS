@@ -3,6 +3,8 @@
 
 // Code originally ported from passport2 pins.c file.
 
+use std::fmt;
+
 use constant_time_eq::{constant_time_eq, constant_time_eq_n};
 use crypto::{error::CryptoError, SHA256_HASH_SIZE};
 use rand::RngCore;
@@ -27,12 +29,14 @@ const DEV_KEYCARD_SECRET: [u8; 32] = [
 /// SHA256 PIN hash with values mixed in from the SE.
 ///
 /// NOTE: This is not simply a hash of the PIN.
+// Don't derive Debug: this authenticates to the SE, so it is as good as the PIN.
 #[derive(Clone, ZeroizeOnDrop)]
 pub struct AuthPinHash(pub [u8; SHA256_HASH_SIZE]);
 
 /// SHA256 hash of a PIN and an encryption salt.
 ///
 /// Used to perform XOR operations with the seed in order to make sure that the PIN is always required.
+// Don't derive Debug: this XORs the stored seed, so leaking it decrypts the seed.
 #[derive(Clone, ZeroizeOnDrop)]
 pub struct XorPinHash(pub [u8; SHA256_HASH_SIZE]);
 
@@ -80,10 +84,19 @@ impl SeedExtras for Seed {
 ///  Some of the code related to this would have been simpler if the tag was the first byte, but
 ///  it would make it impossible to use the [Slot::Seed] contents as a write key since the last
 ///  byte of the [Seed::TwentyFour] would have been in the next SE data block.
-#[derive(Debug, Clone, ZeroizeOnDrop)]
+#[derive(Clone, ZeroizeOnDrop)]
 pub enum XorSeed {
     Twelve([u8; 16]),
     TwentyFour([u8; 32]),
+}
+
+impl fmt::Debug for XorSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Twelve(_) => f.debug_tuple("Twelve").field(&"<redacted>").finish(),
+            Self::TwentyFour(_) => f.debug_tuple("TwentyFour").field(&"<redacted>").finish(),
+        }
+    }
 }
 
 impl XorSeed {
@@ -192,8 +205,14 @@ pub enum LoginFailureReason {
     IncorrectPin,
 }
 
-#[derive(Debug, Clone, ZeroizeOnDrop, Zeroize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, ZeroizeOnDrop, Zeroize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AesEntropy(pub [u8; 72]);
+
+impl fmt::Debug for AesEntropy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("AesEntropy").field(&"<redacted>").finish()
+    }
+}
 
 impl Default for AesEntropy {
     fn default() -> Self { AesEntropy([0u8; 72]) }

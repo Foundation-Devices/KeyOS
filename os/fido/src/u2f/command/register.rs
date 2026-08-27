@@ -47,7 +47,7 @@ impl RegisterResponse {
         signature_base.extend_from_slice(challenge_parameter);
         signature_base.extend_from_slice(&self.key_handle.to_vec());
         signature_base.extend_from_slice(&self.user_public_key);
-        log::debug!("Attestation Signature base: {:02x?}", signature_base);
+        log::trace!("Attestation Signature base: {:02x?}", signature_base);
         let signature_base_hash =
             crate::CryptoApi::default().sha256(&signature_base).map_err(|_| Error::Hashing)?;
         // Always sign with the SE - the certificate was generated during init

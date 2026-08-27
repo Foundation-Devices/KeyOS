@@ -5,7 +5,7 @@ use gui_server_api::{consts::DEFAULT_KEYBOARD_HEIGHT, InputMessage, Key};
 use server::AsScalar;
 use {
     crate::Gui,
-    log::{debug, error, warn},
+    log::{debug, error, trace, warn},
     xous::{CID, PID},
 };
 
@@ -206,7 +206,7 @@ impl Gui {
 
         let input_msg_kind = if is_pressed { InputMessage::KeyPress } else { InputMessage::KeyRelease };
 
-        debug!("Sending key {}: {:?}", if is_pressed { "press" } else { "release" }, key);
+        trace!("Sending key {}: {:?}", if is_pressed { "press" } else { "release" }, key);
 
         self.with_active_app_mut(|app| {
             let msg = xous::Message::new_scalar(input_msg_kind as usize, arg1 as usize, arg2 as usize, 0, 0);

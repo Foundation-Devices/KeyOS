@@ -640,7 +640,7 @@ pub extern "C" fn os_io_tx_cmd(type_: u8, buffer: *const u8, length: u16, _timeo
         packet.push((length >> 8) as u8);
         packet.push(length as u8);
         packet.extend_from_slice(raw);
-        log::debug!("os_io_tx_cmd: RAW_APDU -> Rapdu ({} bytes): {:02x?}", length, &raw[..length.min(16)]);
+        log::trace!("os_io_tx_cmd: RAW_APDU -> Rapdu ({} bytes): {:02x?}", length, &raw[..length.min(16)]);
         send_seph(&packet);
         return length as i32;
     }
@@ -693,7 +693,7 @@ pub extern "C" fn os_io_rx_evt(buf: *mut u8, maxlen: u16, _timeout_ms: *mut u32,
             if data[0] == 0x16 && data_len >= 3 {
                 let apdu = &data[3..];
                 if !apdu.is_empty() && apdu.len() + 1 <= maxlen {
-                    log::debug!(
+                    log::trace!(
                         "os_io_rx_evt: CapduEvent -> RAW_APDU ({} bytes): {:02x?}",
                         apdu.len(),
                         &apdu[..apdu.len().min(16)]
@@ -705,7 +705,7 @@ pub extern "C" fn os_io_rx_evt(buf: *mut u8, maxlen: u16, _timeout_ms: *mut u32,
             }
 
             if data[0] != 0x0e {
-                log::debug!(
+                log::trace!(
                     "os_io_rx_evt: tag=0x{:02x} len={} data={:02x?}",
                     data[0],
                     data_len,

@@ -99,7 +99,7 @@ macro_rules! send_protocol_msg_wrapper {
             Ok(HostProtocolMessage::Bluetooth($expected)) => $body,
             Ok(unexpected) => {
                 log::error!("Got unexpected response to {}", stringify!($msg));
-                log::debug!("{unexpected:?}");
+                log::trace!("{unexpected:?}");
                 $self.reset();
                 Err(BluetoothError::SpiProtocolError)
             }
@@ -260,7 +260,8 @@ impl BluetoothServer {
                 }
                 _ => {
                     // Both the MCU and the BLE firmware tried to send data.
-                    log::warn!("Invalid response received to command: {tx_msg:02x?}");
+                    log::warn!("Invalid response received to command");
+                    log::trace!("Invalid response: {tx_msg:02x?}");
                 }
             }
             log::trace!("Repeated");
@@ -294,7 +295,7 @@ impl BluetoothServer {
             }
             Err(e) => {
                 log::error!("Error decoding response: {e:?}");
-                log::debug!("Message: {rx_msg:02x?}");
+                log::trace!("Message: {rx_msg:02x?}");
                 Err(BluetoothError::SpiProtocolError)
             }
         }
@@ -431,7 +432,7 @@ impl BluetoothServer {
         if !self.state.is_enabled() {
             return Err(BluetoothError::InvalidState);
         }
-        log::debug!("Sending packet {data:02x?}");
+        log::trace!("Sending packet {data:02x?}");
         let result = send_protocol_msg_wrapper!(
             self,
             Bluetooth::SendData(host_protocol::Message::from_slice(data).map_err(|_| BluetoothError::MessageTooLong)?),
@@ -468,8 +469,9 @@ impl BluetoothServer {
             Ok(HostProtocolMessage::AckState(state)) if state == expected_state => true,
             Ok(msg) => {
                 log::error!(
-                    "Got invalid packet to GetState while waiting for state {expected_state:?} ({msg:02x?}). Stopping poll."
+                    "Got invalid packet to GetState while waiting for state {expected_state:?}. Stopping poll."
                 );
+                log::trace!("Invalid GetState packet: {msg:02x?}");
                 self.set_state(State::Unknown);
                 false
             }
@@ -627,7 +629,7 @@ impl BluetoothServer {
             }
             Ok(msg) => {
                 log::error!("Got invalid packet to EraseFirmware. Stopping poll.");
-                log::debug!("{msg:02x?}");
+                log::trace!("{msg:02x?}");
                 Err(BluetoothError::SpiProtocolError)
             }
             Err(e) => {
@@ -672,7 +674,7 @@ impl BluetoothServer {
                 }
                 Ok(msg) => {
                     log::error!("Got invalid packet to WriteFirmwareBlock. Stopping poll.");
-                    log::debug!("{msg:02x?}");
+                    log::trace!("{msg:02x?}");
                     return Err(BluetoothError::SpiProtocolError);
                 }
                 Err(e) => {
@@ -720,7 +722,7 @@ impl BluetoothServer {
             }
             Ok(msg) => {
                 log::error!("Got invalid packet to BootFirmware. Stopping poll.");
-                log::debug!("{msg:02x?}");
+                log::trace!("{msg:02x?}");
                 self.set_state(State::Unknown);
             }
             Err(e) => {
@@ -781,6 +783,7 @@ impl BluetoothServer {
                     .map_err(|_| BluetoothError::Crypto)?;
                 if expected != result {
                     log::error!("Challenge failed.");
+                    log::trace!("Challenge mismatch: expected {expected:02x?}, got {result:02x?}");
                     Err(BluetoothError::UnknownError)
                 } else {
                     Ok(())
@@ -805,7 +808,7 @@ impl BluetoothServer {
                 GENERAL_TIMEOUT,
             )? {
                 HostProtocolMessage::Bluetooth(Bluetooth::ReceivedData(data)) => {
-                    log::debug!("Received packet: {data:02x?}");
+                    log::trace!("Received packet: {data:02x?}");
                     let event = BlePacket(data.to_vec());
                     self.packet_subscribers.send_nowait(&event);
                     self.stats.rx_size += data.len();
@@ -818,7 +821,7 @@ impl BluetoothServer {
                 }
                 msg => {
                     log::error!("Got invalid packet to GetReceivedData.");
-                    log::error!("{msg:02x?}");
+                    log::trace!("{msg:02x?}");
                     return Err(BluetoothError::SpiProtocolError);
                 }
             }

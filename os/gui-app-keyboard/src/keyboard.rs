@@ -284,7 +284,7 @@ impl KeyboardState {
     }
 
     pub fn on_released(&mut self, x: f32, y: f32) -> Option<Key> {
-        log::debug!("released {x}, {y}");
+        log::trace!("released {x}, {y}");
 
         let (overlay_char, last_key) = self.cleanup();
 

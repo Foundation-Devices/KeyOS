@@ -642,7 +642,8 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                         }
                     }
                 } else {
-                    log::error!("General Status: {pkt:02x?}");
+                    log::error!("Unexpected General Status ({} bytes)", pkt.data.len());
+                    log::trace!("General Status: {pkt:02x?}");
                 }
             }
             SephTag::ScreenDisplayStatus | SephTag::DbgScreenDisplayStatus | SephTag::BaglDrawRect => {
@@ -663,7 +664,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                 log::info!("Printc Status: {}", String::from_utf8_lossy(pkt.data));
             }
             SephTag::Rapdu => {
-                log::debug!("Rapdu ({} bytes): {:02x?}", pkt.data.len(), pkt.data);
+                log::trace!("Rapdu ({} bytes): {:02x?}", pkt.data.len(), pkt.data);
                 #[cfg(keyos)]
                 {
                     let channel_id = next_response_channel();
@@ -973,7 +974,8 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                 }
             }
             _ => {
-                log::warn!("Unmanaged SEPH pkt: {pkt:02x?}");
+                log::warn!("Unmanaged SEPH pkt: tag={:?}", pkt.tag);
+                log::trace!("Unmanaged SEPH pkt: {pkt:02x?}");
             }
         }
     }

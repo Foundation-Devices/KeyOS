@@ -76,7 +76,7 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> Option<Vec<u8>> {
-        log::debug!("Setup packet: {msg:02x?}");
+        log::trace!("Setup packet: {msg:02x?}");
         // Get Max LUN (see Universal Serial Bus Mass Storage Class Bulk-Only Transport Table 3.2)
         if msg.request_type == 0b10100001 && msg.request == 0b11111110 {
             Some(vec![MAX_LUN.load(std::sync::atomic::Ordering::SeqCst)])

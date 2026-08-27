@@ -148,7 +148,7 @@ impl<P: CheckedPermissions> SpiPeripheral<P> {
         } else {
             vec![]
         };
-        log::debug!("read_data: code=0x{code:02x?} len={buffer_len} data={data:02x?}");
+        log::trace!("read_data: code=0x{code:02x?} len={buffer_len} data={data:02x?}");
         Ok((code, data))
     }
 }
@@ -215,7 +215,7 @@ where
     }
 
     fn send_command(&mut self, cmd: st25r95::Command, data: &[u8], sod: bool) -> st25r95::Result<()> {
-        log::debug!("send_command: cmd={cmd:?}, data={data:02x?}");
+        log::trace!("send_command: cmd={cmd:?}, data={data:02x?}");
         let mut packet = vec![st25r95::Control::Send as u8, cmd as u8];
         let data_len = data.len() as u8;
         if cmd != st25r95::Command::Echo {

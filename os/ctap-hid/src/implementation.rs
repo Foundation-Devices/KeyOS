@@ -136,7 +136,7 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _sender: xous::PID,
         _context: &mut ServerContext<Self>,
     ) -> Option<Vec<u8>> {
-        log::debug!("Setup packet: {msg:02x?}");
+        log::trace!("Setup packet: {msg:02x?}");
         if msg.request_type == 0x81 && msg.request == 0x06 {
             // HID GET_DESCRIPTOR
             if msg.value == 0x2200 {
@@ -201,7 +201,7 @@ impl Channel {
                             e.to_u2f_response()
                         }
                     };
-                    log::debug!("CTAPHID_MSG response: {payload:02x?}");
+                    log::trace!("CTAPHID_MSG response: {payload:02x?}");
                     (Command::Message, payload)
                 } else {
                     log::error!("CTAPHID_MSG: wrong payload length {}", self.buf.len());

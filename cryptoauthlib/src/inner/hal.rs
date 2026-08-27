@@ -188,9 +188,10 @@ impl Hal {
         let mut echo_buffer = [0u8; MAX_SEND_SIZE];
         self.receive(&mut echo_buffer[..data.len() + 1])?;
         if echo_buffer[0] != address || &echo_buffer[1..data.len() + 1] != data {
-            log::error!(
-                "Probable electrical issue, received != sent: {:02x?} != {address:02x} {:02x?}",
-                &echo_buffer[..data.len()],
+            log::error!("Probable electrical issue, received != sent");
+            log::trace!(
+                "received != sent: {:02x?} != {address:02x} {:02x?}",
+                &echo_buffer[..data.len() + 1],
                 data
             );
             Err(Error { status: ATCA_COMM_FAIL as ATCA_STATUS })

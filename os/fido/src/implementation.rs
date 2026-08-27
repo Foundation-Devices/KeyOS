@@ -197,7 +197,7 @@ impl FidoServer {
         log::info!("starting fido server");
         let state: FileBacked<JsonCodec<FidoKeysState>, _> =
             JsonBacked::new(STATE_FILE, fs::Location::AppData).0;
-        log::debug!("Restored State: {:02x?}", state);
+        log::trace!("Restored State: {:02x?}", state);
 
         // Get the SE's FIDO public key (64 bytes without 0x04 prefix)
         let se_pubkey = security
@@ -243,7 +243,7 @@ impl FidoServer {
         };
         fido_server.populate_fido_keys()?;
         fido_server.compute_next_signing_keys()?;
-        log::debug!("FIDO Keys: {:02x?}", fido_server.fido_keys);
+        log::trace!("FIDO Keys: {:02x?}", fido_server.fido_keys);
         Ok(fido_server)
     }
 
@@ -462,7 +462,7 @@ impl FidoServer {
         let key_handle = KeyHandle { security_key_index, registered_key_index };
         let mut resp = RegisterResponse::new(public_key, key_handle, self.attestation_certificate.clone());
         resp.attest(&application_parameter, &challenge_parameter)?;
-        log::debug!("{resp:02x?}");
+        log::trace!("{resp:02x?}");
         let response_bytes = resp.to_vec();
 
         self.use_next_signing_key(security_key_index)?;

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::fmt;
+
 use server::{xous::MemoryRange, SimpleMemoryMessage};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -8,12 +10,21 @@ use crate::error::{CryptoError, ShamirError};
 use crate::Direction;
 
 #[derive(
-    Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Zeroize, ZeroizeOnDrop,
+    Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Zeroize, ZeroizeOnDrop,
 )]
 #[response(Result<usize, CryptoError>)]
 pub struct AesSetup {
     pub key: Vec<u8>,
     pub mode: AesMode,
+}
+
+impl fmt::Debug for AesSetup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AesSetup")
+            .field("key", &format_args!("<{} bytes>", self.key.len()))
+            .field("mode", &self.mode)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -120,7 +131,7 @@ pub use crate::sha2::ShaAlgo;
 /// Allocate a server-side SHA context slot (or overwrite an existing one) and seed it
 /// with the supplied hash state. `context_id = None` on first use; the server allocates
 /// a slot and returns its id. Subsequent calls with the returned id overwrite the state.
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<usize, CryptoError>)]
 pub struct ShaSetContext {
     /// `None` → allocate a new slot; `Some(id)` → overwrite existing slot.
@@ -129,6 +140,16 @@ pub struct ShaSetContext {
     /// Intermediate hash state in standard digest byte order (BE per word).
     /// SHA-224/256 use the first 32 bytes; SHA-384/512 use all 64.
     pub hash_state: [u8; 64],
+}
+
+impl fmt::Debug for ShaSetContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShaSetContext")
+            .field("context_id", &self.context_id)
+            .field("algo", &self.algo)
+            .field("hash_state", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Feed a block-aligned chunk of data into the hardware SHA engine via DMA.
@@ -160,17 +181,26 @@ pub struct ShaGetContext {
 }
 
 /// Snapshot of a server-side SHA context (returned by `ShaGetContext`).
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ShaContextSnapshot {
     pub algo: ShaAlgo,
     pub hash_state: [u8; 64],
+}
+
+impl fmt::Debug for ShaContextSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShaContextSnapshot")
+            .field("algo", &self.algo)
+            .field("hash_state", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Release a server-side SHA context slot.
 #[derive(Debug, server::Message)]
 pub struct ShaDrop(pub usize);
 
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Vec<u8>, CryptoError>)]
 pub struct Hmac {
     pub algo: ShaAlgo,
@@ -178,7 +208,17 @@ pub struct Hmac {
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+impl fmt::Debug for Hmac {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Hmac")
+            .field("algo", &self.algo)
+            .field("key", &format_args!("<{} bytes>", self.key.len()))
+            .field("data", &format_args!("<{} bytes>", self.data.len()))
+            .finish()
+    }
+}
+
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Vec<Vec<u8>>, ShamirError>)]
 pub struct ShamirSplit {
     pub secret: Vec<u8>,
@@ -186,9 +226,28 @@ pub struct ShamirSplit {
     pub threshold: usize,
 }
 
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+impl fmt::Debug for ShamirSplit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShamirSplit")
+            .field("secret", &format_args!("<{} bytes>", self.secret.len()))
+            .field("num_shares", &self.num_shares)
+            .field("threshold", &self.threshold)
+            .finish()
+    }
+}
+
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(Result<Vec<u8>, ShamirError>)]
 pub struct ShamirRecover {
     pub indexes: Vec<usize>,
     pub shares: Vec<Vec<u8>>,
+}
+
+impl fmt::Debug for ShamirRecover {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShamirRecover")
+            .field("indexes", &self.indexes)
+            .field("shares", &format_args!("<{} shares>", self.shares.len()))
+            .finish()
+    }
 }

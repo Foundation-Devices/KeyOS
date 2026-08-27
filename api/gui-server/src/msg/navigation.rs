@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::fmt;
+
 use server::WithAppId;
 use xous::AppId;
 
@@ -61,10 +63,21 @@ pub struct RunApp {
     pub app_id: AppId,
 }
 
-#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[response(())]
 pub struct FinishResponse {
     pub response: Vec<u8>,
+}
+
+// These are the serialized bytes of a navigation response, which for a QR scan is the
+// scanned payload that ScanQrResult redacts.
+impl fmt::Debug for FinishResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FinishResponse")
+            .field("response", &format_args!("<{} bytes>", self.response.len()))
+            .finish()
+    }
 }
 
 impl FinishResponse {

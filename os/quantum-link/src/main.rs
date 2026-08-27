@@ -491,7 +491,7 @@ impl QuantumLinkServer {
             | QuantumLinkMessage::MagicBackupResponseV2(_)
             | QuantumLinkMessage::TimezoneRequest(_) => {
                 log::warn!("received spurious event message");
-                log::debug!("{msg:?}");
+                log::trace!("{msg:?}");
             }
         }
     }

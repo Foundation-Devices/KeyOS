@@ -84,7 +84,7 @@ impl FidoServer {
             Command::MakeCredential => {
                 log::info!("MakeCredential called");
                 let mut req = MakeCredentialRequest::from_cbor(_data)?;
-                log::debug!("MakeCredentialRequest: {req:02x?}");
+                log::trace!("MakeCredentialRequest: {req:02x?}");
                 // 6.1.2. authenticatorMakeCredential Algorithm
                 // Upon receipt of an authenticatorMakeCredential request, the authenticator performs the
                 // following procedure:
@@ -592,13 +592,13 @@ impl FidoServer {
                 // Attestation succeeded — commit state.
                 self.create_registered_key_ctap(security_key_index, req.rp.clone(), req.user.clone())?;
 
-                log::debug!("Response: {resp:02x?}");
+                log::trace!("Response: {resp:02x?}");
                 Ok(resp.to_vec_cbor())
             }
             Command::GetAssertion => {
                 log::info!("GetAssertion called");
                 let mut req = GetAssertionRequest::from_cbor(_data)?;
-                log::debug!("GetAssertionRequest: {req:02x?}");
+                log::trace!("GetAssertionRequest: {req:02x?}");
                 // 6.2.2. authenticatorGetAssertion Algorithm
                 // Upon receipt of a authenticatorGetAssertion request, the authenticator performs the
                 // following procedure:
@@ -956,7 +956,7 @@ impl FidoServer {
                 signature_base.extend_from_slice(&resp.auth_data.to_vec());
                 (resp.signature, resp.auth_data.sign_count) =
                     self.sign_der(selected_credential.0, selected_credential.1, &signature_base)?;
-                log::debug!("Response: {resp:02x?}");
+                log::trace!("Response: {resp:02x?}");
                 Ok(resp.to_vec_cbor())
             }
             _ => {

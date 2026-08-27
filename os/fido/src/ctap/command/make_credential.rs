@@ -157,7 +157,7 @@ impl AttestationStatement {
         let mut signature_base = Vec::new();
         signature_base.extend_from_slice(client_data_hash);
         signature_base.extend_from_slice(public_key);
-        log::debug!("Attestation Signature base: {:02x?}", signature_base);
+        log::trace!("Attestation Signature base: {:02x?}", signature_base);
         #[cfg(not(test))]
         let signature_base_hash = crate::CryptoApi::default().sha256(&signature_base).expect("sha256");
         Ok(AttestationStatement {

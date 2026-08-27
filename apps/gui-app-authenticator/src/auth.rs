@@ -28,6 +28,30 @@ pub enum AuthDuplicateReason {
     Totp(String),
 }
 
+/// Category of a TOTP URL parse failure, with no part of the offending URL in it.
+///
+/// Every TotpUrlError variant keeps the offending part of the URL, and for
+/// TotpUrlError::Secret that is the raw shared secret, so the error itself must not
+/// be stored or rendered.
+pub fn totp_url_error_category(error: &TotpUrlError) -> &'static str {
+    match error {
+        TotpUrlError::Url(_) => "unparseable URL",
+        TotpUrlError::Scheme(_) => "invalid scheme",
+        TotpUrlError::Host(_) => "invalid host",
+        TotpUrlError::Secret(_) => "invalid secret encoding",
+        TotpUrlError::SecretSize(_) => "secret too short",
+        TotpUrlError::Algorithm(_) => "unknown algorithm",
+        TotpUrlError::Digits(_) => "unparseable digit count",
+        TotpUrlError::DigitsNumber(_) => "digit count out of range",
+        TotpUrlError::Step(_) => "unparseable time step",
+        TotpUrlError::Issuer(_) => "issuer contains a colon",
+        TotpUrlError::IssuerDecoding(_) => "undecodable issuer",
+        TotpUrlError::IssuerMistmatch(_, _) => "issuer mismatch",
+        TotpUrlError::AccountName(_) => "account name contains a colon",
+        TotpUrlError::AccountNameDecoding(_) => "undecodable account name",
+    }
+}
+
 #[derive(PartialEq, Debug, thiserror::Error)]
 pub enum AuthValidationError {
     #[error("Invalid label, labels must not be empty")]
@@ -36,8 +60,8 @@ pub enum AuthValidationError {
     EmptyAccountError,
     #[error("Time period must be 30 seconds: {0:?}")]
     InvalidTimestepError(u64),
-    #[error("Invalid TOTP URL: {0:?}")]
-    InvalidTotpError(TotpUrlError),
+    #[error("Invalid TOTP URL: {0}")]
+    InvalidTotpError(&'static str),
 }
 
 #[repr(u32)]
@@ -184,14 +208,14 @@ impl Auth {
                 | TotpUrlError::AccountName(_)),
             ) => {
                 let (sanitized_url, issuer, account_name) = sanitize_issuer_and_account(&totp_url)
-                    .ok_or(AuthValidationError::InvalidTotpError(error))?;
+                    .ok_or_else(|| AuthValidationError::InvalidTotpError(totp_url_error_category(&error)))?;
                 let mut sanitized_totp = TOTP::from_url_unchecked(&sanitized_url)
-                    .map_err(AuthValidationError::InvalidTotpError)?;
+                    .map_err(|e| AuthValidationError::InvalidTotpError(totp_url_error_category(&e)))?;
                 sanitized_totp.issuer = Some(issuer);
                 sanitized_totp.account_name = account_name;
                 sanitized_totp
             }
-            Err(e) => return Err(AuthValidationError::InvalidTotpError(e)),
+            Err(e) => return Err(AuthValidationError::InvalidTotpError(totp_url_error_category(&e))),
         };
 
         // Account names are a mandatory field, so this is extremely rare,

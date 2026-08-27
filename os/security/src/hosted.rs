@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::fmt;
+
 use security::{messages::*, AppSeed, PinEntryMode, Seed, MAX_LOGIN_ATTEMPTS};
 use security::{
     AccessDenied, BluetoothChallengeSecret, DeviceId, FirmwareTimestamp, LoginFailed, MasterKeyState,
@@ -19,7 +21,7 @@ pub struct Server {
     logged_in: bool,
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct SecurityData {
     raw_pin: String,
     login_attempts: u32,
@@ -28,6 +30,20 @@ struct SecurityData {
     seed_fingerprint: Vec<u8>,
     firmware_timestamp: [u8; 4],
     pin_entry_mode: u8,
+}
+
+impl fmt::Debug for SecurityData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SecurityData")
+            .field("raw_pin", &"<redacted>")
+            .field("login_attempts", &self.login_attempts)
+            .field("factory_reset_counter", &self.factory_reset_counter)
+            .field("seed", &"<redacted>")
+            .field("seed_fingerprint", &self.seed_fingerprint)
+            .field("firmware_timestamp", &self.firmware_timestamp)
+            .field("pin_entry_mode", &self.pin_entry_mode)
+            .finish()
+    }
 }
 
 impl SecurityData {
@@ -152,7 +168,7 @@ impl server::BlockingArchiveHandler<Login> for Server {
             self.data.save();
             Ok(())
         } else {
-            log::warn!("Login failed. Got {:?} instead of {:?}", msg.pin.0, self.data.raw_pin);
+            log::warn!("Login failed.");
 
             self.data.login_attempts += 1;
             self.data.save();
