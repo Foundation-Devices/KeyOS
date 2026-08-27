@@ -4,6 +4,7 @@
 use core::num::NonZeroU8;
 
 use armv7::{
+    asm::dsb,
     structures::paging::{
         InMemoryRegister, PageTableDescriptor, PageTableType, Readable, TranslationTableDescriptor,
         TranslationTableType, PAGE_TABLE_FLAGS, SMALL_PAGE_FLAGS,
@@ -180,18 +181,15 @@ impl MemoryMapping {
         unsafe { l1_pt_addr.add(vpn1) as *mut TranslationTableDescriptor }
     }
 
-    /// Get the L2 pagetable entry for a given address, or `Err()` if the address is not mapped in L1
-    /// The entry itself may be empty.
-    fn get_l2_entry(&self, addr: *const usize) -> Result<*mut u32, Error> {
+    /// Get the L2 slot for a given address, or `Err()` if the address is not mapped in L1
+    /// The entry in it may be empty.
+    fn get_l2_slot(&self, addr: *const usize) -> Result<L2Slot, Error> {
         if addr as usize & (PAGE_SIZE - 1) != 0 {
             return Err(Error::BadAlignment);
         }
 
-        let v = VirtualAddress::new(addr as u32);
-        let vpn1 = v.translation_table_index();
-        let vpn2 = v.page_table_index();
+        let vpn1 = VirtualAddress::new(addr as u32).translation_table_index();
         assert!(vpn1 < 4096);
-        assert!(vpn2 < 256);
 
         if !self.is_kernel() && vpn1 >= L1_USER_PAGE_TABLE_ENTRIES {
             return Err(Error::AccessDenied);
@@ -202,7 +200,7 @@ impl MemoryMapping {
             return Err(Error::BadAddress);
         }
         let l2_pt_addr = transparent_phys_to_virt(existing_l1_entry.get_addr().unwrap());
-        Ok(unsafe { l2_pt_addr.add(vpn2) })
+        Ok(L2Slot::at(l2_pt_addr, addr))
     }
 
     fn zero_newly_allocated_tt_pages(pt_phys: PhysicalAddress, pages: usize) {
@@ -216,21 +214,18 @@ impl MemoryMapping {
         slice.fill(0);
         // The transparent mapping is cacheable, so the zero-fill sits in the
         // cache; order it before anything points the walker at this table.
-        unsafe { core::arch::asm!("dsb") };
+        dsb();
     }
 
-    /// Create an L2 table entry (and L2 table if necessary).
+    /// Get the L2 slot for a given address, creating the L2 table if necessary.
     /// Returns an Error if the address is in use, even if it is unmapped currently.
-    fn allocate_l2_entry(&self, mm: &mut MemoryManager, virt: *mut usize) -> Result<*mut u32, Error> {
+    fn allocate_l2_slot(&self, mm: &mut MemoryManager, virt: *mut usize) -> Result<L2Slot, Error> {
         if virt as usize & (PAGE_SIZE - 1) != 0 {
             return Err(Error::BadAlignment);
         }
-        let v = VirtualAddress::new(virt as u32);
-        let vpn1 = v.translation_table_index();
-        let vpn2 = v.page_table_index();
+        let vpn1 = VirtualAddress::new(virt as u32).translation_table_index();
 
         assert!(vpn1 < 4096);
-        assert!(vpn2 < 256);
 
         if !self.is_kernel() && vpn1 >= L1_USER_PAGE_TABLE_ENTRIES {
             return Err(Error::AccessDenied);
@@ -265,26 +260,26 @@ impl MemoryMapping {
                     unsafe { self.l1_entry_ptr(group_base + k as usize).write_volatile(descriptor) };
                 }
                 // Make the new L1 descriptors visible to the table walker.
-                unsafe { core::arch::asm!("dsb") };
+                dsb();
 
                 PhysicalAddress::new(page_phys + (vpn1 & 0b11) as u32 * L2_TABLE_BYTES)
             }
             TranslationTableType::Page => existing_l1_entry.get_addr().unwrap(),
             _ => return Err(Error::MemoryInUse),
         };
-        let l2_entry = transparent_phys_to_virt(l2_pt_phys).wrapping_add(vpn2);
+        let slot = L2Slot::at(transparent_phys_to_virt(l2_pt_phys), virt);
 
-        let existing_l2_entry = L2TableEntry::read_from(l2_entry);
+        let existing_l2_entry = slot.read();
         if !existing_l2_entry.is_empty() {
             klog!(
                 "Page {:08x} already mapped: {:08x?} (table entry @{:08x})!",
                 virt as usize,
                 existing_l2_entry,
-                l2_entry as usize
+                slot.ptr as usize
             );
             return Err(Error::MemoryInUse);
         }
-        Ok(l2_entry)
+        Ok(slot)
     }
 
     /// Map the given page to the specified process table.
@@ -316,7 +311,7 @@ impl MemoryMapping {
             L2TableEntry::new_on_demand(phys, flags, map_user)?
         };
 
-        entry_data.write_to(virt, self.allocate_l2_entry(mm, virt)?);
+        self.allocate_l2_slot(mm, virt)?.write(entry_data);
 
         Ok(())
     }
@@ -325,12 +320,12 @@ impl MemoryMapping {
     /// Returns an error if the page was not allocated or is currently shared with another process.
     /// Doesn't return an error for unmapped (allocated but not yet backed) pages.
     pub fn unmap_page(&self, virt: *mut usize) -> Result<(), Error> {
-        let entry = self.get_l2_entry(virt)?;
-        let entry_data = L2TableEntry::read_from(entry);
+        let slot = self.get_l2_slot(virt)?;
+        let entry_data = slot.read();
         if entry_data.is_empty() || entry_data.is_shared() {
             return Err(Error::BadAddress);
         };
-        L2TableEntry::Empty.write_to(virt, entry);
+        slot.write(L2TableEntry::Empty);
 
         Ok(())
     }
@@ -345,25 +340,25 @@ impl MemoryMapping {
         dest_addr: *mut usize,
     ) -> Result<usize, Error> {
         klog!("***move - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
-        let src_entry = self.get_l2_entry(src_addr)?;
-        let mut entry_data = L2TableEntry::read_from(src_entry);
+        let src_slot = self.get_l2_slot(src_addr)?;
+        let mut entry_data = src_slot.read();
         if !self.is_kernel() && !entry_data.is_user_accessible() {
             return Err(Error::AccessDenied);
         }
         // An on-demand source must be backed before it can be moved; back it
         // from the walk we already did.
         if entry_data.is_on_demand() {
-            self.allocate_backing_page(mm, src_addr, src_entry, entry_data)?;
-            entry_data = L2TableEntry::read_from(src_entry);
+            self.allocate_backing_page(mm, src_slot, entry_data)?;
+            entry_data = src_slot.read();
         }
         if !entry_data.is_mapped() && entry_data.phys()? != 0 {
             return Err(Error::BadAddress);
         }
-        let dest_entry = dest_space.allocate_l2_entry(mm, dest_addr)?;
+        let dest_slot = dest_space.allocate_l2_slot(mm, dest_addr)?;
 
-        L2TableEntry::Empty.write_to(src_addr, src_entry);
+        src_slot.write(L2TableEntry::Empty);
 
-        entry_data.write_to(dest_addr, dest_entry);
+        dest_slot.write(entry_data);
 
         Ok(entry_data.phys()?)
     }
@@ -380,16 +375,16 @@ impl MemoryMapping {
         mutable: bool,
     ) -> Result<usize, Error> {
         klog!("***lend - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
-        let src_entry = self.get_l2_entry(src_addr)?;
-        let mut entry_data = L2TableEntry::read_from(src_entry);
+        let src_slot = self.get_l2_slot(src_addr)?;
+        let mut entry_data = src_slot.read();
         if !self.is_kernel() && !entry_data.is_user_accessible() {
             return Err(Error::AccessDenied);
         }
         // Lending requires a backed source, so back the on-demand page from
         // the walk we already did.
         if entry_data.is_on_demand() {
-            self.allocate_backing_page(mm, src_addr, src_entry, entry_data)?;
-            entry_data = L2TableEntry::read_from(src_entry);
+            self.allocate_backing_page(mm, src_slot, entry_data)?;
+            entry_data = src_slot.read();
         }
         // Note: we could probably get away with "moving" unmapped pages here,
         //       but some code might depend on moved and lent pages being actually
@@ -397,12 +392,12 @@ impl MemoryMapping {
         if !entry_data.is_mapped() {
             return Err(Error::BadAddress);
         }
-        let dest_entry = dest_space.allocate_l2_entry(mm, dest_addr)?;
+        let dest_slot = dest_space.allocate_l2_slot(mm, dest_addr)?;
 
-        entry_data.to_unmapped()?.write_to(src_addr, src_entry);
+        src_slot.write(entry_data.to_unmapped()?);
 
         let new_data = if !mutable { entry_data.to_immutable()? } else { entry_data };
-        new_data.write_to(dest_addr, dest_entry);
+        dest_slot.write(new_data);
 
         entry_data.phys()
     }
@@ -418,19 +413,19 @@ impl MemoryMapping {
         dest_addr: *mut usize,
     ) -> Result<usize, Error> {
         klog!("***return - src: {:08x} dest: {:08x}***", src_addr as u32, dest_addr as u32);
-        let src_entry = self.get_l2_entry(src_addr)?;
-        let dest_entry = dest_space.get_l2_entry(dest_addr)?;
+        let src_slot = self.get_l2_slot(src_addr)?;
+        let dest_slot = dest_space.get_l2_slot(dest_addr)?;
 
-        let src_data = L2TableEntry::read_from(src_entry);
-        let dest_data = L2TableEntry::read_from(dest_entry);
+        let src_data = src_slot.read();
+        let dest_data = dest_slot.read();
         if src_data.phys()? != dest_data.phys()? {
             klog!("Trying to return wrong page: src: {src_data:?}, dest: {dest_data:?}");
             return Err(Error::ShareViolation);
         }
 
-        L2TableEntry::Empty.write_to(src_addr, src_entry);
+        src_slot.write(L2TableEntry::Empty);
 
-        dest_data.to_mapped(dest_addr)?.write_to(dest_addr, dest_entry);
+        dest_slot.write(dest_data.to_mapped(dest_addr)?);
         dest_data.phys()
     }
 
@@ -438,14 +433,14 @@ impl MemoryMapping {
     /// entry the lender can still unmap. The physical page belongs to the borrower now, so
     /// it is never freed here.
     pub fn clear_shared(&mut self, addr: *mut usize, mode: ClearShared) -> Result<(), Error> {
-        let entry = self.get_l2_entry(addr)?;
-        let data = L2TableEntry::read_from(entry);
+        let slot = self.get_l2_slot(addr)?;
+        let data = slot.read();
         if !data.is_shared() {
             return Ok(());
         }
         match mode {
-            ClearShared::Free => L2TableEntry::Empty.write_to(addr, entry),
-            ClearShared::OnDemand => data.with_phys(0)?.write_to(addr, entry),
+            ClearShared::Free => slot.write(L2TableEntry::Empty),
+            ClearShared::OnDemand => slot.write(data.with_phys(0)?),
         }
         Ok(())
     }
@@ -453,8 +448,7 @@ impl MemoryMapping {
     /// Get the physical address of a virtual one.
     /// Returns various errors if the address is not mapped.
     pub fn virt_to_phys(&self, virt: *const usize) -> Result<usize, Error> {
-        let entry = self.get_l2_entry(virt).or(Err(Error::BadAddress))?;
-        let entry_data = L2TableEntry::read_from(entry);
+        let entry_data = self.get_l2_slot(virt).or(Err(Error::BadAddress))?.read();
 
         if entry_data.is_mapped() {
             entry_data.phys()
@@ -573,8 +567,8 @@ impl MemoryMapping {
                 TranslationTableType::Page => {
                     let l2_base = transparent_phys_to_virt(l1.get_addr().unwrap());
                     while addr < section_end {
-                        let vpn2 = VirtualAddress::new(addr as u32).page_table_index();
-                        if L2TableEntry::read_from(unsafe { l2_base.add(vpn2) }).is_empty() {
+                        let slot = L2Slot::at(l2_base, addr as *const usize);
+                        if slot.read().is_empty() {
                             if run_len == 0 {
                                 run_start = addr;
                             }
@@ -598,21 +592,20 @@ impl MemoryMapping {
         None
     }
 
-    /// Determine whether a virtual address has been mapped
+    /// Determine whether a virtual address is accessible from userspace
     pub fn address_user_accessible(&self, virt: *const usize) -> bool {
-        if let Ok(entry) = self.get_l2_entry(virt) {
-            L2TableEntry::read_from(entry).is_user_accessible()
-        } else {
-            true
-        }
+        let Ok(slot) = self.get_l2_slot(virt) else {
+            return false;
+        };
+        slot.read().is_user_accessible()
     }
 
     /// Determine whether a virtual address has been mapped with an X flag
     pub fn address_executable(&self, virt: *const usize) -> bool {
-        let Ok(entry) = self.get_l2_entry(virt) else {
+        let Ok(slot) = self.get_l2_slot(virt) else {
             return false;
         };
-        let entry_data = L2TableEntry::read_from(entry);
+        let entry_data = slot.read();
         if !entry_data.is_mapped() {
             return false;
         }
@@ -625,8 +618,8 @@ impl MemoryMapping {
     pub fn ensure_backed(mm: &mut MemoryManager, virt: *mut usize) -> Result<(), Error> {
         let this = Self::current();
 
-        let entry = this.get_l2_entry(virt)?;
-        let entry_data = L2TableEntry::read_from(entry);
+        let slot = this.get_l2_slot(virt)?;
+        let entry_data = slot.read();
         if entry_data.is_mapped() {
             return Ok(());
         }
@@ -636,17 +629,17 @@ impl MemoryMapping {
         if !entry_data.is_on_demand() {
             return Err(Error::MemoryInUse);
         }
-        this.allocate_backing_page(mm, virt, entry, entry_data)
+        this.allocate_backing_page(mm, slot, entry_data)
     }
 
     /// Give an on-demand entry a freshly allocated, zeroed backing page. Takes
-    /// `entry` and `entry_data` from a prior get_l2_entry so it adds no walk of
-    /// its own; `entry_data` must already be on-demand.
+    /// `slot` and `entry_data` from a prior lookup so it adds no walk of its own.
+    /// `entry_data` must already be on-demand, and `self` must be the active
+    /// mapping, because the new page is zeroed through `slot`.
     fn allocate_backing_page(
         &self,
         mm: &mut MemoryManager,
-        virt: *mut usize,
-        entry: *mut u32,
+        slot: L2Slot,
         entry_data: L2TableEntry,
     ) -> Result<(), Error> {
         let flags = entry_data.flags()?;
@@ -664,14 +657,22 @@ impl MemoryMapping {
             zeroed = false;
         }
 
-        entry_data.with_phys(phys)?.to_mapped(virt)?.write_to(virt, entry);
+        slot.write(entry_data.with_phys(phys)?.to_mapped(slot.virt)?);
 
         if !zeroed {
-            let page_slice =
-                unsafe { core::slice::from_raw_parts_mut(virt, PAGE_SIZE / core::mem::size_of::<usize>()) };
+            // SAFETY: the entry written above maps this whole page writeable, `self` is
+            // the active mapping per the precondition, and nothing else aliases a page we
+            // just allocated. The write provenance comes from the *mut callers start from.
+            let page_slice = unsafe {
+                core::slice::from_raw_parts_mut(
+                    slot.virt as *mut usize,
+                    PAGE_SIZE / core::mem::size_of::<usize>(),
+                )
+            };
             page_slice.fill(0);
             self.flush_cache(
-                unsafe { MemoryRange::new(virt as usize, PAGE_SIZE).unwrap() },
+                // SAFETY: slot.virt is page aligned and now backed, so this range is mapped.
+                unsafe { MemoryRange::new(slot.virt as usize, PAGE_SIZE).unwrap() },
                 xous::CacheOperation::Clean,
             )?;
             core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
@@ -907,13 +908,52 @@ impl MemoryMapping {
     }
 }
 
+/// Where an L2 entry lives, and the page it translates.
+#[derive(Clone, Copy)]
+struct L2Slot {
+    ptr: *mut u32,
+    virt: *const usize,
+}
+
+impl L2Slot {
+    /// Locate the entry translating `virt` in the L2 table based at `l2_table`.
+    fn at(l2_table: *mut u32, virt: *const usize) -> Self {
+        // SAFETY: page_table_index() is 8 bits wide, so the entry stays inside the
+        // 256-entry table.
+        let ptr = unsafe { l2_table.add(VirtualAddress::new(virt as u32).page_table_index()) };
+        Self { ptr, virt }
+    }
+
+    fn read(&self) -> L2TableEntry {
+        // SAFETY: at() resolved ptr to one live entry of an L2 table. Volatile
+        // because the table walker reads the same location behind the compiler's back.
+        L2TableEntry::from_u32(unsafe { self.ptr.read_volatile() })
+    }
+
+    /// Replace the entry, doing the TLB maintenance the transition needs.
+    fn write(&self, new: L2TableEntry) {
+        // A faulting entry is never held in the TLB (ARM B3.9), so only overwriting
+        // a mapped one can leave a stale translation behind. Invalidating after the
+        // write is sound only because no caller replaces a valid descriptor with
+        // another one; that needs break-before-make (ARM B3.10.1).
+        let stale = self.read().is_mapped();
+        // SAFETY: as read(); the barrier below publishes the descriptor to the walker.
+        unsafe { self.ptr.write_volatile(new.as_u32()) };
+        if stale {
+            flush_tlb_entry(self.virt);
+        } else {
+            // Order the (cacheable) descriptor write before the walker can fetch it.
+            dsb();
+        }
+    }
+}
+
 impl L2TableEntry {
     const MAP_USER_FLAG: usize = 1 << 2;
     const UNMAPPED_FLAGS_OFFSET: usize = 3;
 
-    /// Read entry from the hardware L2 page table
-    fn read_from(pt_entry: *const u32) -> Self {
-        let value = unsafe { pt_entry.read_volatile() };
+    /// Decode a raw hardware L2 descriptor.
+    fn from_u32(value: u32) -> Self {
         if value == 0 {
             L2TableEntry::Empty
         } else if value & 3 == 0 {
@@ -923,22 +963,12 @@ impl L2TableEntry {
         }
     }
 
-    /// Write entry to the hardware L2 page table.
-    /// Does all necessary cache and TLB synchronizations.
-    fn write_to(&self, virt_addr: *mut usize, pt_entry: *mut u32) {
-        let value = match self {
+    /// Encode into a raw hardware L2 descriptor.
+    fn as_u32(&self) -> u32 {
+        match self {
             L2TableEntry::Empty => 0,
             L2TableEntry::Mapped(d) => d.as_u32(),
             L2TableEntry::Unmapped(d) => *d as u32,
-        };
-        unsafe { pt_entry.write_volatile(value) };
-        if self.is_empty() {
-            // Removing a mapping: order the write, invalidate the stale TLB entry.
-            flush_tlb_entry(virt_addr);
-        } else {
-            // New mapping: order the (cacheable) descriptor write before the
-            // walker can fetch it. No prior entry, so nothing to invalidate.
-            unsafe { core::arch::asm!("dsb") };
         }
     }
 
