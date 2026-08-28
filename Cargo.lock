@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-ethereum"
-version = "1.22.1"
+version = "1.22.3"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-solana"
-version = "1.16.0"
+version = "1.15.2"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",

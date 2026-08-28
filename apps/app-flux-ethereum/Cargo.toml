@@ -3,7 +3,7 @@
 
 [package]
 name = "app-flux-ethereum"
-version = "1.22.1"
+version = "1.22.3"
 edition = "2021"
 
 [dependencies]

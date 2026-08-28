@@ -19,10 +19,10 @@ use app_flux_build_support::{
 const APP_ICON: &str = "icons/icon_solana_40px.gif";
 const APP_SOURCE: LedgerAppSource = LedgerAppSource {
     name: "app-solana",
-    pin: GitPin { tag: "flex_1.6.1_1.16.0_sdk_v26.4.0", commit: "f36225a6cc4615d64df1533cfc40f49b28ef659d" },
+    pin: GitPin { tag: "flex_1.6.1_1.15.2_sdk_v26.6.1", commit: "22d6c9b78d6721acdc6d0ce49788a2fd9ea409a0" },
 };
 
-const SDK_PIN: GitPin = GitPin { tag: "v26.4.0", commit: "0be079ad4f6d2c35540b9c5a4fa486c592bf6999" };
+const SDK_PIN: GitPin = GitPin { tag: "v26.6.1", commit: "473fe57b98c24ce9488b1dfecd51ad92fe665d19" };
 
 /// Clone and patch the SDK. Returns the SDK path.
 fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
@@ -96,13 +96,13 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
     let value_defines: &[(&str, &str)] = &[
         ("APPNAME", "\"Solana\""),
         ("CUSTOM_IO_APDU_BUFFER_SIZE", "(255+5+64)"),
-        ("APPVERSION", "\"1.16.0\""),
+        ("APPVERSION", "\"1.15.2\""),
         ("APPVERSION_M", "1"),
-        ("APPVERSION_N", "16"),
-        ("APPVERSION_P", "0"),
+        ("APPVERSION_N", "15"),
+        ("APPVERSION_P", "2"),
         ("MAJOR_VERSION", "1"),
-        ("MINOR_VERSION", "16"),
-        ("PATCH_VERSION", "0"),
+        ("MINOR_VERSION", "15"),
+        ("PATCH_VERSION", "2"),
     ];
     apply_hosted_value_defines(&mut build, value_defines);
 
@@ -187,16 +187,5 @@ fn patch_app(app_path: &Path) {
         &app_path.join("src/globals.h"),
         "extern const internalStorage_t N_storage_real;",
         "extern internalStorage_t N_storage_real; /* const stripped by KeyOS */",
-    );
-
-    // Transaction Check only works with the vendor's wallet app; any other host
-    // leaves every review stamped with a "Transaction Check unavailable" warning
-    // once the toggle is on, and the feature routes transactions through a
-    // third-party scoring service. Drop it so hosts see it as absent, as on
-    // Nano targets.
-    replace_in_file(
-        &app_path.join("src/feature_transaction_check.h"),
-        "#ifdef SCREEN_SIZE_WALLET\n#define HAVE_TRANSACTION_CHECKS\n#endif",
-        "#if 0 /* disabled on KeyOS */\n#define HAVE_TRANSACTION_CHECKS\n#endif",
     );
 }

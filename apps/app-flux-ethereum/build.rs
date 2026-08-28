@@ -19,10 +19,10 @@ use app_flux_build_support::{
 const APP_ICON: &str = "icons/flex_app_chain_1.gif";
 const APP_SOURCE: LedgerAppSource = LedgerAppSource {
     name: "app-ethereum",
-    pin: GitPin { tag: "flex_1.6.1_1.22.1_sdk_v26.1.6", commit: "dfa392a6408560edda1fa2d1664b5d3b644557ac" },
+    pin: GitPin { tag: "flex_1.6.1_1.22.3_sdk_v26.6.1", commit: "d6d699bcdaf5dc4d99722f38cbbbfb466c0f3163" },
 };
 
-const SDK_PIN: GitPin = GitPin { tag: "v26.1.6", commit: "6905e0757bd7054ceb70eb0e93a7e46a841ec153" };
+const SDK_PIN: GitPin = GitPin { tag: "v26.6.1", commit: "473fe57b98c24ce9488b1dfecd51ad92fe665d19" };
 
 /// Clone and patch the SDK. Returns the SDK path.
 fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
@@ -115,11 +115,11 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
         ("ICONHOME", "C_chain_1_64px"),
         ("APPVERSION_M", "1"),
         ("APPVERSION_N", "22"),
-        ("APPVERSION_P", "1"),
-        ("APPVERSION", "\"1.22.1\""),
+        ("APPVERSION_P", "3"),
+        ("APPVERSION", "\"1.22.3\""),
         ("MAJOR_VERSION", "1"),
         ("MINOR_VERSION", "22"),
-        ("PATCH_VERSION", "1"),
+        ("PATCH_VERSION", "3"),
     ];
     apply_hosted_value_defines(&mut build, value_defines);
 

@@ -413,12 +413,17 @@ fn restore_nbgl_engine_sources(sdk_path: &Path) -> bool {
     }
     // restore is no-overlay by default: tracked files under the pathspecs that
     // are absent from --source are removed too, so this yields the exact tree.
+    // nbgl_icons.h is excluded from the swap: v26.6 moved the semantic icon
+    // defines (LARGE_MULTISIG_ICON and friends) out of nbgl_obj.h into that new
+    // header, which v25.11.5 has no copy of, so restoring wholesale would delete
+    // a header the app includes. Keeping the v26 one resolves because the glyphs
+    // it names come from lib_nbgl/glyphs, which is not under these pathspecs.
     let out = Command::new("git")
         .arg("-C")
         .arg(sdk_path)
         .arg("restore")
         .arg(format!("--source={}", NBGL_ENGINE.commit))
-        .args(["--", "lib_nbgl/src", "lib_nbgl/include"])
+        .args(["--", "lib_nbgl/src", "lib_nbgl/include", ":(exclude)lib_nbgl/include/nbgl_icons.h"])
         .output()
         .unwrap_or_else(|e| {
             panic!("Failed to restore lib_nbgl from {} ({}): {e}", NBGL_ENGINE.tag, NBGL_ENGINE.commit)
