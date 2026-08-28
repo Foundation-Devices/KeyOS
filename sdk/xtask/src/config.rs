@@ -497,6 +497,7 @@ mod tests {
             .iter()
             .any(|entry| entry.name == "passport-drive" && entry.binary == "foundation-passport-drive"));
         let slint_viewer = config.compile.iter().find(|entry| entry.name == "slint-viewer").unwrap();
+        assert!(slint_viewer.cargo_flags.windows(2).any(|flags| flags == ["--bin", "slint-viewer"]));
         assert!(slint_viewer.cargo_flags.windows(2).any(|flags| flags == ["-p", "i-slint-common"]));
         assert!(slint_viewer
             .cargo_flags

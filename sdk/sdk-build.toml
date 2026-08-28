@@ -196,6 +196,8 @@ binary = "foundation-slint-viewer"
 # Select i-slint-common too so Cargo can enable its fontconfig-dlopen feature
 # for the shared fontique dependency when cross-compiling the viewer.
 cargo_flags = [
+    "--bin",
+    "slint-viewer",
     "-p",
     "i-slint-common",
     "--no-default-features",
