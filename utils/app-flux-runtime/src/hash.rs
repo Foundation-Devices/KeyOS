@@ -3,8 +3,8 @@
 
 //! Hash context management for Flux syscall emulation.
 //!
-//! Provides Keccak-256, SHA-256, and SHA-512 hash context management with init,
-//! update, and finalize operations to support Flux SDK Ethereum app syscalls.
+//! Provides Keccak-256, SHA3-256, SHA-224, SHA-256, SHA-512, and RIPEMD-160 hash context
+//! management with init, update, and finalize operations to support Flux SDK app syscalls.
 
 use std::{
     collections::HashMap,
@@ -14,8 +14,9 @@ use std::{
     },
 };
 
-use sha2::{Digest as Sha2Digest, Sha256, Sha512};
-use sha3::Keccak256;
+use ripemd::Ripemd160;
+use sha2::{Digest as Sha2Digest, Sha224, Sha256, Sha512};
+use sha3::{Keccak256, Sha3_256};
 
 /// Flux SDK hash algorithm identifiers.
 #[allow(unused)]
@@ -39,9 +40,12 @@ pub mod flags {
 
 /// Hash output sizes in bytes.
 pub mod sizes {
+    pub const SHA224_SIZE: usize = 28;
     pub const SHA256_SIZE: usize = 32;
     pub const SHA512_SIZE: usize = 64;
     pub const KECCAK256_SIZE: usize = 32;
+    pub const SHA3_256_SIZE: usize = 32;
+    pub const RIPEMD160_SIZE: usize = 20;
 }
 
 /// Hash context ID counter for unique context allocation.
@@ -54,8 +58,11 @@ static HASH_CONTEXTS: LazyLock<RwLock<HashMap<u32, HashContext>>> =
 /// Hash context variants supporting different hash algorithms.
 pub enum HashContext {
     Keccak256(Keccak256),
+    Sha3(Sha3_256),
+    Sha224(Sha224),
     Sha256(Sha256),
     Sha512(Sha512),
+    Ripemd160(Ripemd160),
 }
 
 impl HashContext {
@@ -63,8 +70,11 @@ impl HashContext {
     pub fn output_size(&self) -> usize {
         match self {
             HashContext::Keccak256(_) => sizes::KECCAK256_SIZE,
+            HashContext::Sha3(_) => sizes::SHA3_256_SIZE,
+            HashContext::Sha224(_) => sizes::SHA224_SIZE,
             HashContext::Sha256(_) => sizes::SHA256_SIZE,
             HashContext::Sha512(_) => sizes::SHA512_SIZE,
+            HashContext::Ripemd160(_) => sizes::RIPEMD160_SIZE,
         }
     }
 
@@ -72,8 +82,11 @@ impl HashContext {
     pub fn reset(&mut self) {
         match self {
             HashContext::Keccak256(ctx) => *ctx = Keccak256::new(),
+            HashContext::Sha3(ctx) => *ctx = Sha3_256::new(),
+            HashContext::Sha224(ctx) => *ctx = Sha224::new(),
             HashContext::Sha256(ctx) => *ctx = Sha256::new(),
             HashContext::Sha512(ctx) => *ctx = Sha512::new(),
+            HashContext::Ripemd160(ctx) => *ctx = Ripemd160::new(),
         }
     }
 }
@@ -100,6 +113,39 @@ pub fn keccak_init() -> u32 {
     id
 }
 
+/// Initialize a new RIPEMD-160 hash context.
+///
+/// Returns a unique context ID that can be used for subsequent update/finalize calls.
+pub fn ripemd160_init() -> u32 {
+    let id = NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut contexts = HASH_CONTEXTS.write().unwrap();
+    contexts.insert(id, HashContext::Ripemd160(Ripemd160::new()));
+    log::debug!("Created RIPEMD-160 context with id={}", id);
+    id
+}
+
+/// Initialize a new SHA3-256 hash context.
+///
+/// Returns a unique context ID that can be used for subsequent update/finalize calls.
+pub fn sha3_256_init() -> u32 {
+    let id = NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut contexts = HASH_CONTEXTS.write().unwrap();
+    contexts.insert(id, HashContext::Sha3(Sha3_256::new()));
+    log::debug!("Created SHA3-256 context with id={}", id);
+    id
+}
+
+/// Initialize a new SHA-224 hash context.
+///
+/// Returns a unique context ID that can be used for subsequent update/finalize calls.
+pub fn sha224_init() -> u32 {
+    let id = NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut contexts = HASH_CONTEXTS.write().unwrap();
+    contexts.insert(id, HashContext::Sha224(Sha224::new()));
+    log::debug!("Created SHA-224 context with id={}", id);
+    id
+}
+
 /// Initialize a new SHA-256 hash context.
 ///
 /// Returns a unique context ID that can be used for subsequent update/finalize calls.
@@ -122,25 +168,6 @@ pub fn sha512_init() -> u32 {
     id
 }
 
-/// Initialize a hash context based on algorithm identifier.
-///
-/// # Arguments
-/// * `algorithm` - The Flux SDK hash algorithm identifier (see `algo` module)
-///
-/// # Returns
-/// A unique context ID or 0 on error.
-pub fn hash_init(algorithm: u8) -> u32 {
-    match algorithm {
-        algo::CX_SHA256 => sha256_init(),
-        algo::CX_SHA512 => sha512_init(),
-        algo::CX_KECCAK => keccak_init(),
-        _ => {
-            log::warn!("Unsupported hash algorithm: 0x{:02x}", algorithm);
-            0
-        }
-    }
-}
-
 /// Update a hash context with additional data.
 ///
 /// # Arguments
@@ -155,8 +182,11 @@ pub fn hash_update(ctx_id: u32, data: &[u8]) -> Result<(), HashError> {
 
     match ctx {
         HashContext::Keccak256(hasher) => hasher.update(data),
+        HashContext::Sha3(hasher) => hasher.update(data),
+        HashContext::Sha224(hasher) => hasher.update(data),
         HashContext::Sha256(hasher) => hasher.update(data),
         HashContext::Sha512(hasher) => hasher.update(data),
+        HashContext::Ripemd160(hasher) => hasher.update(data),
     }
 
     log::debug!("Updated hash context {} with {} bytes", ctx_id, data.len());
@@ -189,6 +219,20 @@ pub fn hash_final(ctx_id: u32, flags: u32) -> Result<Vec<u8>, HashError> {
                 }
                 digest.to_vec()
             }
+            HashContext::Sha3(hasher) => {
+                let digest = hasher.clone().finalize();
+                if !no_reinit {
+                    *hasher = Sha3_256::new();
+                }
+                digest.to_vec()
+            }
+            HashContext::Sha224(hasher) => {
+                let digest = hasher.clone().finalize();
+                if !no_reinit {
+                    *hasher = Sha224::new();
+                }
+                digest.to_vec()
+            }
             HashContext::Sha256(hasher) => {
                 let digest = hasher.clone().finalize();
                 if !no_reinit {
@@ -200,6 +244,13 @@ pub fn hash_final(ctx_id: u32, flags: u32) -> Result<Vec<u8>, HashError> {
                 let digest = hasher.clone().finalize();
                 if !no_reinit {
                     *hasher = Sha512::new();
+                }
+                digest.to_vec()
+            }
+            HashContext::Ripemd160(hasher) => {
+                let digest = hasher.clone().finalize();
+                if !no_reinit {
+                    *hasher = Ripemd160::new();
                 }
                 digest.to_vec()
             }
@@ -282,8 +333,11 @@ pub fn hash_info(ctx_id: u32) -> Result<(u8, usize), HashError> {
 
     let (algo, size) = match ctx {
         HashContext::Keccak256(_) => (algo::CX_KECCAK, sizes::KECCAK256_SIZE),
+        HashContext::Sha3(_) => (algo::CX_SHA3, sizes::SHA3_256_SIZE),
+        HashContext::Sha224(_) => (algo::CX_SHA224, sizes::SHA224_SIZE),
         HashContext::Sha256(_) => (algo::CX_SHA256, sizes::SHA256_SIZE),
         HashContext::Sha512(_) => (algo::CX_SHA512, sizes::SHA512_SIZE),
+        HashContext::Ripemd160(_) => (algo::CX_RIPEMD160, sizes::RIPEMD160_SIZE),
     };
 
     Ok((algo, size))

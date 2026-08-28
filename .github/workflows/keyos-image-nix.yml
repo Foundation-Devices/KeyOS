@@ -59,7 +59,10 @@ jobs:
       
       - run: nix develop .#build --command cargo xtask build-all
         name: Build all
-      
+
+      - run: nix develop .#build --command scripts/check-flux-cx-stubs.sh
+        name: Check the Flux apps link no unimplemented crypto stub
+
       - run: git diff -I 'rustflags = ' --exit-code
         name: Check if any file (e.g. Cargo.lock) is changed during build
       

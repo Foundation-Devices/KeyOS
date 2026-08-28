@@ -108,6 +108,7 @@ pub struct CxEcfpPublicKey {
 
 // --- SDK cx_md_t values (from lcx_hash.h) ---
 const CX_NONE: u32 = 0;
+const CX_RIPEMD160: u32 = 1;
 const CX_SHA224: u32 = 2;
 const CX_SHA256: u32 = 3;
 const CX_SHA384: u32 = 4;
@@ -137,6 +138,21 @@ static HMAC_PTR_MAP: LazyLock<PtrMap> = LazyLock::new(|| PtrMap::new("HMAC_PTR_M
 // Hash Functions
 // ============================================================================
 
+fn install_hash_ctx(hash: *mut u8, ctx_id: u32) -> u32 {
+    match HASH_PTR_MAP.insert(hash as usize, ctx_id) {
+        Ok(previous) => {
+            if let Some(previous) = previous {
+                let _ = crate::hash::hash_destroy(previous);
+            }
+            CX_OK
+        }
+        Err(err) => {
+            let _ = crate::hash::hash_destroy(ctx_id);
+            err
+        }
+    }
+}
+
 /// cx_keccak_init_no_throw(cx_sha3_t *hash, size_t size)
 ///
 /// Initialize a Keccak hash context. `size` is the output size in bits (256).
@@ -147,17 +163,48 @@ pub unsafe extern "C" fn cx_keccak_init_no_throw(hash: *mut u8, size: u32) -> u3
     }
 
     let ctx_id = crate::hash::keccak_init();
-    if let Err(err) = HASH_PTR_MAP.insert(hash as usize, ctx_id).map(|old_ctx| {
-        if let Some(old_ctx) = old_ctx {
-            let _ = crate::hash::hash_destroy(old_ctx);
-        }
-    }) {
-        let _ = crate::hash::hash_destroy(ctx_id);
-        return err;
+    log::debug!("cx_keccak_init_no_throw: hash={:p}, size={}, ctx_id={}", hash, size, ctx_id);
+    install_hash_ctx(hash, ctx_id)
+}
+
+/// cx_sha3_init_no_throw(cx_sha3_t *hash, size_t size)
+#[no_mangle]
+pub unsafe extern "C" fn cx_sha3_init_no_throw(hash: *mut u8, size: u32) -> u32 {
+    if hash.is_null() {
+        return CX_INVALID_PARAMETER;
+    }
+    if size != 256 {
+        log::warn!("cx_sha3_init_no_throw: unsupported size={size}");
+        return CX_INVALID_PARAMETER_SIZE;
     }
 
-    log::debug!("cx_keccak_init_no_throw: hash={:p}, size={}, ctx_id={}", hash, size, ctx_id);
-    CX_OK
+    let ctx_id = crate::hash::sha3_256_init();
+    log::debug!("cx_sha3_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
+    install_hash_ctx(hash, ctx_id)
+}
+
+/// cx_ripemd160_init_no_throw(cx_ripemd160_t *hash)
+#[no_mangle]
+pub unsafe extern "C" fn cx_ripemd160_init_no_throw(hash: *mut u8) -> u32 {
+    if hash.is_null() {
+        return CX_INVALID_PARAMETER;
+    }
+
+    let ctx_id = crate::hash::ripemd160_init();
+    log::debug!("cx_ripemd160_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
+    install_hash_ctx(hash, ctx_id)
+}
+
+/// cx_sha224_init_no_throw(cx_sha256_t *hash)
+#[no_mangle]
+pub unsafe extern "C" fn cx_sha224_init_no_throw(hash: *mut u8) -> u32 {
+    if hash.is_null() {
+        return CX_INVALID_PARAMETER;
+    }
+
+    let ctx_id = crate::hash::sha224_init();
+    log::debug!("cx_sha224_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
+    install_hash_ctx(hash, ctx_id)
 }
 
 /// cx_sha256_init_no_throw(cx_sha256_t *hash)
@@ -168,17 +215,8 @@ pub unsafe extern "C" fn cx_sha256_init_no_throw(hash: *mut u8) -> u32 {
     }
 
     let ctx_id = crate::hash::sha256_init();
-    if let Err(err) = HASH_PTR_MAP.insert(hash as usize, ctx_id).map(|old_ctx| {
-        if let Some(old_ctx) = old_ctx {
-            let _ = crate::hash::hash_destroy(old_ctx);
-        }
-    }) {
-        let _ = crate::hash::hash_destroy(ctx_id);
-        return err;
-    }
-
     log::debug!("cx_sha256_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    CX_OK
+    install_hash_ctx(hash, ctx_id)
 }
 
 /// cx_sha512_init_no_throw(cx_sha512_t *hash)
@@ -189,17 +227,8 @@ pub unsafe extern "C" fn cx_sha512_init_no_throw(hash: *mut u8) -> u32 {
     }
 
     let ctx_id = crate::hash::sha512_init();
-    if let Err(err) = HASH_PTR_MAP.insert(hash as usize, ctx_id).map(|old_ctx| {
-        if let Some(old_ctx) = old_ctx {
-            let _ = crate::hash::hash_destroy(old_ctx);
-        }
-    }) {
-        let _ = crate::hash::hash_destroy(ctx_id);
-        return err;
-    }
-
     log::debug!("cx_sha512_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    CX_OK
+    install_hash_ctx(hash, ctx_id)
 }
 
 /// cx_hash_no_throw(cx_hash_t *hash, uint32_t mode,
@@ -296,9 +325,12 @@ pub unsafe extern "C" fn cx_hash_final(ctx: *mut u8, digest: *mut u8) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn cx_hash_init(ctx: *mut u8, md_type: u32) -> u32 {
     match md_type {
+        CX_RIPEMD160 => cx_ripemd160_init_no_throw(ctx),
+        CX_SHA224 => cx_sha224_init_no_throw(ctx),
         CX_SHA256 => cx_sha256_init_no_throw(ctx),
         CX_SHA512 => cx_sha512_init_no_throw(ctx),
-        CX_KECCAK | CX_SHA3 => cx_keccak_init_no_throw(ctx, 256),
+        CX_KECCAK => cx_keccak_init_no_throw(ctx, 256),
+        CX_SHA3 => cx_sha3_init_no_throw(ctx, 256),
         _ => {
             log::warn!("cx_hash_init: unsupported md_type={}", md_type);
             CX_INVALID_PARAMETER
@@ -636,9 +668,12 @@ pub unsafe extern "C" fn cx_hmac_sha512(
 pub unsafe extern "C" fn cx_hash_init_ex(ctx: *mut u8, md_type: u32, output_size: u32) -> u32 {
     log::debug!("cx_hash_init_ex(ctx={:p}, md_type=0x{:02x}, output_size={})", ctx, md_type, output_size);
     let result = match md_type {
+        CX_RIPEMD160 => cx_ripemd160_init_no_throw(ctx),
+        CX_SHA224 => cx_sha224_init_no_throw(ctx),
         CX_SHA256 => cx_sha256_init_no_throw(ctx),
         CX_SHA512 => cx_sha512_init_no_throw(ctx),
-        CX_KECCAK | CX_SHA3 => cx_keccak_init_no_throw(ctx, output_size * 8),
+        CX_KECCAK => cx_keccak_init_no_throw(ctx, output_size * 8),
+        CX_SHA3 => cx_sha3_init_no_throw(ctx, output_size * 8),
         _ => {
             log::warn!("cx_hash_init_ex: unsupported md_type=0x{:02x}", md_type);
             CX_INVALID_PARAMETER
@@ -2120,4 +2155,63 @@ pub unsafe extern "C" fn cx_aes_no_throw(
 
     log::debug!("cx_aes_no_throw: mode=0x{:x}, in_len={}, encrypt={}", mode, in_len, encrypt);
     CX_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One `cx_hash_init` + `cx_hash_no_throw` cycle, as an app drives it. The context buffer is
+    /// boxed so two tests running in parallel cannot key `HASH_PTR_MAP` on the same address.
+    fn hash_oneshot(md_type: u32, data: &[u8], digest_len: usize) -> Vec<u8> {
+        let mut ctx = Box::new([0u8; 64]);
+        let mut digest = vec![0u8; digest_len];
+        unsafe {
+            assert_eq!(cx_hash_init(ctx.as_mut_ptr(), md_type), CX_OK);
+            assert_eq!(
+                cx_hash_no_throw(
+                    ctx.as_mut_ptr(),
+                    CX_FLAG_LAST | CX_FLAG_NO_REINIT,
+                    data.as_ptr(),
+                    data.len() as u32,
+                    digest.as_mut_ptr(),
+                    digest.len() as u32,
+                ),
+                CX_OK
+            );
+        }
+        digest
+    }
+
+    #[test]
+    fn cx_sha3_is_not_keccak() {
+        let sha3 = [
+            0x3a, 0x98, 0x5d, 0xa7, 0x4f, 0xe2, 0x25, 0xb2, 0x04, 0x5c, 0x17, 0x2d, 0x6b, 0xd3, 0x90, 0xbd,
+            0x85, 0x5f, 0x08, 0x6e, 0x3e, 0x9d, 0x52, 0x5b, 0x46, 0xbf, 0xe2, 0x45, 0x11, 0x43, 0x15, 0x32,
+        ];
+        let keccak = [
+            0x4e, 0x03, 0x65, 0x7a, 0xea, 0x45, 0xa9, 0x4f, 0xc7, 0xd4, 0x7b, 0xa8, 0x26, 0xc8, 0xd6, 0x67,
+            0xc0, 0xd1, 0xe6, 0xe3, 0x3a, 0x64, 0xa0, 0x36, 0xec, 0x44, 0xf5, 0x8f, 0xa1, 0x2d, 0x6c, 0x45,
+        ];
+        assert_eq!(hash_oneshot(CX_SHA3, b"abc", 32), sha3);
+        assert_eq!(hash_oneshot(CX_KECCAK, b"abc", 32), keccak);
+    }
+
+    #[test]
+    fn cx_sha224_hashes_abc() {
+        let expected = [
+            0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22, 0x86, 0x42, 0xa4, 0x77, 0xbd, 0xa2, 0x55, 0xb3,
+            0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7, 0xe3, 0x6c, 0x9d, 0xa7,
+        ];
+        assert_eq!(hash_oneshot(CX_SHA224, b"abc", 28), expected);
+    }
+
+    #[test]
+    fn cx_ripemd160_hashes_abc() {
+        let expected = [
+            0x8e, 0xb2, 0x08, 0xf7, 0xe0, 0x5d, 0x98, 0x7a, 0x9b, 0x04, 0x4a, 0x8e, 0x98, 0xc6, 0xb0, 0x87,
+            0xf1, 0x5a, 0x0b, 0xfc,
+        ];
+        assert_eq!(hash_oneshot(CX_RIPEMD160, b"abc", 20), expected);
+    }
 }

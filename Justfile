@@ -85,6 +85,7 @@ lint:
     cargo xtask build --hosted --dont-sign
     cargo xtask build --dont-sign
     cargo xtask build-sideload-apps --dont-sign
+    ./scripts/check-flux-cx-stubs.sh
     cargo xtask build --is-recovery
     cargo xtask build sys-benchmark
     cargo audit

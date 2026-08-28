@@ -811,12 +811,6 @@ mod hosted_stubs {
 
     #[no_mangle]
     pub extern "C" fn os_io_seph_cmd_piezo_play_tune(_tune_id: u32) {}
-
-    #[no_mangle]
-    pub extern "C" fn cx_sha3_init_no_throw(_ctx: *mut u8, _size: u32) -> u32 { 0 }
-
-    #[no_mangle]
-    pub extern "C" fn cx_sha224_init_no_throw(_ctx: *mut u8) -> u32 { 0 }
 }
 
 #[allow(non_upper_case_globals)]
