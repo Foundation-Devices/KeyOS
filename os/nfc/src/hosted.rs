@@ -14,7 +14,7 @@ impl Implementation {
 }
 
 impl NfcImpl for Implementation {
-    fn new() -> Result<Implementation, NfcError> { Ok(Implementation) }
+    fn new() -> Implementation { Implementation }
 
     fn read_ndef_raw_msg(&mut self, _timeout: Duration) -> Result<(Vec<u8>, Vec<u8>), NfcError> {
         // TODO: Implement

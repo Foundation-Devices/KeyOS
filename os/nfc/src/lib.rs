@@ -22,7 +22,7 @@ settings::use_api!();
 const ACTIVE_STATUS_THRESHOLD: Duration = Duration::from_millis(1500);
 
 trait NfcImpl {
-    fn new() -> Result<Implementation, NfcError>;
+    fn new() -> Implementation;
     fn read_ndef_raw_msg(&mut self, timeout: Duration) -> Result<(Vec<u8>, Vec<u8>), NfcError>;
     fn write_ndef_raw_msg(&mut self, uid: Vec<u8>, msg: Vec<u8>, timeout: Duration) -> Result<(), NfcError>;
 }
@@ -36,10 +36,7 @@ struct NfcServer {
 }
 
 impl NfcServer {
-    pub fn new() -> Result<Self, NfcError> {
-        let implementation = Implementation::new()?;
-        Ok(Self { implementation, enabled: false, last_access: None })
-    }
+    pub fn new() -> Self { Self { implementation: Implementation::new(), enabled: false, last_access: None } }
 }
 
 impl Server for NfcServer {
@@ -139,4 +136,4 @@ impl BlockingScalarHandler<IsActive> for NfcServer {
     }
 }
 
-pub fn listen() { server::listen(NfcServer::new().unwrap()) }
+pub fn listen() { server::listen(NfcServer::new()) }

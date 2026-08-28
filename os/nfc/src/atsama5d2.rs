@@ -481,13 +481,14 @@ impl Implementation {
 }
 
 impl NfcImpl for Implementation {
-    /// PANIC: this function can panic if :
-    /// - NFC server is not the first app to claim the SPI Nfc peripheral
-    /// - a GPIO get_pin or set_pin failed (IRQ_IN and IRQ_OUT)
-    fn new() -> Result<Self, NfcError> {
+    fn new() -> Self {
         log::debug!("Initialing IRQ_IN and IRQ_OUT pins");
-        GPIO_API.claim_pin(GpioPin::NfcIntB, PinSettings::OutputHigh, false)?;
-        GPIO_API.claim_pin(GpioPin::NfcIrqB, PinSettings::InterruptFalling, false)?;
+        GPIO_API
+            .claim_pin(GpioPin::NfcIntB, PinSettings::OutputHigh, false)
+            .expect("Could not claim NfcIntB pin");
+        GPIO_API
+            .claim_pin(GpioPin::NfcIrqB, PinSettings::InterruptFalling, false)
+            .expect("Could not claim NfcIrqB pin");
         log::debug!("Initialized NFC pins client");
 
         log::debug!("Initializing RFAL");
@@ -501,7 +502,7 @@ impl NfcImpl for Implementation {
                 )
             })
         }
-        match Rfal::new(Platform {
+        let rfal = Rfal::new(Platform {
             spi_poll_send: || match spi_per_lock().write() {
                 Ok(mut spi) => spi
                     .poll(st25r95::PollFlags::CAN_SEND)
@@ -625,29 +626,24 @@ impl NfcImpl for Implementation {
             },
             get_ticks_ms,
             delay_ms: |ms| thread::sleep(Duration::from_millis(ms as u64)),
-        }) {
-            Ok(rfal) => {
-                log::debug!("Initialized RFAL");
-                // Switch to low-power mode until the first actual use.
-                rfal.nfc
-                    .enter_wakeup_mode()
-                    .map_err(|e| {
-                        log::error!("init-time enter_wakeup_mode() failed: {:?}, is the NFC antenna properly attached ?", e);
-                        NfcError::Internal
-                    })
-                    .ok();
-                Ok(Self {
-                    rfal,
-                    fido: None,
-                    consecutive_errors: 0,
-                    last_emulation_attempt: None,
-                    last_successful_emulation: None,
-                })
-            }
-            Err(e) => {
-                log::error!("RFAL init failed: {:?}", e);
-                Err(NfcError::Internal)
-            }
+        })
+        .expect("RFAL init failed");
+        log::debug!("Initialized RFAL");
+
+        // Switch to low-power mode until the first actual use.
+        if let Err(e) = rfal.nfc.enter_wakeup_mode() {
+            log::error!(
+                "init-time enter_wakeup_mode() failed: {:?}, is the NFC antenna properly attached ?",
+                e
+            );
+        }
+
+        Self {
+            rfal,
+            fido: None,
+            consecutive_errors: 0,
+            last_emulation_attempt: None,
+            last_successful_emulation: None,
         }
     }
 
