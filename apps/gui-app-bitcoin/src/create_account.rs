@@ -67,7 +67,7 @@ pub fn present_multisig(
     connector_id: SharedString,
 ) -> anyhow::Result<()> {
     let source = if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
-    let view = MultiSigView::from(&details);
+    let view = MultiSigView::from_details(&details, source);
     {
         let mut state = state.borrow_mut();
         state.set_pending_multisig(details, source)?;

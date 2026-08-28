@@ -6,6 +6,7 @@ use {
     crate::{
         account_id::AccountId,
         bitcoin_settings::BitcoinSettings,
+        export_account::convert_to_slip132_xpub_with_label,
         fs_permissions::FileSystemPermissions,
         load::{self},
         psbt_signing::PendingPsbt,
@@ -583,7 +584,7 @@ fn convert_account(
             color,
             archived: config.archived,
             single: SingleSigView::default(),
-            multi: MultiSigView::from(multisig),
+            multi: MultiSigView::from_details(multisig, source),
             skeleton: false,
         },
         None => {
@@ -610,15 +611,22 @@ fn convert_account(
     }
 }
 
-impl From<&MultiSigDetails> for MultiSigView {
-    fn from(multisig: &MultiSigDetails) -> Self {
+impl MultiSigView {
+    pub(crate) fn from_details(multisig: &MultiSigDetails, source: AccountSource) -> Self {
         let signers = multisig
             .get_signers()
             .iter()
-            .map(|s| MultiSigSignerView {
-                fingerprint: hex::encode_upper(s.get_fingerprint().to_bytes()).to_shared_string(),
-                derivation_path: s.get_derivation_inner().to_shared_string(),
-                public_key: s.get_pubkey_str().into(),
+            .map(|s| {
+                let fingerprint = display_fingerprint(s.get_fingerprint().to_bytes(), source);
+                let (public_key, public_key_label) =
+                    display_public_key(s.get_pubkey_str(), multisig.network_kind, &multisig.format, source);
+
+                MultiSigSignerView {
+                    fingerprint: fingerprint.into(),
+                    derivation_path: s.get_derivation_inner().into(),
+                    public_key_label: public_key_label.into(),
+                    public_key: public_key.into(),
+                }
             })
             .collect::<Vec<MultiSigSignerView>>();
 
@@ -630,6 +638,33 @@ impl From<&MultiSigDetails> for MultiSigView {
             signers: ModelRc::from(Rc::new(VecModel::from(signers))),
         }
     }
+}
+
+fn display_fingerprint(fingerprint: [u8; 4], source: AccountSource) -> String {
+    match source {
+        AccountSource::Casa => hex::encode(fingerprint),
+        AccountSource::Generic => hex::encode_upper(fingerprint),
+    }
+}
+
+fn display_public_key(
+    xpub: &str,
+    network_kind: NgNetworkKind,
+    address_type: &NgAddressType,
+    source: AccountSource,
+) -> (String, &'static str) {
+    if source != AccountSource::Casa {
+        return (xpub.to_owned(), "XPUB");
+    }
+
+    let network = match network_kind {
+        NgNetworkKind::Main => NgNetwork::Bitcoin,
+        NgNetworkKind::Test => NgNetwork::Testnet4,
+    };
+    convert_to_slip132_xpub_with_label(xpub, network, address_type).unwrap_or_else(|error| {
+        log::warn!("failed to format Casa public key for display: {error:#}");
+        (xpub.to_owned(), "XPUB")
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -804,5 +839,37 @@ impl Into<NgNetworkKind> for NetworkKind {
             NetworkKind::Main => NgNetworkKind::Main,
             NetworkKind::Test => NgNetworkKind::Test,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        ngwallet::bdk_wallet::bitcoin::{
+            bip32::{DerivationPath, Xpriv, Xpub},
+            secp256k1::Secp256k1,
+        },
+    };
+
+    #[test]
+    fn casa_identifiers_match_casa_presentation_without_changing_generic_multisig() {
+        let fingerprint = [0xAB, 0xCD, 0x12, 0xEF];
+        assert_eq!(display_fingerprint(fingerprint, AccountSource::Casa), "abcd12ef");
+        assert_eq!(display_fingerprint(fingerprint, AccountSource::Generic), "ABCD12EF");
+
+        let secp = Secp256k1::new();
+        let master = Xpriv::new_master(NgNetwork::Bitcoin, &[7; 32]).unwrap();
+        let derived = master.derive_priv(&secp, &"m/45'".parse::<DerivationPath>().unwrap()).unwrap();
+        let xpub = Xpub::from_priv(&secp, &derived).to_string();
+
+        let casa =
+            display_public_key(&xpub, NgNetworkKind::Main, &NgAddressType::P2ShWsh, AccountSource::Casa);
+        let generic =
+            display_public_key(&xpub, NgNetworkKind::Main, &NgAddressType::P2ShWsh, AccountSource::Generic);
+
+        assert!(casa.0.starts_with("Ypub"));
+        assert_eq!(casa.1, "YPUB");
+        assert_eq!(generic, (xpub, "XPUB"));
     }
 }

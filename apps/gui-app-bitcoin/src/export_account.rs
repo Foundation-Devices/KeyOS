@@ -701,27 +701,39 @@ pub fn convert_to_slip132_xpub(
     network: NgNetwork,
     addr_type: &NgAddressType,
 ) -> Result<String, anyhow::Error> {
+    Ok(convert_to_slip132_xpub_with_label(xpub_like, network, addr_type)?.0)
+}
+
+pub(crate) fn convert_to_slip132_xpub_with_label(
+    xpub_like: &str,
+    network: NgNetwork,
+    addr_type: &NgAddressType,
+) -> Result<(String, &'static str), anyhow::Error> {
     let mut data = base58::decode_check(xpub_like).map_err(|_| anyhow::anyhow!("Invalid base58 in xpub"))?;
 
     if data.len() < 4 {
         return Err(anyhow::anyhow!("xpub too short"));
     }
 
-    let slip132: [u8; 4] = match (network, addr_type) {
-        (NgNetwork::Bitcoin, NgAddressType::P2wpkh) => [0x04, 0xB2, 0x47, 0x46], // zpub
-        (NgNetwork::Bitcoin, NgAddressType::P2ShWpkh) => [0x04, 0x9D, 0x7C, 0xB2], // ypub
-        (_, NgAddressType::P2wpkh) => [0x04, 0x5F, 0x1C, 0xF6],                  // vpub (testnet)
-        (_, NgAddressType::P2ShWpkh) => [0x04, 0x4A, 0x52, 0x62],                // upub (testnet)
+    let (slip132, label): ([u8; 4], &str) = match (network, addr_type) {
+        (NgNetwork::Bitcoin, NgAddressType::P2wpkh) => ([0x04, 0xB2, 0x47, 0x46], "ZPUB"),
+        (NgNetwork::Bitcoin, NgAddressType::P2ShWpkh) => ([0x04, 0x9D, 0x7C, 0xB2], "YPUB"),
+        (NgNetwork::Bitcoin, NgAddressType::P2wsh) => ([0x02, 0xAA, 0x7E, 0xD3], "ZPUB"),
+        (NgNetwork::Bitcoin, NgAddressType::P2ShWsh) => ([0x02, 0x95, 0xB4, 0x3F], "YPUB"),
+        (_, NgAddressType::P2wpkh) => ([0x04, 0x5F, 0x1C, 0xF6], "VPUB"),
+        (_, NgAddressType::P2ShWpkh) => ([0x04, 0x4A, 0x52, 0x62], "UPUB"),
+        (_, NgAddressType::P2wsh) => ([0x02, 0x57, 0x54, 0x83], "VPUB"),
+        (_, NgAddressType::P2ShWsh) => ([0x02, 0x42, 0x89, 0xEF], "UPUB"),
         _ => {
             log::warn!(
                 "Unsupported address type {:?} for SLIP132 conversion, returning original xpub",
                 addr_type
             );
-            return Ok(xpub_like.to_string());
+            return Ok((xpub_like.to_string(), "XPUB"));
         }
     };
     data[0..4].copy_from_slice(&slip132);
-    Ok(base58::encode_check(data.as_slice()))
+    Ok((base58::encode_check(data.as_slice()), label))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1093,6 +1105,23 @@ mod tests {
         let derivation = DerivationPath::from(vec![ChildNumber::from_hardened_idx(45).unwrap()]);
         let derived = master.derive_priv(&secp, &derivation).unwrap();
         (Xpub::from_priv(&secp, &derived), master_fingerprint)
+    }
+
+    #[test]
+    fn multisig_uses_slip132_public_prefixes() {
+        let xpub = bip45_xpub().0.to_string();
+
+        for (network, address_type, prefix, label) in [
+            (NgNetwork::Bitcoin, NgAddressType::P2ShWsh, "Ypub", "YPUB"),
+            (NgNetwork::Testnet4, NgAddressType::P2ShWsh, "Upub", "UPUB"),
+            (NgNetwork::Bitcoin, NgAddressType::P2wsh, "Zpub", "ZPUB"),
+            (NgNetwork::Testnet4, NgAddressType::P2wsh, "Vpub", "VPUB"),
+        ] {
+            let (public_key, public_key_label) =
+                convert_to_slip132_xpub_with_label(&xpub, network, &address_type).unwrap();
+            assert!(public_key.starts_with(prefix));
+            assert_eq!(public_key_label, label);
+        }
     }
 
     #[test]

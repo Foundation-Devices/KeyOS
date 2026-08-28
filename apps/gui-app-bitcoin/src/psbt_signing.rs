@@ -693,7 +693,8 @@ pub mod verify {
                             state.borrow_mut().pending_psbt =
                                 PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo };
 
-                            let multisig_view = MultiSigView::from(&multisig_details);
+                            let multisig_view =
+                                MultiSigView::from_details(&multisig_details, AccountSource::Generic);
                             let create_account_global = ui.global::<CreateAccount>();
                             create_account_global.set_pending_multisig_account(multisig_view);
 
