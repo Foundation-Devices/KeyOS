@@ -67,6 +67,13 @@ shell configuration instead:
 curl -sSfL https://sdk.foundation.xyz/latest/install.sh | FOUNDATION_SDK_UPDATE_RC=0 bash
 ```
 
+Once the SDK is installed, later releases are installed with the CLI itself,
+which runs the same installer:
+
+```sh
+foundation update
+```
+
 Restart your shell or follow the installer's printed `PATH` instructions, then
 verify the environment:
 

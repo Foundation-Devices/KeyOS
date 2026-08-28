@@ -3,6 +3,8 @@
 
 //! Build KeyOS application for hardware
 
+mod stack_frames;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{IsTerminal, Read};
@@ -98,6 +100,8 @@ pub fn execute(args: &BuildArgs) -> Result<BuiltBundle> {
     if !binary_path.exists() {
         anyhow::bail!("Cargo build failed: {}", binary_path.display());
     }
+
+    stack_frames::warn_on_large_frames(&binary_path);
 
     // Strip binary
     println!("Stripping binary...");

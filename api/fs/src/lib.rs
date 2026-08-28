@@ -11,7 +11,7 @@
 //! fs::use_api!();
 //!
 //! let fs = FileSystem::default();
-//! let file = fs.open_file("state.json", fs::Location::AppData, fs::OpenFlags::read_only())?;
+//! let file = fs.open_file("state.json", fs::Location::AppData, fs::OpenFlags::READ_ONLY)?;
 //! ```
 //!
 //! The types in [`messages`] describe the wire protocol between the API handle

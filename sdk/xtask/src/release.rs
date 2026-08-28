@@ -661,6 +661,10 @@ fn smoke_install_native(release_dir: &Path, targets: &[String], verbose: bool) -
     if !install_root.join("bin/foundation").is_file() {
         return Err(boxed_err("installer smoke test did not create bin/foundation"));
     }
+    // Without it every 'foundation update' from this release refuses to run.
+    if !install_root.join("current/share/foundation-sdk-release.asc").is_file() {
+        return Err(boxed_err("installer smoke test did not install the release key"));
+    }
     Ok(())
 }
 

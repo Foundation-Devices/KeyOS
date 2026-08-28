@@ -122,6 +122,11 @@ fn create_project(args: &NewArgs, sdk: &SdkRoot, parent: &Path) -> Result<()> {
     println!("✓ Created project structure from template");
     println!("✓ Created app-config.toml");
 
+    let skills = crate::commands::skills::install_skills(sdk, &project_path)?;
+    if !skills.is_empty() {
+        println!("✓ Installed {} agent skills", skills.len());
+    }
+
     if !args.no_git {
         match initialize_git_repo(&project_path) {
             GitInitStatus::Initialized => println!("✓ Initialized Git repository"),
@@ -536,6 +541,14 @@ mod tests {
         assert!(agents.contains("# Demo App Agent Guide"));
         assert!(agents.contains("sdk/docs/foundation-cli.md"));
         assert!(!agents.contains("{{friendly_app_name}}"));
+        for skill_dir in [".claude", ".agents"] {
+            assert!(project_path
+                .join(skill_dir)
+                .join("skills")
+                .join("foundation-sdk-migrate-newest")
+                .join("SKILL.md")
+                .exists());
+        }
         assert!(project_path.join("permission_templates.toml").exists());
         assert!(project_path.join("resources").join("icon.svg").exists());
         assert!(project_path.join("resources").join("icon-dark.svg").exists());
@@ -966,6 +979,11 @@ mod tests {
                 &root.join("crates").join("cli").join("templates").join(template),
             );
         }
+
+        copy_dir(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join(".agents").join("skills"),
+            &root.join(".agents").join("skills"),
+        );
 
         // create_project reads the built-in themes; seed the base one so
         // theme lookup by id resolves.

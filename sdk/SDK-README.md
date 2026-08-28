@@ -209,6 +209,7 @@ The staged bundle also receives:
 - templates under `lib/templates/`
 - docs and examples
 - the Passport Prime udev rules at `share/99-passport.rules` (Linux USB access)
+- the release public key at `share/foundation-sdk-release.asc`, written by `install.sh` from the key embedded in it, which `foundation update` uses to verify the next installer
 - the SDK-user `flake.nix`, `flake.lock`, and `setup.sh`
 
 The copy list and compile list are configured in `sdk-build.toml`.

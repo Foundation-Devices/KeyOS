@@ -701,13 +701,13 @@ setup_gpg_verifier() {{
   GNUPGHOME="$TMPDIR/gnupg"
   mkdir -p "$GNUPGHOME"
   chmod 700 "$GNUPGHOME"
-  key_file="$GNUPGHOME/foundation-sdk-release.asc"
+  RELEASE_KEY_FILE="$GNUPGHOME/foundation-sdk-release.asc"
   # Base64 was used to embed the armored key safely; decode on disk before import.
-  if ! printf '%s' "$EMBEDDED_GPG_PUBLIC_KEY_B64" | base64 -d > "$key_file" 2>/dev/null; then
+  if ! printf '%s' "$EMBEDDED_GPG_PUBLIC_KEY_B64" | base64 -d > "$RELEASE_KEY_FILE" 2>/dev/null; then
     print_fail "Could not decode embedded Foundation release key (base64)"
   fi
 
-  if "$GPG" --batch --homedir "$GNUPGHOME" --import "$key_file" >/dev/null 2>&1; then
+  if "$GPG" --batch --homedir "$GNUPGHOME" --import "$RELEASE_KEY_FILE" >/dev/null 2>&1; then
     actual_fingerprint="$("$GPG" --batch --homedir "$GNUPGHOME" --with-colons --fingerprint | awk -F: '$1 == "fpr" {{ print $10; exit }}')"
     if [ "$actual_fingerprint" != "$EMBEDDED_GPG_PUBLIC_KEY_FINGERPRINT" ]; then
       print_fail "Embedded Foundation release key fingerprint mismatch"
@@ -810,7 +810,11 @@ EOF
       if [ "$tool_name" = "foundation" ]; then
         continue
       fi
-      ln -sfn "$tool_path" "$bin_dir/$tool_name"
+      # Link through `current`, as the foundation launcher does. A link into the
+      # versioned directory keeps pointing at the SDK that ran the installer, so
+      # switching `current` splits the toolchain and removing an old bundle
+      # dangles every tool but `foundation`.
+      ln -sfn "$current_root/bin/$tool_name" "$bin_dir/$tool_name"
     done
   fi
 }}
@@ -845,6 +849,7 @@ GPG=""
 GPGV=""
 GNUPGHOME=""
 GPG_KEYRING=""
+RELEASE_KEY_FILE=""
 
 setup_gpg_verifier
 
@@ -884,6 +889,13 @@ rm -rf "$DESTINATION"
 mkdir -p "$DESTINATION"
 tar -xzf "$TMPDIR/$COMMON_ARCHIVE" -C "$DESTINATION"
 tar -xzf "$TMPDIR/$TARGET_ARCHIVE" -C "$DESTINATION"
+# The anchor 'foundation update' checks the next installer against. It comes
+# from this script rather than from the archive, so it is exactly the key that
+# authenticated this install, and an install that skipped verification leaves
+# the bundle without one.
+if [ -n "$RELEASE_KEY_FILE" ]; then
+  cp "$RELEASE_KEY_FILE" "$DESTINATION/share/foundation-sdk-release.asc"
+fi
 refresh_installed_mtimes "$DESTINATION"
 rm -f "$CURRENT_LINK"
 ln -s "$DESTINATION" "$CURRENT_LINK"
@@ -929,7 +941,9 @@ fi
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
+    use std::io::Write;
     use std::path::PathBuf;
+    use std::process::{Command, Stdio};
 
     use super::{
         common_archive_name, detached_signature_command, deterministic_archive_command,
@@ -1061,7 +1075,8 @@ mod tests {
         assert!(script
             .contains(&format!("EMBEDDED_GPG_PUBLIC_KEY_FINGERPRINT=\"{TEST_PUBLIC_KEY_FINGERPRINT}\"")));
         assert!(script.contains("EMBEDDED_GPG_PUBLIC_KEY_B64=\""));
-        assert!(script.contains("base64 -d > \"$key_file\""));
+        assert!(script.contains("base64 -d > \"$RELEASE_KEY_FILE\""));
+        assert!(script.contains("cp \"$RELEASE_KEY_FILE\" \"$DESTINATION/share/foundation-sdk-release.asc\""));
         assert!(script.contains("SIGNATURE_VERIFICATION_ENABLED=0"));
         assert!(script.contains("setup_gpg_verifier"));
         // Signed release + missing gpg must hard-fail (not fall back to
@@ -1095,6 +1110,16 @@ mod tests {
         assert!(script.contains("export PATH="));
         assert!(script.contains("foundation develop"));
         assert!(script.contains("source"));
+
+        // The template is a format string, so an unbalanced edit reaches users as
+        // a release that cannot be installed at all.
+        let mut shell = Command::new("sh")
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("sh is required to check the rendered installer");
+        shell.stdin.take().expect("piped stdin").write_all(script.as_bytes()).unwrap();
+        assert!(shell.wait().unwrap().success(), "rendered install.sh is not valid shell");
     }
 
     #[test]

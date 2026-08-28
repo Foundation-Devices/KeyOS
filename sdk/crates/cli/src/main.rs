@@ -51,6 +51,8 @@ async fn run() -> Result<()> {
         Commands::Logs(args) => commands::logs::execute(&args)?,
         #[cfg(feature = "experimental-plugins")]
         Commands::Plugin(args) => commands::plugin::execute(&args).await?,
+        Commands::Update(args) => commands::update::execute(&args)?,
+        Commands::Skills => commands::skills::execute()?,
         Commands::Completions(args) => commands::completions::execute(&args)?,
     }
 

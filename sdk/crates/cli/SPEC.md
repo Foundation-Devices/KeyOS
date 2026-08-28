@@ -274,6 +274,7 @@ Behavior:
 - Rejects friendly and launcher app names containing characters outside ASCII letters, numbers, spaces, and hyphens
 - Creates the project directory from the selected template
 - Writes `app-config.toml`, `permission_templates.toml`, template source files, and resources
+- Installs the SDK's agent skills into the project, as `foundation skills` does
 - Initializes a Git repository by default with initial branch `main`
 - Does not create an initial commit
 - `--no-git` skips repository initialization
@@ -607,6 +608,54 @@ Behavior:
 - Opens the selected bundle's `file://` URL in the system's default web browser; it does not start a
   server or retain state
 - `--url` prints that URL instead of opening it
+
+### `update`
+
+Signature:
+
+```text
+foundation update [--no-verify]
+```
+
+Behavior:
+
+- Downloads `install.sh` from the release channel and runs it with `sh`, so the installer stays the single
+  implementation of archive verification, unpacking, launcher setup, and `PATH` configuration
+- Downloads `install.sh.sig` and verifies it before running the script, against
+  `<sdk-root>/share/foundation-sdk-release.asc`, resolved from the running executable rather than the
+  environment: the release key the installer that installed this bundle wrote, having verified the bundle
+  with it. A key fetched next to the script would authenticate nothing
+- Verifies with `gpgv`, which consults only the keyring named on its command line, so no key in the user's
+  own GnuPG configuration can satisfy the check
+- Refuses to run the installer when the signature does not verify, when the running SDK carries no release
+  key (a source checkout, a local build, or an install made with `--no-verify`), or when `gpg` and `gpgv`
+  are absent
+- Uses `curl`, or `wget` when `curl` is absent, matching what the installer itself accepts
+- Defaults to `https://sdk.foundation.xyz/latest/install.sh`; `FOUNDATION_SDK_INSTALLER_URL` overrides the
+  channel for testing an unpublished installer, and its signature is checked the same way
+- `--no-verify` skips the installer signature check and is forwarded to the installer, which then skips the
+  archive signature checks too (unsafe)
+- Fails with the installer's exit status when it fails; the installer's own output is not captured
+- Replacing the SDK this binary runs from is safe: the installer unlinks the old bundle rather than
+  overwriting the running executable
+
+### `skills`
+
+Signature:
+
+```text
+foundation skills
+```
+
+Behavior:
+
+- Copies every skill directory under `<sdk-root>/.agents/skills/` into both `.claude/skills/` and
+  `.agents/skills/` in the current directory, which is where agent tools resolve project skills
+- Replaces a skill directory whole, so files a newer SDK dropped from a skill do not linger
+- Leaves skill directories the SDK does not ship, so an app's own skills survive a refresh
+- Reports each skill as installed, updated, or unchanged
+- Requires no app project, so a repository being ported to the SDK can install the migration skill
+- `foundation new` runs the same installation for a freshly scaffolded app
 
 ### `preview`
 

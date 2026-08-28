@@ -39,16 +39,6 @@ impl From<xous::Error> for NfcError {
     fn from(_value: xous::Error) -> Self { NfcError::Xous }
 }
 
-#[cfg(keyos)]
-impl From<spi::SpiError> for NfcError {
-    fn from(_value: spi::SpiError) -> Self { NfcError::Spi }
-}
-
-#[cfg(keyos)]
-impl From<gpio::GpioApiError> for NfcError {
-    fn from(_value: gpio::GpioApiError) -> Self { NfcError::Gpio }
-}
-
 impl From<()> for NfcError {
     fn from(_: ()) -> Self { NfcError::Unknown }
 }

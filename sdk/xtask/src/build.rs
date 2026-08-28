@@ -483,6 +483,31 @@ fn copy_entries_for_bundle(config: &Config, bundle: CopyBundle) -> Vec<CopyEntry
     config.expanded_copy_entries().into_iter().filter(|entry| entry.bundle == bundle).collect()
 }
 
+/// The SKILL.md of every staged agent skill, under both tool directories.
+/// `.claude/skills` is a symlink to `.agents/skills` in the source tree, so a
+/// copy that did not follow it leaves the directory Claude Code reads empty.
+fn bundled_skill_paths(stage_dir: &Path) -> Result<Vec<PathBuf>> {
+    let staged = stage_dir.join(".agents").join("skills");
+    let entries = fs::read_dir(&staged)
+        .map_err(|error| boxed_err(format!("could not read {}: {error}", staged.display())))?;
+
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.path().is_dir() {
+            continue;
+        }
+        paths.push(entry.path().join("SKILL.md"));
+        paths.push(stage_dir.join(".claude").join("skills").join(entry.file_name()).join("SKILL.md"));
+    }
+
+    if paths.is_empty() {
+        return Err(boxed_err(format!("no agent skills staged at {}", staged.display())));
+    }
+
+    Ok(paths)
+}
+
 fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
     let mut required_paths = vec![
         stage_dir.join("manifest.toml"),
@@ -517,15 +542,10 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
         stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
         stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
         stage_dir.join("resources").join("icons").join("loader.svg"),
-        stage_dir.join(".agents").join("skills").join("foundation-cli").join("SKILL.md"),
-        stage_dir.join(".agents").join("skills").join("foundation-localize").join("SKILL.md"),
-        stage_dir.join(".agents").join("skills").join("foundation-new-page").join("SKILL.md"),
-        stage_dir.join(".claude").join("skills").join("foundation-cli").join("SKILL.md"),
-        stage_dir.join(".claude").join("skills").join("foundation-localize").join("SKILL.md"),
-        stage_dir.join(".claude").join("skills").join("foundation-new-page").join("SKILL.md"),
         stage_dir.join("flake.nix"),
         stage_dir.join("setup.sh"),
     ];
+    required_paths.extend(bundled_skill_paths(stage_dir)?);
 
     if !skip_docs {
         required_paths.push(stage_dir.join("docs").join("guide"));
@@ -536,7 +556,7 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
     let missing = required_paths.into_iter().filter(|path| !path.exists()).collect::<Vec<_>>();
 
     if missing.is_empty() {
-        return Ok(());
+        return verify_staged_path_dependencies(&stage_dir.join("lib").join("keyos"));
     }
 
     Err(boxed_err(format!(
@@ -544,6 +564,62 @@ fn verify_common_stage(stage_dir: &Path, skip_docs: bool) -> Result<()> {
         stage_dir.display(),
         missing.iter().map(|path| format!("- {}", path.display())).collect::<Vec<_>>().join("\n")
     )))
+}
+
+/// Every `path = ` a staged manifest names must exist in the bundle. A crate the
+/// copy list forgets resolves fine in this checkout and fails for everyone who
+/// installs the SDK, so the miss has to fail the build that produced it.
+fn verify_staged_path_dependencies(keyos_root: &Path) -> Result<()> {
+    let mut missing = Vec::new();
+    for manifest in staged_manifests(keyos_root)? {
+        let Some(base) = manifest.parent() else { continue };
+        let contents = fs::read_to_string(&manifest)?;
+        for path in manifest_dependency_paths(&contents) {
+            if !base.join(&path).exists() {
+                missing.push(format!("{} declares path {path}", manifest.display()));
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    Err(boxed_err(format!(
+        "staged manifests name path dependencies the bundle does not carry:\n{}",
+        missing.iter().map(|entry| format!("- {entry}")).collect::<Vec<_>>().join("\n")
+    )))
+}
+
+fn staged_manifests(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut manifests = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name().is_some_and(|name| name == "Cargo.toml") {
+                manifests.push(path);
+            }
+        }
+    }
+    Ok(manifests)
+}
+
+/// The value of every `path = "..."` in `manifest`, wherever it sits: a section
+/// of its own, an inline table, or a target-specific block.
+fn manifest_dependency_paths(manifest: &str) -> Vec<String> {
+    manifest
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or(line))
+        .flat_map(|line| line.split("path").skip(1))
+        .filter_map(|rest| rest.trim_start().strip_prefix('='))
+        .filter_map(|rest| rest.trim_start().strip_prefix('"'))
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_string)
+        .collect()
 }
 
 fn verify_target_stage(stage_dir: &Path, skip_simulator: bool) -> Result<()> {
@@ -2390,9 +2466,9 @@ mod tests {
         should_stage_simulator_for_target, should_strip_packaged_binaries, stage_bt_error_placeholder,
         stage_cargo_package_snapshot, stage_shared_ui_artifact, stage_slint_sdk_snapshot,
         strip_program_candidates, validate_release_slint_source, validate_release_slint_source_hash,
-        verify_common_stage, verify_target_stage, BuildArgs, ScalarEnumVariant, SmokeCheckArgs,
-        SourceOverrides, StageDirLock, BT_PLACEHOLDER_DESTINATION, DOCS_BUNDLE_LOCK_HELD_ENV,
-        DOCS_BUNDLE_LOCK_PATH,
+        verify_common_stage, verify_staged_path_dependencies, verify_target_stage, BuildArgs,
+        ScalarEnumVariant, SmokeCheckArgs, SourceOverrides, StageDirLock, BT_PLACEHOLDER_DESTINATION,
+        DOCS_BUNDLE_LOCK_HELD_ENV, DOCS_BUNDLE_LOCK_PATH,
     };
     use crate::config::{load, workspace_root};
 
@@ -2655,14 +2731,36 @@ mod tests {
     }
 
     #[test]
+    fn verify_staged_path_dependencies_names_every_missing_crate() {
+        let (_stage_guard, stage_dir) = temp_stage_dir();
+        let keyos = stage_dir.join("lib").join("keyos");
+        fs::create_dir_all(keyos.join("api").join("nfc")).unwrap();
+        fs::write(keyos.join("Cargo.toml"), "[workspace.dependencies.gpio]\npath = \"api/gpio\"\n").unwrap();
+        fs::write(
+            keyos.join("api").join("nfc").join("Cargo.toml"),
+            "[dependencies]\nserver = { path = \"../../server\" }\n# path = \"commented/out\"\n",
+        )
+        .unwrap();
+
+        let error = verify_staged_path_dependencies(&keyos).unwrap_err().to_string();
+        assert!(error.contains("api/gpio"), "{error}");
+        assert!(error.contains("../../server"), "{error}");
+        assert!(!error.contains("commented/out"), "{error}");
+
+        fs::create_dir_all(keyos.join("api").join("gpio")).unwrap();
+        fs::create_dir_all(keyos.join("server")).unwrap();
+        verify_staged_path_dependencies(&keyos).unwrap();
+    }
+
+    #[test]
     fn verify_common_stage_requires_shared_layout() {
         let (_stage_guard, stage_dir) = temp_stage_dir();
         fs::create_dir_all(stage_dir.join("docs").join("guide").join("src")).unwrap();
         fs::create_dir_all(stage_dir.join("docs").join("api")).unwrap();
         for tool_dir in [".agents", ".claude"] {
-            for skill in ["foundation-cli", "foundation-localize", "foundation-new-page"] {
-                fs::create_dir_all(stage_dir.join(tool_dir).join("skills").join(skill)).unwrap();
-            }
+            let skill = stage_dir.join(tool_dir).join("skills").join("foundation-cli");
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), "").unwrap();
         }
         fs::create_dir_all(stage_dir.join("lib").join("keyos")).unwrap();
         fs::create_dir_all(stage_dir.join(BT_PLACEHOLDER_DESTINATION).join("src")).unwrap();
@@ -2726,12 +2824,6 @@ mod tests {
             stage_dir.join("lib").join("keyos").join("utils").join("fiat-symbols").join("Cargo.toml"),
             stage_dir.join("lib").join("keyos").join("utils").join("localizer-codegen").join("Cargo.toml"),
             stage_dir.join("resources").join("icons").join("loader.svg"),
-            stage_dir.join(".agents").join("skills").join("foundation-cli").join("SKILL.md"),
-            stage_dir.join(".agents").join("skills").join("foundation-localize").join("SKILL.md"),
-            stage_dir.join(".agents").join("skills").join("foundation-new-page").join("SKILL.md"),
-            stage_dir.join(".claude").join("skills").join("foundation-cli").join("SKILL.md"),
-            stage_dir.join(".claude").join("skills").join("foundation-localize").join("SKILL.md"),
-            stage_dir.join(".claude").join("skills").join("foundation-new-page").join("SKILL.md"),
             stage_dir.join("docs").join("guide").join("src").join("foundation-cli.md"),
             stage_dir.join("flake.nix"),
             stage_dir.join("setup.sh"),
@@ -2740,6 +2832,11 @@ mod tests {
         }
 
         assert!(verify_common_stage(&stage_dir, false).is_ok());
+
+        // A copy that did not follow the .claude/skills symlink stages the skills
+        // under .agents alone, which no agent tool reads.
+        fs::remove_dir_all(stage_dir.join(".claude")).unwrap();
+        assert!(verify_common_stage(&stage_dir, false).is_err());
     }
 
     #[test]

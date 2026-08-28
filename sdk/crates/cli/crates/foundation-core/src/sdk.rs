@@ -82,6 +82,14 @@ impl SdkRoot {
         }
     }
 
+    /// Armored GPG public key of the release this bundle came from. Signed
+    /// releases ship it; a source checkout or an unsigned local build has none.
+    pub fn release_key_path(&self) -> PathBuf { self.root.join("share").join("foundation-sdk-release.asc") }
+
+    /// Agent skill files shipped with the SDK. `.claude/skills` is a symlink to
+    /// this directory in both layouts, so the `.agents` path is the canonical one.
+    pub fn skills_path(&self) -> PathBuf { self.root.join(".agents").join("skills") }
+
     /// Directory of component schemas (`button.schema.json`, ...), used by the
     /// theme-compile step to generate per-app component themes. Lives under the
     /// KeyOS tree in both layouts (Repo: source tree; Bundle: the staged

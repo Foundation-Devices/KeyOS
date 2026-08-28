@@ -126,6 +126,18 @@ pub enum Commands {
     )]
     Plugin(commands::plugin::PluginArgs),
 
+    /// Install the latest published Foundation SDK
+    #[command(
+        long_about = "Downloads the release channel's installer and runs it, installing the latest published SDK alongside the current one and pointing the launcher at it. This is what the documented curl | bash install line runs"
+    )]
+    Update(commands::update::UpdateArgs),
+
+    /// Install the SDK's agent skills into this app
+    #[command(
+        long_about = "Copies the agent skills shipped with the SDK into .claude/skills/ and .agents/skills/ in the current directory, where Claude Code and other agent tools resolve them. Re-run after an SDK upgrade to refresh the copies"
+    )]
+    Skills,
+
     /// Install shell completions
     #[command(
         long_about = "Installs shell completions for bash, zsh, fish, or PowerShell; use --stdout to print the script instead"

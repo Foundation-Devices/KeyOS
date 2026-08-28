@@ -25,10 +25,12 @@ pub mod preview;
 pub mod search;
 pub mod sideload;
 pub mod sim;
+pub mod skills;
 pub mod theme;
 pub mod themes;
 #[cfg(feature = "experimental-plugins")]
 pub mod uninstall;
+pub mod update;
 
 /// Render a byte count for a build artifact, e.g. `3.4 MiB`.
 pub(crate) fn format_bytes(bytes: u64) -> String {
