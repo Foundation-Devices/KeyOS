@@ -676,11 +676,9 @@ dependencies = [
  "is31fl32xx",
  "log 0.4.27",
  "mass-storage",
- "ndef",
  "ovm7690-rs",
  "png-decoder",
  "r0",
- "rfal",
  "rkyv",
  "rtt-target",
  "utralib",
@@ -8797,9 +8795,9 @@ checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
 name = "ndef"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39081400340c14a9fcbb0122c311aca4e34ec2d19e3136613638ae7e2a362dbc"
+checksum = "977e7ae6f6ed49a2fa6387bc22e2423391201d0355348552bd1591d6a831fd41"
 dependencies = [
  "dcbor",
  "derive_more 1.0.0",

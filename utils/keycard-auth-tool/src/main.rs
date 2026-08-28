@@ -671,9 +671,9 @@ fn is_card_provisioned(
 fn write_ndef_record(card: &Card, keycard_data: &Shard) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut ndef_msg = Message::default();
     let encoded_data = keycard_data.encode();
-    let mut ndef_rec1 = Record::new(None, Payload::RTD(RecordType::Cbor(encoded_data)));
-    ndef_msg.append_record(&mut ndef_rec1);
-    let raw_msg = ndef_msg.to_vec();
+    let ndef_rec1 = Record::new(None, Payload::RTD(RecordType::Cbor(encoded_data)));
+    ndef_msg.append_record(ndef_rec1);
+    let raw_msg = ndef_msg.to_vec().map_err(|_| "Invalid NDEF message")?;
 
     if raw_msg.len() > 888 {
         return Err("Data too large for NTAG 216".into());
@@ -682,7 +682,7 @@ fn write_ndef_record(card: &Card, keycard_data: &Shard) -> Result<Vec<u8>, Box<d
     // Write NDEF to card starting at page 4
     write_ndef_to_pages(card, &raw_msg)?;
 
-    Ok(ndef_rec1.payload())
+    Ok(ndef_msg.records[0].payload().map_err(|_| "Invalid NDEF message")?)
 }
 
 fn ndef_tlv(ndef_data: &[u8]) -> Vec<u8> {
@@ -780,7 +780,7 @@ fn read_ndef_record(card: &Card) -> Result<Vec<u8>, Box<dyn std::error::Error>> 
         return Err("Not an external type record".into());
     }
 
-    Ok(ndef_msg.records[0].payload())
+    Ok(ndef_msg.records[0].payload().map_err(|_| "Invalid NDEF message")?)
 }
 
 #[cfg(test)]
@@ -822,9 +822,9 @@ mod tests {
             shard.set_hmac([0x11; 32]);
 
             let mut ndef_msg = Message::default();
-            let mut record = Record::new(None, Payload::RTD(RecordType::Cbor(shard.encode())));
-            ndef_msg.append_record(&mut record);
-            let tlv = ndef_tlv(&ndef_msg.to_vec());
+            let record = Record::new(None, Payload::RTD(RecordType::Cbor(shard.encode())));
+            ndef_msg.append_record(record);
+            let tlv = ndef_tlv(&ndef_msg.to_vec().unwrap());
 
             let start =
                 tlv.windows(share_len).position(|window| window == marker).expect("share is in the record");
@@ -849,14 +849,14 @@ mod tests {
 
         let mut ndef_msg = Message::default();
         let encoded_data = keycard_data.encode();
-        let mut ndef_rec1 = Record::new(None, Payload::RTD(RecordType::Cbor(encoded_data)));
-        ndef_msg.append_record(&mut ndef_rec1);
-        let serialized = ndef_msg.to_vec();
+        let ndef_rec1 = Record::new(None, Payload::RTD(RecordType::Cbor(encoded_data)));
+        ndef_msg.append_record(ndef_rec1);
+        let serialized = ndef_msg.to_vec().unwrap();
 
         let ndef_msg = Message::try_from(serialized.as_slice()).unwrap();
         assert_eq!(ndef_msg.records.len(), 1);
         assert!(ndef_msg.records[0].is_type_cbor());
-        let payload = ndef_msg.records[0].payload();
+        let payload = ndef_msg.records[0].payload().unwrap();
         let deserialized = Shard::decode(&payload).unwrap();
 
         assert_eq!(keycard_data.hmac(), deserialized.hmac());

@@ -57,10 +57,6 @@ required-features = ["aes"]
 name = "securam"
 required-features = ["securam"]
 
-[[bin]]
-name = "nfc-rfal"
-required-features = ["nfc-rfal"]
-
 [dependencies]
 armv7 = { path = "../armv7" }
 bitfield = "0.15.0"
@@ -81,10 +77,8 @@ hex-literal = { version = "0.4.1", optional = true, default-features = false }
 is31fl32xx = { version = "0.1.0", optional = true }
 log = { version = "0.4.21", optional = true }
 mass-storage = { path = "../mass-storage", optional = true }
-ndef = { workspace = true, optional = true }
 ovm7690-rs = { path = "../ovm7690-rs", optional = true }
 r0 = "1.0.0"
-rfal = { workspace = true, optional = true }
 rkyv = { version = "0.8", default-features = false, optional = true }
 rtt-target = { git = "https://github.com/Foundation-Devices/rtt-target.git", branch = "cortex-a", features = ["cortex-a"], optional = true }
 utralib = { path = "../../utralib" }
@@ -115,11 +109,4 @@ usb-host = [
     "logging",
     "embedded-sdmmc",
 ]
-nfc-rfal = ["critical-section", "drv2605", "eh-0", "heap", "is31fl32xx", "rfal"]
-nfc-ndef = ["ndef"]
-nfc-ndef-read = ["nfc-ndef"]
-nfc-ndef-write = ["nfc-ndef"]
-nfc-ndef-format = ["nfc-ndef"]
-nfc-ce = []
-
 default = ["lcd-console", "eh-1"]

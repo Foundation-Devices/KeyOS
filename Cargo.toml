@@ -273,7 +273,7 @@ futures-lite = { version = "2.5" }
 hex = { version = "0.4.3" }
 jiff = { version = "0.2.5", default-features = false, features = ["std"] }
 log = "0.4.14"
-ndef = { version = "0.5.0", features = ["alloc", "cbor"] }
+ndef = { version = "0.6.0", features = ["alloc", "dcbor"] }
 num-bigint = "0.4"
 num-derive = "0.4.2"
 num-traits = "0.2.18"

@@ -13,14 +13,19 @@ pub fn main() -> () {
     let _ = nfc.set_enabled(true);
     let shard = backup_shard::Shard::default();
     let mut ndef_msg = ndef::Message::default();
-    let mut ndef_rec1 = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
-    ndef_msg.append_record(&mut ndef_rec1);
-    match nfc.write_ndef_raw_msg(vec![], ndef_msg.to_vec(), Duration::from_millis(10000)) {
-        Ok(()) => {
-            log::info!("Wrote message");
-        }
+    let ndef_rec1 = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
+    ndef_msg.append_record(ndef_rec1);
+    match ndef_msg.to_vec() {
+        Ok(raw_msg) => match nfc.write_ndef_raw_msg(vec![], raw_msg, Duration::from_millis(10000)) {
+            Ok(()) => {
+                log::info!("Wrote message");
+            }
+            Err(e) => {
+                log::error!("Failed to write message: {:?}", e);
+            }
+        },
         Err(e) => {
-            log::error!("Failed to write message: {:?}", e);
+            log::error!("Failed to serialize NDEF message: {:?}", e);
         }
     }
     match nfc.read_ndef_raw_msg(Duration::from_millis(10000)) {

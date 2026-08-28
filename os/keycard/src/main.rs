@@ -189,7 +189,9 @@ impl KeycardServer {
         if !ndef_msg.records[0].is_type_cbor() {
             return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
         }
-        let payload = ndef_msg.records[0].payload();
+        let Ok(payload) = ndef_msg.records[0].payload() else {
+            return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
+        };
         let Ok(shard) = Shard::decode(&payload) else {
             return Ok((uid, Some(KeycardIdentifyError::InvalidData)));
         };
@@ -209,38 +211,27 @@ impl KeycardServer {
     }
 
     fn store_shard_to_keycard(&mut self, uid: Vec<u8>) -> Result<(), KeycardError> {
-        let mut shard = self.shards.pop().ok_or(KeycardError::NoShardLeft)?;
+        let shard = self.shards.pop().ok_or(KeycardError::NoShardLeft)?;
         log::debug!("Storing shard {} ({} left in pool)", shard.seed_shamir_share_index(), self.shards.len());
-        let original_shard = shard.clone();
-        shard.set_hmac(hmac(&self.security, &shard, &uid)?);
-        let mut ndef_msg = ndef::Message::default();
-        let mut ndef_rec1 = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
-        ndef_msg.append_record(&mut ndef_rec1);
-        match self.nfc.write_ndef_raw_msg(uid, ndef_msg.to_vec(), NFC_WRITE_TIMEOUT) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                // push shard back on the stack in case of error
-                // so we can retry storing the shard to the keycard
-                self.shards.push(original_shard);
-                Err(e.into())
-            }
-        }
+        self.write_shard_to_keycard(shard.clone(), uid).map_err(|e| {
+            // Put the shard back so the write can be retried.
+            self.shards.push(shard);
+            e
+        })
     }
 
     fn format_keycard(&mut self, uid: Vec<u8>) -> Result<(), KeycardError> {
-        // Write an "empty" shard to the keycard to format it.
         // For a formatted card, only the HMAC must be valid; the rest of the fields can be zeroed and
         // the seed_shamir_share must be empty.
-        let mut shard = Shard::default();
-        shard.set_hmac(hmac(&self.security, &shard, &uid)?);
+        self.write_shard_to_keycard(Shard::default(), uid)
+    }
 
+    fn write_shard_to_keycard(&mut self, mut shard: Shard, uid: Vec<u8>) -> Result<(), KeycardError> {
+        shard.set_hmac(hmac(&self.security, &shard, &uid)?);
         let mut ndef_msg = ndef::Message::default();
-        let mut ndef_rec = ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard));
-        ndef_msg.append_record(&mut ndef_rec);
-        match self.nfc.write_ndef_raw_msg(uid, ndef_msg.to_vec(), NFC_WRITE_TIMEOUT) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.into()),
-        }
+        ndef_msg.append_record(ndef::Record::new(None, ndef::Payload::from_cbor_encodable(&shard)));
+        let raw_msg = ndef_msg.to_vec().map_err(|_| KeycardError::Ndef)?;
+        self.nfc.write_ndef_raw_msg(uid, raw_msg, NFC_WRITE_TIMEOUT).map_err(Into::into)
     }
 
     fn load_shard_from_keycard(&mut self) -> Result<LoadedShard, KeycardError> {
@@ -256,7 +247,7 @@ impl KeycardServer {
         if !ndef_msg.records[0].is_type_cbor() {
             return Err(KeycardError::InvalidData);
         }
-        let payload = ndef_msg.records[0].payload();
+        let payload = ndef_msg.records[0].payload().map_err(|_| KeycardError::InvalidData)?;
         let shard = Shard::decode(&payload).map_err(|_| KeycardError::InvalidData)?;
         if &hmac(&self.security, &shard, &uid)? != shard.hmac() {
             return Err(KeycardError::HmacMismatch);
