@@ -227,6 +227,7 @@ fn try_authorize_lockscreen_request(
     }
 }
 
+#[cfg(not(feature = "recovery-os"))]
 fn app_manager_launch_failure(error: app_manager::AppManagerError) -> RunAppResponse {
     let reason = match error {
         app_manager::AppManagerError::UnknownAppId => return RunAppResponse::AppIdNotFound,
@@ -257,6 +258,7 @@ mod tests {
         VerifyPinOptions { title: None, want_security_words }.serialize()
     }
 
+    #[cfg(not(feature = "recovery-os"))]
     #[test]
     fn compatibility_failure_keeps_its_gui_navigation_reason() {
         assert_eq!(
