@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use file_backed::{FileBacked, JsonBacked, JsonCodec};
 use gui_server_api::navigation::securitykeys::UserPresenceOptions;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
+use security::AppSeed;
 use server::{
     ArchiveEventSubscriptionHandler, ArchiveSubList, BlockingArchiveHandler, BlockingScalarHandler,
     MessageId as _, ScalarHandler, Server, ServerContext,
@@ -128,7 +129,7 @@ pub struct FidoServer {
     pub(crate) state: JsonBacked<FidoKeysState, FileSystemPermissions>,
     pub(crate) attestation_certificate: Vec<u8>,
     pub(crate) attestation_pubkey: Vec<u8>,
-    seed: Vec<u8>,
+    seed: AppSeed,
     fido_keys: Vec<FidoKey>,
     key_change_subscribers: ArchiveSubList<crate::messages::KeysChangedEvent>,
     presence_keep_alive_subscribers: ArchiveSubList<crate::messages::PresenceKeepAliveEvent>,
@@ -179,7 +180,7 @@ impl ScalarHandler<DisconnectHandlerMessage> for FidoServer {
 /// - backup restore to complete
 /// - secure element to unlock and give us our app_seed
 /// - the AppData filesystem to mount (holds the persisted key state)
-pub fn wait() -> (Security, [u8; 32]) {
+pub fn wait() -> (Security, AppSeed) {
     let settings = SettingsApi::default();
     settings.wait_for_onboarding_complete();
 
@@ -189,11 +190,11 @@ pub fn wait() -> (Security, [u8; 32]) {
     // AppData mounts asynchronously on the same unlock that releases app_seed.
     FileSystem::default().wait_for_filesystem(fs::Location::AppData);
 
-    (security, *seed.as_bytes())
+    (security, seed)
 }
 
 impl FidoServer {
-    pub fn new(security: Security, seed: [u8; 32]) -> Result<Self, FidoError> {
+    pub fn new(security: Security, seed: AppSeed) -> Result<Self, FidoError> {
         log::info!("starting fido server");
         let state: FileBacked<JsonCodec<FidoKeysState>, _> =
             JsonBacked::new(STATE_FILE, fs::Location::AppData).0;
@@ -232,7 +233,7 @@ impl FidoServer {
             ],
             attestation_certificate,
             attestation_pubkey,
-            seed: seed.to_vec(),
+            seed,
             fido_keys: Vec::new(),
             key_change_subscribers: ArchiveSubList::default(),
             presence_keep_alive_subscribers: ArchiveSubList::default(),
@@ -519,7 +520,8 @@ impl FidoServer {
             format!("m/83696968’/1179473391’/{}/{}", security_key_index, registered_key_index);
         // TODO: navigate to `settings` app to input the PIN if needed in order to login to `security` server
         // TODO: if we inputed the PIN, save it as auto UV
-        let derivated_seed = self.crypto.hmac256(derivation_path.as_bytes().to_vec(), self.seed.clone())?;
+        let derivated_seed =
+            self.crypto.hmac256(derivation_path.as_bytes().to_vec(), self.seed.as_bytes().to_vec())?;
         let signing_key = SigningKey::from_slice(&derivated_seed).map_err(|_| FidoError::Ecdsa)?;
         Ok(signing_key)
     }
