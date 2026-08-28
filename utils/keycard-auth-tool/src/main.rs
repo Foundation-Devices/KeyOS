@@ -469,6 +469,10 @@ fn verify_card_direct(card: &Card, secret_key: &[u8], parse: bool) -> Result<(),
     Ok(())
 }
 
+const NDEF_FIRST_PAGE: u8 = 4;
+
+const LAST_SECRET_PAGE: u8 = 35;
+
 fn erase_card_direct(card: &Card) -> Result<(), Box<dyn std::error::Error>> {
     // Read the UID for display purposes
     let uid = read_uid(card)?;
@@ -491,22 +495,22 @@ fn erase_card_direct(card: &Card) -> Result<(), Box<dyn std::error::Error>> {
     // Write empty NDEF structure to erase the card
     // NTAG 216 empty NDEF: 03 00 FE 00 (NDEF TLV with 0 length + terminator)
     let empty_ndef_page = [0x03, 0x00, 0xFE, 0x00];
-    write_page(card, 4, &empty_ndef_page)?;
+    write_page(card, NDEF_FIRST_PAGE, &empty_ndef_page)?;
 
-    // Clear additional pages that might contain old data (pages 5-29)
     let empty_page = [0x00, 0x00, 0x00, 0x00];
-    for page in 5..30 {
+    for page in (NDEF_FIRST_PAGE + 1)..=LAST_SECRET_PAGE {
         write_page(card, page, &empty_page)?;
     }
 
     // Verify the erase was successful
     println!("{}", "Verifying erase...".blue());
-    let page4_check = read_page(card, 4)?;
-    if page4_check == empty_ndef_page {
-        print_success_erase(&uid);
-    } else {
+    if read_page(card, NDEF_FIRST_PAGE)? != empty_ndef_page {
         return Err("Verification failed: card was not properly erased".into());
     }
+    if read_page(card, LAST_SECRET_PAGE)? != empty_page {
+        return Err("Verification failed: share pages were not cleared".into());
+    }
+    print_success_erase(&uid);
 
     Ok(())
 }
@@ -681,10 +685,7 @@ fn write_ndef_record(card: &Card, keycard_data: &Shard) -> Result<Vec<u8>, Box<d
     Ok(ndef_rec1.payload())
 }
 
-fn write_ndef_to_pages(card: &Card, ndef_data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    // NTAG 216 NDEF structure:
-    // Page 4+: NDEF message
-
+fn ndef_tlv(ndef_data: &[u8]) -> Vec<u8> {
     let mut all_data = Vec::new();
 
     // NDEF TLV: Type=0x03, Length, Value
@@ -706,8 +707,16 @@ fn write_ndef_to_pages(card: &Card, ndef_data: &[u8]) -> Result<(), Box<dyn std:
         all_data.push(0x00);
     }
 
+    all_data
+}
+
+fn write_ndef_to_pages(card: &Card, ndef_data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    // NTAG 216 NDEF structure:
+    // Page 4+: NDEF message
+    let all_data = ndef_tlv(ndef_data);
+
     // Write data to pages starting from page 4
-    let mut page = 4u8;
+    let mut page = NDEF_FIRST_PAGE;
     for chunk in all_data.chunks(4) {
         let mut page_data = [0u8; 4];
         page_data[..chunk.len()].copy_from_slice(chunk);
@@ -803,6 +812,28 @@ mod tests {
         );
         let hmac3 = compute_hmac(&secret_key, &uid, &different_shard).unwrap();
         assert_ne!(hmac, hmac3);
+    }
+
+    #[test]
+    fn erase_clears_every_share_page() {
+        for share_len in [16usize, 32] {
+            let marker = vec![0xAB; share_len];
+            let mut shard = Shard::new([0x22; 32], [0x33; 32], marker.clone(), 1, true);
+            shard.set_hmac([0x11; 32]);
+
+            let mut ndef_msg = Message::default();
+            let mut record = Record::new(None, Payload::RTD(RecordType::Cbor(shard.encode())));
+            ndef_msg.append_record(&mut record);
+            let tlv = ndef_tlv(&ndef_msg.to_vec());
+
+            let start =
+                tlv.windows(share_len).position(|window| window == marker).expect("share is in the record");
+            let last_page = usize::from(NDEF_FIRST_PAGE) + (start + share_len - 1) / 4;
+            assert!(
+                last_page <= usize::from(LAST_SECRET_PAGE),
+                "a {share_len}-byte share reaches page {last_page}, past the erased range"
+            );
+        }
     }
 
     #[test]
