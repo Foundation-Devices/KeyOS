@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {
     CardColor,
+    FontSize,
     Palette,
     Size,
     Importance,
@@ -76,6 +77,7 @@ component OutputSection inherits VerticalLayout {
 
     property <bool> multi-output: psbt.outputs.length != 1;
     property <PsbtOutputView> output: psbt.outputs[output-index];
+    property <bool> long-address: Utils.string-length(output.address) > 56;
     alignment: start;
     spacing: Size.sz2_5;
 
@@ -149,7 +151,8 @@ component OutputSection inherits VerticalLayout {
                 section-spacing: Size.sz0_5;
                 horizontal-alignment: start;
                 address: output.address;
-                items-per-row: 8;
+                font-size: long-address ? FontSize.xs : FontSize.sm;
+                items-per-row: long-address ? 8 : 7;
             }
             if output.kind == PsbtOutputKind.OpReturn: TextSm {
                 text: output.message;
@@ -320,7 +323,7 @@ export component Example2Outputs inherits Rectangle {
                     kind: PsbtOutputKind.Change,
                     amount-btc: "0.0001",
                     amount-currency: "11.38",
-                    address: "12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S",
+                    address: "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0",
                     account-index: "",
                 },
             ],
