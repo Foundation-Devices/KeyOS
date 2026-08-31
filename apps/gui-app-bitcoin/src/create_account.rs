@@ -64,9 +64,16 @@ pub fn try_parse_multisig(scan: &ScanQrResult) -> anyhow::Result<MultiSigDetails
 pub fn present_multisig(
     state: StoredValue<AppState>,
     details: MultiSigDetails,
-    connector_id: SharedString,
+    mut connector_id: SharedString,
 ) -> anyhow::Result<()> {
-    let source = if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
+    let source =
+        state.borrow().store.classify_multisig_import(&details, &connector_id).unwrap_or_else(|error| {
+            log::warn!("could not classify imported multisig source: {error:?}");
+            AccountSource::Generic
+        });
+    if connector_id.is_empty() || source != AccountSource::Generic {
+        connector_id = source.connector_id().into();
+    }
     let view = MultiSigView::from_details(&details, source);
     {
         let mut state = state.borrow_mut();
@@ -92,8 +99,7 @@ pub fn init(state: StoredValue<AppState>) {
     let global = ui.global::<CreateAccount>();
 
     global.on_import_multisig(move |from_connect, connector_id| {
-        let source =
-            if connector_id.as_str() == "Casa" { AccountSource::Casa } else { AccountSource::Generic };
+        let source = AccountSource::from_connector_context(&connector_id).unwrap_or_default();
         let ui = state.borrow().ui();
         let create_account = ui.global::<CreateAccount>();
         create_account.set_pending_multisig_is_casa(source == AccountSource::Casa);

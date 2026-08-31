@@ -38,6 +38,7 @@ export global ExportAccount {
     pure callback connector-import-label(connector-id: string) -> string;
     pure callback connector-formats(connector-id: string) -> ExportFormats;
     pure callback connector-capabilities(connector-id: string) -> ExportCapabilities;
+    callback record-multisig-connector(account-id: string, connector-id: string);
 
     // TODO: unify single and multisig callbacks
     pure callback export-account-qr(account-id: string, connector-id: string, as_mult: bool, density: int) -> [string];

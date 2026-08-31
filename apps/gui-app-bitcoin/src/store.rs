@@ -10,7 +10,7 @@ use anyhow::{bail, Context};
 use ngwallet::{
     account::NgAccount,
     bdk_wallet::bitcoin::{
-        bip32::{ChildNumber, DerivationPath, Fingerprint, Xpriv, Xpub},
+        bip32::{ChildNumber, Fingerprint, Xpriv, Xpub},
         secp256k1::{All, Secp256k1, Signing},
         Network as NgNetwork,
     },
@@ -59,15 +59,80 @@ pub enum Account {
 
 pub(crate) const ACCOUNT_SOURCE_TAG: &str = "keyos.account.source";
 pub(crate) const CASA_ACCOUNT_SOURCE: &str = "casa";
+pub(crate) const UNCHAINED_ACCOUNT_SOURCE: &str = "unchained";
+const CASA_CONNECTOR_HISTORY_TAG: &str = "keyos.connector.casa";
+const UNCHAINED_CONNECTOR_HISTORY_TAG: &str = "keyos.connector.unchained";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AccountSource {
     #[default]
     Generic,
     Casa,
+    Unchained,
+}
+
+impl AccountSource {
+    pub fn from_connector_context(connector_id: &str) -> Option<Self> {
+        match connector_id {
+            "" => None,
+            "Casa" => Some(Self::Casa),
+            "Unchained" => Some(Self::Unchained),
+            _ => Some(Self::Generic),
+        }
+    }
+
+    pub fn connector_id(self) -> &'static str {
+        match self {
+            Self::Generic => "",
+            Self::Casa => "Casa",
+            Self::Unchained => "Unchained",
+        }
+    }
+
+    fn history_tag(self) -> Option<&'static str> {
+        match self {
+            Self::Generic => None,
+            Self::Casa => Some(CASA_CONNECTOR_HISTORY_TAG),
+            Self::Unchained => Some(UNCHAINED_CONNECTOR_HISTORY_TAG),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ConnectorHistory {
+    casa: bool,
+    unchained: bool,
+}
+
+fn is_casa_legacy_derivation(derivation: &[ChildNumber], network: NetworkKind) -> bool {
+    let [purpose, coin_type, account] = derivation else { return false };
+    let expected_coin_type = match network {
+        NetworkKind::Main => 0,
+        NetworkKind::Test => 1,
+    };
+
+    matches!(
+        (purpose, coin_type, account),
+        (
+            ChildNumber::Normal { index: 49 },
+            ChildNumber::Normal { index },
+            ChildNumber::Normal { .. },
+        ) if *index == expected_coin_type
+    )
+}
+
+fn is_bip45_derivation(derivation: &[ChildNumber]) -> bool {
+    matches!(derivation.first(), Some(ChildNumber::Hardened { index: 45 }))
+}
+
+fn is_bare_bip45_derivation(derivation: &[ChildNumber]) -> bool {
+    matches!(derivation, [ChildNumber::Hardened { index: 45 }])
 }
 
 pub(crate) fn is_casa_account_derivation(derivation: &[ChildNumber], network: NetworkKind) -> bool {
+    if is_casa_legacy_derivation(derivation, network) {
+        return true;
+    }
     let [purpose, coin_type, account] = derivation else { return false };
     let expected_coin_type = match network {
         NetworkKind::Main => 0,
@@ -80,15 +145,38 @@ pub(crate) fn is_casa_account_derivation(derivation: &[ChildNumber], network: Ne
     matches!(
         (purpose, coin_type, account),
         (
-            ChildNumber::Normal { index: 49 },
-            ChildNumber::Normal { index },
-            ChildNumber::Normal { .. },
-        ) | (
             ChildNumber::Hardened { index: 45 },
             ChildNumber::Normal { index },
             ChildNumber::Normal { .. },
         ) if *index == expected_coin_type
     )
+}
+
+fn infer_multisig_source(
+    derivation: &[ChildNumber],
+    network: NetworkKind,
+    history: ConnectorHistory,
+) -> AccountSource {
+    if is_casa_legacy_derivation(derivation, network) {
+        return AccountSource::Casa;
+    }
+    // Both Casa and Unchained use m/45'. Only exclusive connector history is
+    // strong enough to brand a later generic import.
+    if is_bip45_derivation(derivation) {
+        return match (history.casa, history.unchained) {
+            (true, false) => AccountSource::Casa,
+            (false, true) => AccountSource::Unchained,
+            _ => AccountSource::Generic,
+        };
+    }
+    AccountSource::Generic
+}
+
+fn with_connector_source(
+    connector_id: &str,
+    infer: impl FnOnce() -> anyhow::Result<AccountSource>,
+) -> anyhow::Result<AccountSource> {
+    AccountSource::from_connector_context(connector_id).map_or_else(infer, Ok)
 }
 
 fn validate_local_multisig_signer<'a, C: Signing>(
@@ -127,9 +215,19 @@ fn validate_multisig_import<C: Signing>(
     source: AccountSource,
 ) -> anyhow::Result<()> {
     let signer = validate_local_multisig_signer(secp, master_key, multisig)?;
+    validate_multisig_source(signer, multisig, source)
+}
+
+fn validate_multisig_source(
+    signer: &MultiSigSigner,
+    multisig: &MultiSigDetails,
+    source: AccountSource,
+) -> anyhow::Result<()> {
     if source == AccountSource::Casa {
         let derivation = signer.get_derivation().context("invalid Casa signer derivation")?;
-        if !is_casa_account_derivation(derivation.as_ref(), multisig.network_kind) {
+        if !is_casa_account_derivation(derivation.as_ref(), multisig.network_kind)
+            && !is_bare_bip45_derivation(derivation.as_ref())
+        {
             bail!("Casa signer does not use a supported account derivation");
         }
     }
@@ -156,6 +254,13 @@ fn has_repeated_xpub_authority(signers: &[MultiSigSigner]) -> anyhow::Result<boo
 }
 
 impl Account {
+    fn storage(&self) -> &Arc<dyn MetaStorage> {
+        match self {
+            Account::Config { storage, .. } => storage,
+            Account::Full(account) => &account.meta_storage,
+        }
+    }
+
     pub fn config(&self) -> ConfigBorrow<'_> {
         match self {
             Account::Config { config, .. } => ConfigBorrow::Ref(config),
@@ -182,12 +287,10 @@ impl Account {
     }
 
     fn source(&self) -> AccountSource {
-        let storage = match self {
-            Account::Config { storage, .. } => storage,
-            Account::Full(account) => &account.meta_storage,
-        };
+        let storage = self.storage();
         match storage.get_tag(ACCOUNT_SOURCE_TAG) {
             Ok(Some(value)) if value == CASA_ACCOUNT_SOURCE => AccountSource::Casa,
+            Ok(Some(value)) if value == UNCHAINED_ACCOUNT_SOURCE => AccountSource::Unchained,
             Ok(_) => AccountSource::Generic,
             Err(error) => {
                 log::error!("failed to read account source: {error:?}");
@@ -302,7 +405,32 @@ impl AccountStore {
     }
 
     pub fn insert_account(&mut self, id: AccountId, account: NgAccount<KeyOsWalletPersister>) {
-        let _ = self.accounts.insert(id, Account::Full(account));
+        let account = Account::Full(account);
+        if let Err(error) = self.inherit_connector_history(&id, &account) {
+            log::warn!("failed to inherit connector history for {id}: {error:?}");
+        }
+        let _ = self.accounts.insert(id, account);
+    }
+
+    fn inherit_connector_history(&self, id: &AccountId, account: &Account) -> anyhow::Result<()> {
+        let AccountId::Single { fingerprint, network, .. } = id else { return Ok(()) };
+        let history = self.connector_history(*fingerprint, *network)?;
+        let storage = account.storage();
+        let mut changed = false;
+
+        for (enabled, tag) in
+            [(history.casa, CASA_CONNECTOR_HISTORY_TAG), (history.unchained, UNCHAINED_CONNECTOR_HISTORY_TAG)]
+        {
+            if !enabled || storage.get_tag(tag).context("read connector history")?.as_deref() == Some("1") {
+                continue;
+            }
+            storage.set_tag(tag, "1").context("inherit connector history")?;
+            changed = true;
+        }
+        if changed {
+            storage.persist().context("persist inherited connector history")?;
+        }
+        Ok(())
     }
 
     pub fn get_account_config(&self, id: &AccountId) -> Option<ConfigBorrow<'_>> {
@@ -314,6 +442,102 @@ impl AccountStore {
     }
 
     pub fn is_casa_account(&self, id: &AccountId) -> bool { self.account_source(id) == AccountSource::Casa }
+
+    pub fn record_multisig_connector_use(&self, id: &AccountId, connector_id: &str) -> anyhow::Result<()> {
+        let Some(source) = AccountSource::from_connector_context(connector_id) else { return Ok(()) };
+        let Some(tag) = source.history_tag() else { return Ok(()) };
+        let AccountId::Single { fingerprint, network, .. } = id else {
+            bail!("multisig connector history requires a single-signature account");
+        };
+        if fingerprint != &self.fingerprint {
+            bail!("connector account does not match the active Master Key");
+        }
+        let selected = self.accounts.get(id).context("connector account not found")?;
+        let record = |account: &Account| -> anyhow::Result<()> {
+            let storage = account.storage();
+            if storage.get_tag(tag).context("read connector history")?.as_deref() == Some("1") {
+                return Ok(());
+            }
+            storage.set_tag(tag, "1").context("record connector history")?;
+            storage.persist().context("persist connector history")?;
+            Ok(())
+        };
+        record(selected)?;
+
+        for (account_id, account) in &self.accounts {
+            if account_id == id {
+                continue;
+            }
+            if !matches!(
+                account_id,
+                AccountId::Single {
+                    fingerprint: account_fingerprint,
+                    network: account_network,
+                    ..
+                } if account_fingerprint == fingerprint && account_network == network
+            ) {
+                continue;
+            }
+            if let Err(error) = record(account) {
+                log::warn!("failed to copy connector history to {account_id}: {error:?}");
+            }
+        }
+        Ok(())
+    }
+
+    fn connector_history(
+        &self,
+        fingerprint: Fingerprint,
+        expected_network: NgNetwork,
+    ) -> anyhow::Result<ConnectorHistory> {
+        let mut history = ConnectorHistory::default();
+        for (id, account) in &self.accounts {
+            let AccountId::Single { fingerprint: account_fingerprint, network: account_network, .. } = id
+            else {
+                continue;
+            };
+            if account_fingerprint != &fingerprint || account_network != &expected_network {
+                continue;
+            }
+
+            let storage = account.storage();
+            history.casa |= storage
+                .get_tag(CASA_CONNECTOR_HISTORY_TAG)
+                .context("read Casa connector history")?
+                .as_deref()
+                == Some("1");
+            history.unchained |= storage
+                .get_tag(UNCHAINED_CONNECTOR_HISTORY_TAG)
+                .context("read Unchained connector history")?
+                .as_deref()
+                == Some("1");
+        }
+        Ok(history)
+    }
+
+    pub fn classify_multisig_import(
+        &self,
+        multisig: &MultiSigDetails,
+        connector_id: &str,
+    ) -> anyhow::Result<AccountSource> {
+        with_connector_source(connector_id, || {
+            let network = match multisig.network_kind {
+                NetworkKind::Main => NgNetwork::Bitcoin,
+                NetworkKind::Test => NgNetwork::Testnet4,
+            };
+            let master_key = self.load_master_key(network)?;
+            let signer = validate_local_multisig_signer(&self.secp, &master_key, multisig)?;
+            let derivation = signer.get_derivation().context("invalid local signer derivation")?;
+            let history = if is_bip45_derivation(derivation.as_ref()) {
+                self.connector_history(master_key.fingerprint, network)?
+            } else {
+                ConnectorHistory::default()
+            };
+            let source = infer_multisig_source(derivation.as_ref(), multisig.network_kind, history);
+            validate_multisig_source(signer, multisig, source)?;
+            Ok(source)
+        })
+    }
 
     pub fn get_account_config_mut(&mut self, id: &AccountId) -> Option<ConfigBorrowMut<'_>> {
         self.accounts.get_mut(id).map(|account| account.config_mut())
@@ -666,6 +890,7 @@ fn load_master_key(
 mod tests {
     use {
         super::*,
+        ngwallet::bdk_wallet::bitcoin::bip32::DerivationPath,
         ngwallet::config::{AddressType, MultiSigSigner},
     };
 
@@ -683,6 +908,43 @@ mod tests {
 
     fn details(signers: Vec<MultiSigSigner>) -> MultiSigDetails {
         MultiSigDetails::new(2, 2, AddressType::P2ShWsh, Some(NetworkKind::Main), signers).unwrap()
+    }
+
+    #[test]
+    fn multisig_source_inference_is_conservative() {
+        let cases = [
+            ("m/49/0/7", ConnectorHistory::default(), AccountSource::Casa),
+            ("m/49/1/7", ConnectorHistory::default(), AccountSource::Generic),
+            ("m/45'", ConnectorHistory { casa: true, unchained: false }, AccountSource::Casa),
+            ("m/45'/1'/11'/2", ConnectorHistory { casa: false, unchained: true }, AccountSource::Unchained),
+            ("m/45'/0/0", ConnectorHistory { casa: true, unchained: true }, AccountSource::Generic),
+            ("m/45'/0/0", ConnectorHistory::default(), AccountSource::Generic),
+            ("m/84'/0'/0'", ConnectorHistory { casa: true, unchained: false }, AccountSource::Generic),
+        ];
+
+        for (derivation, history, expected) in cases {
+            let derivation: DerivationPath = derivation.parse().unwrap();
+            assert_eq!(
+                infer_multisig_source(derivation.as_ref(), NetworkKind::Main, history),
+                expected,
+                "{derivation}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_connector_context_takes_precedence_over_inference() {
+        let cases = [
+            ("Casa", AccountSource::Unchained, AccountSource::Casa),
+            ("Unchained", AccountSource::Casa, AccountSource::Unchained),
+            ("Sparrow", AccountSource::Casa, AccountSource::Generic),
+            ("", AccountSource::Casa, AccountSource::Casa),
+        ];
+
+        for (connector_id, inferred, expected) in cases {
+            let source = with_connector_source(connector_id, || Ok(inferred)).unwrap();
+            assert_eq!(source, expected, "{connector_id}");
+        }
     }
 
     #[test]
@@ -733,7 +995,7 @@ mod tests {
         let local = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[0; 16], "", None).unwrap();
         let cosigner = MasterKey::from_entropy(&secp, NgNetwork::Bitcoin, &[1; 16], "", None).unwrap();
 
-        for derivation in ["m/49/0/7", "m/45'/0/7"] {
+        for derivation in ["m/49/0/7", "m/45'", "m/45'/0/7"] {
             let multisig = details(vec![
                 signer(&secp, &local, local.fingerprint, derivation),
                 signer(&secp, &cosigner, cosigner.fingerprint, derivation),
@@ -746,6 +1008,17 @@ mod tests {
             signer(&secp, &cosigner, cosigner.fingerprint, "m/84'/0'/0'"),
         ]);
         assert!(validate_multisig_import(&secp, &local, &unrelated, AccountSource::Casa).is_err());
+
+        for derivation in ["m/45'/1/0", "m/45'/0/0/0"] {
+            let unsupported = details(vec![
+                signer(&secp, &local, local.fingerprint, derivation),
+                signer(&secp, &cosigner, cosigner.fingerprint, derivation),
+            ]);
+            assert!(
+                validate_multisig_import(&secp, &local, &unsupported, AccountSource::Casa).is_err(),
+                "{derivation}"
+            );
+        }
     }
 
     #[test]

@@ -27,7 +27,8 @@ use crate::{
     get_timestamp_in_milliseconds, log_ms,
     state::AccountColor,
     store::{
-        AccountSource, CreateMultiSigAccount, CreateSingleSigAccount, ACCOUNT_SOURCE_TAG, CASA_ACCOUNT_SOURCE,
+        AccountSource, CreateMultiSigAccount, CreateSingleSigAccount, ACCOUNT_SOURCE_TAG,
+        CASA_ACCOUNT_SOURCE, UNCHAINED_ACCOUNT_SOURCE,
     },
     FileSystem,
 };
@@ -194,8 +195,12 @@ pub fn build_multisig_account(
         last_remote_sequence: 0,
     };
 
-    if create.source == AccountSource::Casa {
-        meta_storage.set_tag(ACCOUNT_SOURCE_TAG, CASA_ACCOUNT_SOURCE).context("set Casa account source")?;
+    if let Some(source) = match create.source {
+        AccountSource::Generic => None,
+        AccountSource::Casa => Some(CASA_ACCOUNT_SOURCE),
+        AccountSource::Unchained => Some(UNCHAINED_ACCOUNT_SOURCE),
+    } {
+        meta_storage.set_tag(ACCOUNT_SOURCE_TAG, source).context("set account source")?;
     }
     meta_storage.set_config(config.serialize().as_str()).context("set account config")?;
     meta_storage.persist().context("persist account config")?;

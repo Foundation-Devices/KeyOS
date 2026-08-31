@@ -125,6 +125,19 @@ pub fn init(state: StoredValue<AppState>) {
         connector.formats()
     });
 
+    global.on_record_multisig_connector(move |id, connector_id| {
+        let account_id = match id.parse::<AccountId>() {
+            Ok(account_id) => account_id,
+            Err(error) => {
+                log::error!("failed to parse connector account ID {id}: {error:?}");
+                return;
+            }
+        };
+        if let Err(error) = state.borrow().store.record_multisig_connector_use(&account_id, &connector_id) {
+            log::error!("failed to record {connector_id} connector history: {error:?}");
+        }
+    });
+
     // Export callbacks using string-based interface
     global.on_export_account_qr({
         move |id, connector_id, as_multi, density| {

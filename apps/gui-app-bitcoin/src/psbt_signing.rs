@@ -686,17 +686,25 @@ pub mod verify {
 
                     match inferred {
                         InferredAccountDetails::MultiSig(multisig_details) => {
-                            state.borrow_mut().pending_multisig = Some(PendingMultiSig {
-                                details: multisig_details.clone(),
-                                source: AccountSource::Generic,
-                            });
+                            let source = state
+                                .borrow()
+                                .store
+                                .classify_multisig_import(&multisig_details, "")
+                                .unwrap_or_else(|error| {
+                                    log::warn!("could not classify inferred multisig source: {error:?}");
+                                    AccountSource::Generic
+                                });
+                            state.borrow_mut().pending_multisig =
+                                Some(PendingMultiSig { details: multisig_details.clone(), source });
                             state.borrow_mut().pending_psbt =
                                 PendingPsbt::NotSaved { psbt, origin, trust_witness_utxo };
 
-                            let multisig_view =
-                                MultiSigView::from_details(&multisig_details, AccountSource::Generic);
+                            let multisig_view = MultiSigView::from_details(&multisig_details, source);
                             let create_account_global = ui.global::<CreateAccount>();
                             create_account_global.set_pending_multisig_account(multisig_view);
+                            create_account_global.set_pending_multisig_is_casa(source == AccountSource::Casa);
+                            create_account_global
+                                .set_multisig_import_connector_id(source.connector_id().into());
 
                             global.set_is_multisig_account(true);
                             global.set_account_index(String::new().into());

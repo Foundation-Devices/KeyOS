@@ -643,7 +643,7 @@ impl MultiSigView {
 fn display_fingerprint(fingerprint: [u8; 4], source: AccountSource) -> String {
     match source {
         AccountSource::Casa => hex::encode(fingerprint),
-        AccountSource::Generic => hex::encode_upper(fingerprint),
+        AccountSource::Generic | AccountSource::Unchained => hex::encode_upper(fingerprint),
     }
 }
 

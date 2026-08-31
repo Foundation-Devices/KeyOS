@@ -98,6 +98,7 @@ export component AccountConnectPage inherits BasePage {
                     text: TR2.lookup(TrId.ConnectMultisig);
                     icon: "keys";
                     clicked => {
+                        ExportAccount.record-multisig-connector(props.account-id, selected-connector);
                         Navigate.scan-connect({ account-id: props.account-id, connector-id: selected-connector, join-multisig: true }, { });
                     }
                 }
@@ -133,6 +134,9 @@ export component AccountConnectPage inherits BasePage {
                                 // If there is only one capability, the value of
                                 // capabilities.join-multisig will indicate the parameter value here,
                                 // since single and join-multisig are mutually exclusive
+                                if (capabilities.join-multisig) {
+                                    ExportAccount.record-multisig-connector(props.account-id, connector);
+                                }
                                 Navigate.scan-connect({
                                     account-id: props.account-id,
                                     connector-id: connector,
