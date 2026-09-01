@@ -1,15 +1,73 @@
 // SPDX-FileCopyrightText: 2024 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::io::Read;
 use std::path::Path;
 
-use release_manifest::ReleaseManifest;
+use update_image::patch::Format;
+use update_image::{Header, ReleaseManifest, Version};
 
-pub fn generate_release(manifest_path: &Path, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Newest source version that gets a [`Format::LegacyBzip2`] patch, because it
+/// cannot read a zstd body. Anything above it gets [`Format::Zstd`].
+const LAST_LEGACY_UPDATE_VERSION: (u8, u8, u8) = (1, 3, 1);
+
+/// Write the body of every patch `manifest` references.
+///
+/// The two source trees are read at the same relative path the manifest gives for
+/// the patch, and the patch is written under `out` at that path.
+pub fn build_patches(
+    manifest_path: &Path,
+    base: &Path,
+    new: &Path,
+    out: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest = read_manifest(manifest_path)?;
+
+    for action in manifest.transactions.iter().flat_map(|tx| tx.actions()) {
+        let (patch_file, base_version, new_version) = match action {
+            update_image::Action::Patch { patch_file, base_version, new_version, .. }
+            | update_image::Action::PatchAdd { patch_file, base_version, new_version, .. } => {
+                (patch_file, base_version, new_version)
+            }
+            _ => continue,
+        };
+
+        let old_version = Version::parse(base_version)?;
+        let new_version = Version::parse(new_version)?;
+        let triple = (old_version.major, old_version.minor, old_version.patch);
+        let format = if triple <= LAST_LEGACY_UPDATE_VERSION { Format::LegacyBzip2 } else { Format::Zstd };
+
+        let old = read_file(&base.join(patch_file))?;
+        let new = read_file(&new.join(patch_file))?;
+
+        let patch_path = out.join(patch_file);
+        let parent = patch_path.parent().expect("a patch path has a parent");
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create \"{}\": {e}", parent.display()))?;
+        let mut patch = std::fs::File::create(&patch_path)
+            .map_err(|e| format!("failed to create \"{}\": {e}", patch_path.display()))?;
+        update_image::patch::build(&old, old_version, &new, new_version, format, &mut patch)
+            .map_err(|e| format!("failed to build \"{}\": {e}", patch_path.display()))?;
+
+        let size = patch.metadata().map(|m| m.len()).unwrap_or(0);
+        println!("[INFO] {} ({format:?}, {size} bytes)", patch_path.display());
+    }
+    Ok(())
+}
+
+fn read_file(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    std::fs::read(path).map_err(|e| format!("failed to read \"{}\": {e}", path.display()).into())
+}
+
+fn read_manifest(manifest_path: &Path) -> Result<ReleaseManifest, Box<dyn std::error::Error>> {
     let manifest = std::fs::read_to_string(manifest_path)
         .map_err(|e| format!("failed to read manifest file \"{}\": {e}", manifest_path.display()))?;
-    let manifest: ReleaseManifest = serde_json::from_str(&manifest)
-        .map_err(|e| format!("failed to parse manifest file \"{}\": {e}", manifest_path.display()))?;
+    serde_json::from_str(&manifest)
+        .map_err(|e| format!("failed to parse manifest file \"{}\": {e}", manifest_path.display()).into())
+}
+
+pub fn generate_release(manifest_path: &Path, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest = read_manifest(manifest_path)?;
     verify_manifest(&manifest)?;
     let mut files = std::collections::HashSet::new();
     files_used_by_manifest(&manifest, &mut files);
@@ -17,8 +75,24 @@ pub fn generate_release(manifest_path: &Path, output_path: &Path) -> Result<(), 
         std::fs::File::create(output_path)
             .map_err(|e| format!("failed to create output file \"{}\": {e}", output_path.display()))?,
     );
+    tar.append_dir("patch", ".").map_err(|e| format!("failed to append patch directory: {e}"))?;
+    let mut dirs = std::collections::BTreeSet::new();
     for file in files.iter() {
-        tar.append_path(file).map_err(|e| format!("failed to append file \"{file}\" to archive: {e}"))?;
+        dirs.extend(
+            Path::new(file)
+                .ancestors()
+                .skip(1)
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(Path::to_path_buf),
+        );
+    }
+    for dir in dirs {
+        tar.append_dir(Path::new("patch").join(&dir), &dir)
+            .map_err(|e| format!("failed to append directory \"{}\": {e}", dir.display()))?;
+    }
+    for file in files.iter() {
+        tar.append_path_with_name(file, Path::new("patch").join(file))
+            .map_err(|e| format!("failed to append file \"{file}\" to archive: {e}"))?;
     }
     let mut manifest_file = std::fs::File::open(manifest_path)
         .map_err(|e| format!("failed to open manifest file \"{}\": {e}", manifest_path.display()))?;
@@ -35,38 +109,42 @@ fn verify_manifest(manifest: &ReleaseManifest) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn verify_action(action: &release_manifest::Action) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_action(action: &update_image::Action) -> Result<(), Box<dyn std::error::Error>> {
     match action {
-        release_manifest::Action::Patch { patch_file, patch_source: _, base_version, new_version }
-        | release_manifest::Action::PatchAdd {
+        update_image::Action::Patch { patch_file, patch_source: _, base_version, new_version }
+        | update_image::Action::PatchAdd {
             patch_file,
             patch_source: _,
             dest: _,
             base_version,
             new_version,
         } => {
-            let patch_file = std::fs::read(patch_file)
-                .map_err(|e| format!("failed to read patch file \"{patch_file}\": {e}"))?;
-            let expected_base_version = parse_version(base_version)?;
-            let expected_new_version = parse_version(new_version)?;
-            let actual_base_version = patch_file.get(0..4).ok_or("patch file too short")?;
-            let actual_new_version = patch_file.get(44..48).ok_or("patch file too short")?;
-            if actual_base_version != expected_base_version {
+            let mut file = std::fs::File::open(patch_file)
+                .map_err(|e| format!("failed to open patch file \"{patch_file}\": {e}"))?;
+            let header = Header::read_from(&mut file)
+                .map_err(|e| format!("failed to read the header of patch file \"{patch_file}\": {e}"))?;
+            if header.old_version != Version::parse(base_version)? {
                 return Err("patch file base version does not match expected version".into());
             }
-            if actual_new_version != expected_new_version {
+            if header.new_version != Version::parse(new_version)? {
                 return Err("patch file new version does not match expected version".into());
             }
+            let mut magic = [0; Format::MAGIC_LEN];
+            file.read_exact(&mut magic)
+                .map_err(|e| format!("failed to read the body of patch file \"{patch_file}\": {e}"))?;
+            if Format::detect(&magic).is_none() {
+                return Err(format!("patch file \"{patch_file}\" has an unknown body format").into());
+            }
         }
-        release_manifest::Action::Add { .. }
-        | release_manifest::Action::Replace { .. }
-        | release_manifest::Action::UpdateBt
-        | release_manifest::Action::Delete { .. }
-        | release_manifest::Action::Rename { .. }
-        | release_manifest::Action::Move { .. }
-        | release_manifest::Action::Copy { .. }
-        | release_manifest::Action::Set { .. }
-        | release_manifest::Action::OpenApp { .. } => {}
+        update_image::Action::Add { .. }
+        | update_image::Action::Replace { .. }
+        | update_image::Action::UpdateBt
+        | update_image::Action::Delete { .. }
+        | update_image::Action::Rename { .. }
+        | update_image::Action::Move { .. }
+        | update_image::Action::Copy { .. }
+        | update_image::Action::Set { .. }
+        | update_image::Action::OpenApp { .. } => {}
     }
     Ok(())
 }
@@ -77,43 +155,20 @@ fn files_used_by_manifest(manifest: &ReleaseManifest, files: &mut std::collectio
     }
 }
 
-fn files_used_by_action(action: &release_manifest::Action, files: &mut std::collections::HashSet<String>) {
+fn files_used_by_action(action: &update_image::Action, files: &mut std::collections::HashSet<String>) {
     match action {
-        release_manifest::Action::Patch { patch_file: file, .. }
-        | release_manifest::Action::PatchAdd { patch_file: file, .. }
-        | release_manifest::Action::Add { source: file, .. }
-        | release_manifest::Action::Replace { source: file, .. } => {
+        update_image::Action::Patch { patch_file: file, .. }
+        | update_image::Action::PatchAdd { patch_file: file, .. }
+        | update_image::Action::Add { source: file, .. }
+        | update_image::Action::Replace { source: file, .. } => {
             files.insert(file.clone());
         }
-        release_manifest::Action::UpdateBt
-        | release_manifest::Action::Delete { .. }
-        | release_manifest::Action::Rename { .. }
-        | release_manifest::Action::Move { .. }
-        | release_manifest::Action::Copy { .. }
-        | release_manifest::Action::Set { .. }
-        | release_manifest::Action::OpenApp { .. } => {}
+        update_image::Action::UpdateBt
+        | update_image::Action::Delete { .. }
+        | update_image::Action::Rename { .. }
+        | update_image::Action::Move { .. }
+        | update_image::Action::Copy { .. }
+        | update_image::Action::Set { .. }
+        | update_image::Action::OpenApp { .. } => {}
     }
-}
-
-fn parse_version(s: &str) -> Result<[u8; 4], &'static str> {
-    if !s.starts_with('v') {
-        return Err("version must start with 'v'");
-    }
-    let s = &s[1..];
-    let (major, rest) = s.split_once('.').ok_or("missing major version")?;
-    let (minor, patch_and_beta) = rest.split_once('.').ok_or("missing minor version")?;
-    let (patch, beta) = patch_and_beta.split_once('b').unwrap_or((patch_and_beta, ""));
-    let major = major.parse().map_err(|_| "major version invalid or out of range")?;
-    let minor = minor.parse().map_err(|_| "minor version invalid or out of range")?;
-    let patch = patch.parse().map_err(|_| "patch version invalid or out of range")?;
-    let beta = if beta.is_empty() {
-        0xFF
-    } else {
-        let beta = beta.parse().map_err(|_| "beta version invalid or out of range")?;
-        if beta == 0xFF {
-            return Err("beta version may not be 0xFF");
-        }
-        beta
-    };
-    Ok([major, minor, patch, beta])
 }

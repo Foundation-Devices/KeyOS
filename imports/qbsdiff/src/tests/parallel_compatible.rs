@@ -6,6 +6,7 @@ use super::utils::*;
 const CHUNK_SIZE: usize = 4096;
 
 #[test]
+#[ignore = "runs the reference bsdiff binaries, which chmods a tracked asset"]
 fn regular_samples_par_compat() {
     let assets = path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
     let testing = Testing::new(assets);
@@ -29,6 +30,7 @@ fn regular_samples_par_compat() {
 // Therefore, we simply do not test compatibility on those samples here.
 
 #[test]
+#[ignore = "runs the reference bsdiff binaries, which chmods a tracked asset"]
 fn random_samples_par_compat() {
     let assets = path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
     let descs = default_random_samples();

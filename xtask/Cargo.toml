@@ -26,7 +26,6 @@ hex = "0.4"
 keyos = { path = "../keyos" }
 mbrs = "0.3.1"
 regex = "1"
-release-manifest = { path = "../release-manifest" }
 sambuca = { path = "../utils/sambuca/" }
 serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.41"
@@ -34,6 +33,7 @@ sha2 = "0.10.8"
 slint-keyos-platform-build = { path = "../slint-keyos-platform/build" }
 svd2utra = "0.1.11"
 tar = { workspace = true }
+update-image = { path = "../update-image", features = ["build"] }
 usb-debug-protocol = { workspace = true, features = ["client"] }
 utralib = { workspace = true }
 xmas-elf = "0.10.0"

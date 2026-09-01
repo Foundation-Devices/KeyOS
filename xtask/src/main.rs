@@ -23,7 +23,7 @@ mod tags;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.3.1";
+const KEYOS_VERSION: &str = "1.3.2";
 
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
@@ -226,6 +226,19 @@ enum Commands {
     },
     /// Generate a release tarball from a manifest file.
     GenerateRelease { manifest_file: PathBuf, output_path: PathBuf },
+    /// Build the patch bodies a release manifest references.
+    BuildPatches {
+        manifest_file: PathBuf,
+        /// Tree of the version being patched from.
+        #[arg(long)]
+        base: PathBuf,
+        /// Tree of the version being patched to.
+        #[arg(long)]
+        new: PathBuf,
+        /// Where the patches are written, at the paths the manifest gives.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Check crates against both targets (armv7a-unknown-xous-elf and host)
     Check {
         /// Specific crates to check. If not provided, all workspace crates will be checked.
@@ -341,6 +354,9 @@ fn main() {
         }
         Commands::GenerateRelease { manifest_file, output_path } => {
             release_generator::generate_release(&manifest_file, &output_path).unwrap();
+        }
+        Commands::BuildPatches { manifest_file, base, new, out } => {
+            release_generator::build_patches(&manifest_file, &base, &new, &out).unwrap();
         }
         Commands::Check { crates } => {
             check_crates(crates);

@@ -28,7 +28,8 @@ export component UpdateProgressPage inherits Rectangle {
         keyos-version: SettingGlobal.current-keyos-version;
 
         retry-fw-update => {
-            UpdateGlobal.download-firmware-update();
+            UpdateGlobal.fw-update-state = FwUpdateState.Idle;
+            Navigate.update({ replace: true, animate: Animate.None });
         }
         complete-fw-update => {
             UpdateGlobal.fw-update-state = FwUpdateState.Idle;

@@ -104,7 +104,6 @@ members = [
     "os/system-manifests",
     "os/update",
     "os/usb",
-    "release-manifest",
     "server",
     "server/macro",
     "slint-keyos-platform/build",
@@ -146,6 +145,7 @@ members = [
     "test-apps/ticktimer-test-client",
     "test-apps/undef-test",
     "ui/slintbook",
+    "update-image",
     "utils/fiat-symbols",
     "utils/fuse",
     "utils/fw-utils",
@@ -235,7 +235,7 @@ libblur = { path = "imports/libblur", default-features = false }
 ltr303 = { path = "imports/ltr303" }
 mass-storage = { path = "imports/mass-storage", features = ["rkyv"] }
 ovm7690-rs = { path = "imports/ovm7690-rs" }
-qbsdiff = { path = "imports/qbsdiff" }
+qbsdiff = { path = "imports/qbsdiff", default-features = false }
 softbuffer = { path = "imports/softbuffer" }
 tar = { path = "imports/tar-rs" }
 tusb320 = { path = "imports/tusb320" }

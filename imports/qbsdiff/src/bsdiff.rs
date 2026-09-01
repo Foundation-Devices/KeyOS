@@ -3,13 +3,14 @@
 use std::io::{Cursor, Result, Write};
 use std::ops::Range;
 
-use bzip2::write::BzEncoder;
-use bzip2::Compression;
+#[cfg(feature = "bzip2")]
+use bzip2::{write::BzEncoder, Compression};
 use rayon::prelude::*;
 use suffix_array::SuffixArray;
 pub use suffix_array::MAX_LENGTH;
 
 use super::utils::*;
+use crate::bspatch::{Codec, Section};
 
 /// Default threshold to determine small exact match.
 pub const SMALL_MATCH: usize = 12;
@@ -26,6 +27,9 @@ pub const BUFFER_SIZE: usize = 4096;
 /// Default bzip2 compression level.
 pub const COMPRESSION_LEVEL: u32 = 6;
 
+/// Default zstd compression level.
+pub const ZSTD_LEVEL: i32 = 19;
+
 /// Min chunk size of each parallel job, used internally in
 /// `ParallelScheme::Auto`.
 const MIN_CHUNK: usize = 256 * 1024;
@@ -33,9 +37,6 @@ const MIN_CHUNK: usize = 256 * 1024;
 /// Default chunk size of each parallel job, used internally in
 /// `ParallelScheme::Auto`.
 const DEFAULT_CHUNK: usize = 512 * 1024;
-
-/// Magic number bytes of bsdiff 4.x patch files.
-const BSDIFF4_MAGIC: &[u8] = b"BSDIFF40";
 
 /// Parallel searching scheme of bsdiff.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -88,7 +89,93 @@ pub struct Bsdiff<'s, 't> {
     mismatch_count: usize,
     long_suffix: usize,
     buffer_size: usize,
-    compression_level: Compression,
+    compressor: Compressor,
+}
+
+/// How the three sections get compressed.
+#[derive(Debug, Clone, Copy)]
+struct Compressor {
+    codec: Codec,
+    level: u32,
+    zstd_level: i32,
+    zstd_window_logs: [u32; 3],
+}
+
+impl Compressor {
+    fn writer<W: Write>(&self, section: Section, out: W) -> Result<StreamWriter<W>> {
+        match self.codec {
+            #[cfg(feature = "bzip2")]
+            Codec::Bzip2 => {
+                let _ = section;
+                Ok(StreamWriter::Bzip2(BzEncoder::new(out, Compression::new(self.level))))
+            }
+            #[cfg(not(feature = "bzip2"))]
+            Codec::Bzip2 => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "qbsdiff was built without bzip2",
+            )),
+            #[cfg(feature = "zstd-encode")]
+            Codec::Zstd => {
+                let window_log = self.zstd_window_logs[section as usize];
+                let max = crate::bspatch::MAX_WINDOW_LOGS[section as usize];
+                if window_log > max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("zstd window log {window_log} exceeds the {max} a patcher allows"),
+                    ));
+                }
+                let mut encoder = libzstd::Encoder::new(out, self.zstd_level)?;
+                encoder.set_parameter(libzstd::zstd_safe::CParameter::WindowLog(window_log))?;
+                Ok(StreamWriter::Zstd(Box::new(encoder)))
+            }
+            #[cfg(not(feature = "zstd-encode"))]
+            Codec::Zstd => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "qbsdiff was built without zstd-encode",
+            )),
+        }
+    }
+}
+
+/// One of the three compressed sections, being written.
+enum StreamWriter<W: Write> {
+    #[cfg(feature = "bzip2")]
+    Bzip2(BzEncoder<W>),
+    #[cfg(feature = "zstd-encode")]
+    Zstd(Box<libzstd::Encoder<'static, W>>),
+}
+
+impl<W: Write> StreamWriter<W> {
+    /// Finish the stream and drop it, leaving the compressed bytes in the
+    /// underlying writer.
+    fn finish(self) -> Result<()> {
+        match self {
+            #[cfg(feature = "bzip2")]
+            StreamWriter::Bzip2(writer) => writer.finish().map(drop),
+            #[cfg(feature = "zstd-encode")]
+            StreamWriter::Zstd(writer) => writer.finish().map(drop),
+        }
+    }
+}
+
+impl<W: Write> Write for StreamWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        match self {
+            #[cfg(feature = "bzip2")]
+            StreamWriter::Bzip2(writer) => writer.write(buf),
+            #[cfg(feature = "zstd-encode")]
+            StreamWriter::Zstd(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        match self {
+            #[cfg(feature = "bzip2")]
+            StreamWriter::Bzip2(writer) => writer.flush(),
+            #[cfg(feature = "zstd-encode")]
+            StreamWriter::Zstd(writer) => writer.flush(),
+        }
+    }
 }
 
 impl<'s, 't> Bsdiff<'s, 't> {
@@ -107,8 +194,13 @@ impl<'s, 't> Bsdiff<'s, 't> {
             small_match: SMALL_MATCH,
             mismatch_count: MISMATCH_COUNT,
             long_suffix: LONG_SUFFIX,
-            compression_level: Compression::new(COMPRESSION_LEVEL),
             buffer_size: BUFFER_SIZE,
+            compressor: Compressor {
+                codec: Codec::Bzip2,
+                level: COMPRESSION_LEVEL,
+                zstd_level: ZSTD_LEVEL,
+                zstd_window_logs: crate::bspatch::MAX_WINDOW_LOGS,
+            },
         }
     }
 
@@ -179,7 +271,23 @@ impl<'s, 't> Bsdiff<'s, 't> {
     /// In contrast, patch files produced with the best level appeared slightly
     /// bigger in many test cases.
     pub fn compression_level(mut self, compression_level: u32) -> Self {
-        self.compression_level = Compression::new(u32::min(u32::max(compression_level, 0), 9));
+        self.compressor.level = u32::min(u32::max(compression_level, 0), 9);
+        self
+    }
+
+    /// Select the codec for the three compressed sections (default is
+    /// `Codec::Bzip2`). The choice is recorded in the patch magic.
+    pub fn codec(mut self, codec: Codec) -> Self {
+        self.compressor.codec = codec;
+        self
+    }
+
+    /// Set the zstd compression level and the per-section window logs, used when
+    /// the codec is `Codec::Zstd`. Comparing fails if a window log is wider than
+    /// the patcher allows for that section.
+    pub fn zstd_params(mut self, level: i32, window_logs: [u32; 3]) -> Self {
+        self.compressor.zstd_level = level;
+        self.compressor.zstd_window_logs = window_logs;
         self
     }
 
@@ -218,7 +326,7 @@ impl<'s, 't> Bsdiff<'s, 't> {
                 self.mismatch_count,
                 self.long_suffix,
             );
-            pack(self.source, self.target, diff, patch, self.compression_level, self.buffer_size)
+            pack(self.source, self.target, diff, patch, self.compressor, self.buffer_size)
         } else {
             // Go parallel.
             let par_diff = ParSaDiff::new(
@@ -231,7 +339,7 @@ impl<'s, 't> Bsdiff<'s, 't> {
                 self.long_suffix,
             );
             let ctrls = par_diff.compute();
-            pack(self.source, self.target, ctrls.into_iter(), patch, self.compression_level, self.buffer_size)
+            pack(self.source, self.target, ctrls.into_iter(), patch, self.compressor, self.buffer_size)
         }
     }
 }
@@ -252,7 +360,7 @@ fn pack<D, P>(
     target: &[u8],
     diff: D,
     mut patch: P,
-    level: Compression,
+    compressor: Compressor,
     bsize: usize,
 ) -> Result<u64>
 where
@@ -264,9 +372,9 @@ where
     let mut bz_extra = Vec::new();
 
     {
-        let mut ctrls = BzEncoder::new(Cursor::new(&mut bz_ctrls), level);
-        let mut delta = BzEncoder::new(Cursor::new(&mut bz_delta), level);
-        let mut extra = BzEncoder::new(Cursor::new(&mut bz_extra), level);
+        let mut ctrls = compressor.writer(Section::Ctrl, Cursor::new(&mut bz_ctrls))?;
+        let mut delta = compressor.writer(Section::Delta, Cursor::new(&mut bz_delta))?;
+        let mut extra = compressor.writer(Section::Extra, Cursor::new(&mut bz_extra))?;
 
         let mut spos = 0;
         let mut tpos = 0;
@@ -310,9 +418,10 @@ where
 
             spos = spos.wrapping_add(ctrl.seek as u64);
         }
-        ctrls.flush()?;
-        delta.flush()?;
-        extra.flush()?;
+        // zstd only writes its frame epilogue on finish, so flushing is not enough.
+        ctrls.finish()?;
+        delta.finish()?;
+        extra.finish()?;
     }
 
     // Write header (BSDIFF4_MAGIC, control size, delta size, target size).
@@ -321,7 +430,7 @@ where
     let dsize = bz_delta.len() as u64;
     let esize = bz_extra.len() as u64;
     let tsize = target.len() as u64;
-    header[0..8].copy_from_slice(BSDIFF4_MAGIC);
+    header[0..8].copy_from_slice(compressor.codec.magic());
     encode_int(csize as i64, &mut header[8..16]);
     encode_int(dsize as i64, &mut header[16..24]);
     encode_int(tsize as i64, &mut header[24..32]);

@@ -400,6 +400,21 @@ impl<'a, P: crypto::ShaPermissions> cosign2::Sha256 for Sha256<'a, P> {
     fn hash(&self, data: &[u8]) -> [u8; 32] { self.crypto.sha256(data).expect("sha256") }
 }
 
+/// Stream `total_len` bytes from `reader` through the SHA-256 engine, hashing in fixed-size
+/// chunks so the whole input never has to be buffered at once. `progress_fn` is called with the
+/// running fraction hashed.
+pub fn sha256_streaming<P: crypto::ShaPermissions, R: std::io::Read, F: Fn(f32)>(
+    crypto: &CryptoApi<P>,
+    total_len: usize,
+    reader: R,
+    progress_fn: F,
+) -> Result<[u8; 32], HashError> {
+    use cosign2::Sha256Streaming as _;
+
+    Sha256Streaming { crypto, progress_fn: &progress_fn, binary_size: total_len.max(1) }
+        .hash_streaming(total_len, reader)
+}
+
 /// Streaming SHA-256 implementation to allow hashing of large files
 struct Sha256Streaming<'a, P: crypto::ShaPermissions, F: Fn(f32)> {
     crypto: &'a CryptoApi<P>,

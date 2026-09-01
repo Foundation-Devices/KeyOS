@@ -8,12 +8,11 @@ use std::time::Duration;
 use file_backed::JsonBacked;
 use foundation_api::firmware::FirmwareFetchEvent;
 use server::{xous, ArchiveSubList, MessageId as _, Owned};
-use update::messages::InstallProgress;
 use update::{messages::*, Error, MIN_UPDATE_BATTERY_PERCENT};
 use whence::WhenceExt;
 use xous_ticktimer::TicktimerCallback;
 
-use crate::core::{UpdateEvent, UpdateOutcome, FIRMWARE_FILE_PATH};
+use crate::core::{UpdateOutcome, FIRMWARE_FILE_PATH};
 use crate::downloader::{EventOutcome, UpdateDownloader};
 use crate::fs_permissions::FileSystemPermissions;
 use crate::state::{DownloadedUpdate, UpdateState};
@@ -278,13 +277,17 @@ impl server::ArchiveHandler<FirmwareInstallWorkerEvent> for Server {
                 self.install_running = false;
                 let result: whence::Result<(), Error> = (|| {
                     match outcome {
-                        UpdateOutcome::Done => {
+                        UpdateOutcome::Done { .. } => {
+                            self.state.guard().resume_progress_percentage = 0;
                             core::finalize_update(&mut self.fs)?;
                             self.notify_and_reboot(ProgressUpdate::Done)?;
                         }
-                        UpdateOutcome::Partial(remaining_release_paths) => {
+                        UpdateOutcome::Partial { remaining_release_paths, progress_percentage, .. } => {
                             log::info!("release requires a reboot, saving remaining releases and rebooting");
-                            self.state.guard().pending_apply = remaining_release_paths;
+                            let mut state = self.state.guard();
+                            state.pending_apply = remaining_release_paths;
+                            state.resume_progress_percentage = progress_percentage;
+                            drop(state);
                             core::finalize_update(&mut self.fs)?;
                             self.notify_and_reboot(ProgressUpdate::Rebooting)?;
                         }
@@ -333,7 +336,7 @@ impl Server {
 
         log::info!("starting firmware update procedure");
 
-        self.spawn_apply_releases(release_paths);
+        self.spawn_apply_releases(release_paths, 0);
 
         Ok(())
     }
@@ -347,9 +350,13 @@ impl Server {
 
         log::info!("continuing previous firmware update procedure");
 
-        let remaining_release_paths = std::mem::take(&mut self.state.guard().pending_apply);
+        let (remaining_release_paths, progress_base) = {
+            let mut state = self.state.guard();
+            let progress_base = std::mem::take(&mut state.resume_progress_percentage);
+            (std::mem::take(&mut state.pending_apply), progress_base)
+        };
 
-        self.spawn_apply_releases(remaining_release_paths);
+        self.spawn_apply_releases(remaining_release_paths, progress_base);
 
         Ok(())
     }
@@ -366,7 +373,7 @@ impl Server {
 
         log::info!("applying downloaded update with {} patches", downloaded.paths.len());
 
-        self.spawn_apply_releases(downloaded.paths);
+        self.spawn_apply_releases(downloaded.paths, 0);
 
         Ok(())
     }
@@ -384,7 +391,7 @@ impl Server {
         Ok(header.version().to_owned())
     }
 
-    fn spawn_apply_releases(&mut self, release_paths: Vec<String>) {
+    fn spawn_apply_releases(&mut self, release_paths: Vec<String>, progress_base: u32) {
         self.install_running = true;
         self.downloader.reset_state();
         self.refresh_download_stall_tick();
@@ -395,6 +402,7 @@ impl Server {
             crypto: CryptoApi::default(),
             security: Security::default(),
             sender: sender.clone(),
+            progress_base,
         };
 
         thread::spawn(move || match task.apply_releases(release_paths) {
@@ -457,6 +465,7 @@ struct InstallTask {
     crypto: CryptoApi,
     security: Security,
     sender: ServerSender,
+    progress_base: u32,
 }
 
 impl InstallTask {
@@ -468,79 +477,61 @@ impl InstallTask {
         let current_fw_timestamp: u32 =
             self.security.firmware_timestamp().map(u32::from).map_err(|_| Error::SecurityError).whence()?;
         let mut min_allowed_update_timestamp = current_fw_timestamp;
-
-        let patches = core::analyze_patches(&self.fs, &release_paths)?;
-        let total_bytes = core::measure_fw_size(&self.fs)?;
-
-        let mut progress =
-            InstallProgress { patches, firmware_copy: FirmwareCopyProgress { copied_bytes: 0, total_bytes } };
-        self.sender.progress(ProgressUpdate::InstallProgress(progress.clone()));
-
-        core::make_firmware_copy(&self.fs, |copied| {
-            progress.firmware_copy.copied_bytes = copied;
-            let event = ProgressUpdate::InstallProgress(progress.clone());
-            self.sender.progress(event);
-        })?;
-
-        progress.set_firmware_copy(FirmwareCopyProgress { copied_bytes: total_bytes, total_bytes });
-        self.sender.progress(ProgressUpdate::InstallProgress(progress.clone()));
-
         let fs = &self.fs;
         let crypto = &self.crypto;
         let sender = &self.sender;
 
-        let mut fw_timestamp = None;
+        let mut releases = Vec::with_capacity(release_paths.len());
+        for path in release_paths {
+            let guard = fs.open_file(&path, fs::Location::System, fs::OpenFlags::READ_WRITE).whence()?;
+            let header =
+                fw_utils::hash::verify_cosign2(fs, crypto, &path, fs::Location::System, |_| (), false)
+                    .map_err(hash_error_to_error)
+                    .whence()?;
+            #[cfg(feature = "production")]
+            if !matches!(header.trust(), cosign2::Trust::PartiallyTrusted | cosign2::Trust::FullyTrusted,) {
+                return Err(Error::Cosign2("Signer public key not trusted".into())).whence();
+            }
 
-        let outcome = core::apply_update(
-            fs,
-            |path| {
-                let header =
-                    fw_utils::hash::verify_cosign2(fs, crypto, path, fs::Location::System, |_| (), false)
-                        .map_err(hash_error_to_error)
-                        .whence()?;
-                // The update image itself is allowed be single-signed for simplicity
-                // of the release process, but the contents will be double signed.
-                #[cfg(feature = "production")]
-                if !matches!(header.trust(), cosign2::Trust::PartiallyTrusted | cosign2::Trust::FullyTrusted,)
-                {
-                    return Err(Error::Cosign2("Signer public key not trusted".into())).whence();
-                }
+            let update_timestamp = header.timestamp();
+            if update_timestamp < min_allowed_update_timestamp {
+                log::error!(
+                    "rollback prevented while verifying {path}: current timestamp = {min_allowed_update_timestamp}, update timestamp = {update_timestamp}"
+                );
+                return Err(Error::RollbackPrevented {
+                    current: min_allowed_update_timestamp,
+                    update: update_timestamp,
+                })
+                .whence();
+            }
+            min_allowed_update_timestamp = update_timestamp;
+            releases.push(core::Release { path, guard, firmware_timestamp: update_timestamp });
+        }
 
-                let update_timestamp = header.timestamp();
-                if update_timestamp < min_allowed_update_timestamp {
-                    log::error!(
-                        "rollback prevented while verifying {path}: current timestamp = {min_allowed_update_timestamp}, update timestamp = {update_timestamp}"
-                    );
-                    return Err(Error::RollbackPrevented {
-                        current: min_allowed_update_timestamp,
-                        update: update_timestamp,
-                    })
-                    .whence();
-                }
+        let mut estimator = core::analyze_update(fs, &releases, self.progress_base)?;
+        sender.progress(ProgressUpdate::InstallProgress(estimator.snapshot()));
 
-                min_allowed_update_timestamp = update_timestamp;
-                fw_timestamp = Some(update_timestamp.into());
-                Ok(())
-            },
-            release_paths,
-            |event| {
-                match event {
-                    UpdateEvent::ActionCompleted { .. } => {
-                        progress.action_completed();
-                    }
-                    UpdateEvent::PatchCompleted { .. } => {}
-                }
-                let event = ProgressUpdate::InstallProgress(progress.clone());
-                sender.progress(event);
-            },
-        )?;
+        core::make_firmware_copy(fs, |copied| {
+            sender.progress(ProgressUpdate::InstallProgress(estimator.record_copy(copied).snapshot()));
+        })?;
 
-        let Some(fw_timestamp) = fw_timestamp else {
-            log::error!("firmware timestamp wasn't set");
-            return Err(Error::Cosign2HeaderMissing).whence();
+        let hash_file = |path: &str| {
+            let size = fs.metadata(path, fs::Location::System).whence()?.size;
+            let file = fs.open_file(path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
+            fw_utils::hash::sha256_streaming(crypto, size as usize, file, |_| ())
+                .map_err(hash_error_to_error)
+                .whence()
         };
 
-        self.security.set_firmware_timestamp(fw_timestamp).map_err(|_| Error::SecurityError)?;
+        let outcome = core::apply_update(fs, &hash_file, releases, &mut estimator, |estimator| {
+            sender.progress(ProgressUpdate::InstallProgress(estimator.snapshot()));
+        })?;
+
+        let firmware_timestamp = match &outcome {
+            UpdateOutcome::Done { firmware_timestamp }
+            | UpdateOutcome::Partial { firmware_timestamp, .. } => *firmware_timestamp,
+        };
+        self.security.set_firmware_timestamp(firmware_timestamp.into()).map_err(|_| Error::SecurityError)?;
 
         Ok(outcome)
     }
