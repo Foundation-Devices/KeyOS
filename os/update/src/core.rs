@@ -1,22 +1,18 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, BufReader, Read, Seek, Write};
+use std::time::Instant;
 
-use fs::adapter::{BasicFsPermissions, FileAdapter, FsAdapter};
-use qbsdiff::Bspatch;
-use release_manifest::{Action, ReleaseManifest};
-use sha2::Digest;
-use update::messages::PatchProgress;
+use fs::{
+    adapter::{BasicFsPermissions, FileAdapter, FsAdapter},
+    FILE_BUFFER_SIZE,
+};
+use server::xous::{self, DropDeallocate};
+use update::messages::InstallProgress;
 use update::Error;
+use update_image::{Action, Header, ReleaseManifest, Version};
 use whence::WhenceExt;
-
-/// Delta events that represent state changes during the update process
-#[derive(Debug, Clone)]
-pub enum UpdateEvent {
-    ActionCompleted,
-    PatchCompleted,
-}
 
 /// The main directory that contains the OS files.
 pub const KEYOS_DIR_PATH: &str = "/keyos";
@@ -42,38 +38,150 @@ pub const STAGED_FIRMWARE_FILE_PATH: &str = "/keyos.update/app.bin";
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum UpdateOutcome {
     /// All releases were applied successfully.
-    Done,
+    Done { firmware_timestamp: Option<u32> },
     /// Some releases were applied, but a reboot is required before applying the remaining ones.
-    Partial(Vec<String>),
+    Partial {
+        remaining_release_paths: Vec<String>,
+        progress_percentage: u32,
+        firmware_timestamp: Option<u32>,
+    },
 }
 
-/// extract update patch metadata without applying them.
-/// DOES NOT verify signatures
-pub fn analyze_patches<F>(fs: &F, release_paths: &[String]) -> whence::Result<Vec<PatchProgress>, Error>
-where
-    F: FsAdapter,
-    F::Permissions: BasicFsPermissions,
-{
-    let mut patches = Vec::new();
+pub struct Release<F> {
+    pub path: String,
+    pub guard: F,
+    pub firmware_timestamp: Option<u32>,
+}
 
-    for release_path in release_paths {
-        let file = open_release_file(fs, release_path)?;
-        let file_size = file.metadata().whence()?.size;
+pub struct Estimator {
+    total_work: u64,
+    completed_work: u64,
+    progress_base: u32,
+    started_at: Instant,
+}
 
-        let mut archive = tar::Archive::new(file);
-        let manifest = extract_manifest_from_tar(&mut archive)?;
+impl Estimator {
+    const COPY_WEIGHT: u64 = 4;
+    const HASH_WEIGHT: u64 = 7;
+    const MIB: u64 = 1024 * 1024;
+    const PATCH_WEIGHT: u64 = 14;
+    // relative work for 4 MiB/s hashing, 7 MiB/s copies and 2 MiB/s patching
+    const WORK_PER_SECOND: u64 = 28 * Self::MIB;
 
-        let total_actions = manifest.transactions.iter().fold(0, |acc, tx| acc + tx.actions().len() as u32);
+    pub fn record_copy(&mut self, bytes: u64) -> &Self { self.record(bytes, Self::COPY_WEIGHT) }
 
-        patches.push(PatchProgress {
-            file_size,
-            total_actions,
-            completed_actions: 0,
-            requires_reboot: manifest.reboot_required,
-        });
+    pub fn snapshot(&self) -> InstallProgress {
+        let segment = if self.total_work == 0 {
+            100
+        } else {
+            (self.completed_work * 100 / self.total_work).min(99) as u32
+        };
+        let remaining_work = self.total_work - self.completed_work;
+        InstallProgress {
+            completion_percentage: (self.progress_base + segment * (100 - self.progress_base) / 100).min(99),
+            estimated_seconds_remaining: if self.completed_work == 0 {
+                remaining_work.div_ceil(Self::WORK_PER_SECOND)
+            } else {
+                let elapsed_ms = u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+                (elapsed_ms * remaining_work / self.completed_work).div_ceil(1000)
+            },
+        }
     }
 
-    Ok(patches)
+    fn record_hash(&mut self, bytes: u64) -> &Self { self.record(bytes, Self::HASH_WEIGHT) }
+
+    fn record(&mut self, bytes: u64, weight: u64) -> &Self {
+        self.completed_work = (self.completed_work + bytes * weight).min(self.total_work);
+        self
+    }
+}
+
+pub fn analyze_update<F>(
+    fs: &F,
+    releases: &[Release<F::File>],
+    progress_base: u32,
+) -> whence::Result<Estimator, Error>
+where
+    F: FsAdapter + Clone,
+    F::Permissions: BasicFsPermissions,
+{
+    let mut firmware_bytes = 0u64;
+    for entry in fs.walk_dir(KEYOS_DIR_PATH, fs::Location::System).whence()? {
+        let (_, entry) = entry.whence()?;
+        if !entry.is_dir {
+            firmware_bytes += entry.len;
+        }
+    }
+    let mut release_bytes = 0u64;
+    let mut action_work = 0u64;
+    let mut future_firmware_copies = 0u64;
+
+    for (index, release) in releases.iter().enumerate() {
+        let file = open_release_file(fs, &release.path)?;
+        let mut archive = tar::Archive::new(file);
+        let manifest = {
+            let mut manifest: Option<ReleaseManifest> = None;
+            for entry in archive.entries_with_seek().whence()? {
+                let mut entry = entry.whence()?;
+                if entry.path().whence()?.as_ref() == std::path::Path::new("manifest.json") {
+                    let mut buf = Vec::new();
+                    entry.read_to_end(&mut buf).whence()?;
+                    manifest = Some(serde_json::from_slice(&buf).map_err(|e| {
+                        log::error!("failed to parse manifest: {e:?}");
+                        Error::InvalidManifest
+                    })?);
+                    break;
+                }
+            }
+            manifest.ok_or(Error::InvalidManifest).whence()?
+        };
+        if manifest.reboot_required && index + 1 < releases.len() {
+            future_firmware_copies += 1;
+        }
+
+        let file = open_release_file(fs, &release.path)?;
+        let mut archive = tar::Archive::new(file);
+        for entry in archive.entries_with_seek().whence()? {
+            let mut entry = entry.whence()?;
+            let size = entry.header().size().whence()?;
+            release_bytes += size;
+            let path = entry.path().whence()?;
+            let Some(path) = path.to_str().and_then(|path| path.strip_prefix("patch/")) else {
+                continue;
+            };
+            let mut patch_count = 0u64;
+            let mut add_count = 0u64;
+            for action in manifest.transactions.iter().flat_map(|tx| tx.actions()) {
+                match action {
+                    Action::Patch { patch_file, .. } | Action::PatchAdd { patch_file, .. }
+                        if patch_file == path =>
+                    {
+                        patch_count += 1;
+                    }
+                    Action::Add { source, .. } if source == path => add_count += 1,
+                    _ => {}
+                }
+            }
+            if patch_count > 0 {
+                let header = Header::read_from(&mut entry).whence()?;
+                let patch_work = header.old_file_size * Estimator::HASH_WEIGHT
+                    + (size - Header::SIZE as u64) * Estimator::COPY_WEIGHT
+                    + header.new_file_size * (Estimator::PATCH_WEIGHT + Estimator::HASH_WEIGHT);
+                action_work += patch_work * patch_count;
+            }
+            action_work += size * Estimator::COPY_WEIGHT * add_count;
+        }
+    }
+
+    let total_work = firmware_bytes * (1 + future_firmware_copies) * Estimator::COPY_WEIGHT
+        + release_bytes * Estimator::COPY_WEIGHT
+        + action_work;
+    Ok(Estimator {
+        total_work,
+        completed_work: 0,
+        progress_base: progress_base.min(99),
+        started_at: Instant::now(),
+    })
 }
 
 /// Copies the current OS firmware from /keyos to /keyos.update in preparation for patching.
@@ -88,7 +196,6 @@ where
     fs.create_dir(KEYOS_UPDATE_DIR_PATH, fs::Location::System).whence()?;
 
     let walker = fs.walk_dir(KEYOS_DIR_PATH, fs::Location::System).whence()?;
-    let mut completed_work = 0u64;
 
     for entry_result in walker {
         let (path, entry) = entry_result.whence()?;
@@ -111,29 +218,12 @@ where
                     break;
                 }
                 remaining = remaining.saturating_sub(written);
-                completed_work += written as u64;
-                progress(completed_work);
+                progress(written as u64);
             }
         }
     }
 
     Ok(())
-}
-
-pub fn measure_fw_size<F>(fs: &F) -> whence::Result<u64, Error>
-where
-    F: FsAdapter + Clone,
-    F::Permissions: BasicFsPermissions,
-{
-    let walker = fs.walk_dir(KEYOS_DIR_PATH, fs::Location::System).whence()?;
-    let mut work = 0;
-    for entry in walker {
-        let (_path, entry) = entry.whence()?;
-        if !entry.is_dir {
-            work += entry.len;
-        }
-    }
-    Ok(work)
 }
 
 /// Finalizes the update by swapping the updated firmware into place and removing the old version.
@@ -192,29 +282,29 @@ where
 ///
 /// # Arguments
 /// * `fs` - File system API
-/// * `release_paths` - Paths to release files to apply
-/// * `verify_signature` - Function to verify the signature of a release file (can be no-op if already
-///   verified)
-/// * `progress` - Callback invoked for all events
+/// * `hash_file` - SHA256 of a file in [`fs::Location::System`]
+/// * `progress` - Callback invoked when the estimate changes
 pub fn apply_update<F>(
     fs: &F,
-    mut verify_signature: impl FnMut(&str) -> whence::Result<(), Error>,
-    release_paths: Vec<String>,
-    mut progress: impl FnMut(UpdateEvent),
+    hash_file: &impl Fn(&str) -> whence::Result<[u8; 32], Error>,
+    releases: Vec<Release<F::File>>,
+    estimator: &mut Estimator,
+    mut progress: impl FnMut(&Estimator),
 ) -> whence::Result<UpdateOutcome, Error>
 where
     F: FsAdapter,
     F::Permissions: BasicFsPermissions,
 {
-    let mut release_paths = release_paths.into_iter();
+    if releases.is_empty() {
+        return Err(Error::NoUpdateDownloaded).whence();
+    }
 
-    while let Some(release_path) = release_paths.next() {
+    let mut releases = releases.into_iter();
+    let mut applied_timestamp = None;
+
+    while let Some(Release { path: release_path, guard, firmware_timestamp }) = releases.next() {
         log::info!("applying release from {release_path}");
 
-        // Verify if the caller requires it (may be no-op if already verified during analysis)
-        verify_signature(&release_path)?;
-
-        // Open the release file (reusing helper)
         let file = open_release_file(fs, &release_path)?;
         let mut release_tar = tar::Archive::new(file);
 
@@ -238,7 +328,11 @@ where
                 let mut dest_file =
                     fs.open_file(&dest_path, fs::Location::System, fs::OpenFlags::CREATE).whence()?;
                 dest_file.truncate().whence()?;
-                io::copy(&mut entry, &mut dest_file).whence()?;
+                let mut writer = ProgressIo::new(&mut dest_file, |bytes| {
+                    progress(estimator.record_copy(bytes));
+                });
+                io::copy(&mut entry, &mut writer).whence()?;
+                writer.finish();
             }
         }
 
@@ -266,39 +360,45 @@ where
         log::info!("applying release changes");
 
         for tx in manifest.transactions {
-            execute_transaction(fs, tx.actions(), &mut progress)?;
+            execute_transaction(fs, hash_file, tx.actions(), estimator, &mut progress)?;
         }
 
         log::info!("cleaning up update files");
 
         fs.remove(RELEASE_DIR_PATH, fs::Location::System).whence()?;
         drop(release_tar);
+        drop(guard);
         fs.remove(&release_path, fs::Location::System).whence()?;
 
         log::info!("release applied successfully");
-
-        progress(UpdateEvent::PatchCompleted);
+        if firmware_timestamp.is_some() {
+            applied_timestamp = firmware_timestamp;
+        }
 
         if manifest.reboot_required {
-            let remaining_releases = release_paths.collect::<Vec<_>>();
-            if !remaining_releases.is_empty() {
-                log::info!("release requires a reboot, returning partial outcome");
-                return Ok(UpdateOutcome::Partial(remaining_releases));
-            } else {
-                log::info!("last release requires reboot, returning done outcome");
-                return Ok(UpdateOutcome::Done);
+            let remaining_releases = releases.map(|release| release.path).collect::<Vec<_>>();
+            if remaining_releases.is_empty() {
+                break;
             }
+            log::info!("release requires a reboot, returning partial outcome");
+            return Ok(UpdateOutcome::Partial {
+                remaining_release_paths: remaining_releases,
+                progress_percentage: estimator.snapshot().completion_percentage,
+                firmware_timestamp: applied_timestamp,
+            });
         }
     }
 
-    Ok(UpdateOutcome::Done)
+    Ok(UpdateOutcome::Done { firmware_timestamp: applied_timestamp })
 }
 
 /// Execute the actions from a single transaction on a copy of the OS firmware.
 fn execute_transaction<F>(
     fs: &F,
+    hash_file: &impl Fn(&str) -> whence::Result<[u8; 32], Error>,
     actions: &[Action],
-    progress: &mut impl FnMut(UpdateEvent),
+    estimator: &mut Estimator,
+    progress: &mut impl FnMut(&Estimator),
 ) -> whence::Result<(), Error>
 where
     F: FsAdapter,
@@ -308,11 +408,31 @@ where
         match action {
             Action::Patch { patch_file, patch_source, base_version, new_version } => {
                 log::debug!("patch file {patch_source}");
-                patch_to(fs, patch_file, patch_source, patch_source, base_version, new_version)?;
+                patch_to(
+                    fs,
+                    hash_file,
+                    patch_file,
+                    patch_source,
+                    patch_source,
+                    base_version,
+                    new_version,
+                    estimator,
+                    progress,
+                )?;
             }
             Action::PatchAdd { patch_file, patch_source, dest, base_version, new_version } => {
                 log::debug!("patch-add file {patch_source}");
-                patch_to(fs, patch_file, patch_source, dest, base_version, new_version)?;
+                patch_to(
+                    fs,
+                    hash_file,
+                    patch_file,
+                    patch_source,
+                    dest,
+                    base_version,
+                    new_version,
+                    estimator,
+                    progress,
+                )?;
             }
             Action::Add { source, dest } => {
                 log::debug!("add file {source}");
@@ -327,7 +447,11 @@ where
                     fs.open_file(&dest_file_path, fs::Location::System, fs::OpenFlags::CREATE).whence()?;
                 dest_file.truncate().whence()?;
 
-                io::copy(&mut source_file, &mut dest_file).whence()?;
+                let mut writer = ProgressIo::new(&mut dest_file, |bytes| {
+                    progress(estimator.record_copy(bytes));
+                });
+                io::copy(&mut source_file, &mut writer).whence()?;
+                writer.finish();
             }
             Action::Rename { source, dest } | Action::Move { source, dest } => {
                 log::debug!("rename/move file {source} -> {dest}");
@@ -347,30 +471,65 @@ where
                 return Err(Error::Unexpected(format!("unsupported action: {unsupported:?}"))).whence();
             }
         }
-
-        // Emit event to update progress state
-        progress(UpdateEvent::ActionCompleted);
     }
 
     Ok(())
 }
 
+struct ProgressIo<T, P> {
+    inner: T,
+    progress: P,
+    pending: u64,
+}
+
+impl<T, P: FnMut(u64)> ProgressIo<T, P> {
+    const PROGRESS_INTERVAL_BYTES: u64 = 256 * 1024;
+
+    fn new(inner: T, progress: P) -> Self { Self { inner, progress, pending: 0 } }
+
+    fn finish(&mut self) {
+        if self.pending > 0 {
+            (self.progress)(self.pending);
+            self.pending = 0;
+        }
+    }
+}
+
+impl<T: Write, P: FnMut(u64)> Write for ProgressIo<T, P> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.pending += written as u64;
+        if self.pending >= Self::PROGRESS_INTERVAL_BYTES {
+            self.finish();
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.finish();
+        self.inner.flush()
+    }
+}
+
 fn patch_to<F>(
     fs: &F,
+    hash_file: &impl Fn(&str) -> whence::Result<[u8; 32], Error>,
     patch_file: &str,
     patch_source: &str,
     patch_dest: &str,
     base_version: &str,
     new_version: &str,
+    estimator: &mut Estimator,
+    progress: &mut impl FnMut(&Estimator),
 ) -> whence::Result<(), Error>
 where
     F: FsAdapter,
     F::Permissions: BasicFsPermissions,
 {
     let base_version =
-        parse_version(base_version).map_err(|_| Error::ParseVersion(base_version.to_string())).whence()?;
+        Version::parse(base_version).map_err(|_| Error::ParseVersion(base_version.to_string())).whence()?;
     let new_version =
-        parse_version(new_version).map_err(|_| Error::ParseVersion(new_version.to_string())).whence()?;
+        Version::parse(new_version).map_err(|_| Error::ParseVersion(new_version.to_string())).whence()?;
     let patch_file_path = format!("{RELEASE_DIR_PATH}/patch/{patch_file}");
     let patch_file_size: usize = fs
         .metadata(&patch_file_path, fs::Location::System)
@@ -382,57 +541,84 @@ where
     let mut patch =
         fs.open_file(&patch_file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
 
-    // File cursor will be past the updiff header after this.
-    let header = UpdiffHeader::read_from(&mut patch).whence()?;
-    let versions_match = header.old_version == base_version && header.new_version == new_version;
-    if !versions_match {
+    let header = Header::read_from(&mut patch).whence()?;
+    if header.old_version != base_version || header.new_version != new_version {
         return Err(Error::PatchVersionMismatch).whence();
     }
 
     let old_file_path = format!("{KEYOS_UPDATE_DIR_PATH}/{patch_source}");
     let new_file_path = format!("{KEYOS_UPDATE_DIR_PATH}/{patch_dest}");
 
-    check_patch_file_integrity(fs, &old_file_path, header.old_file_size, &header.old_file_hash)?;
+    check_patch_file_integrity(fs, hash_file, &old_file_path, header.old_file_size, &header.old_file_hash)?;
+    progress(estimator.record_hash(header.old_file_size));
 
-    let mut old_file =
-        fs.open_file(&old_file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
+    /// One merged run of source reads. Page aligned and a whole number of pages,
+    /// so the filesystem lends it to the server rather than copying through the
+    /// file's own buffer, and long enough that a run is worth merging at all.
+    const SOURCE_SCRATCH: usize = 64 * 1024;
 
-    // File cursor is past (uncompressed) updiff header, decompress the patch content and apply it.
-    let mut patch_buf = Vec::with_capacity(patch_file_size - UpdiffHeader::SIZE);
-    let mut decoder = bzip2::read::BzDecoder::new(patch);
-    decoder.read_to_end(&mut patch_buf).whence()?;
-    let bspatch = Bspatch::new(&patch_buf).map_err(|e| Error::Bsdiff(e.to_string())).whence()?;
-    if patch_source == patch_dest {
-        // Patch to a temporary file because we cannot have two files with the same name then
-        // rename it to `patch_dest`.
-        let tempfile_path = format!("{KEYOS_UPDATE_DIR_PATH}/tempfile");
-        let mut tempfile =
-            fs.open_file(&tempfile_path, fs::Location::System, fs::OpenFlags::CREATE).whence()?;
-        tempfile.truncate().whence()?;
-        bspatch.apply(&mut old_file, &mut tempfile).map_err(|e| Error::Bsdiff(e.to_string())).whence()?;
-        tempfile.flush().whence()?;
-        drop(old_file);
-        drop(tempfile);
+    let body_size = patch_file_size
+        .checked_sub(Header::SIZE)
+        .ok_or_else(|| Error::Unexpected("patch file is smaller than its header".into()))
+        .whence()?;
+    let mut patches = [
+        patch,
+        fs.open_file(&patch_file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?,
+        fs.open_file(&patch_file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?,
+    ];
+    for patch in &mut patches[1..] {
+        patch.seek(io::SeekFrom::Start(Header::SIZE as u64)).whence()?;
+    }
+    let patches = patches.map(|patch| BufReader::with_capacity(FILE_BUFFER_SIZE, patch));
+
+    let mut scratch = DropDeallocate::new(
+        xous::map_memory(None, None, SOURCE_SCRATCH, xous::MemoryFlags::W)
+            .map_err(|_| Error::Unexpected("no memory for the source scratch".into()))
+            .whence()?,
+    );
+    let tempfile_path = (patch_source == patch_dest).then(|| format!("{KEYOS_UPDATE_DIR_PATH}/tempfile"));
+    if tempfile_path.is_none() {
+        fs.ensure_parent_dir_exists(&new_file_path, fs::Location::System).whence()?;
+    }
+    let output_path = tempfile_path.as_deref().unwrap_or(&new_file_path);
+    {
+        let mut old_file =
+            fs.open_file(&old_file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
+        let mut output_file =
+            fs.open_file(output_path, fs::Location::System, fs::OpenFlags::CREATE).whence()?;
+        output_file.truncate().whence()?;
+
+        let output = ProgressIo::new(&mut output_file, |bytes| {
+            progress(estimator.record(bytes, Estimator::PATCH_WEIGHT));
+        });
+        update_image::patch::apply(
+            patches,
+            body_size as u64,
+            &mut old_file,
+            scratch.as_slice_mut::<u8>(),
+            output,
+        )
+        .map_err(|e| Error::Bsdiff(e.to_string()))
+        .whence()?;
+        progress(estimator.record_copy(body_size as u64));
+        output_file.flush().whence()?;
+    }
+    if let Some(tempfile_path) = tempfile_path {
         fs.remove(&old_file_path, fs::Location::System).whence()?;
         fs.ensure_parent_dir_exists(&new_file_path, fs::Location::System).whence()?;
         fs.rename(&tempfile_path, &new_file_path, fs::Location::System).whence()?;
-    } else {
-        fs.ensure_parent_dir_exists(&new_file_path, fs::Location::System).whence()?;
-        let mut new_file =
-            fs.open_file(&new_file_path, fs::Location::System, fs::OpenFlags::CREATE).whence()?;
-        new_file.truncate().whence()?;
-        bspatch.apply(&mut old_file, &mut new_file).map_err(|e| Error::Bsdiff(e.to_string())).whence()?;
-        new_file.flush().whence()?;
-    };
-    check_patch_file_integrity(fs, &new_file_path, header.new_file_size, &header.new_file_hash)?;
+    }
+    check_patch_file_integrity(fs, hash_file, &new_file_path, header.new_file_size, &header.new_file_hash)?;
+    progress(estimator.record_hash(header.new_file_size));
 
     Ok(())
 }
 
 /// Checks whether the source/target files of the patching process are valid,
-/// based on the data about them in the [UpdiffHeader].
+/// based on the data about them in the [Header].
 fn check_patch_file_integrity<F>(
     fs: &F,
+    hash_file: &impl Fn(&str) -> whence::Result<[u8; 32], Error>,
     file_path: &str,
     expected_file_size: u64,
     expected_file_hash: &[u8; 32],
@@ -442,8 +628,6 @@ where
     F::Permissions: BasicFsPermissions,
 {
     let file_size = fs.metadata(file_path, fs::Location::System).whence()?.size;
-    let mut file = fs.open_file(file_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
-
     if file_size != expected_file_size {
         return Err(Error::PatchSizeMismatch {
             file_name: file_path.to_string(),
@@ -453,167 +637,79 @@ where
         .whence();
     }
 
-    let mut hasher = sha2::Sha256::new();
-    let mut block = [0; 4096];
-    let file_hash: [u8; 32] = loop {
-        let n = file.read(&mut block).whence()?;
-        if n == 0 {
-            break hasher.finalize().into();
-        }
-        hasher.update(&block[..n]);
-    };
-    if &file_hash != expected_file_hash {
+    if &hash_file(file_path)? != expected_file_hash {
         return Err(Error::PatchHashMismatch).whence();
     }
-
-    file.seek(io::SeekFrom::Start(0)).whence()?;
 
     Ok(())
 }
 
-fn parse_version(s: &str) -> Result<[u8; 4], &'static str> {
-    if !s.starts_with('v') {
-        return Err("version must start with 'v'");
-    }
-    let s = &s[1..];
-    let (major, rest) = s.split_once('.').ok_or("missing major version")?;
-    let (minor, patch_and_beta) = rest.split_once('.').ok_or("missing minor version")?;
-    let (patch, beta) = patch_and_beta.split_once('b').unwrap_or((patch_and_beta, ""));
-    let major = major.parse().map_err(|_| "major version invalid or out of range")?;
-    let minor = minor.parse().map_err(|_| "minor version invalid or out of range")?;
-    let patch = patch.parse().map_err(|_| "patch version invalid or out of range")?;
-    let beta = if beta.is_empty() {
-        0xFF
-    } else {
-        let beta = beta.parse().map_err(|_| "beta version invalid or out of range")?;
-        if beta == 0xFF {
-            return Err("beta version may not be 0xFF");
-        }
-        beta
-    };
-    Ok([major, minor, patch, beta])
+struct ReleaseFile<F> {
+    file: F,
+    offset: u64,
 }
 
-struct UpdiffHeader {
-    old_version: [u8; 4],
-    old_file_size: u64,
-    old_file_hash: [u8; 32],
-    new_version: [u8; 4],
-    new_file_size: u64,
-    new_file_hash: [u8; 32],
-    _reserved: [u8; 128],
+impl<F: Read> Read for ReleaseFile<F> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.file.read(buf) }
 }
 
-impl UpdiffHeader {
-    const SIZE: usize = 4 + 8 + 32 + 4 + 8 + 32 + 128;
-
-    /// Read the updiff header from the given reader. The file cursor will be
-    /// advanced by the size of the header.
-    fn read_from<T: Read>(reader: &mut T) -> io::Result<Self> {
-        let mut old_version = [0; 4];
-        reader.read_exact(&mut old_version)?;
-        let mut old_file_size = [0; 8];
-        reader.read_exact(&mut old_file_size)?;
-        let mut old_file_hash = [0; 32];
-        reader.read_exact(&mut old_file_hash)?;
-        let mut new_version = [0; 4];
-        reader.read_exact(&mut new_version)?;
-        let mut new_file_size = [0; 8];
-        reader.read_exact(&mut new_file_size)?;
-        let mut new_file_hash = [0; 32];
-        reader.read_exact(&mut new_file_hash)?;
-        let mut reserved = [0; 128];
-        reader.read_exact(&mut reserved)?;
-        Ok(Self {
-            old_version,
-            old_file_size: u64::from_le_bytes(old_file_size),
-            old_file_hash,
-            new_version,
-            new_file_size: u64::from_le_bytes(new_file_size),
-            new_file_hash,
-            _reserved: reserved,
-        })
+impl<F: Seek> Seek for ReleaseFile<F> {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        let pos = match pos {
+            io::SeekFrom::Start(pos) => self.file.seek(io::SeekFrom::Start(self.offset + pos))?,
+            io::SeekFrom::End(pos) => self.file.seek(io::SeekFrom::End(pos))?,
+            io::SeekFrom::Current(pos) => self.file.seek(io::SeekFrom::Current(pos))?,
+        };
+        Ok(pos.saturating_sub(self.offset))
     }
 }
 
 /// Opens a release file and seeks past the cosign2 header.
-fn open_release_file<F>(fs: &F, release_path: &str) -> whence::Result<F::File, Error>
+fn open_release_file<F>(fs: &F, release_path: &str) -> whence::Result<ReleaseFile<F::File>, Error>
 where
     F: FsAdapter,
     F::Permissions: BasicFsPermissions,
 {
     let mut file = fs.open_file(release_path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
-
-    // Skip cosign2 header
-    let cosign2_header_size: u64 = cosign2::Header::DEFAULT_SIZE.try_into().unwrap();
-    file.seek(io::SeekFrom::Start(cosign2_header_size)).whence()?;
-
-    Ok(file)
-}
-
-/// Extracts just the manifest from a tar archive without extracting other files.
-fn extract_manifest_from_tar<R: Read>(
-    archive: &mut tar::Archive<R>,
-) -> whence::Result<ReleaseManifest, Error> {
-    let entries = archive.entries().whence()?;
-    for entry in entries {
-        let mut entry = entry.whence()?;
-        let entry_path = entry.path().whence()?.to_str().ok_or(Error::InvalidManifest).whence()?.to_string();
-
-        if entry_path == "manifest.json" {
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).whence()?;
-            let manifest = serde_json::from_slice::<ReleaseManifest>(&buf).map_err(|e| {
-                log::error!("failed to parse manifest: {e:?}");
-                Error::InvalidManifest
-            })?;
-            return Ok(manifest);
-        }
-    }
-
-    Err(Error::InvalidManifest).whence()
+    let offset = cosign2::Header::DEFAULT_SIZE.try_into().unwrap();
+    file.seek(io::SeekFrom::Start(offset)).whence()?;
+    Ok(ReleaseFile { file, offset })
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::io::Write;
 
     use fs::adapter::test_utils::FsTest;
-    use qbsdiff::Bsdiff;
-    use release_manifest::{Action, ReleaseManifest, Transaction};
     use sha2::Digest;
+    use update_image::{Action, ReleaseManifest, Transaction};
 
     use super::*;
 
-    /// create an updiff patch file
+    /// The hosted tests have no crypto server to hash for them.
+    fn hash_file(fs: &FsTest, path: &str) -> whence::Result<[u8; 32], Error> {
+        let mut file = fs.open_file(path, fs::Location::System, fs::OpenFlags::READ_ONLY).whence()?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).whence()?;
+        Ok(sha2::Sha256::digest(&data).into())
+    }
+
     fn create_updiff_patch(
         old_content: &[u8],
         new_content: &[u8],
         old_version: &str,
         new_version: &str,
     ) -> Vec<u8> {
-        let mut bsdiff_patch = Vec::new();
-        Bsdiff::new(old_content, new_content).compare(&mut bsdiff_patch).unwrap();
-
-        let mut compressed_patch = Vec::new();
-        let mut encoder = bzip2::write::BzEncoder::new(&mut compressed_patch, bzip2::Compression::best());
-        encoder.write_all(&bsdiff_patch).unwrap();
-        encoder.finish().unwrap();
-
-        let old_hash: [u8; 32] = sha2::Sha256::digest(old_content).into();
-        let new_hash: [u8; 32] = sha2::Sha256::digest(new_content).into();
-
-        let mut updiff = Vec::with_capacity(UpdiffHeader::SIZE + compressed_patch.len());
-        updiff.extend_from_slice(&parse_version(old_version).unwrap());
-        updiff.extend_from_slice(&(old_content.len() as u64).to_le_bytes());
-        updiff.extend_from_slice(&old_hash);
-        updiff.extend_from_slice(&parse_version(new_version).unwrap());
-        updiff.extend_from_slice(&(new_content.len() as u64).to_le_bytes());
-        updiff.extend_from_slice(&new_hash);
-        updiff.extend_from_slice(&[0u8; 128]); // reserved
-        updiff.extend_from_slice(&compressed_patch);
-
+        let mut updiff = Vec::new();
+        update_image::patch::build(
+            old_content,
+            Version::parse(old_version).unwrap(),
+            new_content,
+            Version::parse(new_version).unwrap(),
+            update_image::patch::Format::Zstd,
+            &mut updiff,
+        )
+        .unwrap();
         updiff
     }
 
@@ -678,6 +774,28 @@ mod tests {
         signed_release
     }
 
+    fn guarded_releases(fs: &FsTest, paths: &[&str]) -> Vec<Release<<FsTest as FsAdapter>::File>> {
+        paths
+            .iter()
+            .map(|path| Release {
+                path: (*path).to_string(),
+                guard: fs.open_file(path, fs::Location::System, fs::OpenFlags::READ_WRITE).unwrap(),
+                firmware_timestamp: Some(1),
+            })
+            .collect()
+    }
+
+    fn apply_release(fs: &FsTest, path: &str) {
+        let releases = guarded_releases(fs, &[path]);
+        let mut estimator = analyze_update(fs, &releases, 0).unwrap();
+        make_firmware_copy(fs, |bytes| {
+            estimator.record_copy(bytes);
+        })
+        .unwrap();
+        let hasher = |path: &str| hash_file(fs, path);
+        apply_update(fs, &hasher, releases, &mut estimator, |_| {}).unwrap();
+    }
+
     #[test]
     fn apply_update_happy_path() {
         let mut fs = FsTest::default();
@@ -739,26 +857,22 @@ mod tests {
         let update_path = "updates/release_v1.1.0.tar";
         fs.write_file(update_path, &release_tar, fs::Location::System);
 
-        make_firmware_copy(&fs, |_| ()).unwrap();
-
-        let mut action_count = 0;
-        let mut patch_completed_count = 0;
-
-        let result = apply_update(
-            &fs,
-            |_path| Ok(()), // noop
-            vec![update_path.to_string()],
-            |event| match event {
-                UpdateEvent::ActionCompleted => action_count += 1,
-                UpdateEvent::PatchCompleted => patch_completed_count += 1,
-            },
-        );
+        let releases = guarded_releases(&fs, &[update_path]);
+        let mut estimator = analyze_update(&fs, &releases, 0).unwrap();
+        let mut percentages = vec![estimator.snapshot().completion_percentage];
+        make_firmware_copy(&fs, |bytes| {
+            estimator.record_copy(bytes);
+            percentages.push(estimator.snapshot().completion_percentage);
+        })
+        .unwrap();
+        let hasher = |path: &str| hash_file(&fs, path);
+        let result = apply_update(&fs, &hasher, releases, &mut estimator, |estimator| {
+            percentages.push(estimator.snapshot().completion_percentage);
+        });
 
         assert!(result.is_ok(), "Update failed: {:?}", result.err());
-        assert_eq!(result.unwrap(), UpdateOutcome::Done);
-
-        assert_eq!(action_count, 5);
-        assert_eq!(patch_completed_count, 1);
+        assert_eq!(result.unwrap(), UpdateOutcome::Done { firmware_timestamp: Some(1) });
+        assert!(percentages.windows(2).all(|progress| progress[0] <= progress[1]));
 
         finalize_update(&mut fs).unwrap();
 
@@ -830,11 +944,12 @@ mod tests {
     #[test]
     fn analyze_releases() {
         let fs = FsTest::default();
+        fs.write_file("keyos/app.bin", b"base firmware", fs::Location::System);
 
         let manifest1 = ReleaseManifest {
             label: "v1.1.0".to_string(),
             mandatory: false,
-            reboot_required: false,
+            reboot_required: true,
             date: "2025-01-01".to_string(),
             transactions: vec![Transaction::new(vec![
                 Action::Add { source: "file1".into(), dest: "file1".into() },
@@ -854,27 +969,23 @@ mod tests {
             ])],
         };
 
-        let release1_tar = create_release_tar(&manifest1, vec![]);
-        let release2_tar = create_release_tar(&manifest2, vec![]);
+        let release1_tar =
+            create_release_tar(&manifest1, vec![("file1", vec![0; 10]), ("file2", vec![0; 20])]);
+        let release2_tar = create_release_tar(
+            &manifest2,
+            vec![("file3", vec![0; 30]), ("file4", vec![0; 40]), ("file5", vec![0; 50])],
+        );
 
         let path1 = "updates/release1.tar";
         let path2 = "updates/release2.tar";
         fs.write_file(path1, &release1_tar, fs::Location::System);
         fs.write_file(path2, &release2_tar, fs::Location::System);
 
-        let patches = analyze_patches(&fs, &[path1.to_string(), path2.to_string()]).unwrap();
+        let releases = guarded_releases(&fs, &[path1, path2]);
+        let estimator = analyze_update(&fs, &releases, 60).unwrap();
 
-        assert_eq!(patches.len(), 2);
-
-        assert_eq!(patches[0].file_size, release1_tar.len() as u64);
-        assert_eq!(patches[0].total_actions, 2);
-        assert_eq!(patches[0].completed_actions, 0);
-        assert_eq!(patches[0].requires_reboot, false);
-
-        assert_eq!(patches[1].file_size, release2_tar.len() as u64);
-        assert_eq!(patches[1].total_actions, 3);
-        assert_eq!(patches[1].completed_actions, 0);
-        assert_eq!(patches[1].requires_reboot, true);
+        assert_eq!(estimator.snapshot().completion_percentage, 60);
+        assert!(estimator.total_work > 0);
     }
 
     #[test]
@@ -902,8 +1013,7 @@ mod tests {
         let update_path = "updates/release_v1.1.0.tar";
         fs.write_file(update_path, &release_tar, fs::Location::System);
 
-        make_firmware_copy(&fs, |_| ()).unwrap();
-        apply_update(&fs, |_path| Ok(()), vec![update_path.to_string()], |_| {}).unwrap();
+        apply_release(&fs, update_path);
         finalize_update(&mut fs).unwrap();
 
         let added_app =
@@ -937,8 +1047,7 @@ mod tests {
         let update_path = "updates/release_v1.1.0.tar";
         fs.write_file(update_path, &release_tar, fs::Location::System);
 
-        make_firmware_copy(&fs, |_| ()).unwrap();
-        apply_update(&fs, |_path| Ok(()), vec![update_path.to_string()], |_| {}).unwrap();
+        apply_release(&fs, update_path);
         finalize_update(&mut fs).unwrap();
 
         let updated = fs.read_file_contents("keyos/common/config.bin", fs::Location::System).unwrap();
@@ -975,8 +1084,7 @@ mod tests {
         let update_path = "updates/release_v1.1.0.tar";
         fs.write_file(update_path, &release_tar, fs::Location::System);
 
-        make_firmware_copy(&fs, |_| ()).unwrap();
-        apply_update(&fs, |_path| Ok(()), vec![update_path.to_string()], |_| {}).unwrap();
+        apply_release(&fs, update_path);
         finalize_update(&mut fs).unwrap();
 
         let added_app =
@@ -1008,8 +1116,7 @@ mod tests {
         let update_path = "updates/release_v1.1.0.tar";
         fs.write_file(update_path, &release_tar, fs::Location::System);
 
-        make_firmware_copy(&fs, |_| ()).unwrap();
-        apply_update(&fs, |_path| Ok(()), vec![update_path.to_string()], |_| {}).unwrap();
+        apply_release(&fs, update_path);
         finalize_update(&mut fs).unwrap();
 
         let renamed =

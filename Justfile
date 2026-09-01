@@ -26,11 +26,10 @@ flux_excludes := '--exclude app-flux-ethereum ' + \
 
 check_excludes := target_excludes + ' ' + flux_excludes
 
-# Excluded from the test run only: softbuffer's windowing test (needs a display),
-# tar's vendored integration test, and qbsdiff whose test rewrites a tracked asset.
+# Excluded from the test run only: softbuffer's windowing test (needs a display)
+# and tar's vendored integration test.
 test_only_excludes := '--exclude softbuffer ' + \
-    '--exclude tar ' + \
-    '--exclude qbsdiff'
+    '--exclude tar'
 
 # Format the codebase.
 fmt:

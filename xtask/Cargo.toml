@@ -30,7 +30,6 @@ hex-literal = "0.4"
 keyos = { path = "../keyos" }
 mbrs = "0.3.1"
 regex = "1"
-release-manifest = { path = "../release-manifest" }
 sambuca = { path = "../utils/sambuca/" }
 semver = "1"
 serde = { version = "1.0.130", features = ["derive"] }
@@ -41,6 +40,7 @@ svd2utra = { version = "0.1.15", path = "../svd2utra" }
 tar = { workspace = true }
 tempfile = "3"
 toml = "0.8"
+update-image = { path = "../update-image", features = ["build"] }
 usb-debug-protocol = { workspace = true, features = ["client"] }
 utralib = { workspace = true }
 xmas-elf = "0.10.0"

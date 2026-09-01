@@ -7,7 +7,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bzip2 = { workspace = true }
 cosign2 = { workspace = true }
 crypto = { workspace = true }
 file-backed = { path = "../../utils/file-backed" }
@@ -19,18 +18,16 @@ keyos = { path = "../../keyos" }
 log = "0.4.14"
 log-server = { package = "xous-api-log", path = "../../xous/api/log" }
 power-manager = { workspace = true }
-qbsdiff = { workspace = true }
 quantum-link = { workspace = true }
-release-manifest = { path = "../../release-manifest" }
 rkyv = { workspace = true }
 security = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.128"
 server = { path = "../../server" }
-sha2 = "0.10.9"
 tar = { workspace = true }
 thiserror = "1.0"
 update = { workspace = true }
+update-image = { path = "../../update-image" }
 whence = { path = "../../utils/whence" }
 xous = { path = "../../xous/xous-rs" }
 xous-names = { package = "xous-api-names", path = "../../xous/api/names" }
@@ -42,6 +39,8 @@ utralib = { workspace = true }
 
 [dev-dependencies]
 fs = { workspace = true, features = ["test"] }
+sha2 = "0.10.9"
+update-image = { path = "../../update-image", features = ["build"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

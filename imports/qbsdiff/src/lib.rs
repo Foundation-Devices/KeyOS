@@ -35,7 +35,8 @@ fn bspatch(source: &[u8], patch: &[u8]) -> io::Result<Vec<u8>> {
     let mut target = Vec::new();
     // To preallocate target:
     //Vec::with_capacity(patcher.hint_target_size() as usize);
-    patcher.apply(io::Cursor::new(source), io::Cursor::new(&mut target))?;
+    let mut scratch = vec![0; 65536];
+    patcher.apply(io::Cursor::new(source), &mut scratch, io::Cursor::new(&mut target))?;
     Ok(target)
 }
 ```
@@ -59,11 +60,16 @@ Only the patch file format is promised to be compatible.
 
 #![forbid(unsafe_code)]
 
-pub use bsdiff::{Bsdiff, ParallelScheme};
-pub use bspatch::Bspatch;
+#[cfg(not(any(feature = "bzip2", feature = "zstd")))]
+compile_error!("qbsdiff needs at least one of the bzip2 and zstd features");
 
+#[cfg(feature = "encode")]
+pub use bsdiff::{Bsdiff, ParallelScheme};
+pub use bspatch::{Bspatch, Codec};
+
+#[cfg(feature = "encode")]
 pub mod bsdiff;
 pub mod bspatch;
-#[cfg(test)]
+#[cfg(all(test, feature = "encode"))]
 mod tests;
 mod utils;

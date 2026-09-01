@@ -26,6 +26,8 @@ pub struct UpdateState {
     /// Whether the staged firmware still needs to be swapped into place before resuming.
     #[serde(default)]
     pub finalize_update_pending: bool,
+    #[serde(default)]
+    pub resume_progress_percentage: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -131,8 +131,8 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         while let Some(update) = events.next().await {
             match update {
                 ProgressUpdate::InstallProgress(progress) => {
-                    let percent = progress.completion_percentage();
-                    let time_remaining = progress.estimate_time_remaining_secs();
+                    let percent = progress.completion_percentage;
+                    let time_remaining = progress.estimated_seconds_remaining;
 
                     let time_str = if time_remaining > 60 {
                         format!("{}m {}s", time_remaining / 60, time_remaining % 60)

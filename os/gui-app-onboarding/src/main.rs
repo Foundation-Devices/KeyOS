@@ -464,8 +464,8 @@ fn init_quantum_link(state: StoredValue<AppState>) {
                 ProgressUpdate::InstallProgress(progress) => {
                     callbacks.set_fw_update_state(FwUpdateState::Installing);
 
-                    let percent = progress.completion_percentage();
-                    let secs_remaining = progress.estimate_time_remaining_secs();
+                    let percent = progress.completion_percentage;
+                    let secs_remaining = progress.estimated_seconds_remaining;
                     let mins_remaining = secs_remaining.div_ceil(60).max(1);
                     let time_str = format!("{mins_remaining}m");
 

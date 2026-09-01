@@ -1,7 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! The format of a KeyOS update image: the release manifest describing what to
+//! do, and the updiff patch files it names.
+
 use serde::{Deserialize, Serialize};
+
+mod header;
+pub mod patch;
+mod version;
+
+pub use crate::{header::Header, version::Version};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
