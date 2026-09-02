@@ -36,9 +36,6 @@ const DRAFT_ASSET_LOOKUP_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Args, Debug)]
 pub struct DocsPublishArgs {
-    /// KeyOS-Releases-private tag, including a tagged draft, or the title of its untagged draft.
-    #[arg(value_name = "RELEASE_TAG")]
-    release_tag: Option<String>,
     /// Verify the docs release without uploading.
     #[arg(long)]
     dry_run: bool,
@@ -679,7 +676,7 @@ fn publish_from_root(
     // Keep its lock until the upload finishes so another docs-api invocation
     // cannot replace those files after verification.
     let _docs_bundle_lock = acquire_docs_bundle_lock(root)?;
-    let release = load_generated_release(root, args.release_tag.as_deref())?;
+    let release = load_generated_release(root)?;
     let existing = release_host.release_assets(&release.release_tag)?;
     let collisions = [release.archive_name.as_str(), release.checksum_name.as_str()]
         .into_iter()
@@ -707,18 +704,13 @@ fn publish_from_root(
         )
     };
 
-    let release_tag = if release.release_tag == release.docs_version {
-        String::new()
-    } else {
-        format!(" {}", release.release_tag)
-    };
     let replace = if args.replace { " --replace" } else { "" };
     let docs_site_command =
-        format!("nix develop --command npm run docs:add -- {}{release_tag}{replace}", release.docs_version);
+        format!("nix develop --command npm run docs:add -- {}{replace}", release.docs_version);
     Ok(PublishOutcome { summary, docs_site_command })
 }
 
-fn load_generated_release(root: &Path, release_tag: Option<&str>) -> Result<GeneratedRelease> {
+fn load_generated_release(root: &Path) -> Result<GeneratedRelease> {
     let bundle_dir = sdk_docs_bundle_dir(root);
     let manifest_path = bundle_dir.join("bundle-manifest.json");
     let manifest = read_bundle_manifest(&manifest_path)?;
@@ -751,7 +743,7 @@ fn load_generated_release(root: &Path, release_tag: Option<&str>) -> Result<Gene
         "generated docs manifest has no generator revision"
     );
 
-    let release_tag = require_keyos_version("GitHub release tag", release_tag.unwrap_or(&docs_version))?;
+    let release_tag = docs_version.clone();
     let archive_name = format!("keyos-sdk-docs-v{docs_version}.zip");
     let checksum_name = format!("{archive_name}.sha256");
     let archive = root.join("target").join(&archive_name);
@@ -1140,9 +1132,7 @@ mod tests {
         }
     }
 
-    fn args(release_tag: Option<&str>, dry_run: bool, replace: bool) -> DocsPublishArgs {
-        DocsPublishArgs { release_tag: release_tag.map(str::to_owned), dry_run, replace }
-    }
+    fn args(dry_run: bool, replace: bool) -> DocsPublishArgs { DocsPublishArgs { dry_run, replace } }
 
     #[test]
     fn keyos_versions_are_recoveryos_compatible() {
@@ -1159,12 +1149,12 @@ mod tests {
     #[test]
     fn generated_release_validates_manifest_and_checksum() {
         let fixture = Fixture::new("validation", "1.4.0-beta2");
-        let release = load_generated_release(&fixture.0, Some("1.4.0")).unwrap();
+        let release = load_generated_release(&fixture.0).unwrap();
         assert_eq!(release.docs_version, "1.4.0-beta2");
-        assert_eq!(release.release_tag, "1.4.0");
+        assert_eq!(release.release_tag, "1.4.0-beta2");
 
         fs::write(&release.archive, b"tampered docs archive").unwrap();
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("generated checksum does not match"), "unexpected error: {error}");
     }
 
@@ -1177,7 +1167,7 @@ mod tests {
         manifest["versions"][0]["sourceRevision"] = "new-source".into();
         fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
 
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("archive manifest does not match"), "unexpected error: {error}");
     }
 
@@ -1194,7 +1184,7 @@ mod tests {
         );
         write_test_checksum(&archive);
 
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("version tree does not match"), "unexpected error: {error}");
     }
 
@@ -1209,7 +1199,7 @@ mod tests {
             ],
         );
 
-        load_generated_release(&fixture.0, None).unwrap();
+        load_generated_release(&fixture.0).unwrap();
     }
 
     #[test]
@@ -1228,7 +1218,7 @@ mod tests {
         );
         write_test_checksum(&archive);
 
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("contents do not match"), "unexpected error: {error}");
     }
 
@@ -1255,7 +1245,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("does not contain its current KeyOS version"), "unexpected error: {error}");
     }
 
@@ -1277,7 +1267,7 @@ mod tests {
         );
         write_test_checksum(&archive);
 
-        let error = load_generated_release(&fixture.0, None).unwrap_err().to_string();
+        let error = load_generated_release(&fixture.0).unwrap_err().to_string();
         assert!(error.contains("uncommitted source changes"), "unexpected error: {error}");
     }
 
@@ -1285,7 +1275,7 @@ mod tests {
     fn dry_run_inspects_assets_without_uploading() {
         let fixture = Fixture::new("dry-run", "1.4.0");
         let mut host = MockReleaseHost::default();
-        let outcome = publish_from_root(&fixture.0, &args(None, true, false), &mut host).unwrap();
+        let outcome = publish_from_root(&fixture.0, &args(true, false), &mut host).unwrap();
 
         assert_eq!(host.inspected_tags, ["1.4.0"]);
         assert!(host.uploads.is_empty());
@@ -1299,7 +1289,7 @@ mod tests {
         let mut host =
             LockCheckingReleaseHost { root: fixture.0.clone(), lock_was_held_during_upload: false };
 
-        publish_from_root(&fixture.0, &args(None, false, false), &mut host).unwrap();
+        publish_from_root(&fixture.0, &args(false, false), &mut host).unwrap();
 
         assert!(host.lock_was_held_during_upload);
     }
@@ -1312,21 +1302,17 @@ mod tests {
             "keyos-sdk-docs-v1.4.0.zip.sha256".to_owned(),
         ]);
         let mut host = MockReleaseHost { assets: assets.clone(), ..Default::default() };
-        let error =
-            publish_from_root(&fixture.0, &args(None, false, false), &mut host).unwrap_err().to_string();
+        let error = publish_from_root(&fixture.0, &args(false, false), &mut host).unwrap_err().to_string();
         assert!(error.contains("refusing to replace published release asset(s)"));
         assert!(host.uploads.is_empty());
 
         let mut host = MockReleaseHost { assets, ..Default::default() };
-        let outcome = publish_from_root(&fixture.0, &args(Some("1.4.1"), false, true), &mut host).unwrap();
-        assert_eq!(host.inspected_tags, ["1.4.1"]);
+        let outcome = publish_from_root(&fixture.0, &args(false, true), &mut host).unwrap();
+        assert_eq!(host.inspected_tags, ["1.4.0"]);
         assert_eq!(host.uploads.len(), 1);
         assert!(host.uploads[0].3);
-        assert_eq!(outcome.summary, "Replaced SDK docs 1.4.0 in KeyOS-Releases-private tag 1.4.1");
-        assert_eq!(
-            outcome.docs_site_command,
-            "nix develop --command npm run docs:add -- 1.4.0 1.4.1 --replace"
-        );
+        assert_eq!(outcome.summary, "Replaced SDK docs 1.4.0 in KeyOS-Releases-private tag 1.4.0");
+        assert_eq!(outcome.docs_site_command, "nix develop --command npm run docs:add -- 1.4.0 --replace");
     }
 
     #[test]
@@ -1334,7 +1320,7 @@ mod tests {
         let fixture = Fixture::new("replace-without-collision", "1.4.0");
         let mut host = MockReleaseHost::default();
 
-        let outcome = publish_from_root(&fixture.0, &args(None, false, true), &mut host).unwrap();
+        let outcome = publish_from_root(&fixture.0, &args(false, true), &mut host).unwrap();
 
         assert_eq!(host.uploads.len(), 1);
         assert!(!host.uploads[0].3);

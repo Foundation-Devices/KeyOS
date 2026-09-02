@@ -25,6 +25,7 @@ const RELEASE_MANIFEST_NAME: &str = "release.toml";
 pub struct FinalizeArgs {
     pub targets: Vec<String>,
     pub version: Option<String>,
+    pub keyos_version: Option<String>,
     pub output_dir: PathBuf,
     pub sign_key: Option<String>,
     pub verbose: bool,
@@ -35,6 +36,7 @@ impl Default for FinalizeArgs {
         Self {
             targets: Vec::new(),
             version: None,
+            keyos_version: None,
             output_dir: PathBuf::from("dist"),
             sign_key: None,
             verbose: false,
@@ -51,6 +53,7 @@ impl FinalizeArgs {
             match arg.as_str() {
                 "--target" => args.targets.push(next_value(&mut iter, "--target")?),
                 "--version" => args.version = Some(next_value(&mut iter, "--version")?),
+                "--keyos-version" => args.keyos_version = Some(next_value(&mut iter, "--keyos-version")?),
                 "--output-dir" => args.output_dir = PathBuf::from(next_value(&mut iter, "--output-dir")?),
                 "--sign-key" => args.sign_key = Some(next_value(&mut iter, "--sign-key")?),
                 "--verbose" => args.verbose = true,
@@ -121,10 +124,12 @@ impl UploadArgs {
 struct ReleaseManifest {
     format_version: u32,
     sdk_version: String,
+    keyos_version: String,
     release: String,
     base_url: String,
     targets: Vec<String>,
     workspace_commit: String,
+    target_workspace_commits: BTreeMap<String, String>,
     signing_fingerprint: String,
     files: Vec<ReleaseFile>,
 }
@@ -168,6 +173,32 @@ pub fn validated_sdk_version(root: &Path, config: &Config, requested: Option<&st
     Ok(configured.to_string())
 }
 
+pub fn validated_keyos_version(config: &Config, requested: Option<&str>) -> Result<String> {
+    let requested = requested
+        .ok_or_else(|| boxed_err("finalize requires a KeyOS API version; use --keyos-version VERSION"))?;
+    let normalized = requested.strip_prefix('v').unwrap_or(requested);
+    if normalized.matches('.').count() != 2 {
+        return Err(boxed_err(
+            "KeyOS versions must contain exactly two periods for RecoveryOS compatibility",
+        ));
+    }
+    let requested = Version::parse(normalized).map_err(|error| {
+        boxed_err(format!("requested KeyOS version '{requested}' is not valid SemVer: {error}"))
+    })?;
+    if requested.to_string() != normalized {
+        return Err(boxed_err("KeyOS versions must use canonical SemVer"));
+    }
+
+    let configured = Version::parse(&config.sdk.keyos_version)
+        .map_err(|error| boxed_err(format!("sdk.keyos_version must be valid SemVer: {error}")))?;
+    if requested != configured {
+        return Err(boxed_err(format!(
+            "requested KeyOS version {requested} does not match sdk-build.toml version {configured}"
+        )));
+    }
+    Ok(requested.to_string())
+}
+
 fn workspace_package_version(path: &Path) -> Result<Version> {
     let contents =
         fs::read_to_string(path).map_err(|error| boxed_err(format!("read {}: {error}", path.display())))?;
@@ -205,6 +236,7 @@ fn version_from_release_label(label: &str) -> Result<Version> {
 pub fn finalize(root: &Path, config: &Config, args: &FinalizeArgs) -> Result<()> {
     ensure_current_checkout_clean(root)?;
     let version_text = validated_sdk_version(root, config, args.version.as_deref())?;
+    let keyos_version = validated_keyos_version(config, args.keyos_version.as_deref())?;
     let version = Version::parse(&version_text)?;
     let release = canonical_release_label(&version)?;
     let targets = selected_targets(config, &args.targets)?;
@@ -230,6 +262,7 @@ pub fn finalize(root: &Path, config: &Config, args: &FinalizeArgs) -> Result<()>
         &output_dir,
         &staging,
         &version_text,
+        &keyos_version,
         &release,
         &targets,
         &sign_key,
@@ -298,6 +331,7 @@ fn finalize_into(
     source_dir: &Path,
     staging: &Path,
     version: &str,
+    keyos_version: &str,
     release: &str,
     targets: &[String],
     sign_key: &str,
@@ -311,15 +345,18 @@ fn finalize_into(
 
     let tar_program = package::find_gnu_tar()?.ok_or_else(|| boxed_err("GNU tar is required"))?;
     let current_commit = git_head(root)?;
-    validate_common_archive(&tar_program, &common_archive, version, &current_commit)?;
+    validate_common_archive(&tar_program, &common_archive, version, keyos_version, &current_commit)?;
     let mut archive_paths = vec![common_archive];
+    let mut target_workspace_commits = BTreeMap::new();
     for target in targets {
         let name = target_archive_name(version, target);
         let source = source_dir.join(&name);
         require_file(&source, &format!("packaged archive for {target}"))?;
         let destination = staging.join(&name);
         util::copy_file(&source, &destination)?;
-        validate_target_archive(&tar_program, &destination, version, target, &current_commit)?;
+        let target_commit =
+            validate_target_archive(&tar_program, &destination, version, keyos_version, target)?;
+        target_workspace_commits.insert(target.clone(), target_commit);
         archive_paths.push(destination);
     }
 
@@ -334,9 +371,19 @@ fn finalize_into(
         verbose,
     )?;
     validate_written_metadata(staging, version, targets, &base_url, &written)?;
-    smoke_install_native(staging, targets, verbose)?;
-    write_release_manifest(staging, version, release, &base_url, targets, &current_commit, &written)?;
-    validate_release_directory(staging, version, release)?;
+    smoke_install_native(staging, version, targets, verbose)?;
+    write_release_manifest(
+        staging,
+        version,
+        keyos_version,
+        release,
+        &base_url,
+        targets,
+        &current_commit,
+        &target_workspace_commits,
+        &written,
+    )?;
+    validate_release_directory(staging, version, keyos_version, release)?;
     Ok(())
 }
 
@@ -409,35 +456,138 @@ fn validate_common_archive(
     tar_program: &OsString,
     archive: &Path,
     expected_version: &str,
+    expected_keyos_version: &str,
     expected_commit: &str,
 ) -> Result<()> {
     validate_archive_paths(tar_program, archive)?;
     let manifest = archive_manifest(tar_program, archive)?;
     require_manifest_string(&manifest, "sdk", "version", expected_version, archive)?;
+    require_manifest_string(&manifest, "sdk", "keyos_version", expected_keyos_version, archive)?;
     require_manifest_string(&manifest, "sdk", "kind", "common", archive)?;
     require_manifest_string(&manifest, "build", "profile", "release", archive)?;
     require_manifest_string(&manifest, "build", "workspace_commit", expected_commit, archive)?;
-    require_clean_build_manifest(&manifest, archive)
+    require_clean_build_manifest(&manifest, archive)?;
+    validate_embedded_docs(tar_program, archive, expected_version, expected_keyos_version)
 }
 
 fn validate_target_archive(
     tar_program: &OsString,
     archive: &Path,
     expected_version: &str,
+    expected_keyos_version: &str,
     expected_target: &str,
-    expected_commit: &str,
-) -> Result<()> {
+) -> Result<String> {
     validate_archive_paths(tar_program, archive)?;
     let manifest = archive_manifest(tar_program, archive)?;
 
     require_manifest_string(&manifest, "sdk", "version", expected_version, archive)?;
+    require_manifest_string_if_present(&manifest, "sdk", "keyos_version", expected_keyos_version, archive)?;
     require_manifest_string(&manifest, "sdk", "target", expected_target, archive)?;
     require_manifest_string(&manifest, "build", "profile", "release", archive)?;
-    require_manifest_string(&manifest, "build", "workspace_commit", expected_commit, archive)?;
     require_clean_build_manifest(&manifest, archive)?;
+    let workspace_commit = manifest_string(&manifest, "build", "workspace_commit", archive)?.to_string();
 
     let foundation = archive_member(tar_program, archive, "bin/foundation")?;
-    validate_binary_architecture(&foundation, expected_target, archive)
+    validate_foundation_binary_identity(&foundation, expected_version, &workspace_commit, archive)?;
+    validate_binary_architecture(&foundation, expected_target, archive)?;
+    Ok(workspace_commit)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EmbeddedDocsManifest {
+    schema_version: u32,
+    sdk_version: String,
+    current_keyos_version: String,
+    default_keyos_version: String,
+    versions: Vec<EmbeddedDocsVersion>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EmbeddedDocsVersion {
+    keyos_version: String,
+    path: String,
+}
+
+fn validate_embedded_docs(
+    tar_program: &OsString,
+    archive: &Path,
+    expected_sdk_version: &str,
+    expected_keyos_version: &str,
+) -> Result<()> {
+    for member in ["docs/api/index.html", "docs/api/version-selector.js"] {
+        archive_member(tar_program, archive, member)?;
+    }
+    let manifest_bytes = archive_member(tar_program, archive, "docs/api/bundle-manifest.json")?;
+    let script_bytes = archive_member(tar_program, archive, "docs/api/bundle-manifest.js")?;
+    let manifest = validate_embedded_docs_manifest(
+        &manifest_bytes,
+        &script_bytes,
+        expected_sdk_version,
+        expected_keyos_version,
+    )?;
+    archive_member(tar_program, archive, &format!("docs/api/{}index.html", manifest.versions[0].path))?;
+    Ok(())
+}
+
+fn validate_embedded_docs_manifest(
+    manifest_bytes: &[u8],
+    script_bytes: &[u8],
+    expected_sdk_version: &str,
+    expected_keyos_version: &str,
+) -> Result<EmbeddedDocsManifest> {
+    let manifest_text = std::str::from_utf8(manifest_bytes)
+        .map_err(|error| boxed_err(format!("embedded docs bundle-manifest.json is not UTF-8: {error}")))?;
+    let manifest: EmbeddedDocsManifest = serde_json::from_str(manifest_text)
+        .map_err(|error| boxed_err(format!("parse embedded docs bundle-manifest.json: {error}")))?;
+    if manifest.schema_version != 1 {
+        return Err(boxed_err(format!(
+            "embedded docs schemaVersion is {}, expected 1",
+            manifest.schema_version
+        )));
+    }
+    if manifest.sdk_version != expected_sdk_version {
+        return Err(boxed_err(format!(
+            "embedded docs sdkVersion is '{}', expected '{}'",
+            manifest.sdk_version, expected_sdk_version
+        )));
+    }
+    for (field, actual) in [
+        ("currentKeyosVersion", manifest.current_keyos_version.as_str()),
+        ("defaultKeyosVersion", manifest.default_keyos_version.as_str()),
+    ] {
+        if actual != expected_keyos_version {
+            return Err(boxed_err(format!(
+                "embedded docs {field} is '{actual}', expected '{expected_keyos_version}'"
+            )));
+        }
+    }
+    if manifest.versions.len() != 1 {
+        return Err(boxed_err(format!(
+            "embedded SDK docs must contain exactly one KeyOS version, found {}",
+            manifest.versions.len()
+        )));
+    }
+    let version = &manifest.versions[0];
+    if version.keyos_version != expected_keyos_version {
+        return Err(boxed_err(format!(
+            "embedded docs versions[0].keyosVersion is '{}', expected '{}'",
+            version.keyos_version, expected_keyos_version
+        )));
+    }
+    let expected_path = format!("v{expected_keyos_version}/");
+    if version.path != expected_path {
+        return Err(boxed_err(format!(
+            "embedded docs versions[0].path is '{}', expected '{expected_path}'",
+            version.path
+        )));
+    }
+    let expected_script = format!("window.KEYOS_DOCS_BUNDLE_MANIFEST = {manifest_text};\n");
+    if script_bytes != expected_script.as_bytes() {
+        return Err(boxed_err("embedded docs bundle-manifest.js does not match bundle-manifest.json"));
+    }
+    Ok(manifest)
 }
 
 fn require_clean_build_manifest(manifest: &toml::Value, archive: &Path) -> Result<()> {
@@ -459,14 +609,64 @@ fn require_manifest_string(
     expected: &str,
     archive: &Path,
 ) -> Result<()> {
-    let actual = manifest
-        .get(table)
-        .and_then(|value| value.get(field))
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| boxed_err(format!("{} manifest has no {table}.{field}", archive.display())))?;
+    let actual = manifest_string(manifest, table, field, archive)?;
     if actual != expected {
         return Err(boxed_err(format!(
             "{} manifest {table}.{field} is '{actual}', expected '{expected}'",
+            archive.display()
+        )));
+    }
+    Ok(())
+}
+
+fn require_manifest_string_if_present(
+    manifest: &toml::Value,
+    table: &str,
+    field: &str,
+    expected: &str,
+    archive: &Path,
+) -> Result<()> {
+    let Some(actual) = manifest.get(table).and_then(|value| value.get(field)) else {
+        return Ok(());
+    };
+    let actual = actual.as_str().ok_or_else(|| {
+        boxed_err(format!("{} manifest {table}.{field} is not a string", archive.display()))
+    })?;
+    if actual != expected {
+        return Err(boxed_err(format!(
+            "{} manifest {table}.{field} is '{actual}', expected '{expected}'",
+            archive.display()
+        )));
+    }
+    Ok(())
+}
+
+fn manifest_string<'a>(
+    manifest: &'a toml::Value,
+    table: &str,
+    field: &str,
+    archive: &Path,
+) -> Result<&'a str> {
+    manifest
+        .get(table)
+        .and_then(|value| value.get(field))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| boxed_err(format!("{} manifest has no {table}.{field}", archive.display())))
+}
+
+fn validate_foundation_binary_identity(
+    bytes: &[u8],
+    expected_sdk_version: &str,
+    expected_commit: &str,
+    archive: &Path,
+) -> Result<()> {
+    let short_commit = expected_commit
+        .get(..12)
+        .ok_or_else(|| boxed_err(format!("workspace commit is too short: {expected_commit}")))?;
+    let expected = format!("{expected_sdk_version} ({short_commit})");
+    if !bytes.windows(expected.len()).any(|window| window == expected.as_bytes()) {
+        return Err(boxed_err(format!(
+            "{} foundation binary does not contain expected SDK identity '{expected}'",
             archive.display()
         )));
     }
@@ -641,7 +841,12 @@ fn verify_signature(
     Ok(())
 }
 
-fn smoke_install_native(release_dir: &Path, targets: &[String], verbose: bool) -> Result<()> {
+fn smoke_install_native(
+    release_dir: &Path,
+    expected_sdk_version: &str,
+    targets: &[String],
+    verbose: bool,
+) -> Result<()> {
     let host = host_target()?;
     if !targets.iter().any(|target| target == &host) {
         eprintln!("warning: skipping installer smoke test because {host} is not in this release");
@@ -658,8 +863,16 @@ fn smoke_install_native(release_dir: &Path, targets: &[String], verbose: bool) -
         .env("FOUNDATION_SDK_INSTALL_DIR", &install_root)
         .env("FOUNDATION_SDK_UPDATE_RC", "0");
     util::run_command(&mut command, verbose)?;
-    if !install_root.join("bin/foundation").is_file() {
+    let foundation = install_root.join("bin/foundation");
+    if !foundation.is_file() {
         return Err(boxed_err("installer smoke test did not create bin/foundation"));
+    }
+    let reported_version = util::capture_command(Command::new(&foundation).arg("--version"))?;
+    let expected_prefix = format!("foundation {expected_sdk_version} (");
+    if !reported_version.starts_with(&expected_prefix) {
+        return Err(boxed_err(format!(
+            "installed foundation binary reports '{reported_version}', expected SDK {expected_sdk_version}"
+        )));
     }
     // Without it every 'foundation update' from this release refuses to run.
     if !install_root.join("current/share/foundation-sdk-release.asc").is_file() {
@@ -677,13 +890,16 @@ fn host_target() -> Result<String> {
         .ok_or_else(|| boxed_err("could not determine host target from rustc -vV"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_release_manifest(
     release_dir: &Path,
     version: &str,
+    keyos_version: &str,
     release: &str,
     base_url: &str,
     targets: &[String],
     workspace_commit: &str,
+    target_workspace_commits: &BTreeMap<String, String>,
     written: &WrittenReleaseMetadata,
 ) -> Result<()> {
     let mut files = Vec::new();
@@ -701,10 +917,12 @@ fn write_release_manifest(
     let manifest = ReleaseManifest {
         format_version: 1,
         sdk_version: version.to_string(),
+        keyos_version: keyos_version.to_string(),
         release: release.to_string(),
         base_url: base_url.to_string(),
         targets: targets.to_vec(),
         workspace_commit: workspace_commit.to_string(),
+        target_workspace_commits: target_workspace_commits.clone(),
         signing_fingerprint: written
             .signing_fingerprint
             .clone()
@@ -736,13 +954,24 @@ fn load_release_manifest(release_dir: &Path) -> Result<ReleaseManifest> {
     toml::from_str(&contents).map_err(|error| boxed_err(format!("parse {}: {error}", path.display())))
 }
 
-fn validate_release_directory(release_dir: &Path, version: &str, release: &str) -> Result<ReleaseManifest> {
+fn validate_release_directory(
+    release_dir: &Path,
+    version: &str,
+    keyos_version: &str,
+    release: &str,
+) -> Result<ReleaseManifest> {
     let manifest = load_release_manifest(release_dir)?;
     if manifest.format_version != 1 {
         return Err(boxed_err(format!("unsupported release manifest format {}", manifest.format_version)));
     }
     if manifest.sdk_version != version || manifest.release != release {
         return Err(boxed_err(format!("release manifest identity mismatch: expected {release} / {version}")));
+    }
+    if manifest.keyos_version != keyos_version {
+        return Err(boxed_err(format!(
+            "release manifest KeyOS version is '{}', expected '{}'",
+            manifest.keyos_version, keyos_version
+        )));
     }
     if manifest.base_url != format!("{PUBLIC_DOWNLOAD_ROOT}/{release}") {
         return Err(boxed_err("release manifest has an unexpected base_url"));
@@ -757,6 +986,10 @@ fn validate_release_directory(release_dir: &Path, version: &str, release: &str) 
     let configured_targets = manifest.targets.iter().cloned().collect::<BTreeSet<_>>();
     if configured_targets.len() != manifest.targets.len() || configured_targets.is_empty() {
         return Err(boxed_err("release manifest targets must be non-empty and unique"));
+    }
+    let committed_targets = manifest.target_workspace_commits.keys().cloned().collect::<BTreeSet<_>>();
+    if committed_targets != configured_targets {
+        return Err(boxed_err("release manifest target commit set does not match its targets"));
     }
 
     let expected_manifest_files = finalized_file_names(version, &manifest.targets);
@@ -807,6 +1040,7 @@ fn validate_release_directory(release_dir: &Path, version: &str, release: &str) 
 pub fn upload(root: &Path, config: &Config, args: &UploadArgs) -> Result<()> {
     ensure_current_checkout_clean(root)?;
     let version_text = validated_sdk_version(root, config, None)?;
+    let keyos_version = validated_keyos_version(config, Some(&config.sdk.keyos_version))?;
     let requested_version = version_from_release_label(&args.release)?;
     let configured_version = Version::parse(&version_text)?;
     if requested_version != configured_version {
@@ -818,7 +1052,7 @@ pub fn upload(root: &Path, config: &Config, args: &UploadArgs) -> Result<()> {
 
     let output_dir = util::absolute_path(root, &args.output_dir);
     let release_dir = output_dir.join("releases").join(&args.release);
-    let manifest = validate_release_directory(&release_dir, &version_text, &args.release)?;
+    let manifest = validate_release_directory(&release_dir, &version_text, &keyos_version, &args.release)?;
     let configured_targets = selected_targets(config, &manifest.targets)?;
     if configured_targets != manifest.targets {
         return Err(boxed_err("release targets are not in canonical sdk-build.toml order"));
@@ -828,16 +1062,26 @@ pub fn upload(root: &Path, config: &Config, args: &UploadArgs) -> Result<()> {
         &tar_program,
         &release_dir.join(common_archive_name(&version_text)),
         &version_text,
+        &keyos_version,
         &manifest.workspace_commit,
     )?;
     for target in &manifest.targets {
-        validate_target_archive(
+        let target_commit = manifest
+            .target_workspace_commits
+            .get(target)
+            .ok_or_else(|| boxed_err(format!("release manifest has no workspace commit for {target}")))?;
+        let actual_commit = validate_target_archive(
             &tar_program,
             &release_dir.join(target_archive_name(&version_text, target)),
             &version_text,
+            &keyos_version,
             target,
-            &manifest.workspace_commit,
         )?;
+        if &actual_commit != target_commit {
+            return Err(boxed_err(format!(
+                "{target} archive workspace commit is {actual_commit}, expected {target_commit} from release.toml"
+            )));
+        }
     }
     validate_uploaded_signatures(&release_dir, &manifest)?;
 
@@ -1214,6 +1458,7 @@ fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
@@ -1223,8 +1468,10 @@ mod tests {
     use super::{
         archive_entry_is_safe, binary_description_is_portable_for_target, binary_description_matches_target,
         canonical_release_label, ensure_current_checkout_clean, ordered_upload_files, remote_custom_metadata,
-        replace_finalized_release, staging_destination, stale_release_objects, validated_sdk_version,
-        version_from_release_label, FinalizeArgs, ReleaseFile, ReleaseManifest, UploadArgs,
+        replace_finalized_release, require_manifest_string_if_present, staging_destination,
+        stale_release_objects, validate_embedded_docs_manifest, validate_foundation_binary_identity,
+        validated_keyos_version, validated_sdk_version, version_from_release_label, FinalizeArgs,
+        ReleaseFile, ReleaseManifest, UploadArgs,
     };
     use crate::config::Config;
 
@@ -1233,12 +1480,15 @@ mod tests {
         let args = FinalizeArgs::parse(vec![
             "mac-all".into(),
             "linux-x86".into(),
+            "--keyos-version".into(),
+            "1.4.0-beta3".into(),
             "--sign-key".into(),
             "release@example.com".into(),
             "--verbose".into(),
         ])
         .unwrap();
         assert_eq!(args.targets, ["mac-all", "linux-x86"]);
+        assert_eq!(args.keyos_version.as_deref(), Some("1.4.0-beta3"));
         assert_eq!(args.sign_key.as_deref(), Some("release@example.com"));
         assert!(args.verbose);
     }
@@ -1318,10 +1568,15 @@ mod tests {
         let manifest = ReleaseManifest {
             format_version: 1,
             sdk_version: "1.2.3".into(),
+            keyos_version: "1.4.0-beta3".into(),
             release: "v1.2.3".into(),
             base_url: "https://sdk.foundation.xyz/v1.2.3".into(),
             targets: vec!["aarch64-apple-darwin".into()],
             workspace_commit: "abc".into(),
+            target_workspace_commits: BTreeMap::from([(
+                "aarch64-apple-darwin".into(),
+                "target-commit".into(),
+            )]),
             signing_fingerprint: "fingerprint".into(),
             files,
         };
@@ -1417,6 +1672,54 @@ mod tests {
     }
 
     #[test]
+    fn keyos_version_is_required_and_must_match_the_sdk_configuration() {
+        let mut config = Config::default();
+        config.sdk.keyos_version = "1.4.0-beta3".to_string();
+
+        assert_eq!(validated_keyos_version(&config, Some("1.4.0-beta3")).unwrap(), "1.4.0-beta3");
+        assert!(validated_keyos_version(&config, None).unwrap_err().to_string().contains("--keyos-version"));
+        assert!(validated_keyos_version(&config, Some("1.4.0-beta.3"))
+            .unwrap_err()
+            .to_string()
+            .contains("exactly two periods"));
+        assert!(validated_keyos_version(&config, Some("1.4.0"))
+            .unwrap_err()
+            .to_string()
+            .contains("does not match sdk-build.toml"));
+    }
+
+    #[test]
+    fn embedded_docs_versions_and_browser_manifest_must_match() {
+        let json = serde_json::to_string_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "sdkVersion": "1.0.0",
+            "currentKeyosVersion": "1.4.0-beta3",
+            "defaultKeyosVersion": "1.4.0-beta3",
+            "versions": [{
+                "keyosVersion": "1.4.0-beta3",
+                "path": "v1.4.0-beta3/"
+            }]
+        }))
+        .unwrap();
+        let script = format!("window.KEYOS_DOCS_BUNDLE_MANIFEST = {json};\n");
+
+        validate_embedded_docs_manifest(json.as_bytes(), script.as_bytes(), "1.0.0", "1.4.0-beta3").unwrap();
+        assert!(validate_embedded_docs_manifest(json.as_bytes(), script.as_bytes(), "1.0.0", "1.4.0-beta2")
+            .unwrap_err()
+            .to_string()
+            .contains("currentKeyosVersion"));
+        assert!(validate_embedded_docs_manifest(
+            json.as_bytes(),
+            b"window.KEYOS_DOCS_BUNDLE_MANIFEST = {};\n",
+            "1.0.0",
+            "1.4.0-beta3"
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("does not match"));
+    }
+
+    #[test]
     fn binary_architecture_detection_covers_release_targets() {
         assert!(binary_description_matches_target("Mach-O 64-bit executable arm64", "aarch64-apple-darwin"));
         assert!(binary_description_matches_target("Mach-O 64-bit executable x86_64", "x86_64-apple-darwin"));
@@ -1432,6 +1735,49 @@ mod tests {
             "ELF 64-bit LSB pie executable, x86-64",
             "aarch64-unknown-linux-gnu"
         ));
+    }
+
+    #[test]
+    fn foundation_binary_identity_contains_sdk_version_and_source_commit() {
+        let archive = PathBuf::from("foundation-sdk.tar.gz");
+        let bytes = b"binary data 1.0.0 (039881500da0) more binary data";
+
+        validate_foundation_binary_identity(
+            bytes,
+            "1.0.0",
+            "039881500da0d1d14dc3468e7e5852d986bb898b",
+            &archive,
+        )
+        .unwrap();
+        assert!(validate_foundation_binary_identity(
+            bytes,
+            "1.0.1",
+            "039881500da0d1d14dc3468e7e5852d986bb898b",
+            &archive,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("expected SDK identity"));
+    }
+
+    #[test]
+    fn reused_target_archives_may_predate_keyos_version_metadata() {
+        let archive = PathBuf::from("foundation-sdk.tar.gz");
+        let without_keyos: toml::Value = toml::from_str("[sdk]\nversion = \"1.0.0\"\n").unwrap();
+        require_manifest_string_if_present(&without_keyos, "sdk", "keyos_version", "1.4.0-beta3", &archive)
+            .unwrap();
+
+        let wrong_keyos: toml::Value = toml::from_str("[sdk]\nkeyos_version = \"1.4.0-beta2\"\n").unwrap();
+        assert!(require_manifest_string_if_present(
+            &wrong_keyos,
+            "sdk",
+            "keyos_version",
+            "1.4.0-beta3",
+            &archive,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("expected '1.4.0-beta3'"));
     }
 
     #[test]

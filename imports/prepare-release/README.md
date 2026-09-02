@@ -5,6 +5,8 @@ A Rust implementation of the KeyOS release preparation tool, converted from the 
 ## Features
 
 - **Type-safe version validation**: Uses `semver` crate for proper semantic version parsing
+- **Single release-version input**: Passes the CLI version through to the production firmware build
+  and rejects RecoveryOS-incompatible prereleases such as `beta.3` (use `beta3`)
 - **Better error handling**: Structured error types with detailed error messages
 - **Environment validation**: Validates `EXTRA_ENTROPY` format using regex
 - **Interactive prompts**: Asks for user confirmation when overwriting existing branches/directories

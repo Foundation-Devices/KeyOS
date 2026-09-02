@@ -235,7 +235,7 @@ pub fn unzip(root: &Path, config: &Config, args: &UnzipArgs) -> Result<()> {
         if unchanged == 0 { String::new() } else { format!(" ({unchanged} already identical)") }
     );
     println!("Ready to run:");
-    println!("  just finalize {}", inspected.manifest.targets.join(" "));
+    println!("  just finalize {} {}", config.sdk.keyos_version, inspected.manifest.targets.join(" "));
     Ok(())
 }
 

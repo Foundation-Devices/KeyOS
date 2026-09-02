@@ -33,6 +33,9 @@ use crate::{
 
 #[derive(Args, Debug)]
 pub struct DocsApiArgs {
+    /// KeyOS release version recorded in the generated bundle.
+    #[arg(long, value_name = "VERSION")]
+    keyos_version: Option<String>,
     /// Package this KeyOS version as a deterministic ZIP after building it.
     #[arg(long)]
     package: bool,
@@ -78,6 +81,7 @@ struct SdkBuildConfig {
 #[derive(Debug, Deserialize)]
 struct SdkDocsConfig {
     version: String,
+    keyos_version: String,
     api_crates: Vec<CrateDoc>,
 }
 
@@ -230,8 +234,8 @@ pub fn run(args: DocsApiArgs) -> Result<()> {
     let config = load_sdk_build_config(&root)?;
     validate_sdk_build_config(&root, &source_root, &config)?;
 
-    let current_keyos_version = crate::KEYOS_VERSION.trim_start_matches('v').to_string();
-    validate_source_keyos_version(&source_root, &current_keyos_version)?;
+    let current_keyos_version =
+        selected_keyos_version(args.keyos_version.as_deref(), &config.sdk.keyos_version)?;
     let bundle_dir = sdk_docs_bundle_dir(&root);
     reset_dir(&bundle_dir)?;
     let destination = bundle_dir.join(version_dir_name(&current_keyos_version));
@@ -273,6 +277,7 @@ fn load_sdk_build_config(root: &Path) -> Result<SdkBuildConfig> {
 
 fn validate_sdk_build_config(root: &Path, source_root: &Path, config: &SdkBuildConfig) -> Result<()> {
     Version::parse(&config.sdk.version).context("sdk.version must be valid SemVer")?;
+    validate_keyos_version(&config.sdk.keyos_version)?;
     ensure!(!config.sdk.api_crates.is_empty(), "sdk.api_crates must not be empty");
 
     let sdk_root = root.join("sdk");
@@ -335,7 +340,6 @@ fn validate_sdk_build_config(root: &Path, source_root: &Path, config: &SdkBuildC
         }
     }
 
-    validate_keyos_version(crate::KEYOS_VERSION.trim_start_matches('v'))?;
     Ok(())
 }
 
@@ -361,23 +365,10 @@ fn validate_keyos_version(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_source_keyos_version(source_root: &Path, expected: &str) -> Result<()> {
-    let path = source_root.join("xtask/src/main.rs");
-    let contents = fs::read_to_string(&path)
-        .with_context(|| format!("reading canonical KeyOS version from {}", path.display()))?;
-    let pattern = Regex::new(r#"(?m)^\s*const\s+KEYOS_VERSION\s*:\s*&str\s*=\s*"([^"]+)"\s*;"#)
-        .expect("KeyOS version constant regex is valid");
-    let source = pattern
-        .captures(&contents)
-        .and_then(|captures| captures.get(1))
-        .map(|capture| capture.as_str().trim_start_matches('v'))
-        .with_context(|| format!("{} has no canonical KEYOS_VERSION", path.display()))?;
-    validate_keyos_version(source)?;
-    ensure!(
-        source == expected,
-        "KeyOS source version {source} does not match docs generator version {expected}"
-    );
-    Ok(())
+fn selected_keyos_version(value: Option<&str>, configured: &str) -> Result<String> {
+    let version = value.unwrap_or(configured).trim_start_matches('v');
+    validate_keyos_version(version)?;
+    Ok(version.to_owned())
 }
 
 fn reset_dir(path: &Path) -> Result<()> {
@@ -2232,11 +2223,9 @@ mod tests {
     }
 
     #[test]
-    fn keyos_override_must_match_the_generator_version() {
-        validate_source_keyos_version(&project_root(), crate::KEYOS_VERSION).unwrap();
-
-        let error = validate_source_keyos_version(&project_root(), "1.4.0-beta1").unwrap_err().to_string();
-        assert!(error.contains("does not match docs generator version"), "unexpected error: {error}");
+    fn explicit_release_version_overrides_the_sdk_default() {
+        assert_eq!(selected_keyos_version(None, "1.4.0-beta3").unwrap(), "1.4.0-beta3");
+        assert_eq!(selected_keyos_version(Some("1.4.0-beta4"), "1.4.0-beta3").unwrap(), "1.4.0-beta4");
     }
 
     #[test]

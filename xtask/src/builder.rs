@@ -109,6 +109,7 @@ pub(crate) struct Builder {
     profile: Profile,
     ci: bool,
     reproducible: bool,
+    keyos_version: Version,
 }
 
 enum Profile {
@@ -134,10 +135,15 @@ pub(crate) struct BuildResult {
     built_loader: Option<String>,
     built_loader_bin: Option<PathBuf>,
     built_xous_img: Option<PathBuf>,
+    keyos_version: Version,
 }
 
 impl Builder {
     pub fn new(args: BuildArgs) -> Builder {
+        args.require_production_keyos_version();
+        let keyos_version = args.keyos_version.clone().unwrap_or_else(|| {
+            Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer")
+        });
         let mut features = Vec::new();
         let mut loader_features = Vec::new();
         let mut kernel_features = Vec::new();
@@ -196,6 +202,7 @@ impl Builder {
             ci: args.ci,
             // production_firmware implies reproducible
             reproducible: args.reproducible || args.production_firmware,
+            keyos_version,
         }
     }
 
@@ -529,6 +536,7 @@ impl Builder {
             built_loader,
             built_loader_bin,
             built_xous_img,
+            keyos_version: self.keyos_version,
         };
         // Emit the hosted-mode services manifest so the SDK packager (and any
         // other `build --hosted` consumer) can stage it for the simulator kernel.
@@ -743,8 +751,12 @@ impl Builder {
         }
         // fileHashes must be taken after the icons are staged, so in-bundle icon files are covered.
         let app_version = crate_version(app_name);
-        let manifest =
-            generated_bundle_manifest(load_manifest(app_name), &app_version, bundle_file_hashes(bundle_dir));
+        let manifest = generated_bundle_manifest(
+            load_manifest(app_name),
+            &app_version,
+            &self.keyos_version,
+            bundle_file_hashes(bundle_dir),
+        );
         let hashed_files = manifest.file_hashes.keys().cloned().collect();
         let manifest_path = bundle_dir.join("manifest.json");
         serde_json::to_writer(
@@ -956,7 +968,7 @@ impl BuildResult {
     /// Additionally runs `join-image` that creates combined loader + kernel + apps image to
     /// be used with `at91bootstrap` bootloader.
     /// Can only be called after build()
-    pub fn build_combined_image(self, target_path: &Path, signing_mode: SigningMode, version: &str) {
+    pub fn build_combined_image(self, target_path: &Path, signing_mode: SigningMode) {
         if self.target.is_none() {
             // We don't build combined images in hosted mode, so let's noop out.
             return;
@@ -1001,7 +1013,8 @@ impl BuildResult {
         args.extend_from_slice(&["-i", combined_img_path_str]);
         args.extend_from_slice(&["-c", cosign2_config_path_str]);
         args.extend_from_slice(&["--in-place"]);
-        args.extend_from_slice(&["--binary-version", &version]);
+        let keyos_version = self.keyos_version.to_string();
+        args.extend_from_slice(&["--binary-version", &keyos_version]);
 
         if !Command::new("cosign2").args(&args).status().unwrap().success() {
             panic!("cosign2 failed");
@@ -1220,12 +1233,11 @@ fn sign_bundle(cosign2: &Cosign2, mode: SigningMode, bundled: &BundledApp) {
 fn generated_bundle_manifest(
     mut manifest: Manifest,
     app_version: &Version,
+    keyos_version: &Version,
     file_hashes: BTreeMap<String, [u8; app_manifest::FILE_HASH_BYTE_LEN]>,
 ) -> Manifest {
     manifest.version = Some(app_version.to_string());
-    manifest.min_keyos_version.get_or_insert_with(|| {
-        Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer")
-    });
+    manifest.min_keyos_version.get_or_insert_with(|| keyos_version.clone());
     manifest.file_hashes = file_hashes;
     manifest
 }
@@ -1322,15 +1334,30 @@ mod tests {
                 .unwrap();
         let cargo_version = crate_version("xtask");
 
-        let generated = generated_bundle_manifest(manifest, &cargo_version, BTreeMap::new());
+        let keyos_version = Version::parse("1.4.0-beta3").unwrap();
+        let generated = generated_bundle_manifest(manifest, &cargo_version, &keyos_version, BTreeMap::new());
         let generated_json = serde_json::to_string(&generated).unwrap();
         let packaged: Manifest = serde_json::from_str(&generated_json).unwrap();
 
         assert_eq!(packaged.version, Some(cargo_version.to_string()));
-        assert_eq!(
-            packaged.min_keyos_version,
-            Some(Version::parse(crate::KEYOS_VERSION).expect("KEYOS_VERSION must be valid SemVer"))
-        );
+        assert_eq!(packaged.min_keyos_version, Some(keyos_version));
+    }
+
+    #[test]
+    #[should_panic(expected = "--production-firmware requires --keyos-version VERSION")]
+    fn production_builds_require_an_explicit_keyos_version() {
+        Builder::new(BuildArgs { production_firmware: true, ..Default::default() });
+    }
+
+    #[test]
+    fn developer_builds_default_to_keyos_version_and_cli_overrides_it() {
+        let default = Builder::new(BuildArgs::default());
+        assert_eq!(default.keyos_version, Version::parse(crate::KEYOS_VERSION).unwrap());
+
+        let requested = Version::parse("1.4.0-beta3").unwrap();
+        let explicit =
+            Builder::new(BuildArgs { keyos_version: Some(requested.clone()), ..Default::default() });
+        assert_eq!(explicit.keyos_version, requested);
     }
 
     #[test]

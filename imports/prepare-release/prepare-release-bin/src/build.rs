@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use semver::Version;
 use std::{env, fs, io::Write, path::PathBuf, process::Command};
 
 const FOUNDATION_SIDELOAD_APP_COUNT: usize = 3;
@@ -20,6 +21,7 @@ pub struct FirmwarePaths {
 
 /// Build firmware components (bootloader + recovery + main OS)
 pub fn build_firmware(
+    version: &Version,
     log_serial: bool,
     log_usb_serial: bool,
     log_usb_file: bool,
@@ -29,16 +31,7 @@ pub fn build_firmware(
 
     writeln!(stdout, "Building firmware (bootloader + recovery + main OS)...").map_err(Error::Stdout)?;
 
-    let mut args = vec![
-        "xtask".to_string(),
-        "build-all".to_string(),
-        "--dont-sign".to_string(), /* --dont-sign because the files will be signed by a `signer` tool in
-                                    * KeyOS-Releases-private */
-        "--production-bootloader".to_string(),
-        "--production-firmware".to_string(),
-        "--extra-entropy".to_string(),
-        extra_entropy,
-    ];
+    let mut args = production_build_args(version, extra_entropy);
 
     if log_serial {
         writeln!(stdout, "  - Enabling UART serial logging").map_err(Error::Stdout)?;
@@ -66,6 +59,21 @@ pub fn build_firmware(
     }
 
     Ok(())
+}
+
+fn production_build_args(version: &Version, extra_entropy: String) -> Vec<String> {
+    vec![
+        "xtask".to_string(),
+        "build-all".to_string(),
+        "--dont-sign".to_string(), /* --dont-sign because the files will be signed by a `signer` tool in
+                                    * KeyOS-Releases-private */
+        "--production-bootloader".to_string(),
+        "--production-firmware".to_string(),
+        "--keyos-version".to_string(),
+        version.to_string(),
+        "--extra-entropy".to_string(),
+        extra_entropy,
+    ]
 }
 
 /// Verify that firmware files were built successfully (build phase).
@@ -264,3 +272,15 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::production_build_args;
+    use semver::Version;
+
+    #[test]
+    fn production_build_receives_the_release_version() {
+        let args = production_build_args(&Version::parse("1.4.0-beta3").unwrap(), "entropy".into());
+        assert!(args.windows(2).any(|pair| pair == ["--keyos-version", "1.4.0-beta3"]));
+    }
+}

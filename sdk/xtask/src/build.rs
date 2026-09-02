@@ -73,6 +73,15 @@ pub struct BuildArgs {
     pub verbose: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct CommonBuildArgs {
+    pub release: bool,
+    pub package: bool,
+    pub source_overrides: SourceOverrides,
+    pub output_dir: PathBuf,
+    pub verbose: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CheckLayoutArgs {
     pub source_overrides: SourceOverrides,
@@ -100,6 +109,18 @@ impl Default for BuildArgs {
             sign_key: None,
             output_dir: PathBuf::from("dist"),
             jobs: None,
+            verbose: false,
+        }
+    }
+}
+
+impl Default for CommonBuildArgs {
+    fn default() -> Self {
+        Self {
+            release: false,
+            package: false,
+            source_overrides: BTreeMap::new(),
+            output_dir: PathBuf::from("dist"),
             verbose: false,
         }
     }
@@ -136,6 +157,31 @@ impl BuildArgs {
                 }
                 "--verbose" => args.verbose = true,
                 other => return Err(boxed_err(format!("unsupported build option: {other}"))),
+            }
+        }
+
+        Ok(args)
+    }
+}
+
+impl CommonBuildArgs {
+    pub fn parse(raw: Vec<String>) -> Result<Self> {
+        let mut args = Self::default();
+        let mut iter = raw.into_iter();
+
+        while let Some(arg) = iter.next() {
+            match arg.as_str() {
+                "--release" => args.release = true,
+                "--package" => args.package = true,
+                "--keyos-dir" => {
+                    parse_override(&mut args.source_overrides, "keyos", &mut iter, "--keyos-dir")?
+                }
+                "--slint-dir" => {
+                    parse_override(&mut args.source_overrides, "slint", &mut iter, "--slint-dir")?
+                }
+                "--output-dir" => args.output_dir = PathBuf::from(next_value(&mut iter, "--output-dir")?),
+                "--verbose" => args.verbose = true,
+                other => return Err(boxed_err(format!("unsupported build-common option: {other}"))),
             }
         }
 
@@ -289,6 +335,34 @@ pub fn run(root: &Path, config: &Config, args: &BuildArgs) -> Result<()> {
             verbose: args.verbose,
         };
         package::run(root, config, &package_args, sign_key.as_deref(), args.verbose)?;
+    }
+
+    Ok(())
+}
+
+pub fn run_common(root: &Path, config: &Config, args: &CommonBuildArgs) -> Result<()> {
+    let mut source_overrides = args.source_overrides.clone();
+    submodules::apply_env_overrides(config, &mut source_overrides);
+    ensure_release_sources_are_pinned(args.release, &args.source_overrides, &source_overrides, config)?;
+
+    let output_dir = util::absolute_path(root, &args.output_dir);
+    util::ensure_dir(&output_dir)?;
+    let stage_root = package::stage_root_dir(&output_dir);
+    let _stage_lock = StageDirLock::acquire(&output_dir, &stage_root)?;
+    util::ensure_dir(&stage_root)?;
+
+    let resolver = submodules::resolve(root, config, &source_overrides)?;
+    ensure_layout(root, config, &resolver, args.verbose)?;
+    let build_args = BuildArgs {
+        release: args.release,
+        output_dir: args.output_dir.clone(),
+        verbose: args.verbose,
+        ..Default::default()
+    };
+    build_common_stage(root, config, &build_args, &output_dir, &resolver)?;
+
+    if args.package {
+        package::package_common(root, config, &args.output_dir, args.verbose)?;
     }
 
     Ok(())
@@ -2251,7 +2325,7 @@ fn build_docs(
     // and therefore does not deadlock trying to take the same lock.
     let _docs_bundle_lock = acquire_docs_bundle_lock(&generator_root)?;
     let keyos_root = resolver.keyos_root();
-    let mut command = docs_generator_command(&generator_root, keyos_root);
+    let mut command = docs_generator_command(&generator_root, keyos_root, &config.sdk.keyos_version);
     util::run_command(&mut command, verbose)?;
 
     let generated_docs = generator_root.join(DOCS_BUNDLE_OUTPUT_PATH);
@@ -2294,11 +2368,13 @@ fn docs_generator_root(sdk_root: &Path) -> Result<PathBuf> {
     Ok(root.to_path_buf())
 }
 
-fn docs_generator_command(generator_root: &Path, source_root: &Path) -> Command {
+fn docs_generator_command(generator_root: &Path, source_root: &Path, keyos_version: &str) -> Command {
     let mut command = Command::new("cargo");
     command
         .arg("xtask")
         .arg("docs-api")
+        .arg("--keyos-version")
+        .arg(keyos_version)
         .arg("--source-root")
         .arg(source_root)
         .current_dir(generator_root)
@@ -2320,6 +2396,7 @@ fn render_manifest(
     lines.push("[sdk]".to_string());
     lines.push(format!("version = \"{}\"", config.sdk.version));
     lines.push(format!("api_version = \"{}\"", config.sdk.api_version));
+    lines.push(format!("keyos_version = \"{}\"", config.sdk.keyos_version));
     lines.push(format!("target = \"{}\"", target));
     lines.push("nix_required = true".to_string());
     lines.push(String::new());
@@ -2400,6 +2477,7 @@ fn render_common_manifest(root: &Path, config: &Config, release: bool) -> String
     let mut lines = vec![
         "[sdk]".to_string(),
         format!("version = \"{}\"", config.sdk.version),
+        format!("keyos_version = \"{}\"", config.sdk.keyos_version),
         "kind = \"common\"".to_string(),
         String::new(),
         "[build]".to_string(),
@@ -2467,8 +2545,8 @@ mod tests {
         stage_cargo_package_snapshot, stage_shared_ui_artifact, stage_slint_sdk_snapshot,
         strip_program_candidates, validate_release_slint_source, validate_release_slint_source_hash,
         verify_common_stage, verify_staged_path_dependencies, verify_target_stage, BuildArgs,
-        ScalarEnumVariant, SmokeCheckArgs, SourceOverrides, StageDirLock, BT_PLACEHOLDER_DESTINATION,
-        DOCS_BUNDLE_LOCK_HELD_ENV, DOCS_BUNDLE_LOCK_PATH,
+        CommonBuildArgs, ScalarEnumVariant, SmokeCheckArgs, SourceOverrides, StageDirLock,
+        BT_PLACEHOLDER_DESTINATION, DOCS_BUNDLE_LOCK_HELD_ENV, DOCS_BUNDLE_LOCK_PATH,
     };
     use crate::config::{load, workspace_root};
 
@@ -2495,11 +2573,14 @@ mod tests {
     fn docs_generator_uses_current_checkout_with_resolved_keyos_sources() {
         let generator_root = Path::new("/current/keyos");
         let source_root = Path::new("/overrides/keyos");
-        let command = docs_generator_command(generator_root, source_root);
+        let command = docs_generator_command(generator_root, source_root, "1.4.0-beta3");
         let args = command.get_args().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>();
 
         assert_eq!(command.get_current_dir(), Some(generator_root));
-        assert_eq!(args, ["xtask", "docs-api", "--source-root", "/overrides/keyos"]);
+        assert_eq!(
+            args,
+            ["xtask", "docs-api", "--keyos-version", "1.4.0-beta3", "--source-root", "/overrides/keyos"]
+        );
         assert!(command.get_envs().any(|(name, value)| name.to_string_lossy() == DOCS_BUNDLE_LOCK_HELD_ENV
             && value.is_some_and(|value| value.to_string_lossy() == "1")));
     }
@@ -2590,6 +2671,24 @@ mod tests {
         assert!(parsed.sign);
         assert_eq!(parsed.sign_key.as_deref(), Some("release@example.com"));
         assert!(parsed.verbose);
+    }
+
+    #[test]
+    fn common_build_args_are_docs_and_package_only() {
+        let parsed = CommonBuildArgs::parse(vec![
+            "--release".into(),
+            "--package".into(),
+            "--output-dir".into(),
+            "docs-dist".into(),
+            "--verbose".into(),
+        ])
+        .unwrap();
+
+        assert!(parsed.release);
+        assert!(parsed.package);
+        assert_eq!(parsed.output_dir, PathBuf::from("docs-dist"));
+        assert!(parsed.verbose);
+        assert!(CommonBuildArgs::parse(vec!["--target".into(), "linux-all".into()]).is_err());
     }
 
     #[test]

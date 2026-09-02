@@ -8,6 +8,7 @@ use bootloader::{
     build_keyos_boot, hash_historical_bootloader, BootloaderBuildArgs, HashBootloaderArgs, SambaCryptArgs,
 };
 use clap::{Args, Parser, Subcommand};
+use semver::Version;
 
 use crate::bootimage::{build_charge_boot, create_boot_image};
 use crate::builder::*;
@@ -32,14 +33,13 @@ mod tests;
 mod utils;
 mod xous_arguments;
 
-const KEYOS_VERSION: &str = "1.4.0-beta2";
-
 const BOOTLOADER_IMAGE: &str = "boot.bin";
 const BOOTLOADER_IMAGE_CIPHER: &str = "boot_sama5d2x.cip";
 const BOOT_ASSETS_DIR: &str = "blassets";
 
 const APP_IMAGE: &str = "app.bin";
 const RECOVERY_IMAGE: &str = "recovery.bin";
+const KEYOS_VERSION: &str = "1.4.0";
 
 /// Logging output services.
 const LOGGING_SERVICE_SERIAL: &str = "log-serial";
@@ -266,6 +266,9 @@ enum Commands {
         /// Implies --reproducible.
         #[arg(long)]
         production_firmware: bool,
+        /// KeyOS release version stamped into generated app manifests.
+        #[arg(long, value_name = "VERSION", value_parser = parse_keyos_version)]
+        keyos_version: Option<Version>,
     },
     /// Build a full flash-able firmware image, combining the bootloader, the recovery and normal images.
     /// Run the following first (in this order):
@@ -408,10 +411,33 @@ struct BuildArgs {
         conflicts_with = "with_systemview"
     )]
     production_firmware: bool,
+    /// KeyOS release version stamped into firmware and generated app manifests.
+    /// Required for production firmware; development builds default to KEYOS_VERSION.
+    #[arg(long, value_name = "VERSION", value_parser = parse_keyos_version)]
+    keyos_version: Option<Version>,
 }
 
 impl BuildArgs {
     pub fn with_recovery(self, is_recovery: bool) -> Self { Self { is_recovery, ..self } }
+
+    fn require_production_keyos_version(&self) {
+        if self.production_firmware && self.keyos_version.is_none() {
+            panic!("--production-firmware requires --keyos-version VERSION");
+        }
+    }
+}
+
+fn parse_keyos_version(input: &str) -> Result<Version, String> {
+    let normalized = input.strip_prefix('v').unwrap_or(input);
+    if normalized.matches('.').count() != 2 {
+        return Err("KeyOS versions must contain exactly two periods for RecoveryOS compatibility".into());
+    }
+    let version =
+        Version::parse(normalized).map_err(|error| format!("invalid KeyOS version '{input}': {error}"))?;
+    if version.to_string() != normalized {
+        return Err("KeyOS versions must use canonical SemVer".into());
+    }
+    Ok(version)
 }
 
 /// target triple for KeyOS builds
@@ -457,22 +483,24 @@ fn main() {
                 pack_app_archive(&bundle, &out.join(app_archive::archive_file_name(&app)));
             }
         }
-        Commands::BuildSideloadApps { apps, dont_sign, reproducible, production_firmware } => {
+        Commands::BuildSideloadApps { apps, dont_sign, reproducible, production_firmware, keyos_version } => {
             build_sideload_apps(
                 &apps,
                 dont_sign,
-                BuildArgs { reproducible, production_firmware, ..Default::default() },
+                BuildArgs { reproducible, production_firmware, keyos_version, ..Default::default() },
             );
         }
         Commands::BuildFirmwareImage { samba_crypt_args } => {
             create_boot_image(samba_crypt_args);
         }
         Commands::BuildAll { build_args, dont_sign, bootloader_args, samba_crypt_args } => {
+            build_args.require_production_keyos_version();
             build_keyos_boot(bootloader_args);
             build(build_args.clone().with_recovery(true), dont_sign);
             let sideload_args = BuildArgs {
                 reproducible: build_args.reproducible,
                 production_firmware: build_args.production_firmware,
+                keyos_version: build_args.keyos_version.clone(),
                 ..Default::default()
             };
             build(build_args, dont_sign);
@@ -529,8 +557,18 @@ fn build(mut build_args: BuildArgs, dont_sign: bool) {
     Builder::new(build_args).build(signing_mode).build_combined_image(
         &Builder::images_path().join(if is_recovery { RECOVERY_IMAGE } else { APP_IMAGE }),
         signing_mode,
-        KEYOS_VERSION,
     );
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::parse_keyos_version;
+
+    #[test]
+    fn release_versions_are_recoveryos_compatible() {
+        assert_eq!(parse_keyos_version("v1.4.0-beta3").unwrap().to_string(), "1.4.0-beta3");
+        assert!(parse_keyos_version("1.4.0-beta.3").unwrap_err().contains("exactly two periods"));
+    }
 }
 
 /// Build `apps` (default: [`FOUNDATION_SIDELOAD_APPS`]) as Foundation-signed sideloadable

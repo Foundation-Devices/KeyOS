@@ -15,7 +15,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use build::{BuildArgs, CheckLayoutArgs, SmokeCheckArgs};
+use build::{BuildArgs, CheckLayoutArgs, CommonBuildArgs, SmokeCheckArgs};
 use config::{load, workspace_root, Result};
 use handoff::{SyncArgs, UnzipArgs, ZipArgs};
 use package::PackageArgs;
@@ -42,6 +42,10 @@ fn run() -> Result<()> {
         "build" => {
             let parsed = BuildArgs::parse(args.collect())?;
             build::run(&root, &config, &parsed)
+        }
+        "build-common" => {
+            let parsed = CommonBuildArgs::parse(args.collect())?;
+            build::run_common(&root, &config, &parsed)
         }
         "check-layout" => {
             let parsed = CheckLayoutArgs::parse(args.collect())?;
@@ -114,6 +118,7 @@ Foundation SDK xtask
 
 Commands:
   build [OPTIONS]
+  build-common [OPTIONS]
   check-layout [OPTIONS]
   smoke-check [OPTIONS]
   package [OPTIONS]
@@ -129,12 +134,13 @@ Examples:
   cargo xtask check-layout
   cargo xtask smoke-check
   cargo xtask build --target all --release
+  cargo xtask build-common --release --package
   cargo xtask build --target aarch64-apple-darwin --release --package
   cargo xtask package --target all
   cargo xtask zip linux-all /media/usb
   cargo xtask unzip /media/usb/foundation-sdk-1.0.0-linux-all-handoff.zip
   cargo xtask sync linux-all ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
-  cargo xtask finalize mac-all linux-x86
+  cargo xtask finalize --keyos-version 1.4.0-beta3 mac-all linux-x86
   cargo xtask upload v1.0.0 --link-as-latest
   cargo xtask check-submodules
 "

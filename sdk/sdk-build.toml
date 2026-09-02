@@ -4,6 +4,10 @@
 [sdk]
 version = "1.0.0"
 api_version = "1"
+# KeyOS API release documented by this SDK. This is independent of the SDK
+# package version and must use RecoveryOS-compatible SemVer (for example,
+# `beta3`, not `beta.3`).
+keyos_version = "1.4.0-beta3"
 
 # The public Rust crates copied into the SDK and included in the generated API
 # reference. This is the only allowlist for the SDK API surface.

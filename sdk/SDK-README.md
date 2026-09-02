@@ -163,6 +163,7 @@ The most important commands are:
 - `cargo xtask check-layout`
 - `cargo xtask smoke-check`
 - `cargo xtask build`
+- `cargo xtask build-common`
 - `cargo xtask package`
 - `cargo xtask zip`
 - `cargo xtask unzip`
@@ -181,7 +182,7 @@ For each requested target triple, `cargo xtask build`:
 3. Compiles the SDK binaries declared in `sdk-build.toml`
 4. Stages the hosted KeyOS simulator runtime
 5. Copies the curated source and support trees into `dist/<target>/`
-6. Builds or copies documentation unless `--skip-docs` is used
+6. Builds documentation for `[sdk].keyos_version` from `sdk-build.toml` unless `--skip-docs` is used
 7. Writes bundle metadata such as `manifest.toml`
 8. Verifies the staged bundle has the required files
 9. Optionally packages the result into `.tar.gz` archives when `--package` is set
@@ -222,8 +223,23 @@ Useful commands from `sdk/`:
 nix develop --command cargo xtask check-layout
 nix develop --command cargo xtask smoke-check
 nix develop --command cargo xtask build --target aarch64-apple-darwin --release --package
-nix develop --command cargo xtask finalize mac-all linux-x86
+nix develop --command cargo xtask build-common --release --package
+nix develop --command cargo xtask finalize --keyos-version 1.4.0-beta3 mac-all linux-x86
 ```
+
+When only the docs or other common SDK content changed, use the convenience recipe:
+
+```bash
+just docs
+just finalize 1.4.0-beta3 mac-all linux-all
+```
+
+`just docs` rebuilds and packages only `foundation-sdk-<SDK-version>-common.tar.gz`. It preserves the
+existing platform archives in `dist/`, so neither `just build mac-all` nor `just build linux-all` is
+needed. Run it from the final clean commit: finalization requires the refreshed common archive to be
+a clean release build. Existing target archives may come from their own earlier clean commits;
+finalization validates each archive's recorded commit against the SDK identity embedded in its
+`foundation` binary.
 
 There is also a convenience reinstall flow for Apple Silicon by default:
 
@@ -247,7 +263,7 @@ just reinstall x86
 For macOS release artifacts, use `just build mac-all` on the Apple Silicon Mac
 that will finalize the release. This leaves both `aarch64-apple-darwin` and
 `x86_64-apple-darwin` archives in its local `dist/` before the Linux archives
-arrive and `just finalize` runs.
+arrive and `just finalize <KeyOS-version> ...` runs.
 
 Finalization accepts explicit triples and these selectors: `mac-all`,
 `mac-arm`, `mac-x86`, `linux-all`, `linux-arm`, `linux-x86`, `win-all`,
@@ -308,7 +324,7 @@ Deployment is conceptually simple:
 
 1. build and package one archive per target
 2. send the Linux archives directly to the Apple Silicon finalization Mac with `just sync <address> <remote-dist-path>`, or use `just zip linux-all` and `just unzip <file-path>` for a USB handoff
-3. run `just finalize <selectors...>` to copy exactly the selected archives into `dist/releases/<release>/`, validate their embedded version, target, architecture, release profile, Git commit, and clean-workspace state, then generate and verify signatures, checksums, `install.sh`, and `release.toml`
+3. run `just finalize <KeyOS-version> <selectors...>` to copy exactly the selected archives into `dist/releases/<release>/`; the requested KeyOS version must match `sdk-build.toml`, the common archive, any target archive that records it, and the embedded docs JSON and browser-side manifest, while every target's clean source commit and SDK version must match its `foundation` binary identity and the installed native `foundation --version` output
 4. use `--sign-key` only if you want to override the default GPG signing identity source
 5. publish with `just upload <release>` and add `--link-as-latest` when that release should become the default
 
@@ -319,7 +335,7 @@ For example:
 just sync ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
 
 # On the Apple Silicon Mac that built mac-all and will finalize the release.
-just finalize mac-all linux-all
+just finalize 1.4.0-beta3 mac-all linux-all
 just upload v1.0.0 --link-as-latest
 ```
 

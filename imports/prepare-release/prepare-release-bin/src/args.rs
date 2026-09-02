@@ -49,7 +49,25 @@ pub struct Args {
 
 fn parse_version(input: &str) -> Result<Version, String> {
     let normalized = input.strip_prefix('v').unwrap_or(input);
-    normalized.parse::<Version>().map_err(|error| format!("invalid version '{input}': {error}"))
+    if normalized.matches('.').count() != 2 {
+        return Err("KeyOS versions must contain exactly two periods for RecoveryOS compatibility".into());
+    }
+    let version = normalized.parse::<Version>().map_err(|error| format!("invalid version '{input}': {error}"))?;
+    if version.to_string() != normalized {
+        return Err("KeyOS versions must use canonical SemVer".into());
+    }
+    Ok(version)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_version;
+
+    #[test]
+    fn release_versions_are_recoveryos_compatible() {
+        assert_eq!(parse_version("v1.4.0-beta3").unwrap().to_string(), "1.4.0-beta3");
+        assert!(parse_version("1.4.0-beta.3").unwrap_err().contains("exactly two periods"));
+    }
 }
 
 pub fn args<I, T>(args: I) -> Result<Args, Error>

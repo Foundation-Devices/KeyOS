@@ -96,6 +96,32 @@ build targets="native":
     nix develop "path:$temp_flake_dir" --command \
         cargo xtask build "${xtask_args[@]}" --release --package
 
+# Rebuild and package only the common SDK content, including embedded API docs.
+# Existing platform-specific archives in dist/ are preserved.
+docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    temp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/foundation-sdk-flake.XXXXXX")"
+    temp_flake_dir="$temp_workspace/sdk"
+    cleanup() {
+        rm -rf "$temp_workspace"
+    }
+    trap cleanup EXIT
+
+    mkdir -p "$temp_flake_dir/nix"
+    cp "{{ justfile_directory() }}/flake.nix" "$temp_flake_dir/flake.nix"
+    cp "{{ justfile_directory() }}/flake.lock" "$temp_flake_dir/flake.lock"
+    cp "{{ justfile_directory() }}/sdk-build.toml" "$temp_flake_dir/sdk-build.toml"
+    cp "{{ justfile_directory() }}/rust-toolchain.toml" "$temp_flake_dir/rust-toolchain.toml"
+    cp -R "{{ justfile_directory() }}/nix/." "$temp_flake_dir/nix/"
+    cp "{{ justfile_directory() }}/../nix/foundation-slint.nix" "$temp_flake_dir/nix/foundation-slint.nix"
+
+    cd "{{ justfile_directory() }}"
+
+    nix develop "path:$temp_flake_dir" --command \
+        cargo xtask build-common --release --package
+
 # Export packaged SDK builds to a portable handoff ZIP.
 zip targets="native" destination="":
     #!/usr/bin/env bash
@@ -196,7 +222,7 @@ sync address destination targets="linux-all":
     nix develop "path:$temp_flake_dir" --command \
         cargo xtask sync {{ quote(targets) }} {{ quote(address) }} {{ quote(destination) }}
 
-finalize *args:
+finalize keyos_version *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -218,7 +244,7 @@ finalize *args:
     cd "{{ justfile_directory() }}"
 
     nix develop "path:$temp_flake_dir" --command \
-        cargo xtask finalize {{ args }}
+        cargo xtask finalize --keyos-version {{ quote(keyos_version) }} {{ args }}
 
 upload release *args:
     #!/usr/bin/env bash

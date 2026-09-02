@@ -65,18 +65,7 @@ pub fn run(
     let tar_program = find_gnu_tar()?.ok_or_else(|| {
         boxed_err("deterministic packaging requires GNU tar (expected 'tar' or 'gtar' with GNU tar)")
     })?;
-    let mut archive_paths = Vec::new();
-
-    let common_stage = common_stage_dir(&output_dir);
-    if !common_stage.exists() {
-        return Err(boxed_err(format!("missing common build staging directory: {}", common_stage.display())));
-    }
-    let common_archive_path = output_dir.join(common_archive_name(&version));
-    remove_if_exists(&common_archive_path)?;
-    let mut common_archive_command =
-        deterministic_archive_command(&tar_program, &common_archive_path, &common_stage);
-    util::run_command(&mut common_archive_command, verbose)?;
-    archive_paths.push(common_archive_path);
+    let mut archive_paths = vec![write_common_archive(&tar_program, &output_dir, &version, verbose)?];
 
     for target in &targets {
         let stage_source = target_stage_dir(&output_dir, target);
@@ -104,6 +93,40 @@ pub fn run(
         verbose,
     )?;
     Ok(())
+}
+
+pub fn package_common(
+    root: &Path,
+    config: &Config,
+    requested_output_dir: &Path,
+    verbose: bool,
+) -> Result<PathBuf> {
+    let output_dir = util::absolute_path(root, requested_output_dir);
+    let version = crate::release::validated_sdk_version(root, config, None)?;
+    check_package_prerequisites(None)?;
+    let tar_program = find_gnu_tar()?.ok_or_else(|| {
+        boxed_err("deterministic packaging requires GNU tar (expected 'tar' or 'gtar' with GNU tar)")
+    })?;
+    let archive = write_common_archive(&tar_program, &output_dir, &version, verbose)?;
+    println!("packaged common SDK content at {}", archive.display());
+    Ok(archive)
+}
+
+fn write_common_archive(
+    tar_program: &OsString,
+    output_dir: &Path,
+    version: &str,
+    verbose: bool,
+) -> Result<PathBuf> {
+    let common_stage = common_stage_dir(output_dir);
+    if !common_stage.exists() {
+        return Err(boxed_err(format!("missing common build staging directory: {}", common_stage.display())));
+    }
+    let archive = output_dir.join(common_archive_name(version));
+    remove_if_exists(&archive)?;
+    let mut command = deterministic_archive_command(tar_program, &archive, &common_stage);
+    util::run_command(&mut command, verbose)?;
+    Ok(archive)
 }
 
 pub fn stage_root_dir(output_dir: &Path) -> PathBuf { output_dir.join(".stage") }

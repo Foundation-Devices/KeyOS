@@ -58,6 +58,7 @@ where
     // Step 2: Build firmware
     writeln!(stdout, "{} Building firmware...", "▶".blue()).map_err(Error::Stdout)?;
     build::build_firmware(
+        &args.version,
         args.log_serial,
         args.log_usb_serial,
         args.log_usb_file,

@@ -254,8 +254,9 @@ reproduce-bootloader ref *args:
 update-flux app *args:
     ./scripts/update-flux.sh {{app}} {{args}}
 
-build-repro:
-    cargo xtask build-all --production-bootloader --production-firmware
+# VERSION is required so the reproducible production build contains no hardcoded release identity.
+build-repro VERSION:
+    cargo xtask build-all --production-bootloader --production-firmware --keyos-version {{VERSION}}
     cargo xtask print-hashes
 
 # Prepare a KeyOS release (builds, signs, and pushes in one step)
@@ -281,23 +282,23 @@ clean:
     cargo clean
     cargo clean --manifest-path ui2/Cargo.toml
 
-# Build the SDK API documentation for this checkout's canonical KeyOS version.
-docs:
-    nix develop .#build --command cargo xtask docs-api
+# Build the SDK API documentation for an explicit KeyOS release version.
+docs version *args:
+    nix develop .#build --command cargo xtask docs-api --keyos-version {{version}} {{args}}
 
 # Package that one self-contained KeyOS snapshot for release hosting.
-docs-package:
-    nix develop .#build --command cargo xtask docs-api --package
+docs-package version *args:
+    nix develop .#build --command cargo xtask docs-api --keyos-version {{version}} --package {{args}}
 
-# Build, verify, and immutably upload one SDK docs release. Pass a release tag
-# only when it differs from the canonical KeyOS version.
-docs-publish *args:
-    just docs-package
+# Build, verify, and immutably upload one SDK docs release. VERSION must be the
+# same RecoveryOS-compatible value passed to prepare-release and sign.
+docs-publish version *args:
+    just docs-package {{version}}
     nix develop .#build --command cargo xtask docs-publish {{args}}
 
 # Build the generated bundle and open it with the Foundation CLI.
-docs-open:
-    just docs
+docs-open version *args:
+    just docs {{version}} {{args}}
     FOUNDATION_DOCS_ROOT="{{justfile_directory()}}/target/sdk-docs/api" cargo run --manifest-path sdk/crates/cli/Cargo.toml -- docs
 
 list-subtrees:

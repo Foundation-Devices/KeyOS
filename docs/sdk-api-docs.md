@@ -13,9 +13,14 @@ the app's `minKeyosVersion`.
   in `[[copy]]`.
 - `[docs].guide_source` selects the SDK guide source.
 
-The generated docs version always comes from KeyOS-dev's canonical KeyOS version. Historical
-versions and their release checksums are selected in Docs-Site, because they control the hosted
-deployment rather than the SDK build.
+For maintainer builds and release publishing, the generated docs version comes from the explicit
+`VERSION` passed to `just docs` or `just docs-publish`. Use exactly the same RecoveryOS-compatible
+value passed to `prepare-release` and `sign`, such as `1.4.0-beta3`. Internal SDK packaging can
+invoke the generator without a release-workflow argument because `[sdk].keyos_version` in
+`sdk/sdk-build.toml` records the KeyOS API release paired with that SDK version. Both release paths
+use those explicit release-specific values rather than the `KEYOS_VERSION` fallback used by ordinary
+developer firmware builds. Historical versions and their release checksums are selected in
+Docs-Site, because they control the hosted deployment rather than the SDK build.
 
 ### Temporary QuantumLink compatibility placeholder
 
@@ -43,25 +48,29 @@ later requires reviewing both the allowlist and its permissions.
 
 ```text
 # Build without publishing:
-just docs
+just docs VERSION
 
 # Complete publishing workflow (packages immediately before publishing):
-just docs-publish [RELEASE_TAG] [--dry-run] [--replace]
+just docs-publish VERSION [--dry-run] [--replace]
 
 # Equivalent explicit steps; do not run the publisher against an older package:
-just docs-package
-nix develop .#build --command cargo xtask docs-publish [RELEASE_TAG] [--dry-run] [--replace]
+just docs-package VERSION
+nix develop .#build --command cargo xtask docs-publish [--dry-run] [--replace]
+
+# Backfill an already-tagged release using its clean source checkout:
+just docs-package VERSION --source-root /path/to/tagged/keyos/source
+nix develop .#build --command cargo xtask docs-publish [--dry-run]
 
 # Local preview:
-just docs-open
+just docs-open VERSION
 ```
 
 `just docs-publish` is the recommended publishing command. It packages the docs and then invokes the
 Rust publisher. The raw `cargo xtask docs-publish` command is only the second step of the explicit
 recipe above: it verifies and uploads the ZIP and checksum already on disk, but does not rebuild
 them. The publisher refuses to replace an existing asset by default. Pass `--dry-run` to verify
-without uploading or `--replace` to overwrite both assets explicitly. The release tag defaults to
-the KeyOS version; pass it only when the storage tag differs. When KeyOS-Releases-private has a matching
+without uploading or `--replace` to overwrite both assets explicitly. The release tag is the
+generated KeyOS version and cannot differ from it. When KeyOS-Releases-private has a matching
 draft—by its tag, or by its release title when it is untagged (for example, because its version
 branch has the same name as its eventual tag)—the publisher uses that draft's release ID. It can
 validate and upload assets to the draft without creating or publishing the tag.
@@ -93,7 +102,8 @@ sorted, use normalized permissions and timestamps, and are reproducible for iden
 
 ## Release and deployment flow
 
-1. Run `nix develop .#build --command just docs-publish [RELEASE_TAG]` in KeyOS-dev.
+1. Run `nix develop .#build --command just docs-publish VERSION` in KeyOS-dev, using the same
+   `VERSION` supplied to the private release workflow.
 2. Run the printed `docs:add` command in Docs-Site. It fetches the published checksum and adds the
    KeyOS version to Docs-Site's checked-in release catalog.
 3. Review and merge the Docs-Site pull request. Its main-branch deployment downloads every catalog
@@ -103,10 +113,10 @@ KeyOS-Releases-private is the current artifact store. The firmware release API c
 changing the per-version bundle format or the independent SDK/KeyOS version identities.
 Because that repository is private, every manual or automated asset download must authenticate with
 a GitHub token that has read access to `Foundation-Devices/KeyOS-Releases-private`. A repository-scoped
-`GITHUB_TOKEN` from Docs-Site cannot read this sibling private repository. Docs-Site does not yet pass
-a suitable cross-repository token to its downloader, so deployment from the private store remains
-blocked until that fetcher and its workflows are updated.
+`GITHUB_TOKEN` from Docs-Site cannot read this sibling private repository. Docs-Site's fetcher accepts
+`KEYOS_DOCS_GITHUB_TOKEN`; its GitHub Actions deployment maps the separately configured
+`KEYOS_RELEASES_TOKEN` secret to that variable.
 
-The SDK builder copies its one generated snapshot into `docs/api`. `foundation docs [SDK_VERSION]`
-opens those installed bytes; pass `--url` to print their `file://` URL instead. `SDK_VERSION` selects
-the installed SDK bundle.
+The SDK builder generates the `[sdk].keyos_version` snapshot and copies it into `docs/api`.
+`foundation docs [SDK_VERSION]` opens those installed bytes; pass `--url` to print their `file://`
+URL instead. `SDK_VERSION` selects the installed SDK bundle.

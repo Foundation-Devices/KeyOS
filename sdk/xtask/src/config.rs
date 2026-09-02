@@ -32,6 +32,7 @@ pub struct Config {
 pub struct SdkConfig {
     pub version: String,
     pub api_version: String,
+    pub keyos_version: String,
     pub api_crates: Vec<ApiCrateConfig>,
 }
 
@@ -147,6 +148,7 @@ struct RawConfig {
 struct RawSdk {
     version: String,
     api_version: String,
+    keyos_version: String,
     api_crates: Vec<ApiCrateConfig>,
 }
 
@@ -305,6 +307,7 @@ pub fn load(path: &Path) -> Result<Config> {
         sdk: SdkConfig {
             version: raw.sdk.version,
             api_version: raw.sdk.api_version,
+            keyos_version: raw.sdk.keyos_version,
             api_crates: raw.sdk.api_crates,
         },
         submodules: raw.submodules.into_iter().map(|(k, v)| (k, v.into())).collect(),
@@ -372,6 +375,7 @@ fn validate(config: &Config) -> Result<()> {
     if config.sdk.api_version.is_empty() {
         return Err(boxed_err("sdk.api_version is required"));
     }
+    validate_keyos_version(&config.sdk.keyos_version)?;
     if config.sdk.api_crates.is_empty() {
         return Err(boxed_err("sdk.api_crates is required"));
     }
@@ -460,6 +464,20 @@ fn validate(config: &Config) -> Result<()> {
     Ok(())
 }
 
+fn validate_keyos_version(value: &str) -> Result<()> {
+    if value.matches('.').count() != 2 {
+        return Err(boxed_err(
+            "sdk.keyos_version must contain exactly two periods for RecoveryOS compatibility",
+        ));
+    }
+    let parsed = semver::Version::parse(value)
+        .map_err(|error| boxed_err(format!("sdk.keyos_version must be valid SemVer: {error}")))?;
+    if parsed.to_string() != value {
+        return Err(boxed_err("sdk.keyos_version must use canonical SemVer"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -472,6 +490,7 @@ mod tests {
 
         assert_eq!(config.sdk.version, "1.0.0");
         assert_eq!(config.sdk.api_version, "1");
+        assert_eq!(config.sdk.keyos_version, "1.4.0-beta3");
         for expected in ["app-manager", "crypto", "fs", "gui-server-api", "settings"] {
             assert!(
                 config.sdk.api_crates.iter().any(|api_crate| api_crate.package == expected),
@@ -634,6 +653,7 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
+            keyos_version = "1.4.0-beta3"
 
             [[sdk.api_crates]]
             package = "gui-server-api"
@@ -682,6 +702,7 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
+            keyos_version = "1.4.0-beta3"
 
             [[sdk.api_crates]]
             package = "gui-server-api"
@@ -728,6 +749,7 @@ mod tests {
             [sdk]
             version = "1.0.0"
             api_version = "1"
+            keyos_version = "1.4.0-beta3"
             mystery_field = "oops"
 
             [[sdk.api_crates]]

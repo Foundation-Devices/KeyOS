@@ -153,7 +153,7 @@ jobs:
             echo
             echo "GitHub Actions built one private artifact bundle named \`foundation-sdk-packages\`."
             echo
-            echo "Download the bundle into \`sdk/dist/\`, then choose the release targets with \`just finalize mac-all linux-all\`."
+            echo "Download the bundle into \`sdk/dist/\`, then choose the release targets with \`just finalize 1.4.0-beta3 mac-all linux-all\`."
             echo
             echo "Included files:"
             ls -1 dist | sed 's/^/- /'
