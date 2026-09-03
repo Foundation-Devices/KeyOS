@@ -25,6 +25,7 @@ use {
 };
 
 const MAX_HEALTH_CHECK_BYTES: usize = 64 * 1024;
+const HEALTH_CHECK_LOCATIONS: [PickerLocation; 2] = [PickerLocation::External, PickerLocation::Airlock];
 
 pub fn init(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
@@ -41,19 +42,19 @@ pub fn init(state: StoredValue<AppState>) {
             Ok(())
         })();
         if let Err(error) = result {
-            report_error(state, "CASA-HC-ACCOUNT", "start", &error);
+            report_error(state, CasaHealthState::Error, "CASA-HC-ACCOUNT", "start", &error);
         }
     });
 
     global.on_check_with_qr(move || {
         if let Err(error) = check_with_qr(state) {
-            report_error(state, "CASA-HC-QR", "qr", &error);
+            report_error(state, CasaHealthState::Error, "CASA-HC-QR", "qr", &error);
         }
     });
 
     global.on_check_with_file(move || {
         if let Err(error) = check_with_file(state) {
-            report_error(state, "CASA-HC-FILE", "file", &error);
+            report_error(state, CasaHealthState::Error, "CASA-HC-FILE", "file", &error);
         }
     });
 
@@ -153,10 +154,7 @@ fn check_with_qr(state: StoredValue<AppState>) -> anyhow::Result<()> {
 fn check_with_file(state: StoredValue<AppState>) -> anyhow::Result<()> {
     let options = SelectFileOptions::default()
         .with_start_location(PickerLocation::External)
-        .with_allowed_locations(AllowedLocations::specific([
-            PickerLocation::External,
-            PickerLocation::Airlock,
-        ]))
+        .with_allowed_locations(AllowedLocations::specific(HEALTH_CHECK_LOCATIONS))
         .with_dirs_allowed(true)
         .with_multiple_selection_mode(false);
     let selection = select_file::<GuiPermissions>(options).context("open file picker")?;
@@ -164,17 +162,14 @@ fn check_with_file(state: StoredValue<AppState>) -> anyhow::Result<()> {
     let Some((path, picker_location)) = selection.files().first() else {
         bail!("no Casa health-check file selected");
     };
-    let location = match picker_location {
-        PickerLocation::External => Location::Usb,
-        PickerLocation::Airlock => Location::Airlock,
-        PickerLocation::Internal => bail!("Casa health check must be read from microSD or Airlock"),
-    };
+    let location = health_check_location(*picker_location)?;
     let source_path = Path::new(path);
     let source_name =
         source_path.file_name().and_then(|name| name.to_str()).context("invalid health-check filename")?;
     if !is_health_check_filename(source_name) {
         bail!("select a Casa -hc file that has not already been signed");
     }
+    let desired_name = signed_filename(source_name)?;
 
     state.borrow().ui().global::<CasaHealth>().set_state(CasaHealthState::Working);
     let fs = FileSystem::default();
@@ -188,18 +183,22 @@ fn check_with_file(state: StoredValue<AppState>) -> anyhow::Result<()> {
         challenge.zeroize();
         bail!("Casa health check is too large");
     }
+    drop(file);
     let signed = sign_challenge(state, &challenge);
     challenge.zeroize();
     let signed = signed?;
 
-    let desired_name = signed_filename(source_name)?;
-    let directory = source_path.parent().unwrap_or_else(|| Path::new(""));
-    let (output_path, display_name) = collision_safe_output(&fs, location, directory, &desired_name)?;
-    let mut output = fs.open_file(&output_path, location, OpenFlags::CREATE).context("create output file")?;
-    let mut payload = signed.into_bytes();
-    let write_result = output.overwrite(&payload).context("write signed health check");
-    payload.zeroize();
-    write_result?;
+    let display_name = match save_signed_response(&fs, *picker_location, &desired_name, signed) {
+        Ok(Some(display_name)) => display_name,
+        Ok(None) => {
+            state.borrow().ui().global::<CasaHealth>().set_state(CasaHealthState::Idle);
+            return Ok(());
+        }
+        Err(error) => {
+            report_error(state, CasaHealthState::SaveError, "CASA-HC-SAVE", "save", &error);
+            return Ok(());
+        }
+    };
 
     let ui = state.borrow().ui();
     let global = ui.global::<CasaHealth>();
@@ -207,6 +206,41 @@ fn check_with_file(state: StoredValue<AppState>) -> anyhow::Result<()> {
     global.set_state(CasaHealthState::FileSaved);
     log::info!(target: "casa::health", "operation=health_check_file stage=complete");
     Ok(())
+}
+
+fn save_signed_response(
+    fs: &FileSystem,
+    start_location: PickerLocation,
+    desired_name: &str,
+    signed: protocol::SignedResponse,
+) -> anyhow::Result<Option<String>> {
+    let options = SelectFileOptions::default()
+        .with_start_location(start_location)
+        .with_allowed_locations(AllowedLocations::specific(HEALTH_CHECK_LOCATIONS))
+        .with_dir_selection_mode(true);
+    let destination = select_file::<GuiPermissions>(options).context("open destination picker")?;
+    let Some(destination) = destination else { return Ok(None) };
+    let Some((directory, picker_location)) = destination.files().first() else {
+        bail!("no Casa health-check destination selected");
+    };
+    let location = health_check_location(*picker_location)?;
+    let (output_path, display_name) =
+        collision_safe_output(&fs, location, Path::new(directory), desired_name)?;
+    let mut output = fs.open_file(&output_path, location, OpenFlags::CREATE).context("create output file")?;
+    let mut payload = signed.into_bytes();
+    let write_result = output.overwrite(&payload).context("write signed health check");
+    payload.zeroize();
+    write_result?;
+
+    Ok(Some(display_name))
+}
+
+fn health_check_location(location: PickerLocation) -> anyhow::Result<Location> {
+    match location {
+        PickerLocation::External => Ok(Location::Usb),
+        PickerLocation::Airlock => Ok(Location::Airlock),
+        PickerLocation::Internal => bail!("Casa health checks require microSD or Airlock"),
+    }
 }
 
 fn is_health_check_filename(filename: &str) -> bool {
@@ -244,6 +278,7 @@ fn collision_safe_output(
 
 fn report_error(
     state: StoredValue<AppState>,
+    error_state: CasaHealthState,
     code: &'static str,
     stage: &'static str,
     error: &anyhow::Error,
@@ -253,5 +288,5 @@ fn report_error(
     let ui = state.borrow().ui();
     let global = ui.global::<CasaHealth>();
     global.set_error_code(protocol_code.into());
-    global.set_state(CasaHealthState::Error);
+    global.set_state(error_state);
 }

@@ -128,11 +128,13 @@ export component CasaHealthPage inherits BasePage {
         }
     }
 
-    if CasaHealth.state == CasaHealthState.Error: ConfirmationModal {
+    if CasaHealth.state == CasaHealthState.Error || CasaHealth.state == CasaHealthState.SaveError: ConfirmationModal {
         icon: "alert";
         icon-color: Palette.content-notice;
-        title: "Health Check Failed";
-        text: "Passport could not validate or sign this Casa health check.\n\n" + CasaHealth.error-code;
+        title: CasaHealth.state == CasaHealthState.SaveError ? "Health Check Not Saved" : "Health Check Failed";
+        text: (CasaHealth.state == CasaHealthState.SaveError
+            ? "Passport signed the Casa health check but could not save the response.\n\n"
+            : "Passport could not validate or sign this Casa health check.\n\n") + CasaHealth.error-code;
         cancel-button-label: "Cancel";
         confirm-button-label: "Try Again";
         cancel-clicked => { CasaHealth.done(); }
