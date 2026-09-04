@@ -65,6 +65,7 @@
           gcc-arm-embedded
           gh
           git
+          git-lfs
           gnumake
           just
           openssl
