@@ -15,7 +15,7 @@ the app's `minKeyosVersion`.
 
 For maintainer builds and release publishing, the generated docs version comes from the explicit
 `VERSION` passed to `just docs` or `just docs-publish`. Use exactly the same RecoveryOS-compatible
-value passed to `prepare-release` and `sign`, such as `1.4.0-beta3`. Internal SDK packaging can
+value passed to `prepare-release` and `sign`, such as `1.4.0`. Internal SDK packaging can
 invoke the generator without a release-workflow argument because `[sdk].keyos_version` in
 `sdk/sdk-build.toml` records the KeyOS API release paired with that SDK version. Both release paths
 use those explicit release-specific values rather than the `KEYOS_VERSION` fallback used by ordinary

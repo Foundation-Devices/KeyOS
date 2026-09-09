@@ -488,9 +488,9 @@ mod tests {
     fn loads_real_sdk_build_configuration() {
         let config = load(&workspace_root().join("sdk-build.toml")).unwrap();
 
-        assert_eq!(config.sdk.version, "1.0.0");
+        assert_eq!(config.sdk.version, "1.1.0");
         assert_eq!(config.sdk.api_version, "1");
-        assert_eq!(config.sdk.keyos_version, "1.4.0-beta3");
+        assert_eq!(config.sdk.keyos_version, "1.4.0");
         for expected in ["app-manager", "crypto", "fs", "gui-server-api", "settings"] {
             assert!(
                 config.sdk.api_crates.iter().any(|api_crate| api_crate.package == expected),

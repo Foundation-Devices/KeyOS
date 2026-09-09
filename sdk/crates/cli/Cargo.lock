@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "foundation"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "app-archive",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "foundation-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "app-manifest",
  "cargo_metadata",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "foundation-mcp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "foundation-core",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "foundation-plugin-sdk"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "foundation-plugins"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs",
  "foundation-core",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "foundation-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "console",
  "dialoguer",

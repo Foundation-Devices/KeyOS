@@ -138,10 +138,10 @@ Examples:
   cargo xtask build --target aarch64-apple-darwin --release --package
   cargo xtask package --target all
   cargo xtask zip linux-all /media/usb
-  cargo xtask unzip /media/usb/foundation-sdk-1.0.0-linux-all-handoff.zip
+  cargo xtask unzip /media/usb/foundation-sdk-1.1.0-linux-all-handoff.zip
   cargo xtask sync linux-all ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
-  cargo xtask finalize --keyos-version 1.4.0-beta3 mac-all linux-x86
-  cargo xtask upload v1.0.0 --link-as-latest
+  cargo xtask finalize --keyos-version 1.4.0 mac-all linux-x86
+  cargo xtask upload v1.1.0 --link-as-latest
   cargo xtask check-submodules
 "
     );

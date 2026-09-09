@@ -224,14 +224,14 @@ nix develop --command cargo xtask check-layout
 nix develop --command cargo xtask smoke-check
 nix develop --command cargo xtask build --target aarch64-apple-darwin --release --package
 nix develop --command cargo xtask build-common --release --package
-nix develop --command cargo xtask finalize --keyos-version 1.4.0-beta3 mac-all linux-x86
+nix develop --command cargo xtask finalize --keyos-version 1.4.0 mac-all linux-x86
 ```
 
 When only the docs or other common SDK content changed, use the convenience recipe:
 
 ```bash
 just docs
-just finalize 1.4.0-beta3 mac-all linux-all
+just finalize 1.4.0 mac-all linux-all
 ```
 
 `just docs` rebuilds and packages only `foundation-sdk-<SDK-version>-common.tar.gz`. It preserves the
@@ -335,8 +335,8 @@ For example:
 just sync ken@macbook.local /Users/ken/foundation/KeyOS/sdk/dist
 
 # On the Apple Silicon Mac that built mac-all and will finalize the release.
-just finalize 1.4.0-beta3 mac-all linux-all
-just upload v1.0.0 --link-as-latest
+just finalize 1.4.0 mac-all linux-all
+just upload v1.1.0 --link-as-latest
 ```
 
 Both transfer routes carry only the selected target archives. They do not carry
@@ -365,9 +365,9 @@ Export also asks before replacing an existing handoff ZIP. Destination
 directories must already exist so a misspelled or unmounted USB path fails
 instead of silently writing somewhere else.
 
-Versioned release objects are uploaded under `gs://foundation-sdk/v1.0.0/`.
+Versioned release objects are uploaded under `gs://foundation-sdk/v1.1.0/`.
 Release labels always use the complete SDK SemVer with a conventional `v`
-prefix (`1.0.0` → `v1.0.0`); abbreviated labels such as `v1.0` are rejected.
+prefix (`1.1.0` → `v1.1.0`); abbreviated labels such as `v1.1` are rejected.
 Cloud Storage does not provide symlinks, so `--link-as-latest` safely copies
 the signed versioned installer to `latest/install.sh`; that installer continues
 to download its assets from the selected version directory. Existing objects
