@@ -1,5 +1,5 @@
 /// Main error type for the crate
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 #[cfg_attr(
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
@@ -25,6 +25,11 @@ pub enum EhciError {
     Stalled,
     /// The controller is disabled
     ControllerDisabled,
+    /// The transfer failed without the device refusing it: a transaction error,
+    /// babble, or a buffer problem
+    TransferError,
+    /// The host abandoned the transfer before the controller finished it
+    Cancelled,
 }
 
 pub type Result<T> = core::result::Result<T, EhciError>;

@@ -6,7 +6,7 @@ use gui_server_api::msg::{
     SwitchTo, SwitchToLauncher, UpdateKioskPolicy,
 };
 use log::{error, info, warn};
-use server::{BlockingScalar, BlockingScalarHandler, ScalarHandler, ServerContext};
+use server::{BlockingScalar, BlockingScalarHandler, ScalarEventHandler, ScalarHandler, ServerContext};
 use xous::PID;
 
 use super::{BlurDone, CloseAppTimeout, ForceShutdownTimeout, OnFreeMemoryBelowThreshold};
@@ -144,6 +144,21 @@ impl BlockingScalarHandler<Shutdown> for Gui {
     ) -> <Shutdown as BlockingScalar>::Response {
         info!("Shutdown requested by PID={sender}");
         self.shutdown(msg.reboot);
+    }
+}
+
+impl ScalarEventHandler<power_manager::BatteryCritical> for Gui {
+    fn handle(
+        &mut self,
+        _msg: power_manager::BatteryCritical,
+        _sender: PID,
+        _context: &mut ServerContext<Self>,
+    ) {
+        if self.shutting_down.is_some() {
+            return;
+        }
+        warn!("Battery critical, shutting down");
+        self.shutdown(false);
     }
 }
 

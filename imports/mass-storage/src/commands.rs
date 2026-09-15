@@ -137,7 +137,6 @@ pub struct Inquiry6 {
 #[derive(
     Debug,
     Clone,
-    Default,
     zerocopy::KnownLayout,
     zerocopy::Immutable,
     zerocopy::IntoBytes,
@@ -155,6 +154,25 @@ pub struct SenseResponse {
     pub additional_sense_code_qualifier: u8,
     pub fru_code: u8,
     pub sense_key_specific: [u8; 3],
+}
+
+impl Default for SenseResponse {
+    fn default() -> Self {
+        Self {
+            // Hosts throw the whole response away unless it says current error in fixed
+            // format, counting the ten bytes that follow the length.
+            response_code: 0x70,
+            additional_sense_length: 10,
+            _obsolete: 0,
+            flags_and_sense_key: SenseKey::NoSense,
+            information: 0.into(),
+            command_specific_information: 0.into(),
+            additional_sense_code: 0,
+            additional_sense_code_qualifier: 0,
+            fru_code: 0,
+            sense_key_specific: [0; 3],
+        }
+    }
 }
 
 #[derive(
@@ -260,6 +278,16 @@ impl Cbw {
     pub fn tag(&self) -> u32 { self.tag }
 
     pub fn lun(&self) -> u8 { self.lun }
+
+    pub fn transfer_len(&self) -> u32 { self.transfer_len }
+
+    pub fn direction(&self) -> CbwDirection {
+        if self.flags & 0x80 != 0 {
+            CbwDirection::In
+        } else {
+            CbwDirection::Out
+        }
+    }
 }
 
 impl Csw {
@@ -272,8 +300,20 @@ impl Csw {
         self
     }
 
+    /// Tells the host the two of us disagree about the data phase, which BOT 6.7.3 asks
+    /// for when it sends less than its CBW promised. It answers with a Reset Recovery.
+    pub fn phase_error(mut self) -> Self {
+        self.status = CswStatus::PhaseError;
+        self
+    }
+
     pub fn with_tag(mut self, tag: u32) -> Self {
         self.tag = tag;
+        self
+    }
+
+    pub fn with_residue(mut self, residue: u32) -> Self {
+        self.data_residue = residue;
         self
     }
 

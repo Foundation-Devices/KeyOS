@@ -12,7 +12,6 @@ default = ["settings"]
 
 [dependencies]
 ehci = { workspace = true, features = ["rkyv"] }
-gpio = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
 power-manager = { workspace = true }

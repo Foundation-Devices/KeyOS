@@ -2,7 +2,7 @@ use zerocopy::{IntoBytes, TryFromBytes};
 
 use crate::{
     commands::{
-        CapacityResponse, Cbw, Command, Csw, FormatCapacityResponse, SenseKey, SenseResponse,
+        CapacityResponse, Cbw, CbwDirection, Command, Csw, FormatCapacityResponse, SenseKey, SenseResponse,
         INVALID_COMMAND_OPERATION_CODE, INVALID_FIELD_IN_CBD, WRITE_PROTECTED,
     },
     BlockDeviceError, MassStorageError, UsbError,
@@ -23,6 +23,9 @@ pub trait Buffer {
 
 /// Actual USB implementation
 pub trait UsbEmulationCommands<Buffer> {
+    /// Maximum packet length of the bulk endpoints, below which a packet ends a transfer
+    const MAX_PACKET_LEN: usize;
+
     /// Receive bulk transfer through the mass storage OUT endpoint (from host)
     fn bulk_rx(&mut self, buffer: &mut Buffer, len: usize) -> core::result::Result<usize, UsbError>;
     /// Send bulk transfer through the mass storage IN endpoint (to host)
@@ -63,6 +66,8 @@ pub struct MassStorageEmulation<B: Buffer, UE: UsbEmulationCommands<B>, BD: Bloc
     usb: UE,
     block_device: BD,
     current_sense: SenseResponse,
+    data_expected: usize,
+    data_transferred: usize,
 }
 
 /// What kind of accesses will be allowed on the exposed USB interface
@@ -77,7 +82,14 @@ pub enum AllowedAccess {
 impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassStorageEmulation<B, UE, BD> {
     /// Create a new Mass Storage Emulation driver
     pub fn new(usb: UE, block_device: BD) -> Self {
-        Self { buffer: Buffer::new(BUF_SIZE), usb, block_device, current_sense: Default::default() }
+        Self {
+            buffer: Buffer::new(BUF_SIZE),
+            usb,
+            block_device,
+            current_sense: Default::default(),
+            data_expected: 0,
+            data_transferred: 0,
+        }
     }
 
     /// Reset state and run the emulation.
@@ -91,6 +103,8 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
             let cbw = Cbw::try_ref_from_bytes(&self.buffer.as_slice()[..0x1F]).unwrap().clone();
             cbw.check()?;
             log::trace!("Got command: {cbw:02x?}");
+            self.data_expected = cbw.transfer_len() as usize;
+            self.data_transferred = 0;
             let response = if let Ok(command) = cbw.command() {
                 let command = command.clone();
                 log::trace!("Decoded into {command:02x?}");
@@ -100,8 +114,23 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
                 self.set_current_sense(SenseKey::IllegalRequest, INVALID_COMMAND_OPERATION_CODE);
                 Csw::new().failed()
             };
+            // Finish the data phase the host asked for, or it hangs waiting and resets us.
+            let residue = self.data_expected - self.data_transferred;
+            match cbw.direction() {
+                // A packet shorter than the maximum is what ends an IN transfer, so send an
+                // empty one. Skip it once a short packet went out, or the host reads the
+                // extra packet as the CSW.
+                CbwDirection::In if residue > 0 && self.data_transferred % UE::MAX_PACKET_LEN == 0 => {
+                    self.usb.bulk_tx(&self.buffer, 0)?;
+                }
+                CbwDirection::In => {}
+                CbwDirection::Out => self.discard_out(residue)?,
+            }
             log::trace!("Returning: {response:?}");
-            self.send_bytes(response.with_tag(cbw.tag()).as_bytes())?;
+            let csw = response.with_tag(cbw.tag()).with_residue(residue as u32);
+            let csw_bytes = csw.as_bytes();
+            self.buffer.as_slice_mut()[..csw_bytes.len()].copy_from_slice(csw_bytes);
+            self.usb.bulk_tx(&self.buffer, csw_bytes.len())?;
         }
     }
 
@@ -112,9 +141,47 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
         self.current_sense.additional_sense_code_qualifier = ascq;
     }
 
+    fn send_buffer(&mut self, len: usize) -> Result<(), MassStorageError> {
+        // Clamp, or a CDB asking for more than its CBW overruns the data phase.
+        let len = len.min(self.data_expected - self.data_transferred);
+        if len == 0 {
+            return Ok(());
+        }
+        self.usb.bulk_tx(&self.buffer, len)?;
+        self.data_transferred += len;
+        Ok(())
+    }
+
     fn send_bytes(&mut self, data: &[u8]) -> Result<(), MassStorageError> {
         self.buffer.as_slice_mut()[..data.len()].copy_from_slice(data);
-        self.usb.bulk_tx(&self.buffer, data.len())?;
+        self.send_buffer(data.len())
+    }
+
+    /// Receive data phase bytes into the buffer, and report how many arrived.
+    fn receive_buffer(&mut self, len: usize) -> Result<usize, MassStorageError> {
+        // Clamp, or we block waiting for bytes the host was never going to send.
+        let len = len.min(self.data_expected - self.data_transferred);
+        if len == 0 {
+            return Ok(0);
+        }
+        // Cap the count as well, or a backend overreporting underflows the residue.
+        let received = self.usb.bulk_rx(&mut self.buffer, len)?.min(len);
+        self.data_transferred += received;
+        Ok(received)
+    }
+
+    /// Swallow the requested length, which BOT 6.7.3 (cases 9, 11-12) takes instead of a STALL.
+    fn discard_out(&mut self, mut len: usize) -> Result<(), MassStorageError> {
+        while len > 0 {
+            let chunk = len.min(BUF_SIZE);
+            let received = self.usb.bulk_rx(&mut self.buffer, chunk)?.min(chunk);
+            len -= received;
+            // A short packet is the host saying it has nothing more, whatever the CBW
+            // promised. Asking again would block until the cable comes out.
+            if received < chunk {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -258,11 +325,10 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
             let blocks_read = block_num.min(BUF_SIZE / BLOCK_SIZE);
             if let Err(e) = self.block_device.read_blocks(lun, &mut self.buffer, lba, blocks_read) {
                 log::error!("Read error at LBA 0x{lba:x?}, blocks={blocks_read}: {e:?}");
-                self.usb.bulk_tx(&self.buffer, 0)?;
                 self.set_current_sense(e.sense_key(), e.sense_code());
                 return Ok(Csw::new().failed());
             }
-            self.usb.bulk_tx(&self.buffer, blocks_read * BLOCK_SIZE)?;
+            self.send_buffer(blocks_read * BLOCK_SIZE)?;
             lba += blocks_read as u32;
             block_num -= blocks_read;
         }
@@ -272,19 +338,24 @@ impl<B: Buffer, UE: UsbEmulationCommands<B>, BD: BlockDeviceCommands<B>> MassSto
     fn handle_write(&mut self, lun: u8, mut lba: u32, mut block_num: usize) -> Result<Csw, MassStorageError> {
         if self.block_device.allowed_access() == AllowedAccess::ReadOnly {
             self.set_current_sense(SenseKey::DataProtect, WRITE_PROTECTED);
-            // TODO: this is not enough, we should stall pipes because we don't receive enough bytes.
-            //       but this should only happen with faulty USB host implementations, so we might as
-            //       well have a protocol error.
             return Ok(Csw::new().failed());
         }
         while block_num > 0 {
-            let blocks_read = block_num.min(BUF_SIZE / BLOCK_SIZE);
-            self.usb.bulk_rx(&mut self.buffer, blocks_read * BLOCK_SIZE)?;
-            if let Err(e) = self.block_device.write_blocks(lun, &self.buffer, lba, blocks_read) {
-                log::error!("Write error at LBA 0x{lba:x?}, blocks={blocks_read}: {e:?}");
-                self.set_current_sense(e.sense_key(), e.sense_code());
-                return Ok(Csw::new().failed());
-            };
+            let blocks_wanted = block_num.min(BUF_SIZE / BLOCK_SIZE);
+            let blocks_read = self.receive_buffer(blocks_wanted * BLOCK_SIZE)? / BLOCK_SIZE;
+            if blocks_read > 0 {
+                if let Err(e) = self.block_device.write_blocks(lun, &self.buffer, lba, blocks_read) {
+                    log::error!("Write error at LBA 0x{lba:x?}, blocks={blocks_read}: {e:?}");
+                    self.set_current_sense(e.sense_key(), e.sense_code());
+                    return Ok(Csw::new().failed());
+                };
+            }
+            // The rest of the buffer still holds the CBW and the last command's blocks, so
+            // a host whose CBW promises less than its CDB writes must not reach the disk.
+            if blocks_read < blocks_wanted {
+                log::error!("Host sent {blocks_read} of {blocks_wanted} blocks for LBA 0x{lba:x?}");
+                return Ok(Csw::new().phase_error());
+            }
             lba += blocks_read as u32;
             block_num -= blocks_read;
         }

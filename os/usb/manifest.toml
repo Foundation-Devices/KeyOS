@@ -10,7 +10,10 @@ en = "USB Server"
 [servers."os/usb"]
 DoWork = { id = 0, type = "scalar" }
 SubscriberDisconnected = { id = 64, type = "scalar" }
-HostOtgMode = { id = 65, type = "scalar" }
+PortRole = { id = 65, type = "scalar" }
+
+[servers."os/usb-internal"]
+DetachDebounced = { id = 0, type = "scalar" }
 
 [servers."os/usbdev"]
 SetDeviceEmulationEnabled = { id = 99, type = "scalar" }
@@ -18,13 +21,11 @@ EndOfReset = { id = 100, type = "scalar" }
 DmaInterrupt = { id = 101, type = "scalar" }
 RxCompleteInterrupt = { id = 102, type = "move" }
 TxCompleteInterrupt = { id = 103, type = "scalar" }
-SetCableConnected = { id = 104, type = "scalar" }
-OtgMode = { id = 105, type = "scalar" }
+SetHostAttached = { id = 104, type = "scalar" }
 
 [permissions]
-template = ["gpio"]
 "os/power-manager" = ["SetPeripheralEnabled"]
-"os/power-manager-ext" = ["SetUsbBoost", "SetOtgPriority"]
+"os/power-manager-ext" = ["SetOtgPriority", "StatusSubscribe"]
 "os/settings" = [
     "SubscribeDeviceName",
     "SubscribeUsbEnabled",

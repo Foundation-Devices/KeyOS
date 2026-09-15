@@ -6,7 +6,7 @@ use atsama5d27::pmc::PeripheralId;
 use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar};
 
-use crate::{AttachedState, ChargeStatus, OtgPriority, Status};
+use crate::{AttachedState, BatteryCritical, ChargeStatus, OtgPriority, Status};
 
 #[cfg(not(keyos))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,33 +55,6 @@ impl AsScalar<3> for Status {
 }
 
 #[derive(Debug, server::Message)]
-#[response(SetUsbBoostResponse)]
-pub struct SetUsbBoost {
-    pub enabled: bool,
-}
-
-pub struct SetUsbBoostResponse {
-    pub success: bool,
-    pub previous_state: bool,
-}
-
-impl FromScalar<1> for SetUsbBoost {
-    fn from_scalar([value]: [u32; 1]) -> Self { Self { enabled: value != 0 } }
-}
-
-impl AsScalar<1> for SetUsbBoost {
-    fn as_scalar(&self) -> [u32; 1] { [self.enabled.into()] }
-}
-
-impl FromScalar<2> for SetUsbBoostResponse {
-    fn from_scalar(value: [u32; 2]) -> Self { Self { success: value[0] != 0, previous_state: value[1] != 0 } }
-}
-
-impl AsScalar<2> for SetUsbBoostResponse {
-    fn as_scalar(&self) -> [u32; 2] { [self.success.into(), self.previous_state.into()] }
-}
-
-#[derive(Debug, server::Message)]
 #[response(())]
 pub struct SetPeripheralEnabled {
     pub peripheral: PeripheralId,
@@ -109,6 +82,14 @@ impl FromScalar<1> for OtgPriority {
 }
 
 impl AsScalar<1> for OtgPriority {
+    fn as_scalar(&self) -> [u32; 1] { [self.to_u32().unwrap_or_default()] }
+}
+
+impl FromScalar<1> for AttachedState {
+    fn from_scalar([value]: [u32; 1]) -> Self { AttachedState::from_u32(value).unwrap_or_default() }
+}
+
+impl AsScalar<1> for AttachedState {
     fn as_scalar(&self) -> [u32; 1] { [self.to_u32().unwrap_or_default()] }
 }
 
@@ -160,6 +141,18 @@ pub struct ClearChargeFault;
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[event(Status)]
 pub struct StatusSubscribe;
+
+impl FromScalar<1> for BatteryCritical {
+    fn from_scalar(_: [u32; 1]) -> Self { Self }
+}
+
+impl AsScalar<1> for BatteryCritical {
+    fn as_scalar(&self) -> [u32; 1] { [0] }
+}
+
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[event(BatteryCritical)]
+pub struct BatteryCriticalSubscribe;
 
 #[derive(Debug, server::Message)]
 pub struct SetBatteryPercent(pub(crate) u8);

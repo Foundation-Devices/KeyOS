@@ -8,6 +8,7 @@ en = "Mass storage server"
 [servers."os/mass-storage"]
 ReadBlocks = { id = 0, type = "lendMut" }
 WriteBlocks = { id = 1, type = "lendMut" }
+Flush = { id = 2, type = "blockingScalar" }
 Subscribe = { id = 3, type = "scalarEvent" }
 BlockCount = { id = 4, type = "blockingScalar" }
 
@@ -18,4 +19,5 @@ BlockCount = { id = 4, type = "blockingScalar" }
     "BulkOut",
     "Claim",
     "OpenEndpoint",
+    "ControlTransfer",
 ]

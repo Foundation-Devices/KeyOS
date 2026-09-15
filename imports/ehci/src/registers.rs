@@ -182,6 +182,15 @@ bitfield! {
     pub data_toggle,set_data_toggle:31;
 }
 
+impl QtdToken {
+    /// Halted because the device answered STALL, rather than because of a transaction
+    /// error, babble, or a buffer problem. Only a STALL leaves the device refusing the
+    /// pipe until a ClearFeature, and only then does its data toggle go back to DATA0.
+    pub fn device_stalled(&self) -> bool {
+        self.halted() && !self.xact_err() && !self.babble() && !self.buffer_error()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PidCode {

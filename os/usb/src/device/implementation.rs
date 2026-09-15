@@ -24,17 +24,15 @@ use utralib::{HW_UDPHS_BASE, HW_UDPHS_RAM_MEM, HW_UDPHS_RAM_MEM_LEN};
 use xous::arch::irq::IrqNumber;
 
 use super::{messages::*, msos20};
-use crate::{PowerManagerApi, PowerManagerExtApi};
+use crate::PowerManagerApi;
 
 #[derive(server::Server)]
 #[name = "os/usbdev"]
 pub struct UsbDeviceServer {
     power_manager: PowerManagerApi,
-    power_manager_ext: PowerManagerExtApi,
     hw: UsbDevice,
     pending_address: Option<u8>,
-    otg_device_connected: bool,
-    vbus_has_power: bool,
+    host_attached: bool,
     is_configured: bool,
     should_be_enabled: bool,
     enabled: bool,
@@ -160,9 +158,12 @@ const DEVICE_DESCRIPTOR: [u8; 0x12] = [
 ];
 
 const GET_STATUS: u8 = 0;
+const CLEAR_FEATURE: u8 = 1;
 const SET_ADDRESS: u8 = 5;
 const GET_DESCRIPTOR: u8 = 6;
 const SET_CONFIGURATION: u8 = 9;
+const ENDPOINT_HALT: u16 = 0;
+const RECIPIENT_INTERFACE: u8 = 1;
 
 impl server::Server for UsbDeviceServer {
     fn on_start(&mut self, _context: &mut server::ServerContext<Self>) {
@@ -197,7 +198,7 @@ impl UsbDeviceServer {
         let power_manager = PowerManagerApi::default();
         power_manager.enable_peripheral(PeripheralId::Udphs).unwrap();
         let mut hw = UsbDevice::new(udphs_csr.as_mut_ptr(), udphs_banks.as_mut_ptr());
-        // Disable for now, it will be reenabled (and reset) when we read the OTG gpio line later
+        // Disable for now, it is reenabled (and reset) once the port controller reports a host
         hw.set_enabled(false);
         power_manager.disable_peripheral(PeripheralId::Udphs).unwrap();
 
@@ -212,11 +213,9 @@ impl UsbDeviceServer {
 
         Self {
             power_manager,
-            power_manager_ext: Default::default(),
             hw,
             pending_address: None,
-            otg_device_connected: false,
-            vbus_has_power: false,
+            host_attached: false,
             connection_waiters: Default::default(),
             interfaces: Default::default(),
             capabilities,
@@ -235,11 +234,7 @@ impl UsbDeviceServer {
     }
 
     fn update_hw_enabled_state(&mut self) {
-        if self.should_be_enabled
-            && self.vbus_has_power
-            && !self.otg_device_connected
-            && !self.config_descriptor.is_empty()
-        {
+        if self.should_be_enabled && self.host_attached && !self.config_descriptor.is_empty() {
             if !self.enabled {
                 self.power_manager.enable_peripheral(PeripheralId::Udphs).unwrap();
                 self.hw.set_enabled(true);
@@ -598,10 +593,18 @@ impl UsbDeviceServer {
             self.end_setup_tx_with_short_packet = false;
         }
         log::trace!("Sending setup response {bytes:02x?}");
-        self.hw.write_endpoint_memory(0, 0, &bytes);
+        self.send_fifo_packet(0, &bytes);
+    }
+
+    /// Send one packet out of the endpoint's FIFO bank, a ZLP if `data` is empty.
+    /// Callers must keep `data` within the endpoint's max packet length.
+    fn send_fifo_packet(&mut self, endpoint_number: u8, data: &[u8]) {
+        if !data.is_empty() {
+            self.hw.write_endpoint_memory(endpoint_number as usize, 0, data);
+        }
         let mut status = EndpointStatus(0x0);
         status.set_tx_packet_ready(true);
-        self.hw.endpoint(0).status_set.set(status);
+        self.hw.endpoint(endpoint_number as usize).status_set.set(status);
     }
 }
 
@@ -783,24 +786,26 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
         let zlp = msg.body().zlp;
         log::trace!("Writing {total} bytes on EP{endpoint_number}");
         let use_dma = endpoint.use_dma;
-        if use_dma {
+        if total == 0 {
+            // A DMA of length 0 transfers 64KB (BUFF_LENGTH in the datasheet), so the empty
+            // packet leaves through the FIFO no matter what the endpoint uses.
+            let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
+            ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp: false, pending_zlp: true });
+            self.send_fifo_packet(endpoint_number, &[]);
+        } else if use_dma {
             xous::flush_cache(msg.body().buf, xous::CacheOperation::Clean).ok();
             let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
             ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp, pending_zlp: false });
             // Start first (or only) DMA chunk.
             self.start_next_dma_chunk(endpoint_number);
         } else {
-            // FIFO write: copy data to endpoint memory, set tx_packet_ready
             let len = total as usize;
             if len > endpoint.properties.max_packet_len as usize {
                 msg.set_response(Err(UsbError::DataTooLarge));
                 return;
             }
             let buf = msg.body().buf.as_slice::<u8>();
-            self.hw.write_endpoint_memory(endpoint_number as usize, 0, &buf[..len]);
-            let mut status = EndpointStatus(0x0);
-            status.set_tx_packet_ready(true);
-            self.hw.endpoint(endpoint_number as usize).status_set.set(status);
+            self.send_fifo_packet(endpoint_number, &buf[..len]);
             let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
             ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp: false, pending_zlp: false });
         }
@@ -880,6 +885,17 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
         log::trace!("Setup received: {msg:02x?}");
         let response = match (msg.request_type, msg.request) {
             (0x80, GET_STATUS) => Some(vec![1, 0]), // Self Powered
+            (0x81, GET_STATUS) => Some(vec![0, 0]), // Interface status is reserved
+            (0x82, GET_STATUS) => {
+                let endpoint_number = (msg.index & 0x0f) as usize;
+                // Endpoint zero is always there, but it is not one of the registered ones.
+                if endpoint_number == 0 || self.endpoints.contains_key(&(endpoint_number as u8)) {
+                    let halted = self.hw.endpoint(endpoint_number).status.get().force_stall();
+                    Some(vec![halted as u8, 0])
+                } else {
+                    None
+                }
+            }
             (0x80, GET_DESCRIPTOR) => {
                 match msg.value {
                     0x100 => {
@@ -929,6 +945,19 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
                     }
                 }
             }
+            (0x02, CLEAR_FEATURE) if msg.value == ENDPOINT_HALT => {
+                let endpoint_number = (msg.index & 0x0f) as u8;
+                if !self.endpoints.contains_key(&endpoint_number) {
+                    None
+                } else {
+                    // USB 2.0 9.4.5 resets the toggle whether or not we were halted.
+                    let mut status = EndpointStatus(0x0);
+                    status.set_force_stall(true);
+                    status.set_toggle_sequence(true);
+                    self.hw.endpoint(endpoint_number as usize).status_clr.set(status);
+                    Some(Vec::new())
+                }
+            }
             (0x00, SET_ADDRESS) => {
                 log::debug!("Set address (pending): {}", msg.value);
                 // Only set the address once the STATUS phase (IN, i.e. transmission) is over
@@ -951,40 +980,28 @@ impl ScalarHandler<SetupPacket> for UsbDeviceServer {
                 let len = usize::min(msg.length as usize, self.msos20_descriptor_set.len());
                 Some(self.msos20_descriptor_set[..len].to_vec())
             }
-            _ => {
-                let send_setup = |setup_responder| {
-                    // A responder app may exit while the host is still issuing SETUP
-                    // packets. Treat a dead CID as "didn't handle this packet" so
-                    // the control endpoint stalls instead of panicking the USB server.
-                    match try_send_blocking_archive(setup_responder, SetupPacketCallback(msg.clone())) {
-                        Ok(response) => response,
-                        Err(e) => {
-                            log::warn!("setup responder {setup_responder:?} unreachable: {e:?}");
-                            None
-                        }
-                    }
-                };
+            _ if msg.request_type & 0x1f == RECIPIENT_INTERFACE => {
                 // The host addresses an interface by the number it carries in the configuration
                 // descriptor, which is not the priority it registered with.
                 let interface_number = (msg.index & 0xff) as u8;
-                let interface_response = self
-                    .interfaces
+                self.interfaces
                     .values()
                     .find(|interface| interface.enabled && interface.interface_number == interface_number)
                     .and_then(|interface| interface.setup_responder)
-                    .and_then(&send_setup);
-
-                interface_response.or_else(|| {
-                    if msg.request_type & 0x1f != 0 {
-                        return None;
-                    }
-                    self.interfaces
-                        .values()
-                        .filter(|interface| interface.enabled)
-                        .filter_map(|interface| interface.setup_responder)
-                        .find_map(send_setup)
-                })
+                    .and_then(|setup_responder| {
+                        // A responder app may exit while the host is still issuing SETUP
+                        // packets. Treat a dead CID as "didn't handle this packet" so
+                        // the control endpoint stalls instead of panicking the USB server.
+                        match try_send_blocking_archive(setup_responder, SetupPacketCallback(msg.clone())) {
+                            Ok(response) => response,
+                            Err(e) => {
+                                log::warn!("setup responder {setup_responder:?} unreachable: {e:?}");
+                                None
+                            }
+                        }
+                    })
             }
+            _ => None,
         };
         match response {
             Some(mut bytes) => {
@@ -1146,13 +1163,9 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
             let wr = ep.ongoing_write.as_mut().unwrap();
             let max_pkt = ep.properties.max_packet_len as u32;
             if wr.zlp && wr.total > 0 && wr.total % max_pkt == 0 {
-                // Need a ZLP. The data DMA used end_of_transfer=false so the
-                // endpoint is still active. Set tx_packet_ready with nothing
-                // in the FIFO to send a zero-length packet.
+                // The data DMA used end_of_transfer=false, so the endpoint is still active.
                 wr.pending_zlp = true;
-                let mut status = EndpointStatus(0x0);
-                status.set_tx_packet_ready(true);
-                self.hw.endpoint(ep_num as usize).status_set.set(status);
+                self.send_fifo_packet(ep_num, &[]);
             } else {
                 // Transfer complete — respond to caller.
                 let total = wr.total as usize;
@@ -1163,29 +1176,14 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
     }
 }
 
-impl ScalarHandler<SetCableConnected> for UsbDeviceServer {
+impl ScalarHandler<SetHostAttached> for UsbDeviceServer {
     fn handle(
         &mut self,
-        msg: SetCableConnected,
+        msg: SetHostAttached,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
-        self.vbus_has_power = msg.0;
-        self.update_hw_enabled_state();
-    }
-}
-
-impl ScalarHandler<OtgMode> for UsbDeviceServer {
-    fn handle(&mut self, msg: OtgMode, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        if msg.0 {
-            log::debug!("OTG slave device connected, enabling power to it");
-            self.power_manager_ext.set_usb_boost(true).ok();
-            self.otg_device_connected = true;
-        } else {
-            log::debug!("OTG slave device disconnected, disabling power");
-            self.power_manager_ext.set_usb_boost(false).ok();
-            self.otg_device_connected = false;
-        }
+        self.host_attached = msg.0;
         self.update_hw_enabled_state();
     }
 }
@@ -1202,17 +1200,6 @@ impl ScalarHandler<SetDeviceEmulationEnabled> for UsbDeviceServer {
     }
 }
 
-impl BlockingScalarHandler<IsDeviceEmulationEnabled> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        _msg: IsDeviceEmulationEnabled,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> bool {
-        self.enabled
-    }
-}
-
 impl BlockingScalarHandler<IsDeviceEmulationConnected> for UsbDeviceServer {
     fn handle(
         &mut self,
@@ -1221,28 +1208,6 @@ impl BlockingScalarHandler<IsDeviceEmulationConnected> for UsbDeviceServer {
         _context: &mut server::ServerContext<Self>,
     ) -> bool {
         self.is_configured
-    }
-}
-
-impl BlockingScalarHandler<IsCableConnected> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        _msg: IsCableConnected,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> bool {
-        self.vbus_has_power
-    }
-}
-
-impl BlockingScalarHandler<IsDeviceMode> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        _msg: IsDeviceMode,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> bool {
-        !self.otg_device_connected
     }
 }
 

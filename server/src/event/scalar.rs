@@ -229,6 +229,8 @@ impl<T: ScalarCodec> Default for ScalarSubList<T> {
 impl<T: ScalarCodec> ScalarSubList<T> {
     pub fn push(&mut self, sub: ScalarEventSubscriber<T>) { self.inner.push(sub); }
 
+    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+
     pub fn send(&mut self, msg: &T) { self.inner.retain(|sub| sub.send(msg).is_ok()) }
 
     pub fn send_nowait(&mut self, msg: &T) {

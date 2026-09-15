@@ -19,7 +19,5 @@ DeliverHidApdu = { id = 3, type = "archive" }
     "ReadEndpoint",
     "WriteEndpoint",
     "SetInterfaceEnabled",
-    "IsDeviceEmulationEnabled",
-    "IsDeviceEmulationConnected",
     "SetVidPid",
 ]

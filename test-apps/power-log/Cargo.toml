@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "power-log"
+version = "0.1.0"
+edition = "2021"
+description = "Record battery and screen state to a CSV"
+
+[dependencies]
+fs = { workspace = true }
+gui-server-api = { workspace = true }
+log = "0.4.14"
+log-server = { workspace = true }
+power-manager = { workspace = true }
+server = { workspace = true }

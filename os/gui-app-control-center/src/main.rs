@@ -78,7 +78,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         ui.global::<State>().set_is_nfc_in_use(false);
     }
 
-    let gui = cx.gui.clone();
     spawn_local(async move {
         let mut status_updates = subscribe_scalar::<
             power_manager_ext_permissions::PowerManagerExtPermissions,
@@ -90,10 +89,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
             // Give haptic feedback when the USB is plugged in and charging begins
             let is_charging = status.charge_status == power_manager::ChargeStatus::Charging;
-            if !is_charging && status.battery_percent == 0 {
-                log::info!("Battery reserve reached, forcing shutdown");
-                gui.shutdown().ok();
-            }
             let is_usb_attached = status.attached_state != power_manager::AttachedState::None;
             if is_charging && is_usb_attached && !state.is_usb_attached {
                 #[cfg(keyos)]

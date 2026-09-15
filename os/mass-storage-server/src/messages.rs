@@ -43,6 +43,10 @@ impl From<WriteBlocks> for server::SimpleMemoryMessage {
     }
 }
 
+#[derive(Debug, server::Message)]
+#[response(Result<(), MassStorageError>)]
+pub struct Flush;
+
 #[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[event(MassStorageEvent)]
 pub struct Subscribe;

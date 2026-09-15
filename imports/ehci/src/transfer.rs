@@ -212,10 +212,19 @@ impl<CT: TransferContext> Transfer<CT> {
             let remaining = self.qtds[self.last_data_qtd_index].token.get().total_bytes();
             let transferred = self.original_total_bytes.saturating_sub(remaining as usize);
             Ok(transferred)
-        } else {
+        } else if self.qtds.iter().any(|q| q.token.get().device_stalled()) {
             Err(EhciError::Stalled)
+        } else {
+            Err(EhciError::TransferError)
         };
         TransferResult { result, context: self.context }
+    }
+
+    /// Resolve a transfer the host is abandoning rather than one the controller
+    /// finished. [`Transfer::halt_all`] leaves a qTD status indistinguishable from a
+    /// device STALL, so these must not go through [`Transfer::into_result`].
+    pub(crate) fn into_cancelled(self, error: EhciError) -> TransferResult<CT> {
+        TransferResult { result: Err(error), context: self.context }
     }
 
     pub(crate) fn take_context(self) -> CT { self.context }

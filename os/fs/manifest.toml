@@ -23,6 +23,7 @@ ProcessDisconnected = { id = 65, type = "scalar" }
     "ReadBlocks",
     "WriteBlocks",
     "BlockCount",
+    "Flush",
     "Subscribe",
 ]
 "os/security" = ["SubscribeDiskEncryptionKeysReady"]

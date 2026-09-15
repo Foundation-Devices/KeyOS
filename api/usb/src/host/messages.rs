@@ -88,6 +88,22 @@ impl From<BulkIn> for server::SimpleMemoryMessage {
     }
 }
 
+/// A control transfer on endpoint zero. The direction is the top bit of
+/// `request_type`, as on the wire.
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(Result<Vec<u8>, UsbError>)]
+pub struct ControlTransfer {
+    pub handle: usize,
+    pub request_type: u8,
+    pub request: u8,
+    pub value: u16,
+    pub index: u16,
+    /// Payload sent to the device; empty for a device-to-host transfer.
+    pub data: Vec<u8>,
+    /// Bytes to read back; zero for a host-to-device transfer.
+    pub read_len: usize,
+}
+
 #[derive(Debug, server::Message, Clone)]
 pub struct SetEnabled(pub bool);
 

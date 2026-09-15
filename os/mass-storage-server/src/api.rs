@@ -90,6 +90,15 @@ impl<P: CheckedPermissions> MassStorageApi<P> {
         Ok(())
     }
 
+    /// Commits the device's write caches to the medium. Devices that do not
+    /// implement the command report success.
+    pub fn flush(&mut self) -> Result<(), MassStorageError>
+    where
+        P: MessageAllowed<Flush>,
+    {
+        self.conn.try_send_blocking_scalar(Flush)?
+    }
+
     pub fn subscribe<S>(&self, listener: &mut ServerContext<S>)
     where
         S: server::Server + server::ScalarEventHandler<MassStorageEvent>,

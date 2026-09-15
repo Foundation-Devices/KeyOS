@@ -150,19 +150,7 @@ impl From<WriteEndpoint> for server::SimpleMemoryMessage {
 
 #[derive(Debug, server::Message, Clone)]
 #[response(bool)]
-pub struct IsDeviceEmulationEnabled;
-
-#[derive(Debug, server::Message, Clone)]
-#[response(bool)]
 pub struct IsDeviceEmulationConnected;
-
-#[derive(Debug, server::Message, Clone)]
-#[response(bool)]
-pub struct IsCableConnected;
-
-#[derive(Debug, server::Message, Clone)]
-#[response(bool)]
-pub struct IsDeviceMode;
 
 #[derive(Debug, server::Message, Clone)]
 #[response(Result<(), UsbError>)]

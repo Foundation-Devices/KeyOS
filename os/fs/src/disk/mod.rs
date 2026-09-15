@@ -232,7 +232,7 @@ impl<BD: BlockDevice> Write for Disk<BD> {
 impl<BD: BlockDevice> Drop for Disk<BD> {
     fn drop(&mut self) {
         if let Err(e) = self.flush() {
-            log::error!("Failed to flush disk: {:?}", e);
+            log::error!("Failed to flush disk: {e}");
         }
     }
 }

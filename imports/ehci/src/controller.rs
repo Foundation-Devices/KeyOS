@@ -15,6 +15,9 @@ use crate::util::VolatileCellHelper;
 use crate::{error::EhciError, queue::AsyncQueue};
 use crate::{BufferPool, QtdPool, QueueHeadPool, TransferContext};
 
+/// Largest data stage a control transfer can carry, set by the pool element size.
+pub const MAX_CONTROL_DATA_LEN: usize = 0x40;
+
 /// Main USB Controller struct. Instantiate to access all functionality.
 pub struct Controller<CT> {
     opregs: *mut OperationalRegisters,
@@ -69,12 +72,20 @@ enum BuiltinTransfer<CT> {
     User {
         context: CT,
     },
+    UserControl {
+        context: CT,
+        setup_buffer: PoolElementHandle<[u8; 0x40]>,
+        data_buffer: PoolElementHandle<[u8; 0x40]>,
+        /// Data stage length; zero leaves the stage out, as CLEAR_FEATURE requires.
+        data_len: usize,
+    },
 }
 
 impl<CT> BuiltinTransfer<CT> {
     pub(crate) fn into_user(self) -> CT {
         match self {
             BuiltinTransfer::User { context } => context,
+            BuiltinTransfer::UserControl { context, .. } => context,
             _ => panic!(),
         }
     }
@@ -87,6 +98,7 @@ impl<CT: TransferContext> TransferContext for BuiltinTransfer<CT> {
             BuiltinTransfer::SetConfiguration { .. } => &mut [],
             BuiltinTransfer::GetDescriptor { data_buffer, .. } => &mut **data_buffer,
             BuiltinTransfer::User { context } => context.data_buffer(),
+            BuiltinTransfer::UserControl { data_buffer, data_len, .. } => &mut data_buffer[..*data_len],
         }
     }
 
@@ -99,6 +111,9 @@ impl<CT: TransferContext> TransferContext for BuiltinTransfer<CT> {
                 &setup_buffer[..core::mem::size_of::<ControlRequest>()]
             }
             BuiltinTransfer::GetDescriptor { setup_buffer, .. } => {
+                &setup_buffer[..core::mem::size_of::<ControlRequest>()]
+            }
+            BuiltinTransfer::UserControl { setup_buffer, .. } => {
                 &setup_buffer[..core::mem::size_of::<ControlRequest>()]
             }
             BuiltinTransfer::User { context } => context.setup_buffer(),
@@ -216,6 +231,14 @@ impl<CT: TransferContext> Controller<CT> {
                 BuiltinTransfer::User { context } => {
                     handler.transfer_result(self, ft.result, context);
                 }
+                BuiltinTransfer::UserControl { mut context, data_buffer, .. } => {
+                    if let Ok(transferred) = ft.result {
+                        let destination = context.data_buffer();
+                        let len = transferred.min(destination.len());
+                        destination[..len].copy_from_slice(&data_buffer[..len]);
+                    }
+                    handler.transfer_result(self, ft.result, context);
+                }
             };
         }
 
@@ -298,6 +321,52 @@ impl<CT: TransferContext> Controller<CT> {
             .map_err(|(transfer, e)| (transfer.take_context().into_user(), e))
     }
 
+    /// Schedule a Control transfer. Result only indicates that the scheduling itself
+    /// was successful, the transfer result will be returned via the EventHandler
+    ///
+    /// The direction is the top bit of `request.typ`, as on the wire: a read fills the
+    /// context's data buffer with up to `request.length` bytes once the transfer
+    /// finishes, a write sends `data`. Control transfers always run on endpoint zero,
+    /// which stays open for the lifetime of the device.
+    pub fn schedule_control(
+        &mut self,
+        address: u8,
+        request: ControlRequest,
+        data: &[u8],
+        context: CT,
+    ) -> Result<(), (CT, EhciError)> {
+        if !self.enabled {
+            return Err((context, EhciError::ControllerDisabled));
+        }
+        let device_to_host = request.typ & 0x80 != 0;
+        let mut staging = [0u8; MAX_CONTROL_DATA_LEN];
+        let data_len = if device_to_host {
+            (request.length as usize).min(staging.len())
+        } else {
+            let len = data.len().min(staging.len());
+            staging[..len].copy_from_slice(&data[..len]);
+            len
+        };
+
+        let setup_buffer = match self.buffer_pool.alloc(request.into_tmp_buffer()) {
+            Ok(buffer) => buffer,
+            Err(e) => return Err((context, e)),
+        };
+        let data_buffer = match self.buffer_pool.alloc(staging) {
+            Ok(buffer) => buffer,
+            Err(e) => return Err((context, e)),
+        };
+        let builtin = BuiltinTransfer::UserControl { context, setup_buffer, data_buffer, data_len };
+        let transfer = if device_to_host {
+            Transfer::new_control_read(&mut self.qtd_pool, builtin, self.virt_to_phys)
+        } else {
+            Transfer::new_control_write(&mut self.qtd_pool, builtin, self.virt_to_phys)
+        }
+        .map_err(|(ctx, e)| (ctx.into_user(), e))?;
+        self.schedule_transfer(address, transfer)
+            .map_err(|(transfer, e)| (transfer.take_context().into_user(), e))
+    }
+
     /// Open a specific USB endpoint. Should be called before scheduling any transfers.
     /// Initializes transfer queues.
     pub fn open_endpoint(
@@ -363,8 +432,11 @@ impl<CT: TransferContext> Controller<CT> {
         }
         self.enabled = false;
         for transfer_result in self.async_queue.flush() {
-            if let BuiltinTransfer::User { context } = transfer_result.context {
-                handler.transfer_result(self, transfer_result.result, context);
+            match transfer_result.context {
+                BuiltinTransfer::User { context } | BuiltinTransfer::UserControl { context, .. } => {
+                    handler.transfer_result(self, transfer_result.result, context);
+                }
+                _ => {}
             }
         }
         let mut disconnects = Vec::new();

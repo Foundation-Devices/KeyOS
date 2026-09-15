@@ -23,16 +23,14 @@ impl PartiallyEncryptedEmmc {
 
 impl BlockDevice for EmmcApi {
     fn read_blocks(&mut self, block_idx: u32, block_buf: &mut [u8]) -> Result<(), std::io::Error> {
-        self.read_blocks(block_idx, block_buf).map_err(|_| std::io::ErrorKind::Other.into())
+        self.read_blocks(block_idx, block_buf).map_err(std::io::Error::other)
     }
 
     fn write_blocks(&mut self, block_idx: u32, block_buf: &[u8]) -> Result<(), std::io::Error> {
-        self.write_blocks(block_idx, block_buf).map_err(|_| std::io::ErrorKind::Other.into())
+        self.write_blocks(block_idx, block_buf).map_err(std::io::Error::other)
     }
 
-    fn flush_blocks(&mut self) -> Result<(), std::io::Error> {
-        self.flush().map_err(|_| std::io::ErrorKind::Other.into())
-    }
+    fn flush_blocks(&mut self) -> Result<(), std::io::Error> { self.flush().map_err(std::io::Error::other) }
 }
 
 impl BlockDevice for PartiallyEncryptedEmmc {
@@ -49,10 +47,7 @@ impl BlockDevice for PartiallyEncryptedEmmc {
             self.emmc.read_blocks(block_idx, block_buf)
         };
 
-        res.map_err(|e| {
-            log::error!("Error reading encrypted blocks: {:?}", e);
-            std::io::ErrorKind::Other.into()
-        })
+        res.map_err(std::io::Error::other)
     }
 
     fn write_blocks(&mut self, block_idx: u32, block_buf: &[u8]) -> Result<(), std::io::Error> {
@@ -68,13 +63,10 @@ impl BlockDevice for PartiallyEncryptedEmmc {
             self.emmc.write_blocks(block_idx, block_buf)
         };
 
-        res.map_err(|e| {
-            log::error!("Error writing encrypted blocks: {:?}", e);
-            std::io::ErrorKind::Other.into()
-        })
+        res.map_err(std::io::Error::other)
     }
 
     fn flush_blocks(&mut self) -> Result<(), std::io::Error> {
-        self.emmc.flush().map_err(|_| std::io::ErrorKind::Other.into())
+        self.emmc.flush().map_err(std::io::Error::other)
     }
 }

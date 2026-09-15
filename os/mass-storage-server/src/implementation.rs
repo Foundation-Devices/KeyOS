@@ -20,6 +20,8 @@ const INTERFACE_PROTOCOL_BULK_ONLY: u8 = 0x50;
 pub struct MassStorageServer {
     backend: Option<mass_storage::MassStorageHost<UsbWrapper>>,
     device_handle: Option<usize>,
+    flush_unsupported: bool,
+    wrote_since_flush: bool,
     usb: UsbHost,
     subscribers: Vec<ScalarEventSubscriber<MassStorageEvent>>,
 }
@@ -64,6 +66,8 @@ impl server::ArchiveEventHandler<UsbEvent> for MassStorageServer {
                         let block_count = backend.block_count() as usize;
                         self.backend = Some(backend);
                         self.device_handle = Some(handle);
+                        self.flush_unsupported = false;
+                        self.wrote_since_flush = false;
                         self.subscribers.retain(|subscriber| {
                             subscriber.send(&MassStorageEvent::Connect { block_size, block_count }).is_ok()
                         });
@@ -122,12 +126,18 @@ impl mass_storage::UsbHostCommands for UsbWrapper {
         self.temp_buffer.as_slice_mut()[..data.len()].copy_from_slice(data);
         self.ep_out.bulk_out(self.temp_buffer, data.len()).map_err(convert_ehci_error)
     }
+
+    fn clear_halt_in(&mut self) -> core::result::Result<(), mass_storage::UsbError> {
+        self.ep_in.clear_halt().map_err(convert_ehci_error)
+    }
 }
 
 fn convert_ehci_error(e: UsbError) -> mass_storage::UsbError {
     match e {
         UsbError::EhciError(EhciError::Stalled) => mass_storage::UsbError::Stalled,
         UsbError::EhciError(EhciError::Disconnected) => mass_storage::UsbError::Disconnected,
+        UsbError::EhciError(EhciError::TransferError) => mass_storage::UsbError::TransferError,
+        UsbError::EhciError(EhciError::Cancelled) => mass_storage::UsbError::Cancelled,
         UsbError::NotFound => mass_storage::UsbError::Disconnected,
         _ => mass_storage::UsbError::Other,
     }
@@ -182,10 +192,38 @@ impl LendMutHandler<WriteBlocks> for MassStorageServer {
             backend.usb_mut().block_buffer = Some(msg.buf);
             let result = backend.write(msg.block_index, &msg.buf.as_slice()[..msg.length]);
             backend.usb_mut().block_buffer = None;
+            // Set even on failure: a write that errored may still have reached the medium.
+            self.wrote_since_flush = true;
             Ok(result?)
         } else {
             Err(MassStorageError::NotConnected)
         }
+    }
+}
+
+impl BlockingScalarHandler<Flush> for MassStorageServer {
+    fn handle(
+        &mut self,
+        _msg: Flush,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> <Flush as server::BlockingScalar>::Response {
+        let backend = self.backend.as_mut().ok_or(MassStorageError::NotConnected)?;
+        if self.flush_unsupported || !self.wrote_since_flush {
+            return Ok(());
+        }
+        match backend.flush() {
+            Err(mass_storage::MassStorageError::SenseError(mass_storage::SenseKey::IllegalRequest))
+            | Err(mass_storage::MassStorageError::Usb(mass_storage::UsbError::Stalled)) => {
+                // Asking again would cost a round trip on every file close.
+                log::info!("Mass storage device does not support flushing");
+                self.flush_unsupported = true;
+            }
+            other => other?,
+        }
+        // Left set when the flush failed for any other reason, so the next one retries.
+        self.wrote_since_flush = false;
+        Ok(())
     }
 }
 

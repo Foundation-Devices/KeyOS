@@ -159,34 +159,11 @@ impl<P: CheckedPermissions> UsbDeviceEmulation<P> {
         Ok(())
     }
 
-    pub fn is_enabled(&self) -> Result<bool, UsbError>
-    where
-        P: MessageAllowed<IsDeviceEmulationEnabled>,
-    {
-        Ok(self.0.try_send_blocking_scalar(IsDeviceEmulationEnabled)?)
-    }
-
     pub fn is_connected(&self) -> Result<bool, UsbError>
     where
         P: MessageAllowed<IsDeviceEmulationConnected>,
     {
         Ok(self.0.try_send_blocking_scalar(IsDeviceEmulationConnected)?)
-    }
-
-    /// Returns true if the USB cable is connected (VBUS has power)
-    pub fn is_cable_connected(&self) -> Result<bool, UsbError>
-    where
-        P: MessageAllowed<IsCableConnected>,
-    {
-        Ok(self.0.try_send_blocking_scalar(IsCableConnected)?)
-    }
-
-    /// Returns true if in USB device mode (not acting as USB host via OTG)
-    pub fn is_device_mode(&self) -> Result<bool, UsbError>
-    where
-        P: MessageAllowed<IsDeviceMode>,
-    {
-        Ok(self.0.try_send_blocking_scalar(IsDeviceMode)?)
     }
 
     pub fn set_custom_vid_pid(&mut self, vid: Option<u16>, pid: Option<u16>)
@@ -281,6 +258,9 @@ impl<P: CheckedPermissions> UsbEmulatedEndpoint<P> {
     /// The USB server handles DMA chunking internally for transfers larger
     /// than one DMA descriptor (64 KB).
     ///
+    /// A `length` of 0 sends a single zero length packet, on DMA and non-DMA
+    /// endpoints alike.
+    ///
     /// **`buf` must be backed by physically contiguous pages** (allocate with
     /// `MemoryFlags::POPULATE`). The DMA controller reads from a single
     /// physical start address; non-contiguous pages cause data corruption.
@@ -293,7 +273,8 @@ impl<P: CheckedPermissions> UsbEmulatedEndpoint<P> {
 
     /// Like [`write_buf`](Self::write_buf) but sends a ZLP after the transfer
     /// if the total length is an exact multiple of `max_packet_len`, so the
-    /// host sees a proper USB transfer boundary.
+    /// host sees a proper USB transfer boundary. A `length` of 0 still sends
+    /// the one packet, not two.
     ///
     /// See [`write_buf`](Self::write_buf) for the physical contiguity requirement.
     pub fn write_buf_zlp(&mut self, buf: xous::MemoryRange, length: usize) -> Result<usize, UsbError>

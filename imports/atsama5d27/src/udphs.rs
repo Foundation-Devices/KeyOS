@@ -70,6 +70,8 @@ bitfield! {
     impl Debug;
 
     pub force_stall, set_force_stall: 5;
+    // Only TOGGLESQ in the clear register, where it resets the data toggle to DATA0.
+    pub toggle_sequence, set_toggle_sequence: 6;
     pub overflow_error, set_overflow_error:8;
     pub received_out, set_received_out:9;
     pub transmission_complete, set_transmmission_complete:10;

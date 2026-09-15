@@ -31,7 +31,7 @@ PermissionRequest = { id = 66, type = "scalar", cfg = 'not(feature = "recovery-o
 "os/camera" = ["NotifyVisible", "Subscribe"]
 "os/haptics" = ["Vibrate"]
 "os/power-manager" = ["SetPeripheralEnabled", "Reboot"]
-"os/power-manager-ext" = ["GetStatus", "Shutdown"]
+"os/power-manager-ext" = ["GetStatus", "Shutdown", "BatteryCriticalSubscribe"]
 "os/rgb-server" = ["AnimateAllTo", "SetAllTo", "SubscribeColorUpdates"]
 "os/security" = ["Logout", "GetMasterKeyState"]
 "os/settings" = [

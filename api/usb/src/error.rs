@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub use ehci::EhciError;
+use num_traits::{FromPrimitive, ToPrimitive};
 use server::{AsScalar, FromScalar};
 
 #[derive(Debug, Clone, Copy, thiserror::Error, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -44,20 +45,7 @@ impl AsScalar<2> for UsbError {
     fn as_scalar(&self) -> [u32; 2] {
         match self {
             UsbError::XousError(e) => [1, *e as u32],
-            UsbError::EhciError(e) => [
-                2,
-                match e {
-                    EhciError::InvalidCapsLen => 1,
-                    EhciError::EndpointNotOpen => 2,
-                    EhciError::InvalidAddress => 3,
-                    EhciError::Disconnected => 4,
-                    EhciError::DescriptorError => 5,
-                    EhciError::OutOfPoolItems => 6,
-                    EhciError::SetupUnsuccessful => 7,
-                    EhciError::Stalled => 8,
-                    EhciError::ControllerDisabled => 9,
-                },
-            ],
+            UsbError::EhciError(e) => [2, e.to_u32().unwrap()],
             UsbError::Other => [3, 0],
             UsbError::NotFound => [4, 0],
             UsbError::NotClaimed => [5, 0],
@@ -76,18 +64,7 @@ impl FromScalar<2> for UsbError {
     fn from_scalar(value: [u32; 2]) -> Self {
         match value[0] {
             1 => UsbError::XousError(value[1] as usize),
-            2 => UsbError::EhciError(match value[1] {
-                1 => EhciError::InvalidCapsLen,
-                2 => EhciError::EndpointNotOpen,
-                3 => EhciError::InvalidAddress,
-                4 => EhciError::Disconnected,
-                5 => EhciError::DescriptorError,
-                6 => EhciError::OutOfPoolItems,
-                7 => EhciError::SetupUnsuccessful,
-                8 => EhciError::Stalled,
-                9 => EhciError::ControllerDisabled,
-                _ => EhciError::Disconnected,
-            }),
+            2 => EhciError::from_u32(value[1]).map_or(UsbError::Other, UsbError::EhciError),
             3 => UsbError::Other,
             4 => UsbError::NotFound,
             5 => UsbError::NotClaimed,
@@ -104,9 +81,12 @@ impl FromScalar<2> for UsbError {
 }
 
 impl From<usize> for UsbError {
-    fn from(value: usize) -> Self { Self::from_scalar([value as u32, 0]) }
+    fn from(value: usize) -> Self { Self::from_scalar([value as u32 >> 24, value as u32 & 0x00FF_FFFF]) }
 }
 
 impl From<UsbError> for usize {
-    fn from(value: UsbError) -> Self { server::AsScalar::<2>::as_scalar(&value)[0] as usize }
+    fn from(value: UsbError) -> Self {
+        let [variant, payload] = server::AsScalar::<2>::as_scalar(&value);
+        ((variant << 24) | (payload & 0x00FF_FFFF)) as usize
+    }
 }

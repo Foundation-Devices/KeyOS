@@ -92,13 +92,6 @@ impl<P: CheckedPermissions> PowerManagerExtApi<P> {
         self.conn.send_blocking_archive(GetExtendedStatus)
     }
 
-    pub fn set_usb_boost(&self, enabled: bool) -> Result<SetUsbBoostResponse, xous::Error>
-    where
-        P: MessageAllowed<SetUsbBoost>,
-    {
-        self.conn.try_send_blocking_scalar(SetUsbBoost { enabled })
-    }
-
     #[cfg(not(keyos))]
     pub fn set_battery_percent(&self, level: u8) -> Result<(), xous::Error>
     where
@@ -133,7 +126,19 @@ impl<P: CheckedPermissions> PowerManagerExtApi<P> {
     {
         self.conn.subscribe_scalar_infallible(StatusSubscribe, context)
     }
+
+    pub fn subscribe_battery_critical<S>(&self, context: &mut server::ServerContext<S>)
+    where
+        S: server::Server + server::ScalarEventHandler<BatteryCritical>,
+        P: MessageAllowed<BatteryCriticalSubscribe>,
+    {
+        self.conn.subscribe_scalar_infallible(BatteryCriticalSubscribe, context)
+    }
 }
+
+/// The cell has reached its reserve. Power is cut a few seconds later whatever the subscriber does.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct BatteryCritical;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Status {
@@ -174,8 +179,9 @@ impl From<OtgPriority> for tusb320::ModeSelect {
     }
 }
 
-#[derive(num_derive::FromPrimitive, num_derive::ToPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(num_derive::FromPrimitive, num_derive::ToPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AttachedState {
+    #[default]
     None = 0,
     Source = 1,
     Sink = 2,

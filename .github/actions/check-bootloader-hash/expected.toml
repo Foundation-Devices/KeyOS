@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-version = "0.2.6"
+version = "0.2.7"
 
 # Built on AArch64 Linux with KEYOS_SOURCE_DATE_EPOCH=1 so changes in this hash
 # reflect changes to the bootloader binary rather than the canonical timestamp.
 # This normalized hash is for source-drift detection only; release builds use
 # the timestamp in boot/keyos-boot/SOURCE_DATE_EPOCH.
-normalized_sha256 = "4cbd336440b8e7620acfd515f481ced824f8cb38291e672ac5f1393687021995"
+normalized_sha256 = "2575a60bb76834218e0fe5333627ca9038b27176c92988c217136eb52e1b1e90"
 
 # Exact AArch64 Linux hashes produced with boot/keyos-boot/SOURCE_DATE_EPOCH.
 # The on-device value models the plaintext SRAM image hashed by System Information.
-canonical_sha256 = "722a0d2d9511f051f2432d24952d1e5e0bf5167aeb8b8bd6cad0689a71383875"
-on_device_sha256 = "f2afccf7b70208d76722e23a9e2a3fab4f362815f2c70414201d7f9883a2794f"
+canonical_sha256 = "cf9c675f30800fa3ea95f3e4b3a3ad735f84b870eb7b0cba8aa92371cb7eed58"
+on_device_sha256 = "f44fd2fb48afd2d1c5f132a8ba381327cb105ac1114d838d2c5bf437d13ae3f3"

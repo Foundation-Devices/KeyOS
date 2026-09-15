@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use power_manager::messages::*;
-use power_manager::{AttachedState, ChargeStatus, PowerManagerError, Status};
+use power_manager::{AttachedState, BatteryCritical, ChargeStatus, PowerManagerError, Status};
 use server::{
     BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, ScalarEventSubscriber,
     ScalarEventSubscriptionHandler, ScalarHandler, ServerContext,
@@ -17,7 +17,6 @@ impl server::Server for PowerManagerServer {}
 #[derive(server::Server)]
 #[name = "os/power-manager-ext"]
 pub struct PowerManagerServerExt {
-    boosting: bool,
     battery_percent: u8,
     status_update_subscribers: Vec<ScalarEventSubscriber<Status>>,
     last_status: Option<Status>,
@@ -33,12 +32,7 @@ impl PowerManagerServer {
 
 impl PowerManagerServerExt {
     pub fn new() -> Result<Self, PowerManagerError> {
-        Ok(Self {
-            boosting: false,
-            battery_percent: 80,
-            last_status: None,
-            status_update_subscribers: Vec::new(),
-        })
+        Ok(Self { battery_percent: 80, last_status: None, status_update_subscribers: Vec::new() })
     }
 }
 
@@ -68,20 +62,6 @@ impl BlockingScalarHandler<GetStatus> for PowerManagerServerExt {
             battery_percent: self.battery_percent,
             attached_state: AttachedState::Source,
         }
-    }
-}
-
-impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServerExt {
-    fn handle(
-        &mut self,
-        msg: SetUsbBoost,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> SetUsbBoostResponse {
-        log::info!("SetUsbBoost called with enabled={}", msg.enabled);
-        let previous = self.boosting;
-        self.boosting = msg.enabled;
-        SetUsbBoostResponse { success: true, previous_state: previous }
     }
 }
 
@@ -120,6 +100,18 @@ impl ScalarHandler<ClearChargeFault> for PowerManagerServerExt {
         _context: &mut server::ServerContext<Self>,
     ) {
         log::info!("ClearChargeFault called, but not implemented in hosted mode");
+    }
+}
+
+impl ScalarEventSubscriptionHandler<BatteryCriticalSubscribe> for PowerManagerServerExt {
+    fn handle(
+        &mut self,
+        _msg: BatteryCriticalSubscribe,
+        _subscriber: ScalarEventSubscriber<BatteryCritical>,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<(), server::Infallible> {
+        // There is no fuel gauge to go critical, so the subscription is accepted and dropped.
+        Ok(())
     }
 }
 

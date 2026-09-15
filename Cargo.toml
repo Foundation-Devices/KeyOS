@@ -135,6 +135,7 @@ members = [
     "test-apps/mem-move-test-src",
     "test-apps/mutex-test",
     "test-apps/nfc-ndef",
+    "test-apps/power-log",
     "test-apps/randomness-test",
     "test-apps/sandbox-test/runner",
     "test-apps/sandbox-test/worker",

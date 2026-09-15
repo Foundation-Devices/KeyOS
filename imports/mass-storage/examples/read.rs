@@ -51,6 +51,13 @@ impl UsbHostCommands for UsbWrapper {
             }
         }
     }
+
+    fn clear_halt_in(&mut self) -> core::result::Result<(), UsbError> {
+        self.device.clear_halt(self.ep_in).map_err(|e| {
+            error!("Yusb error: {e}");
+            UsbError::Other
+        })
+    }
 }
 fn main() {
     env_logger::init();

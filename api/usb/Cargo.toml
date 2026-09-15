@@ -9,6 +9,7 @@ description = "USB Server API crate"
 publish = false
 
 [dependencies]
+num-traits = { workspace = true }
 ehci = { workspace = true, features = ["rkyv"] }
 log = { workspace = true }
 rkyv = { workspace = true }

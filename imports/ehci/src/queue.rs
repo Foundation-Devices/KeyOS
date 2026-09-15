@@ -118,11 +118,13 @@ impl<CT: TransferContext> AsyncQueue<CT> {
                 let mut head = self.heads.remove(i);
                 debug!("Closing endpoint A={}:EP={}:{:?}", head.address, head.endpoint, head.direction);
 
-                // Halt all qtds
+                // Halt all qtds so the controller stops walking them
                 for transfer in &mut head.transfers {
                     transfer.halt_all();
                 }
-                self.transfer_graveyard.extend(head.transfers.into_iter().map(|t| t.into_result()));
+                self.transfer_graveyard.extend(
+                    head.transfers.into_iter().map(|t| t.into_cancelled(EhciError::Disconnected)),
+                );
 
                 // RIP
                 self.head_graveyard.push(InactiveQueueHead { _head: head.head, ticks: 0 });
@@ -201,8 +203,14 @@ impl<CT: TransferContext> AsyncQueue<CT> {
                     qh.next_qtd.set(QtdPointer::TERMINATE);
                 }
                 qh.token.change(|t| {
+                    // A stalled device refuses the pipe until a ClearFeature, which lands
+                    // it on DATA0, so getting there early costs nothing. After any other
+                    // halt it kept the pipe and its toggle, and resetting ours desyncs them.
+                    if t.device_stalled() {
+                        t.set_data_toggle(false);
+                    }
                     t.set_halted(false);
-                    t.set_active(false)
+                    t.set_active(false);
                 });
             }
         }
@@ -216,7 +224,9 @@ impl<CT: TransferContext> AsyncQueue<CT> {
             self.heads
                 .split_off(1)
                 .into_iter()
-                .flat_map(|head| head.transfers.into_iter().map(|t| t.into_result())),
+                .flat_map(|head| {
+                    head.transfers.into_iter().map(|t| t.into_cancelled(EhciError::Cancelled))
+                }),
         );
         result
     }

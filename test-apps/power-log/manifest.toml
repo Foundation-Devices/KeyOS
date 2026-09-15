@@ -1,0 +1,17 @@
+manifestVersion = "0"
+appId = "0x706f7765722d6c6f6700000000000000"
+
+[appName]
+en = "Power Log"
+
+[permissions]
+template = ["fs-generic"]
+"os/fs" = [
+    "GetUserReadAccess",
+    "GetUserWriteAccess",
+]
+"os/gui-server" = ["IsLocked"]
+"os/power-manager-ext" = [
+    "GetStatus",
+    "GetExtendedStatus",
+]

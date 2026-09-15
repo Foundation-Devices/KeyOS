@@ -15,8 +15,9 @@ mod registers;
 mod transfer;
 mod util;
 
-pub use controller::{Controller, EventHandler};
+pub use controller::{Controller, EventHandler, MAX_CONTROL_DATA_LEN};
 pub use error::EhciError;
+pub use transfer::ControlRequest;
 use pool::{Pool, PoolElement};
 pub use queue::EndpointDirection;
 use registers::{Qtd, QueueHead};

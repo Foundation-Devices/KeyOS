@@ -15,6 +15,8 @@ pub trait UsbHostCommands {
     fn bulk_in(&mut self, data: &mut [u8]) -> core::result::Result<usize, UsbError>;
     /// Send bulk transfer through the mass storage OUT endpoint (to device)
     fn bulk_out(&mut self, data: &[u8]) -> core::result::Result<usize, UsbError>;
+    /// Clear a STALL condition on the mass storage IN endpoint
+    fn clear_halt_in(&mut self) -> core::result::Result<(), UsbError>;
 }
 
 /// Main Mass Storage driver. Instantiate to access all functionality.
@@ -120,7 +122,17 @@ impl<UsbHost: UsbHostCommands> MassStorageHost<UsbHost> {
 
     fn read_csw(&mut self) -> Result<Csw> {
         let mut csw_data = [0u8; 13];
-        if self.usb.bulk_in(&mut csw_data)? != 13 {
+        // BOT 6.7.1: a device may stall the Bulk In pipe instead of answering, and
+        // expects the host to clear it and ask again before giving up.
+        let len = match self.usb.bulk_in(&mut csw_data) {
+            Err(UsbError::Stalled) => {
+                debug!("Bulk In stalled, clearing it and retrying the CSW");
+                self.usb.clear_halt_in()?;
+                self.usb.bulk_in(&mut csw_data)?
+            }
+            other => other?,
+        };
+        if len != 13 {
             return Err(MassStorageError::OtherError);
         }
         Csw::try_read_from_bytes(&csw_data).map_err(|_| MassStorageError::OtherError)

@@ -5,7 +5,7 @@
 pub enum MassStorageError {
     #[error("OS error: {:?}", xous::Error::from_usize(*.0))]
     XousError(usize),
-    #[error("Mass storage error: {0:?}")]
+    #[error("Mass storage error: {0}")]
     MassStorageError(mass_storage::MassStorageError),
     #[error("The device is write-protected")]
     WriteProtected,
@@ -29,7 +29,7 @@ impl server::AsScalar<2> for MassStorageError {
     fn as_scalar(&self) -> [u32; 2] {
         match self {
             MassStorageError::XousError(e) => [1, *e as u32],
-            MassStorageError::MassStorageError(_) => [2, 0], // TODO: Actually store the specifics
+            MassStorageError::MassStorageError(e) => [2, u32::from(u16::from(*e))],
             MassStorageError::WriteProtected => [3, 0],
             MassStorageError::NotConnected => [4, 0],
             MassStorageError::UnalignedBufferSize => [5, 0],
@@ -42,7 +42,7 @@ impl server::FromScalar<2> for MassStorageError {
     fn from_scalar(value: [u32; 2]) -> Self {
         match value[0] {
             1 => MassStorageError::XousError(value[1] as usize),
-            2 => MassStorageError::MassStorageError(mass_storage::MassStorageError::OtherError),
+            2 => MassStorageError::MassStorageError((value[1] as u16).into()),
             3 => MassStorageError::WriteProtected,
             4 => MassStorageError::NotConnected,
             5 => MassStorageError::UnalignedBufferSize,

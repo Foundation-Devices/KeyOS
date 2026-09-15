@@ -28,6 +28,7 @@ i2c = { workspace = true }
 keyos = { path = "../../keyos" }
 tusb320 = { workspace = true }
 utralib = { workspace = true }
+xous-ticktimer = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

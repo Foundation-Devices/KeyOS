@@ -41,18 +41,20 @@ const README_FILE_CONTENTS: &[u8] = b"Airlock is disabled. To enable it:
 4. Click \"Airlock Read&Write\" or \"Airlock Read Only\"
 ";
 
+const BULK_MAX_PACKET_LEN: u16 = 512;
+
 const ENDPOINTS: [EndpointProperties; 2] = [
     EndpointProperties {
         ep_type: EndpointType::Bulk,
         ep_direction: EndpointDirection::In,
-        max_packet_len: 512,
+        max_packet_len: BULK_MAX_PACKET_LEN,
         interval: 0,
         use_dma: true,
     },
     EndpointProperties {
         ep_type: EndpointType::Bulk,
         ep_direction: EndpointDirection::Out,
-        max_packet_len: 512,
+        max_packet_len: BULK_MAX_PACKET_LEN,
         interval: 0,
         use_dma: true,
     },
@@ -77,11 +79,25 @@ impl BlockingArchiveHandler<SetupPacketCallback> for SetupResponder {
         _context: &mut server::ServerContext<Self>,
     ) -> Option<Vec<u8>> {
         log::trace!("Setup packet: {msg:02x?}");
-        // Get Max LUN (see Universal Serial Bus Mass Storage Class Bulk-Only Transport Table 3.2)
-        if msg.request_type == 0b10100001 && msg.request == 0b11111110 {
-            Some(vec![MAX_LUN.load(std::sync::atomic::Ordering::SeqCst)])
-        } else {
-            None
+        // Class-specific requests from Universal Serial Bus Mass Storage Class Bulk-Only
+        // Transport Tables 3.1 and 3.2.
+        match (msg.request_type, msg.request) {
+            // Get Max LUN
+            (0b10100001, 0b11111110) => Some(vec![MAX_LUN.load(Ordering::SeqCst)]),
+            // Bulk-Only Mass Storage Reset. Refused on purpose, so that the host gives up
+            // and resets the port, which takes the endpoints down with it.
+            // TODO: answering it would leave a command that is half way through its data
+            //       phase reading the next CBW as payload. Doing better means reaching into
+            //       the emulation to abandon the transfer it is blocked on, which it has no
+            //       way to ask for yet.
+            (0b00100001, 0b11111111) => {
+                log::warn!("Refusing Bulk-Only Mass Storage Reset, the host should reset the port");
+                None
+            }
+            _ => {
+                log::warn!("Unhandled mass storage control request: {msg:02x?}");
+                None
+            }
         }
     }
 }
@@ -108,6 +124,8 @@ struct UsbWrapper<'a> {
 }
 
 impl<'a> UsbEmulationCommands<BufferWrapper> for UsbWrapper<'a> {
+    const MAX_PACKET_LEN: usize = BULK_MAX_PACKET_LEN as usize;
+
     fn bulk_rx(
         &mut self,
         buffer: &mut BufferWrapper,

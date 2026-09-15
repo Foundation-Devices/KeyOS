@@ -7,8 +7,15 @@ use xous::MemoryRange;
 
 use super::messages::SetEnabled;
 pub use super::messages::UsbEvent;
-use super::messages::{BulkIn, BulkOut, Claim, IsConnected, IsEnabled, OpenEndpoint, Subscribe};
+use super::messages::{
+    BulkIn, BulkOut, Claim, ControlTransfer, IsConnected, IsEnabled, OpenEndpoint, Subscribe,
+};
 use crate::error::UsbError;
+
+const CLEAR_FEATURE: u8 = 1;
+const ENDPOINT_HALT: u16 = 0;
+const RECIPIENT_ENDPOINT: u8 = 0x02;
+const ENDPOINT_IN: u8 = 0x80;
 
 #[macro_export]
 macro_rules! use_host_api {
@@ -129,6 +136,23 @@ impl<P: CheckedPermissions> UsbInEndpoint<P> {
         P: MessageAllowed<BulkIn>,
     {
         self.conn.lend_mut(BulkIn { handle: self.handle, endpoint: self.endpoint, buffer, length })
+    }
+
+    /// Clears a STALL condition on this pipe, leaving both sides on DATA0.
+    pub fn clear_halt(&mut self) -> Result<(), UsbError>
+    where
+        P: MessageAllowed<ControlTransfer>,
+    {
+        self.conn.send_blocking_archive(ControlTransfer {
+            handle: self.handle,
+            request_type: RECIPIENT_ENDPOINT,
+            request: CLEAR_FEATURE,
+            value: ENDPOINT_HALT,
+            index: u16::from(self.endpoint | ENDPOINT_IN),
+            data: Vec::new(),
+            read_len: 0,
+        })?;
+        Ok(())
     }
 }
 

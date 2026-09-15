@@ -1,29 +1,38 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gpio::{GpioPin, IrqMessage, PinSettings};
-use server::{CheckedConn, CheckedPermissions, WithAllPermissions};
+use power_manager::{AttachedState, Status};
+use server::{CheckedConn, CheckedPermissions, MessageId as _, ScalarHandler, WithAllPermissions};
 #[cfg(not(feature = "recovery-os"))]
 use settings::global::{AirlockMode, DeviceName, UsbEnabled};
 use usb::host::messages::SetEnabled;
 
 #[cfg(not(feature = "recovery-os"))]
 use crate::device::messages::SetDeviceEmulationEnabled;
-use crate::device::messages::{OtgMode, SetCableConnected};
-use crate::host::messages::HostOtgMode;
+use crate::device::messages::SetHostAttached;
+use crate::host::messages::PortRole;
 use crate::PowerManagerExtApi;
 
-gpio::use_api!();
+/// Long enough to sit out the port controller's soft reset and the CC debounce that
+/// follows it, and for a peer offered the host role to toggle back as a source.
+const DETACH_DEBOUNCE_MS: usize = 1000;
+
+#[derive(Debug, server::Message, Clone)]
+pub struct DetachDebounced;
+
 #[cfg(not(feature = "recovery-os"))]
 settings::use_api!();
 
-#[derive(Default)]
+#[derive(Default, server::Server)]
+#[name = "os/usb-internal"]
 pub struct SubscriptionServer {
     device: CheckedConn<WithAllPermissions<DevicePermissions>>,
     host: CheckedConn<WithAllPermissions<HostPermissions>>,
+    power_manager_ext: PowerManagerExtApi,
+    detach_callback: Option<xous_ticktimer::TicktimerCallback>,
+    attached_state: AttachedState,
     #[cfg(not(feature = "recovery-os"))]
     settings: SettingsApi,
-    power_manager_ext: PowerManagerExtApi,
     #[cfg(not(feature = "recovery-os"))]
     airlock_is_rw: bool,
 }
@@ -42,12 +51,6 @@ impl CheckedPermissions for HostPermissions {
     const NAME: &str = "os/usb";
 }
 
-impl server::ServerMessages for SubscriptionServer {
-    const NAME: &'static str = "";
-
-    fn messages() -> &'static [server::MessageDef<Self>] { &[] }
-}
-
 impl server::Server for SubscriptionServer {
     fn on_start(&mut self, context: &mut server::ServerContext<Self>) {
         #[cfg(not(feature = "recovery-os"))]
@@ -57,27 +60,11 @@ impl server::Server for SubscriptionServer {
             self.settings.server_subscribe_airlock_mode(context);
         }
 
-        let gpio_api = GpioApi::default();
-        gpio_api
-            .claim_pin(GpioPin::UsbOtgId, PinSettings::InterruptBoth, false)
-            .expect("Could not claim pin");
-
-        log::debug!("Enabling OTG_ID IRQ");
-        gpio_api.enable_irq(GpioPin::UsbOtgId, context).expect("Could not subscribe to gpio interrupt");
-
-        gpio_api
-            .claim_pin(GpioPin::UsbVbusIrq, PinSettings::InterruptBoth, false)
-            .expect("Could not claim pin");
-
-        log::debug!("Enabling VBUS IRQ");
-        gpio_api.enable_irq(GpioPin::UsbVbusIrq, context).expect("Could not subscribe to gpio interrupt");
-
-        let usb_otg_pin = gpio_api.get_pin(GpioPin::UsbOtgId).unwrap();
-        let usb_vbus = gpio_api.get_pin(GpioPin::UsbVbusIrq).unwrap();
-        // The pin is LOW if there is an OTG device present.
-        self.device.send_scalar(OtgMode(!usb_otg_pin));
-        self.host.send_scalar(HostOtgMode(!usb_otg_pin));
-        self.device.send_scalar(SetCableConnected(usb_vbus));
+        self.detach_callback = Some(
+            xous_ticktimer::TicktimerCallback::new(context.sid()).expect("Could not connect to ticktimer"),
+        );
+        // Subscribing answers with the current status, which seeds the attached state.
+        self.power_manager_ext.subscribe_status(context);
 
         #[cfg(feature = "recovery-os")]
         self.set_usb_host_enabled(true);
@@ -85,6 +72,17 @@ impl server::Server for SubscriptionServer {
 }
 
 impl SubscriptionServer {
+    fn notify_port_role(&mut self) {
+        // Only a host on the other end has any use for the device side.
+        self.device.send_scalar(SetHostAttached(self.attached_state == AttachedState::Sink));
+        self.host.send_scalar(PortRole(self.attached_state));
+        #[cfg(not(feature = "recovery-os"))]
+        if self.attached_state == AttachedState::None && self.airlock_is_rw {
+            log::info!("Cable disconnected, setting airlock mode to ReadOnly");
+            self.settings.set_airlock_mode(AirlockMode::ReadOnly);
+        }
+    }
+
     #[cfg(not(feature = "recovery-os"))]
     fn set_usb_enabled(&mut self, enabled: bool) {
         self.set_usb_device_enabled(enabled);
@@ -133,33 +131,35 @@ impl server::ScalarEventHandler<AirlockMode> for SubscriptionServer {
     }
 }
 
-impl server::ScalarEventHandler<IrqMessage> for SubscriptionServer {
-    fn handle(&mut self, msg: IrqMessage, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        log::trace!("GPIO IRQ: {msg:?}");
-        match msg.pin {
-            GpioPin::UsbOtgId => {
-                // The pin is LOW if there is an OTG device present.
-                self.device.send_scalar(OtgMode(!msg.is_high));
-                self.host.send_scalar(HostOtgMode(!msg.is_high));
-            }
-            GpioPin::UsbVbusIrq => {
-                if !msg.is_high {
-                    #[cfg(not(feature = "recovery-os"))]
-                    {
-                        // Return mass storage to read-only when the cable is
-                        // unplugged. This is now independent of Developer Mode,
-                        // which no longer governs AirlockMode.
-                        if self.airlock_is_rw {
-                            log::info!("USB cable disconnected, setting airlock mode to ReadOnly");
-                            self.settings.set_airlock_mode(AirlockMode::ReadOnly);
-                        }
-                    }
-                    // Undo any Never priority set by the host server's timeout backoff.
-                    self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Automatic).ok();
-                }
-                self.device.send_scalar(SetCableConnected(msg.is_high));
-            }
-            _ => log::warn!("Unexpected GPIO IRQ: {msg:?}"),
+impl server::ScalarEventHandler<Status> for SubscriptionServer {
+    fn handle(&mut self, msg: Status, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
+        if msg.attached_state == self.attached_state {
+            return;
         }
+        self.attached_state = msg.attached_state;
+
+        let Some(callback) = self.detach_callback.as_ref() else { return };
+        if self.attached_state == AttachedState::None {
+            callback.request(DETACH_DEBOUNCE_MS, DetachDebounced::ID, 0);
+        } else {
+            callback.cancel(DetachDebounced::ID);
+            self.notify_port_role();
+        }
+    }
+}
+
+impl ScalarHandler<DetachDebounced> for SubscriptionServer {
+    fn handle(
+        &mut self,
+        _msg: DetachDebounced,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        // Cancelling does not recall a callback the ticktimer already queued, so the port
+        // may well be back by the time this arrives.
+        if self.attached_state != AttachedState::None {
+            return;
+        }
+        self.notify_port_role();
     }
 }

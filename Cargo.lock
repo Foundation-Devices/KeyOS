@@ -3551,6 +3551,8 @@ version = "0.1.1"
 dependencies = [
  "bitfield 0.15.0",
  "log 0.4.27",
+ "num-derive",
+ "num-traits",
  "rkyv",
  "vcell",
  "zerocopy 0.8.9",
@@ -7686,7 +7688,7 @@ dependencies = [
 
 [[package]]
 name = "keyos-boot"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "arrayvec",
  "atsama5d27",
@@ -8241,6 +8243,7 @@ dependencies = [
  "env_logger 0.11.8",
  "log 0.4.27",
  "rkyv",
+ "thiserror 2.0.19",
  "yusb",
  "zerocopy 0.8.9",
 ]
@@ -10506,6 +10509,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "power-log"
+version = "0.1.0"
+dependencies = [
+ "fs",
+ "gui-server-api",
+ "log 0.4.27",
+ "power-manager",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
 name = "power-manager"
 version = "0.1.0"
 dependencies = [
@@ -10541,6 +10556,7 @@ dependencies = [
  "utralib",
  "xous",
  "xous-api-log",
+ "xous-api-ticktimer",
 ]
 
 [[package]]
@@ -14641,6 +14657,7 @@ dependencies = [
  "atsama5d27",
  "ehci",
  "log 0.4.27",
+ "num-traits",
  "rkyv",
  "server",
  "thiserror 2.0.19",
@@ -14686,7 +14703,6 @@ version = "0.1.0"
 dependencies = [
  "atsama5d27",
  "ehci",
- "gpio",
  "log 0.4.27",
  "power-manager",
  "rkyv",

@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use power_manager::AttachedState;
 use server::{
     ArchiveEventSubscriptionHandler, BlockingScalarHandler, DeferredLendMut, DeferredLendMutHandler,
     MessageId as _, ScalarHandler,
@@ -32,6 +33,19 @@ pub struct UsbHostServer {
     work_callback: Option<TicktimerCallback>,
     enabled: bool,
     otg_watch_since: Option<Instant>,
+    peer_host_role: PeerHostRole,
+}
+
+/// Whether the peer can be the USB host. We learn it by yielding the role: a computer
+/// takes it, a peripheral leaves the port empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeerHostRole {
+    /// Nothing tried yet, so a self-powered device starts a probe.
+    Unknown,
+    /// Yielded, and OTG priority stays Never until the port says who took the role.
+    Offered,
+    /// The peer left the port empty, so we host it despite the self-powered bit.
+    Declined,
 }
 
 #[derive(Debug, Default, Clone, server::Permissions)]
@@ -49,6 +63,14 @@ struct Statistics {
 enum EhciMessageContext {
     BulkIn(DeferredLendMut<BulkIn>),
     BulkOut(DeferredLendMut<BulkOut>),
+    Control(ControlContext),
+}
+
+/// A control transfer in flight. `data` is where a read lands, and stays empty for a
+/// write; the buffers the controller works from belong to the driver's uncached pool.
+struct ControlContext {
+    response: server::ArchiveResponse<Result<Vec<u8>, UsbError>>,
+    data: Vec<u8>,
 }
 
 impl ehci::TransferContext for EhciMessageContext {
@@ -62,6 +84,7 @@ impl ehci::TransferContext for EhciMessageContext {
                 let body = b.body_mut();
                 &mut body.buffer.as_slice_mut()[..body.length]
             }
+            EhciMessageContext::Control(c) => &mut c.data,
         }
     }
 }
@@ -71,6 +94,13 @@ impl EhciMessageContext {
         match self {
             EhciMessageContext::BulkIn(mut s) => s.set_response(r),
             EhciMessageContext::BulkOut(mut s) => s.set_response(r),
+            EhciMessageContext::Control(c) => {
+                let ControlContext { response, data, .. } = c;
+                let answer = r.map(|len| data[..len.min(data.len())].to_vec());
+                if let Err(e) = response.respond(answer) {
+                    log::warn!("Could not answer a control transfer: {e:?}");
+                }
+            }
         }
     }
 }
@@ -199,6 +229,7 @@ impl UsbHostServer {
             work_callback: None,
             enabled: false,
             otg_watch_since: None,
+            peer_host_role: PeerHostRole::Unknown,
         }
     }
 
@@ -221,6 +252,7 @@ impl UsbHostServer {
                 event_subscribers: &mut self.event_subscribers,
                 power_manager_ext: &self.power_manager_ext,
                 otg_watch_since: &mut self.otg_watch_since,
+                peer_host_role: &mut self.peer_host_role,
             },
         ) {
             log::warn!("Error during ehci work(): {e:?}");
@@ -259,6 +291,7 @@ impl UsbHostServer {
             event_subscribers: &mut self.event_subscribers,
             power_manager_ext: &self.power_manager_ext,
             otg_watch_since: &mut self.otg_watch_since,
+            peer_host_role: &mut self.peer_host_role,
         })?;
         self.power_manager.disable_peripheral(atsama5d27::pmc::PeripheralId::Uhphs)?;
         self.enabled = false;
@@ -326,12 +359,63 @@ impl DeferredLendMutHandler<BulkOut> for UsbHostServer {
     fn default_response() -> <BulkIn as server::LendMut>::Response { Err(UsbError::Other) }
 }
 
+impl server::BlockingArchiveAsyncHandler<ControlTransfer> for UsbHostServer {
+    fn handle(
+        &mut self,
+        request: server::ArchiveRequest<ControlTransfer>,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        let server::ArchiveRequest { message, response } = request;
+        let Some(device) = self.devices.iter().find(|d| d.handle == message.handle) else {
+            response.respond(Err(UsbError::NotFound)).ok();
+            return;
+        };
+        if !device.claimed.map(|pid| pid == response.pid()).unwrap_or(false) {
+            response.respond(Err(UsbError::NotClaimed)).ok();
+            return;
+        }
+
+        let device_to_host = message.request_type & 0x80 != 0;
+        let unused_field_set = if device_to_host { !message.data.is_empty() } else { message.read_len != 0 };
+        if unused_field_set {
+            response.respond(Err(UsbError::InvalidParameter)).ok();
+            return;
+        }
+        let length = if device_to_host { message.read_len } else { message.data.len() };
+        if length > ehci::MAX_CONTROL_DATA_LEN {
+            response.respond(Err(UsbError::DataTooLarge)).ok();
+            return;
+        }
+        let length = length as u16;
+        let request = ehci::ControlRequest {
+            typ: message.request_type,
+            request: message.request,
+            value: message.value,
+            index: message.index,
+            length,
+        };
+
+        self.statistics.transfers += 1;
+
+        let address = device.address;
+        let data = if device_to_host { vec![0; length as usize] } else { Vec::new() };
+        let context = EhciMessageContext::Control(ControlContext { response, data });
+        let scheduled = self.ehci.schedule_control(address, request, &message.data, context);
+        if let Err((ctx, err)) = scheduled {
+            ctx.respond(Err(err.into()));
+        }
+    }
+
+    fn default_response() -> <ControlTransfer as server::BlockingArchive>::Response { Err(UsbError::Other) }
+}
+
 struct EhciEventHandler<'a> {
     next_device_handle: &'a mut usize,
     event_subscribers: &'a mut Vec<server::ArchiveEventSubscriber<UsbEvent>>,
     devices: &'a mut Vec<Device>,
     power_manager_ext: &'a PowerManagerExtApi,
     otg_watch_since: &'a mut Option<Instant>,
+    peer_host_role: &'a mut PeerHostRole,
 }
 
 impl server::ScalarHandler<DoWork> for UsbHostServer {
@@ -353,15 +437,17 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         address: u8,
         descriptors: ehci::descriptors::DescriptorSet,
     ) {
-        // Reject self-powered devices; only accept bus-powered devices
         const SELF_POWERED_BIT: u8 = 1 << 6; // D6: self-powered
 
         let is_self_powered =
             descriptors.configurations().any(|config| (config.attributes & SELF_POWERED_BIT) != 0);
 
-        if is_self_powered {
-            log::info!("Device is self-powered, disabling OTG and not connecting: {descriptors:?}");
+        // A laptop declares itself self-powered, but so does a mains-powered drive we are
+        // happy to host, and only the port controller can tell the two apart.
+        if is_self_powered && *self.peer_host_role == PeerHostRole::Unknown {
+            log::info!("Device is self-powered, offering it the host role: {descriptors:?}");
             self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
+            *self.peer_host_role = PeerHostRole::Offered;
             return;
         }
 
@@ -462,13 +548,33 @@ impl ScalarHandler<SetEnabled> for UsbHostServer {
     }
 }
 
-impl ScalarHandler<HostOtgMode> for UsbHostServer {
-    fn handle(&mut self, msg: HostOtgMode, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        if msg.0 {
-            self.otg_watch_since = Some(Instant::now());
-        } else {
-            self.otg_watch_since = None;
+impl ScalarHandler<PortRole> for UsbHostServer {
+    fn handle(
+        &mut self,
+        PortRole(role): PortRole,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        self.otg_watch_since = (role == AttachedState::Source).then(Instant::now);
+
+        if role != AttachedState::None {
+            if self.peer_host_role == PeerHostRole::Offered {
+                log::info!("Port came back as {role:?}, ending the host role probe");
+                self.peer_host_role = PeerHostRole::Unknown;
+            }
+            return;
         }
+
+        if self.peer_host_role == PeerHostRole::Offered {
+            // Rd against Rd reads the same as an empty port, so a peer that leaves it
+            // empty for the whole detach debounce has no host role to take.
+            log::info!("The peer declined the host role, taking it back");
+            self.peer_host_role = PeerHostRole::Declined;
+        } else {
+            log::info!("Port is empty, allowing host mode again");
+            self.peer_host_role = PeerHostRole::Unknown;
+        }
+        self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Automatic).ok();
     }
 }
 

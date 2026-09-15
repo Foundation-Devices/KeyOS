@@ -6,12 +6,13 @@ use bq27421::Bq27421;
 use gpio::{GpioPin, PinSettings};
 use i2c::Peripheral;
 use power_manager::{messages::*, OtgPriority};
-use power_manager::{ChargeStatus, PowerManagerError, Status};
+use power_manager::{AttachedState, BatteryCritical, ChargeStatus, PowerManagerError, Status};
 use server::{
-    BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, ScalarEventHandler, ScalarEventSubscriber,
-    ScalarEventSubscriptionHandler, ScalarHandler, ServerContext,
+    BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, MessageId, ScalarEventHandler,
+    ScalarEventSubscriber, ScalarEventSubscriptionHandler, ScalarHandler, ScalarSubList, ServerContext,
 };
 use tusb320::Tusb320;
+use xous_ticktimer::TicktimerCallback;
 
 i2c::use_api!();
 gpio::use_api!();
@@ -25,8 +26,25 @@ pub struct PowerManagerServerExt {
     fuel_gauge: Bq27421<I2cPeripheral>,
     port_controller: Tusb320<I2cPeripheral>,
     status_update_subscribers: Vec<ScalarEventSubscriber<Status>>,
+    battery_critical_subscribers: ScalarSubList<BatteryCritical>,
+    battery_critical: bool,
+    shutdown_failsafe: Option<TicktimerCallback>,
     last_status: Option<Status>,
 }
+
+/// Open-circuit voltage at which we call the cell flat.
+/// Above the datasheet's 15% point: the display already reads 0% there, and by 3600 mV the gauge
+/// is under the 5% the bootloader wants to start at. Stopping here costs around half an hour of
+/// active use and buys roughly six extra weeks before a flat pack clears SECURAM.
+const BATTERY_CRITICAL_OCV_MV: i32 = 3700;
+/// Pack impedance under a sustained load, above the datasheet's 180 mOhm measured at 2 kHz.
+/// It grows as the cell ages, so underestimating it trips early, the safe direction.
+const BATTERY_IMPEDANCE_MOHM: i32 = 300;
+/// How long a subscriber gets to shut down before we cut power ourselves.
+const SHUTDOWN_FAILSAFE_MS: usize = 5000;
+
+#[derive(Debug, server::Message)]
+pub struct BatteryCriticalFailsafe;
 
 impl server::Server for PowerManagerServerExt {
     fn on_start(&mut self, context: &mut ServerContext<Self>) {
@@ -38,6 +56,8 @@ impl server::Server for PowerManagerServerExt {
         gpio_api
             .enable_irq(GpioPin::UsbCtrlIrqB, context)
             .expect("Could not enable USB port controller GPIO interrupt");
+        self.shutdown_failsafe =
+            Some(TicktimerCallback::new(context.sid()).expect("Could not claim a ticktimer callback"));
     }
 }
 
@@ -66,7 +86,11 @@ impl PowerManagerServerExt {
         log::debug!("Claiming I2C peripherals");
         let i2c_api = I2cApi::default();
         let charger_periph = i2c_api.claim_peripheral(Peripheral::BatteryCharger)?;
-        let charger = Bq24157::new(charger_periph);
+        let mut charger = Bq24157::new(charger_periph);
+        // Older bootloaders predate this dump and set different settings.
+        if let Err(e) = charger.apply_register_dump(&keyos::batt::CHARGER_CONFIG_DUMP) {
+            log::error!("Could not configure the charger: {e:?}");
+        }
         let fuel_gauge_periph = i2c_api.claim_peripheral(Peripheral::FuelGauge)?;
         let fuel_gauge = Bq27421::new(fuel_gauge_periph);
         let port_controller_periph = i2c_api.claim_peripheral(Peripheral::UsbPortController)?;
@@ -95,26 +119,24 @@ impl PowerManagerServerExt {
             last_reported_charge_fault: None,
             num_faults: 0,
             status_update_subscribers: Vec::new(),
+            battery_critical_subscribers: ScalarSubList::default(),
+            battery_critical: false,
+            shutdown_failsafe: None,
             last_status: None,
         })
     }
 
-    fn set_usb_boost(&mut self, enabled: bool) -> SetUsbBoostResponse {
+    fn set_usb_boost(&mut self, enabled: bool) {
         let mut ctrl = match self.charger.control() {
             Ok(ctrl) => ctrl,
             Err(e) => {
                 log::error!("Error getting control register: {e:?}");
-                return SetUsbBoostResponse { success: false, previous_state: false };
+                return;
             }
         };
-        let previous_state = ctrl.opa_mode();
         ctrl.set_opa_mode(enabled);
-        match self.charger.set_control(ctrl) {
-            Ok(()) => SetUsbBoostResponse { success: true, previous_state },
-            Err(e) => {
-                log::error!("Error setting control register: {e:?}");
-                SetUsbBoostResponse { success: false, previous_state }
-            }
+        if let Err(e) = self.charger.set_control(ctrl) {
+            log::error!("Error setting control register: {e:?}");
         }
     }
 
@@ -126,6 +148,53 @@ impl PowerManagerServerExt {
                 false
             }
         }
+    }
+
+    fn shut_down(&mut self) -> ! {
+        // Disable USB boost before shutting down, so we don't
+        // continue draining the battery into a connected slave device.
+        self.set_usb_boost(false);
+        if !self.set_fuel_gauge_hibernate() {
+            log::error!("Failed to set fuel gauge hibernate mode before shutdown");
+        }
+
+        xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
+        panic!("Shutdown syscall did not shut down");
+    }
+
+    /// Shut down once the cell reaches its reserve, measured as open-circuit voltage.
+    /// We can't use SoC, because it is not reliable: it drifts badly across partial charges.
+    fn check_battery_critical(&mut self, state_of_charge: u8) {
+        if self.battery_critical {
+            return;
+        }
+        // A failed read comes back as 0, which trips the cutoff. Losing the gauge has to stop the
+        // device: we can no longer tell when the pack is empty, and running it flat clears SECURAM.
+        let voltage_mv = self.fuel_gauge.voltage().unwrap_or_default();
+        let current_ma = self.fuel_gauge.charge_current().unwrap_or_default();
+        // Positive current means we are charging, so we are not in danger of dipping below the reserve.
+        if current_ma > 0 {
+            return;
+        }
+        let open_circuit_mv = voltage_mv as i32 - current_ma as i32 * BATTERY_IMPEDANCE_MOHM / 1000;
+        // The gauge stops interrupting at 0%, so this is the last check we get.
+        if open_circuit_mv >= BATTERY_CRITICAL_OCV_MV && state_of_charge > 0 {
+            return;
+        }
+
+        log::warn!("Battery critical at {open_circuit_mv} mV open-circuit, gauge at {state_of_charge}%");
+        self.battery_critical = true;
+        self.battery_critical_subscribers.send_nowait(&BatteryCritical);
+        if self.battery_critical_subscribers.is_empty() {
+            // Nothing to notify, so there is no shutdown in flight to wait for.
+            self.shut_down();
+        }
+
+        self.shutdown_failsafe.as_ref().unwrap().request(
+            SHUTDOWN_FAILSAFE_MS,
+            BatteryCriticalFailsafe::ID,
+            0,
+        );
     }
 }
 
@@ -145,17 +214,6 @@ impl BlockingScalarHandler<GetStatus> for PowerManagerServerExt {
         );
 
         self.update_status()
-    }
-}
-
-impl BlockingScalarHandler<SetUsbBoost> for PowerManagerServerExt {
-    fn handle(
-        &mut self,
-        msg: SetUsbBoost,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> SetUsbBoostResponse {
-        self.set_usb_boost(msg.enabled)
     }
 }
 
@@ -205,15 +263,32 @@ impl ScalarHandler<ClearChargeFault> for PowerManagerServerExt {
 
 impl BlockingScalarHandler<Shutdown> for PowerManagerServerExt {
     fn handle(&mut self, _msg: Shutdown, _sender: xous::PID, _context: &mut server::ServerContext<Self>) {
-        // Disable USB boost before shutting down, so we don't
-        // continue draining the battery into a connected slave device.
-        self.set_usb_boost(false);
-        if !self.set_fuel_gauge_hibernate() {
-            log::error!("Failed to set fuel gauge hibernate mode before shutdown");
-        }
+        self.shut_down()
+    }
+}
 
-        xous::rsyscall(xous::SysCall::Shutdown(0)).unwrap();
-        panic!("Shutdown syscall did not shut down");
+impl ScalarHandler<BatteryCriticalFailsafe> for PowerManagerServerExt {
+    fn handle(
+        &mut self,
+        _msg: BatteryCriticalFailsafe,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        log::warn!("Shutdown did not finish in time, cutting power");
+        self.shut_down()
+    }
+}
+
+impl ScalarEventSubscriptionHandler<BatteryCriticalSubscribe> for PowerManagerServerExt {
+    fn handle(
+        &mut self,
+        _msg: BatteryCriticalSubscribe,
+        subscriber: ScalarEventSubscriber<BatteryCritical>,
+        _context: &mut ServerContext<Self>,
+    ) -> Result<(), server::Infallible> {
+        self.battery_critical_subscribers.push(subscriber);
+
+        Ok(())
     }
 }
 
@@ -319,17 +394,27 @@ impl PowerManagerServerExt {
     }
 
     fn update_status(&mut self) -> Status {
+        let attached_state: AttachedState = self.port_controller.attached_state().unwrap_or_default().into();
+        let was_source =
+            matches!(&self.last_status, Some(last) if last.attached_state == AttachedState::Source);
+        let is_source = attached_state == AttachedState::Source;
+        if is_source != was_source {
+            self.set_usb_boost(is_source);
+        }
+
         let raw_soc = self.fuel_gauge.state_of_charge().unwrap_or_default();
         let status = Status {
             charge_status: self.charge_status(),
             battery_percent: reported_soc(raw_soc),
-            attached_state: self.port_controller.attached_state().unwrap_or_default().into(),
+            attached_state,
         };
 
         if self.last_status != Some(status) {
             self.last_status.replace(status);
             self.status_update_subscribers.retain(|subscriber| subscriber.send(&status).is_ok())
         }
+
+        self.check_battery_critical(raw_soc);
 
         status
     }

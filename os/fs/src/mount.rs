@@ -311,7 +311,10 @@ impl OpenFile {
 impl Drop for OpenFile {
     fn drop(&mut self) {
         use std::io::Write;
-        let _ = self.file.flush();
+        // Drop cannot report back, so an unlogged failure here is silent data loss.
+        if let Err(e) = self.file.flush() {
+            log::error!("Failed to flush file on close: {e}");
+        }
     }
 }
 

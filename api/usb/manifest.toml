@@ -8,6 +8,7 @@ BulkIn = { id = 5, type = "deferredLendMut" }
 SetEnabled = { id = 6, type = "scalar", approval = "autoAllow" }
 IsEnabled = { id = 7, type = "blockingScalar", permissionGroup = "device-connectivity.usb-host-status", approval = "autoAllow" }
 IsConnected = { id = 8, type = "blockingScalar", permissionGroup = "device-connectivity.usb-host-status", approval = "autoAllow" }
+ControlTransfer = { id = 9, type = "blockingArchive" }
 
 [servers."os/usbdev"]
 RegisterInterface = { id = 0, type = "blockingArchive" }
@@ -15,11 +16,8 @@ WaitForConnection = { id = 1, type = "blockingScalar" }
 SetEndpointStalled = { id = 2, type = "scalar" }
 ReadEndpoint = { id = 3, type = "deferredLendMut" }
 WriteEndpoint = { id = 4, type = "deferredLendMut" }
-IsDeviceEmulationEnabled = { id = 9, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 IsDeviceEmulationConnected = { id = 10, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 SetVidPid = { id = 12, type = "blockingScalar" }
 ResetController = { id = 13, type = "blockingScalar" }
-IsCableConnected = { id = 14, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
-IsDeviceMode = { id = 15, type = "blockingScalar", permissionGroup = "device-connectivity.usb-device-status", approval = "autoAllow" }
 SetupPacket = { id = 17, type = "scalar" }
 SetInterfaceEnabled = { id = 20, type = "blockingScalar" }

@@ -297,6 +297,8 @@ impl Server for Gui {
 
         self.init_auto_lock(context);
 
+        PowerManagerExtApi::default().subscribe_battery_critical(context);
+
         #[cfg(not(keyos))]
         self.rgb_led.subscribe_color_updates(context);
 
