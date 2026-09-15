@@ -20,13 +20,26 @@ pub struct PricePoint {
     pub is_pad: bool,
 }
 
-// Must match the graph-strip clip radius in the launcher's page.slint so the
-// border curve and the Slint clip curve lie on top of each other.
 /// Corner radius of the graph bitmap's rounded-bottom mask and border.
-/// Exported so the launcher's Slint layer can clip overlays (e.g. the scrub
-/// marker) on the same curve instead of hard-coding a copy.
 pub const GRAPH_BORDER_RADIUS: f32 = 16.0;
 const GRAPH_BORDER_STROKE_WIDTH: f32 = 1.0;
+
+// Figma palette colors shared by the graph strokes and gradient stops.
+const POSITIVE: [u8; 3] = [0x2e, 0x94, 0x83]; // Green/500
+const NEGATIVE: [u8; 3] = [0xff, 0x33, 0x33]; // Red/500
+const POSITIVE_DARK: [u8; 3] = [0x21, 0x69, 0x5d]; // Green/700
+const NEGATIVE_DARK: [u8; 3] = [0xb5, 0x24, 0x24]; // Red/700
+const STALE_LINE: [u8; 3] = [0x95, 0x93, 0x94]; // Content/Tertiary
+const STALE_FILL: [u8; 3] = [0xc2, 0xc1, 0xc1]; // Neutral/200
+const EMPTY_FILL_TOP: [u8; 3] = [0xe4, 0xe4, 0xe4];
+const EMPTY_FILL_BOTTOM: [u8; 3] = [0x86, 0x83, 0x85];
+const BORDER: [u8; 3] = [0x73, 0x50, 0x45];
+
+fn rgba([r, g, b]: [u8; 3], alpha: u8) -> Color { Color::from_rgba8(r, g, b, alpha) }
+
+fn is_flatline(data: &[PricePoint]) -> bool {
+    data.len() == 2 && data[0].price == data[1].price && data[0].is_pad
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct GraphPoint {
@@ -75,6 +88,7 @@ pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec
     let max_value = *prices.iter().max().unwrap_or(&0);
     let min_value = *prices.iter().min().unwrap_or(&0);
     let is_constant = max_value == min_value;
+    let constant_y = h as f32 * if is_flatline(data) { 0.5 } else { 0.25 };
     let value_range = (max_value - min_value) as f32;
     let max_y = h.saturating_sub(GRAPH_BOTTOM_MARGIN) as f32;
 
@@ -99,8 +113,7 @@ pub fn graph_points(data: &[PricePoint], w: u32, h: u32, max_height: u32) -> Vec
             } else {
                 ((*price - min_value) as f32 / value_range) * max_height as f32
             };
-            let adjusted_value = if is_constant { max_y - h as f32 * 0.25 } else { scaled };
-            let y = max_y - adjusted_value;
+            let y = if is_constant { constant_y } else { max_y - scaled };
 
             GraphPoint { x, y, price: point.price as f32, timestamp: point.timestamp }
         })
@@ -116,10 +129,8 @@ pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, style: G
         return Image::from_rgba8_premultiplied(pixel_buffer);
     }
 
-    let is_flatline = data.len() == 2 && data[0].price == data[1].price && data[0].is_pad;
-
-    if is_flatline {
-        draw_flatline_graph(&mut pixmap, data, w, h, max_height, style.is_dark_mode);
+    if is_flatline(data) {
+        draw_flatline_graph(&mut pixmap, w, h);
     } else {
         draw_normal_graph(&mut pixmap, data, w, h, max_height, style.is_price_positive, style.is_dark_mode);
     }
@@ -127,32 +138,16 @@ pub fn draw_graph(data: &[PricePoint], w: u32, h: u32, max_height: u32, style: G
     Image::from_rgba8_premultiplied(pixel_buffer)
 }
 
-fn draw_flatline_graph(
-    pixmap: &mut tiny_skia::PixmapMut,
-    data: &[PricePoint],
-    w: u32,
-    h: u32,
-    max_height: u32,
-    is_dark_mode: bool,
-) {
-    let stale_fg_color = if is_dark_mode {
-        Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff)
-    } else {
-        Color::from_rgba8(0x95, 0x93, 0x94, 0xff)
-    };
-    let max_y = h.saturating_sub(GRAPH_BOTTOM_MARGIN);
-    let adjusted_value = max_y as f32 - h as f32 * 0.25;
-    let y = max_y as f32 - adjusted_value;
+fn draw_flatline_graph(pixmap: &mut tiny_skia::PixmapMut, w: u32, h: u32) {
+    // Loading/disconnected: the dashed line bisects the 120px graph strip.
+    let y = h as f32 / 2.0;
+    let stale_fg_color = rgba(STALE_LINE, 0xff);
 
     let mut pb_line_stale = PathBuilder::new();
     let mut pb_fill_stale = PathBuilder::new();
 
-    let min_timestamp = data[0].timestamp;
-    let max_timestamp = data[1].timestamp;
-    let time_range = max_timestamp.saturating_sub(min_timestamp);
-
     let x0 = 0.0;
-    let x1 = if time_range > 0 { w as f32 } else { w as f32 };
+    let x1 = w as f32;
 
     pb_fill_stale.move_to(x0, h as f32);
     pb_fill_stale.line_to(x0, y);
@@ -168,14 +163,11 @@ fn draw_flatline_graph(
 
     let mut paint_line_stale = Paint::default();
     paint_line_stale.set_color(stale_fg_color);
+    // The empty-state wash is shared by both themes. In the Figma export
+    // the gradient starts above the line and ends before the bottom edge.
     let (start, end) =
-        (Point::from_xy(w as f32 / 2.0, h as f32), Point::from_xy(w as f32 / 2.0, (h - max_height) as f32));
-
-    let stale_stops = if is_dark_mode {
-        [(0.0, Color::from_rgba8(0x86, 0x83, 0x85, 0x33)), (1.0, Color::from_rgba8(0x45, 0x44, 0x44, 0xff))]
-    } else {
-        [(0.0, Color::from_rgba8(0x95, 0x93, 0x94, 0x00)), (1.0, Color::from_rgba8(0x95, 0x93, 0x94, 0x66))]
-    };
+        (Point::from_xy(w as f32 / 2.0, h as f32 * 0.25), Point::from_xy(w as f32 / 2.0, h as f32 * 0.875));
+    let stale_stops = [(0.0, rgba(EMPTY_FILL_TOP, 0xcc)), (1.0, rgba(EMPTY_FILL_BOTTOM, 0x29))];
     let stale_stops: Vec<_> =
         stale_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
 
@@ -220,17 +212,9 @@ fn draw_normal_graph(
     is_price_positive: bool,
     is_dark_mode: bool,
 ) {
-    // Match the price-change pill's Palette.content-positive/negative color.
-    let (fresh_r, fresh_g, fresh_b) = if is_price_positive {
-        (0x2e, 0x94, 0x83) // UIColors.green-500
-    } else {
-        (0xff, 0x33, 0x33) // UIColors.red-500
-    };
-    let fg_color = Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0xff);
-    let stale_fg_color = match is_dark_mode {
-        true => Color::from_rgba8(0x5a, 0x59, 0x5a, 0xff), // #5A595A
-        false => Color::from_rgba8(0x95, 0x93, 0x94, 0xff), // #959394
-    };
+    let fresh_color = if is_price_positive { POSITIVE } else { NEGATIVE };
+    let fg_color = rgba(fresh_color, 0xff);
+    let stale_fg_color = rgba(STALE_LINE, 0xff); // Content/Tertiary
     let mut pb_line = PathBuilder::new();
     let mut pb_line_stale = PathBuilder::new();
     let mut pb_fill_fresh = PathBuilder::new();
@@ -277,15 +261,10 @@ fn draw_normal_graph(
     let mut paint_line_stale = Paint::default();
     paint_line_stale.set_color(stale_fg_color);
 
-    let (start, end) =
-        (Point::from_xy(w as f32 / 2.0, h as f32), Point::from_xy(w as f32 / 2.0, (h - max_height) as f32));
-
-    let stale_stops = if is_dark_mode {
-        [(0.0, Color::from_rgba8(0x86, 0x83, 0x85, 0x33)), (1.0, Color::from_rgba8(0x45, 0x44, 0x44, 0xff))]
-    } else {
-        // Light mode: use lighter, more transparent colors for stale gradient
-        [(0.0, Color::from_rgba8(0x95, 0x93, 0x94, 0x00)), (1.0, Color::from_rgba8(0x95, 0x93, 0x94, 0x66))]
-    };
+    // Anchor fills to the whole strip, not the price range. Missing history
+    // stays at 70% opacity in the upper half and fades to transparent below.
+    let (start, end) = (Point::from_xy(0.0, 0.0), Point::from_xy(0.0, h as f32));
+    let stale_stops = [(0.5, rgba(STALE_FILL, 0xb3)), (1.0, rgba(STALE_FILL, 0x00))];
     let stale_stops: Vec<_> =
         stale_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
     let paint_fill_stale = Paint {
@@ -293,14 +272,19 @@ fn draw_normal_graph(
         ..Default::default()
     };
 
-    // 8% at the bottom towards the top; dark mode stays more translucent (60%
-    // vs 80%) so the line leads and the wallpaper pattern shows through,
-    // matching the launcher mock.
-    let fresh_top_alpha = if is_dark_mode { 0x99 } else { 0xcc };
-    let fresh_stops = [
-        (0.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, 0x14)),
-        (1.0, Color::from_rgba8(fresh_r, fresh_g, fresh_b, fresh_top_alpha)),
-    ];
+    // Light mode holds the color through the upper half; dark mode fades
+    // across the full strip. Both reach transparency at the bottom.
+    let bottom_color = if is_dark_mode {
+        if is_price_positive {
+            POSITIVE_DARK
+        } else {
+            NEGATIVE_DARK
+        }
+    } else {
+        fresh_color
+    };
+    let fresh_stops =
+        [(if is_dark_mode { 0.0 } else { 0.5 }, rgba(fresh_color, 0xb3)), (1.0, rgba(bottom_color, 0x00))];
     let fresh_stops: Vec<_> =
         fresh_stops.into_iter().map(|(pos, color)| GradientStop::new(pos, color)).collect();
     let paint_fill_fresh = Paint {
@@ -311,6 +295,11 @@ fn draw_normal_graph(
     // Round joins/caps: miter joins grow spikes on sharp price peaks.
     let graph_stroke =
         Stroke { width: 2.0, line_join: LineJoin::Round, line_cap: LineCap::Round, ..Default::default() };
+    let stale_stroke = Stroke {
+        width: 2.0,
+        dash: Some(StrokeDash::new(vec![10.0, 10.0], 0.0).unwrap()),
+        ..Default::default()
+    };
     let mask = graph_clip_mask(w, h);
 
     // Draw fill gradients
@@ -323,7 +312,7 @@ fn draw_normal_graph(
 
     // Draw lines.
     for (path, paint, stroke) in
-        [(&graph_path, &paint_line, &graph_stroke), (&graph_stale_path, &paint_line_stale, &graph_stroke)]
+        [(&graph_path, &paint_line, &graph_stroke), (&graph_stale_path, &paint_line_stale, &stale_stroke)]
     {
         if let Some(path) = path {
             pixmap.stroke_path(path, paint, stroke, Transform::identity(), Some(&mask));
@@ -350,9 +339,9 @@ fn draw_graph_border(pixmap: &mut tiny_skia::PixmapMut, w: u32, h: u32) {
 
     // Hairline at 60% peak alpha: the mock shows a subtle copper edge, not a frame.
     let stops = vec![
-        GradientStop::new(0.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
-        GradientStop::new(0.25, Color::from_rgba8(0x73, 0x50, 0x45, 0x00)),
-        GradientStop::new(1.0, Color::from_rgba8(0x73, 0x50, 0x45, 0x99)),
+        GradientStop::new(0.0, rgba(BORDER, 0x00)),
+        GradientStop::new(0.25, rgba(BORDER, 0x00)),
+        GradientStop::new(1.0, rgba(BORDER, 0x99)),
     ];
     let paint = Paint {
         shader: LinearGradient::new(

@@ -43,10 +43,6 @@ export global GraphLayout {
     out property <length> card-height: 180px;
     out property <length> bottom-gap: 24px;
     out property <length> no-graph-top-gap: 20px;
-    // Set from main.rs at startup to the platform crate's GRAPH_BORDER_RADIUS —
-    // the radius the graph bitmap's own corner mask is built with — so overlay
-    // clips follow the same curve without a hand-copied constant.
-    in property <length> strip-corner-radius: 16px;
 }
 
 // Transient icon motion: how far a pressed icon sinks, and the rearrange
@@ -123,6 +119,29 @@ component PriceGraph inherits Rectangle {
         image-fit: fill;
     }
 
+    graph-strip := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height;
+        width: root.graph-width;
+        height: root.graph-height;
+        // The bitmap already contains antialiased rounded bottom corners.
+        background: transparent;
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: State.bitcoin-graph-image;
+        }
+
+        if State.bitcoin-scrub-active: Circle {
+            size: root.scrub-marker-size;
+            x: State.bitcoin-scrub-marker-x;
+            y: State.bitcoin-scrub-marker-y;
+            background: Palette.content-secondary;
+        }
+    }
+
+    // Draw the price and caption above the graph, including high padded history.
     HorizontalLayout {
         alignment: space-between;
         padding-left: Size.sz4 + (parent.width - root.graph-width) / 2;
@@ -180,13 +199,13 @@ component PriceGraph inherits Rectangle {
                         Icon {
                             name: State.is-price-positive ? "trend-up" : "trend-down";
                             size: Size.sz6;
-                            color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
+                            color: UIColors.neutral-100;
                         }
                     }
 
                     TextSm {
                         text: State.bitcoin-price-change-percent;
-                        color: State.is-price-positive ? Palette.background-positive-subtle : Palette.background-negative-subtle;
+                        color: UIColors.neutral-100;
                         vertical-alignment: center;
                     }
                 }
@@ -197,6 +216,7 @@ component PriceGraph inherits Rectangle {
             alignment: start;
             spacing: Size.sz1;
             vertical-stretch: 0;
+            padding-top: 17px - Size.sz2_5;
 
             TextSm {
                 text: TR2.lookup(TrId.MainLastUpdate);
@@ -211,16 +231,22 @@ component PriceGraph inherits Rectangle {
             }
         }
 
-        if !State.bitcoin-scrub-active && State.is-price-stale && State.is-price-expired: TextSm {
-            text: State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected);
-            color: Palette.content-tertiary;
+        if !State.bitcoin-scrub-active && State.is-price-stale && State.is-price-expired: VerticalLayout {
+            alignment: start;
             vertical-stretch: 0;
+            padding-top: 17px - Size.sz2_5;
+
+            TextSm {
+                text: State.is-envoy-connected ? TR2.lookup(TrId.MainLoadingData) : TR2.lookup(TrId.MainDisconnected);
+                color: Palette.content-tertiary;
+            }
         }
 
         if State.bitcoin-scrub-active: VerticalLayout {
             alignment: start;
             spacing: 0px;
             vertical-stretch: 0;
+            padding-top: 17px - Size.sz2_5;
 
             TextSm {
                 text: State.bitcoin-point-date;
@@ -236,39 +262,29 @@ component PriceGraph inherits Rectangle {
         }
     }
 
-    graph-strip := Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: parent.height - self.height;
-        width: root.graph-width;
-        height: root.graph-height;
-        // No clip here: the graph bitmap already rounds its own bottom corners
-        // (transparent outside its radius-16 mask). Clipping again at the same
-        // curve would stack a second anti-aliased edge on top and rough it up.
-        background: transparent;
+    if State.is-price-expired && !State.bitcoin-scrub-active: Rectangle {
+        x: graph-strip.x + (graph-strip.width - self.width) / 2;
+        y: graph-strip.y + (graph-strip.height - self.height) / 2;
+        width: 42px;
+        height: 42px;
+        border-radius: self.height / 2;
+        border-width: 2px;
+        border-color: Palette.content-tertiary;
+        background: Palette.background-hover;
 
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: State.bitcoin-graph-image;
+        if State.is-envoy-connected: TimerLoader {
+            running: State.current-page == 0;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            size: 36px;
         }
 
-        // The marker gets its own rounded clip layer: clamped to the strip's
-        // edges it can overlap the transparent corners the bitmap's mask cut
-        // away, and clipping only this layer leaves the image's anti-aliased
-        // edge untouched.
-        if State.bitcoin-scrub-active: Rectangle {
-            width: parent.width;
-            height: parent.height;
-            border-bottom-left-radius: GraphLayout.strip-corner-radius;
-            border-bottom-right-radius: GraphLayout.strip-corner-radius;
-            clip: true;
-
-            Circle {
-                size: root.scrub-marker-size;
-                x: State.bitcoin-scrub-marker-x;
-                y: State.bitcoin-scrub-marker-y;
-                background: Palette.content-secondary;
-            }
+        if !State.is-envoy-connected: Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            name: "close";
+            size: 36px;
+            color: Palette.content-tertiary;
         }
     }
 

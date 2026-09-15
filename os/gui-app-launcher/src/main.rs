@@ -349,10 +349,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    // The graph bitmap rounds its own corners; hand the renderer's radius to
-    // the Slint layer so overlay clips (scrub marker) follow the same curve.
-    ui.global::<GraphLayout>().set_strip_corner_radius(slint_keyos_platform::skia::GRAPH_BORDER_RADIUS);
-
     let state = StoredValue::new(AppState::new(cx.gui.clone(), ui.as_weak()));
 
     let app_icon_cache: Rc<RefCell<lru::LruCache<String, Image>>> =
@@ -516,8 +512,10 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             );
 
             let marker_half = BITCOIN_SCRUB_MARKER_SIZE / 2.0;
+            // With the graph's 14px bottom margin, a 1px horizontal inset keeps
+            // the 10px marker inside the rounded card without a clipping layer.
             let marker_x =
-                (sample.x - marker_half).clamp(0.0, GRAPH_WIDTH as f32 - BITCOIN_SCRUB_MARKER_SIZE);
+                (sample.x - marker_half).clamp(1.0, GRAPH_WIDTH as f32 - BITCOIN_SCRUB_MARKER_SIZE - 1.0);
             let marker_y =
                 (sample.y - marker_half).clamp(0.0, GRAPH_HEIGHT as f32 - BITCOIN_SCRUB_MARKER_SIZE);
             ui_state.set_bitcoin_scrub_marker_x(marker_x);
