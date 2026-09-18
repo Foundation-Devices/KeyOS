@@ -362,6 +362,10 @@
       "header": "Actualización Completada",
       "subheader": "Passport se actualizó correctamente \na {0}"
     },
+    "warningModalBatteryCritical": {
+      "content": "Passport Prime is about to shut down. Connect a charger to keep using the device.",
+      "title": "Battery Level Critical"
+    },
     "weekday": {
       "fridayFull": "viernes",
       "fridayShort": "vie",

@@ -14,7 +14,13 @@
     {
       "name": "controlcenter",
       "path": "os/gui-app-control-center",
-      "include": ["common.button.shutDown", "common.backup", "common.time"]
+      "include": [
+        "common.button.confirm",
+        "common.button.shutDown",
+        "common.backup",
+        "common.time",
+        "common.warningModalBatteryCritical"
+      ]
     },
     {
       "name": "files",

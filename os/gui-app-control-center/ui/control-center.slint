@@ -99,6 +99,7 @@ export component ControlCenter inherits VerticalLayout {
 
     alignment: space-between;
     in property <int> battery: 75;
+    in property <bool> is-battery-critical;
     in property <bool> is-charging;
 
     in property <bool> use-custom-colors: false;
@@ -196,8 +197,10 @@ export component ControlCenter inherits VerticalLayout {
                         Battery {
                             is-charging: is-charging;
                             bg-color: bg-color;
-                            fill-color: content-color;
-                            charging-color: use-custom-colors ? content-color : DarkPalette.content-brand;
+                            fill-color: is-battery-critical ? Palette.content-negative : content-color;
+                            charging-color: is-battery-critical
+                                ? Palette.content-negative
+                                : (use-custom-colors ? content-color : DarkPalette.content-brand);
                             charging-icon-color: use-custom-colors ? bg-color : content-color;
                             percentage: battery;
                         }
@@ -276,8 +279,15 @@ export component ControlCenter inherits VerticalLayout {
                                 Battery {
                                     is-charging: is-charging;
                                     bg-color: DarkPalette.background-primary;
-                                    fill-color: DarkPalette.content-primary;
-                                    charging-color: DarkPalette.content-brand;
+                                    fill-color: is-battery-critical
+                                        ? DarkPalette.content-negative
+                                        : DarkPalette.content-primary;
+                                    charging-color: is-battery-critical
+                                        ? DarkPalette.content-negative
+                                        : DarkPalette.content-brand;
+                                    // Keep the bolt off the fill it sits on, which fill-color
+                                    // would otherwise match once both go red.
+                                    charging-icon-color: DarkPalette.content-primary;
                                     percentage: battery;
                                 }
                             }

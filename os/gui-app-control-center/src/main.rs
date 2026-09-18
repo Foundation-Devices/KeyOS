@@ -12,6 +12,8 @@ use slint_keyos_platform::{
     slint::{Color, ComponentHandle, Timer, TimerMode},
     spawn_local, subscribe_scalar, StoredValue,
 };
+#[cfg(not(feature = "recovery-os"))]
+use slint_keyos_platform::{gui_server_api::navigation::alerts::InvokeAlert, navigation::async_invoke_alert};
 use state::AppState;
 use xous::MessageEnvelope;
 
@@ -34,6 +36,8 @@ usb::use_host_api!();
 security::use_api!();
 
 const STATUS_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
+
+const BATTERY_CRITICAL_PERCENT: u8 = 2;
 
 app!(
     "Control Center",
@@ -138,6 +142,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, STATUS_UPDATE_INTERVAL, move || {
+        #[cfg(not(feature = "recovery-os"))]
+        check_battery_critical(state);
+
         let state = state.borrow();
         #[cfg(keyos)]
         update_hw_state(&state);
@@ -272,7 +279,48 @@ fn init_keyos(state: StoredValue<AppState>) {
 
 fn update_battery_state(state: &AppState) {
     state.ui.set_control_center_battery(state.battery_percent as i32);
+    state.ui.set_control_center_is_battery_critical(state.battery_percent <= BATTERY_CRITICAL_PERCENT);
     state.ui.set_control_center_is_charging(state.is_charging);
+}
+
+/// Warns that the charge has run critically low, re-arming once it recovers or goes on charge.
+///
+/// The alert is refused while the device is locked or mid-transition, so callers must keep
+/// calling until one gets through.
+#[cfg(not(feature = "recovery-os"))]
+fn check_battery_critical(state: StoredValue<AppState>) {
+    {
+        let mut state = state.borrow_mut();
+        // A charging device is not about to shut down. Re-arming here rather than only above
+        // the threshold is what warns again when the charger comes off still critical.
+        if state.battery_percent > BATTERY_CRITICAL_PERCENT || state.is_charging {
+            state.battery_alert_shown = false;
+            return;
+        }
+        let waiting = state.battery_alert.as_ref().is_some_and(|task| !task.is_finished());
+        if state.battery_alert_shown || waiting {
+            return;
+        }
+    }
+
+    let task = spawn_local(async move {
+        let alert = InvokeAlert {
+            app_title: None,
+            title: tr::lookup_id(TrId::CommonWarningModalBatteryCriticalTitle).to_string(),
+            icon: "battery-flat".to_string(),
+            line1: tr::lookup_id(TrId::CommonWarningModalBatteryCriticalContent).to_string(),
+            line2: None,
+            button1_title: tr::lookup_id(TrId::CommonButtonConfirm).to_string(),
+            button2_title: None,
+            button3_title: None,
+        };
+        match async_invoke_alert::<gui_permissions::GuiPermissions>(alert).await {
+            // Only an answer counts as warned, so dismissing the alert brings it back.
+            Ok(_) => state.borrow_mut().battery_alert_shown = true,
+            Err(e) => log::debug!("Battery alert not shown: {e:?}"),
+        }
+    });
+    state.borrow_mut().battery_alert = Some(task);
 }
 
 #[cfg(all(keyos, feature = "recovery-os"))]

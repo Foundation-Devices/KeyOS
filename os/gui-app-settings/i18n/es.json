@@ -334,6 +334,8 @@
   "common.updateReceive.subheader": "Mantén ambos dispositivos cerca.",
   "common.updateSuccess.header": "Actualización Completada",
   "common.updateSuccess.subheader": "Passport se actualizó correctamente \na {0}",
+  "common.warningModalBatteryCritical.content": "Passport Prime is about to shut down. Connect a charger to keep using the device.",
+  "common.warningModalBatteryCritical.title": "Battery Level Critical",
   "common.weekday.fridayFull": "viernes",
   "common.weekday.fridayShort": "vie",
   "common.weekday.mondayFull": "lunes",

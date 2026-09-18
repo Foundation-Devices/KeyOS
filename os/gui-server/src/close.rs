@@ -44,7 +44,7 @@ impl Gui {
 
         if self.shutting_down.is_none() {
             // If the modal app died, collapse back to its background; if the background
-            // died, exit the modal and go to the launcher (the modal's requestor is gone).
+            // died, exit the modal and go to the launcher.
             if let GuiState::Modal(modal_state) = &mut self.state {
                 if pid == modal_state.modal_pid() {
                     modal_state.respond(Err(NavigationError::ModalExited));

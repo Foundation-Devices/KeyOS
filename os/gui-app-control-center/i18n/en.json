@@ -7,6 +7,7 @@
   "button.usb": "USB",
   "common.backup.backedUpXAgo": "Backed up {0} ago",
   "common.backup.neverBackedUp": "Never backed up",
+  "common.button.confirm": "Confirm",
   "common.button.shutDown": "Shut Down",
   "common.time.dayFull": "Day",
   "common.time.dayMed": "day",
@@ -33,5 +34,7 @@
   "common.time.weekShort": "w",
   "common.time.weeksFull": "Weeks",
   "common.time.weeksMed": "wks",
+  "common.warningModalBatteryCritical.content": "Passport Prime is about to shut down. Connect a charger to keep using the device.",
+  "common.warningModalBatteryCritical.title": "Battery Level Critical",
   "slideToShutDown.shuttingDown": "Shutting Down"
 }

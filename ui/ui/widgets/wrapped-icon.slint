@@ -9,6 +9,7 @@ export component WrappedIcon inherits JumboIcon {
     // "jumbo-circle", "jumbo-shield", "jumbo-underbar"
     in property <string> outer-icon: "jumbo-circle";
     in property <string> inner-icon: "check";
+    in property <brush> inner-icon-color: Palette.content-brand;
     in property <bool> compact: false;
     private property <length> inner-icon-size: min(
         compact ? IconSize.px64 : IconSize.px96,
@@ -25,7 +26,7 @@ export component WrappedIcon inherits JumboIcon {
         Icon {
             name: root.inner-icon;
             size: parent.width;
-            color: Palette.content-brand;
+            color: root.inner-icon-color;
         }
     }
 }

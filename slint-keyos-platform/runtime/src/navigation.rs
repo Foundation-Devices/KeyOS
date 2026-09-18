@@ -5,10 +5,11 @@ use gui_server_api::{
     error::NavigationError,
     msg::ShowModal,
     navigation::{
+        alerts::{AlertResult, InvokeAlert},
         filepicker::{SelectFileOptions, SelectFileResult},
         lockscreen::{VerifyPinOptions, VerifyPinResult},
         qrscanner::{ScanQrOptions, ScanQrResult},
-        FILE_BROWSER_APP_ID, LOCK_SCREEN_APP_ID, QR_SCANNER_APP_ID,
+        ALERTS_APP_ID, FILE_BROWSER_APP_ID, LOCK_SCREEN_APP_ID, QR_SCANNER_APP_ID,
     },
     GuiServerError, ModalStyle,
 };
@@ -97,6 +98,32 @@ where
         Err(NavigationError::CanceledBySystem) | Err(NavigationError::CanceledByUser) => {
             Ok(VerifyPinResult { success: false, security_words: None })
         }
+        Err(e) => Err(GuiServerError::Navigation(e)),
+    }
+}
+
+/// Shows a modal alert and resolves once the user has answered it.
+///
+/// Awaits instead of parking the event loop, so an app that stays on screen next to the
+/// alert keeps drawing. Only an answer from the alert's own buttons is `Ok`; one that was
+/// refused, dismissed without answering, or torn down by a lock or an app switch is an
+/// error, so a caller acting on having warned the user can tell the two apart.
+pub async fn async_invoke_alert<P>(alert: InvokeAlert) -> Result<AlertResult, GuiServerError>
+where
+    P: CheckedPermissions + MessageAllowed<ShowModal>,
+{
+    // The alerts app paints a popup-sized window, so a fullscreen modal would stretch the
+    // card past it. Fixed, so the alert can't be swiped away.
+    let msg = ShowModal {
+        app_id: ALERTS_APP_ID,
+        modal_style: ModalStyle::SlideUpFixedPopup,
+        args: alert.serialize(),
+    };
+
+    match async_archive::<P, _>(msg).await {
+        Ok(response) => AlertResult::from_slice(response.as_slice())
+            .ok_or(GuiServerError::Navigation(NavigationError::InternalError)),
+        Err(NavigationError::CanceledByUser) => Ok(AlertResult::Canceled),
         Err(e) => Err(GuiServerError::Navigation(e)),
     }
 }

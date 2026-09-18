@@ -140,9 +140,19 @@ impl ModalState {
 
 impl Gui {
     pub(crate) fn modal_activate(&mut self, modal_pid: PID, mut request: ArchiveRequest<ShowModal>) {
+        // Not every requester has an app window of its own, so fall back to the foreground app.
+        let requester = request.response.pid();
+        let background_pid = if self.windows.contains_key(&requester) {
+            requester
+        } else if let GuiState::SingleWindow { pid, .. } = &self.state {
+            *pid
+        } else {
+            request.response.respond(Err(NavigationError::InternalError)).ok();
+            return;
+        };
+
         debug!("Entered modal state, top PID: {modal_pid}");
         request.response.set_response(|| Err(NavigationError::CanceledBySystem));
-        let background_pid = request.response.pid();
         let modal_style = request.message.modal_style;
         self.modal_activate_inner(modal_pid, background_pid, modal_style, ModalRequest::External(request));
     }

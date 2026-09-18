@@ -8,9 +8,9 @@ use std::time::{Duration, SystemTime};
 use i18n::replace_placeholders;
 #[cfg(not(feature = "recovery-os"))]
 use jiff::fmt::strtime;
-#[cfg(not(feature = "recovery-os"))]
-use slint_keyos_platform::settings::global;
 use slint_keyos_platform::slint::ComponentHandle;
+#[cfg(not(feature = "recovery-os"))]
+use slint_keyos_platform::{settings::global, TaskHandle};
 
 use crate::AppWindow;
 #[cfg(not(feature = "recovery-os"))]
@@ -29,6 +29,13 @@ pub struct AppState {
     pub is_charging: bool,
     pub is_usb_attached: bool,
     pub battery_percent: u8,
+
+    /// Set once the critical battery alert has been shown, cleared when the charge recovers.
+    #[cfg(not(feature = "recovery-os"))]
+    pub battery_alert_shown: bool,
+    /// Runs from the alert request until the user answers it.
+    #[cfg(not(feature = "recovery-os"))]
+    pub battery_alert: Option<TaskHandle<()>>,
 
     #[cfg(not(feature = "recovery-os"))]
     pub last_backup_at: Option<SystemTime>,
@@ -57,6 +64,10 @@ impl AppState {
             is_charging: false,
             is_usb_attached: false,
             battery_percent: 100,
+            #[cfg(not(feature = "recovery-os"))]
+            battery_alert_shown: false,
+            #[cfg(not(feature = "recovery-os"))]
+            battery_alert: None,
             #[cfg(not(feature = "recovery-os"))]
             last_backup_at: None,
             #[cfg(not(feature = "recovery-os"))]

@@ -81,6 +81,9 @@ export component GenericAlertPage inherits Rectangle {
                     inner-icon: GenericAlertGlobal.icon == "alert"
                         ? "alert-wrapped"
                         : GenericAlertGlobal.icon;
+                    inner-icon-color: GenericAlertGlobal.icon == "battery-flat"
+                        ? Palette.content-negative
+                        : Palette.content-brand;
                 }
             }
 
