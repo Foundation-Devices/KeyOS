@@ -32,8 +32,20 @@ pub struct UsbHostServer {
     power_manager_ext: PowerManagerExtApi,
     work_callback: Option<TicktimerCallback>,
     enabled: bool,
-    otg_watch_since: Option<Instant>,
+    attached_state: AttachedState,
+    otg_watch: OtgWatch,
     peer_host_role: PeerHostRole,
+}
+
+/// Tracks a port we are powering but that no device has turned up on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OtgWatch {
+    /// Not sourcing, or a device is enumerated.
+    Idle,
+    /// Sourcing an attached peer with nothing on the bus since this instant.
+    Waiting(Instant),
+    /// Gave up on it; the backoff does not repeat until something about the port changes.
+    BackedOff,
 }
 
 /// Whether the peer can be the USB host. We learn it by yielding the role: a computer
@@ -140,7 +152,12 @@ impl server::Server for UsbHostServer {
 
 impl UsbHostServer {
     const BUFFER_POOL_SIZE: usize = 8;
-    const DEVICE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
+    /// Must outlast a whole enumeration attempt, or we stop sourcing VBUS to a device
+    /// that would have come up. The extra 100ms is TSIGATT, what a device is allowed for
+    /// signalling attach once VBUS is valid. One attempt is budgeted and not a retry, so
+    /// a device that starts over can meet the backoff partway through the second.
+    const DEVICE_CONNECTION_TIMEOUT: Duration =
+        Duration::from_millis((ehci::max_enumeration_ms(Self::WORK_PERIOD_MS) + 100) as u64);
     const QH_POOL_SIZE: usize = 16;
     const QTD_POOL_SIZE: usize = 128;
     pub const WORK_PERIOD_MS: usize = 100;
@@ -228,7 +245,8 @@ impl UsbHostServer {
             power_manager_ext: Default::default(),
             work_callback: None,
             enabled: false,
-            otg_watch_since: None,
+            attached_state: AttachedState::None,
+            otg_watch: OtgWatch::Idle,
             peer_host_role: PeerHostRole::Unknown,
         }
     }
@@ -251,21 +269,38 @@ impl UsbHostServer {
                 next_device_handle: &mut self.next_device_handle,
                 event_subscribers: &mut self.event_subscribers,
                 power_manager_ext: &self.power_manager_ext,
-                otg_watch_since: &mut self.otg_watch_since,
                 peer_host_role: &mut self.peer_host_role,
             },
         ) {
             log::warn!("Error during ehci work(): {e:?}");
         }
-        if self.otg_watch_since.is_some_and(|since| since.elapsed() >= Self::DEVICE_CONNECTION_TIMEOUT) {
-            log::info!(
-                "No device after {:?} of host-mode activation, backing off OTG",
-                Self::DEVICE_CONNECTION_TIMEOUT
-            );
-            self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
-            self.otg_watch_since = None;
-        }
+        self.update_otg_backoff();
         self.work_callback.as_ref().unwrap().request(Self::WORK_PERIOD_MS, DoWork::ID, 0);
+    }
+
+    /// Stop sourcing VBUS once we have supplied an attached peer for
+    /// DEVICE_CONNECTION_TIMEOUT without a device enumerating on it. A host role probe
+    /// is exempt, because an empty bus is the answer it is waiting for.
+    fn update_otg_backoff(&mut self) {
+        if self.attached_state != AttachedState::Source
+            || self.peer_host_role == PeerHostRole::Offered
+            || self.ehci.any_port_configured()
+        {
+            self.otg_watch = OtgWatch::Idle;
+            return;
+        }
+        match self.otg_watch {
+            OtgWatch::Idle => self.otg_watch = OtgWatch::Waiting(Instant::now()),
+            OtgWatch::Waiting(since) if since.elapsed() >= Self::DEVICE_CONNECTION_TIMEOUT => {
+                log::info!(
+                    "No device after {:?} of host-mode activation, backing off OTG",
+                    Self::DEVICE_CONNECTION_TIMEOUT
+                );
+                self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
+                self.otg_watch = OtgWatch::BackedOff;
+            }
+            OtgWatch::Waiting(_) | OtgWatch::BackedOff => {}
+        }
     }
 
     fn enable(&mut self) -> Result<(), UsbError> {
@@ -290,11 +325,12 @@ impl UsbHostServer {
             next_device_handle: &mut self.next_device_handle,
             event_subscribers: &mut self.event_subscribers,
             power_manager_ext: &self.power_manager_ext,
-            otg_watch_since: &mut self.otg_watch_since,
             peer_host_role: &mut self.peer_host_role,
         })?;
         self.power_manager.disable_peripheral(atsama5d27::pmc::PeripheralId::Uhphs)?;
         self.enabled = false;
+        // A watch left running here fires the moment we are enabled again.
+        self.otg_watch = OtgWatch::Idle;
         Ok(())
     }
 }
@@ -414,7 +450,6 @@ struct EhciEventHandler<'a> {
     event_subscribers: &'a mut Vec<server::ArchiveEventSubscriber<UsbEvent>>,
     devices: &'a mut Vec<Device>,
     power_manager_ext: &'a PowerManagerExtApi,
-    otg_watch_since: &'a mut Option<Instant>,
     peer_host_role: &'a mut PeerHostRole,
 }
 
@@ -475,10 +510,6 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         context: EhciMessageContext,
     ) {
         context.respond(result.map_err(From::from));
-    }
-
-    fn port_connected(&mut self, _controller: &mut ehci::Controller<EhciMessageContext>) {
-        *self.otg_watch_since = None;
     }
 }
 
@@ -555,7 +586,7 @@ impl ScalarHandler<PortRole> for UsbHostServer {
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
-        self.otg_watch_since = (role == AttachedState::Source).then(Instant::now);
+        self.attached_state = role;
 
         if role != AttachedState::None {
             if self.peer_host_role == PeerHostRole::Offered {

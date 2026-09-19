@@ -15,7 +15,7 @@ mod registers;
 mod transfer;
 mod util;
 
-pub use controller::{Controller, EventHandler, MAX_CONTROL_DATA_LEN};
+pub use controller::{max_enumeration_ms, Controller, EventHandler, MAX_CONTROL_DATA_LEN};
 pub use error::EhciError;
 pub use transfer::ControlRequest;
 use pool::{Pool, PoolElement};

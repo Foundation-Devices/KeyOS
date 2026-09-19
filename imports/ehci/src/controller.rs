@@ -18,6 +18,41 @@ use crate::{BufferPool, QtdPool, QueueHeadPool, TransferContext};
 /// Largest data stage a control transfer can carry, set by the pool element size.
 pub const MAX_CONTROL_DATA_LEN: usize = 0x40;
 
+/// USB 2.0 Table 7-13: TATTDB, debounce a connect for 100ms so that power is stable at
+/// the device before we reset it.
+const ATTACH_DEBOUNCE_MS: usize = 100;
+/// USB 2.0 Table 7-13: TDRSTR, a root port drives reset for at least 50ms.
+const RESET_HOLD_MS: usize = 300;
+/// EHCI 1.0 PORTSC bit 8: the controller enables the port within 2ms of software
+/// clearing reset.
+const PORT_ENABLE_TIMEOUT_MS: usize = 50;
+/// USB 2.0 9.2.6.3: SetAddress completes within 50ms, plus 2ms of recovery.
+const SET_ADDRESS_TIMEOUT_MS: usize = 100;
+/// USB 2.0 9.2.6.4: 500ms to the first data packet, then 50ms for the status stage.
+const DATA_STAGE_TIMEOUT_MS: usize = 600;
+/// USB 2.0 9.2.6.4 allows 50ms, but this is where a mass storage device does its
+/// internal setup, and real ones run well past it.
+const SET_CONFIGURATION_TIMEOUT_MS: usize = 1000;
+
+/// Longest a device can take from turning up on a port to being configured, for a
+/// caller driving [`Controller::work`] every `work_period_ms`. Some steps end on a timer
+/// that only the next call can see, so each of those runs a period late. A budget shorter
+/// than the period cannot end before it either, which the same allowance covers. Keep
+/// VBUS up at least this long, plus whatever the device takes to signal attach, or one
+/// that works never finishes.
+pub const fn max_enumeration_ms(work_period_ms: usize) -> usize {
+    /// Steps that end on a timer or a register the caller has to come back and read.
+    const POLLED_STEPS: usize = 4;
+
+    ATTACH_DEBOUNCE_MS
+        + RESET_HOLD_MS
+        + PORT_ENABLE_TIMEOUT_MS
+        + SET_ADDRESS_TIMEOUT_MS
+        + 2 * DATA_STAGE_TIMEOUT_MS
+        + SET_CONFIGURATION_TIMEOUT_MS
+        + POLLED_STEPS * work_period_ms
+}
+
 /// Main USB Controller struct. Instantiate to access all functionality.
 pub struct Controller<CT> {
     opregs: *mut OperationalRegisters,
@@ -48,10 +83,6 @@ pub trait EventHandler<CT> {
         result: Result<usize, EhciError>,
         context: CT,
     );
-
-    /// Fires when a port's `connected` bit goes high, before reset and
-    /// enumeration. Indicates a peripheral has electrically attached.
-    fn port_connected(&mut self, _controller: &mut Controller<CT>) {}
 }
 
 enum BuiltinTransfer<CT> {
@@ -125,6 +156,9 @@ impl<CT: TransferContext> TransferContext for BuiltinTransfer<CT> {
 enum PortStatus {
     #[default]
     Disconnected,
+    Debouncing {
+        since: usize,
+    },
     Resetting {
         since: usize,
     },
@@ -199,7 +233,8 @@ impl<CT: TransferContext> Controller<CT> {
         if !self.enabled {
             return Err(EhciError::ControllerDisabled);
         }
-        self.update_ports(tick_count, handler)?;
+        // Harvest completions before scanning the ports, or a device that answers at
+        // its deadline gets timed out with the answer already in the queue.
         let finished_transfers = self.async_queue.work();
         for ft in finished_transfers {
             // We throw away error results here, because we want to handle all transactions
@@ -242,7 +277,7 @@ impl<CT: TransferContext> Controller<CT> {
             };
         }
 
-        Ok(())
+        self.update_ports(tick_count, handler)
     }
 
     /// Schedule a transfer. Result only indicates that the scheduling itself
@@ -459,7 +494,6 @@ impl<CT: TransferContext> Controller<CT> {
     ) -> Result<(), EhciError> {
         let mut disconnects = Vec::new();
         let mut connects = Vec::new();
-        let mut any_port_connected = false;
         for (port_number, port) in self.ports.iter_mut().enumerate() {
             let mut port_status = unsafe { (*self.opregs).ports[port_number].get() };
             match *port {
@@ -468,42 +502,48 @@ impl<CT: TransferContext> Controller<CT> {
                     // not configured.
                     self.async_queue.close_endpoint(Self::port_to_address(port_number), None, None);
                     if port_status.connected() {
+                        *port = PortStatus::Debouncing { since: tick_count };
+                    }
+                }
+                PortStatus::Debouncing { since } => {
+                    if !port_status.connected() {
+                        *port = PortStatus::Disconnected;
+                    } else if tick_count.wrapping_sub(since) >= ATTACH_DEBOUNCE_MS {
                         info!("Resetting port {port_number}");
                         port_status.set_reset(true);
                         unsafe { (*self.opregs).ports[port_number].set(port_status) };
                         *port = PortStatus::Resetting { since: tick_count };
-                        any_port_connected = true;
                     }
                 }
                 PortStatus::Resetting { since } => {
                     // XXX: We should check line status, because low speed devices
                     //      need to be handed over, but we don't support those anyway.
-                    if tick_count.wrapping_sub(since) >= 300 {
+                    if tick_count.wrapping_sub(since) >= RESET_HOLD_MS {
                         debug!("Enabling port {port_number}");
                         port_status.set_reset(false);
                         unsafe { (*self.opregs).ports[port_number].set(port_status) };
                         *port = PortStatus::WaitingForEnabled { since: tick_count };
                     }
                 }
-                PortStatus::WaitingForEnabled { since } => {
+                PortStatus::WaitingForEnabled { .. } => {
                     if port_status.enabled() {
                         connects.push(port_number);
-                    } else if tick_count.wrapping_sub(since) >= 1000 {
+                    } else if port.timed_out(tick_count) {
                         debug!("Timed out waiting for port {port_number} to become Enabled");
                         debug!("Status reg: {:?}", unsafe { (*self.opregs).status.get() });
                         debug!("Port reg: {port_status:?}");
                         *port = PortStatus::Disconnected;
                     }
                 }
-                PortStatus::WaitingForSetAddress { since }
-                | PortStatus::WaitingForSetConfiguration { since, .. }
-                | PortStatus::WaitingForDeviceDescriptor { since, .. }
-                | PortStatus::WaitingForConfigDescriptor { since, .. } => {
+                PortStatus::WaitingForSetAddress { .. }
+                | PortStatus::WaitingForSetConfiguration { .. }
+                | PortStatus::WaitingForDeviceDescriptor { .. }
+                | PortStatus::WaitingForConfigDescriptor { .. } => {
                     if !port_status.connected() {
                         info!("Port {port_number} disconnected while in state {port:?}");
                         *port = PortStatus::Disconnected;
-                    } else if tick_count.wrapping_sub(since) >= 1000 {
-                        debug!("Timed out waiting for Set Address result on port {port_number}");
+                    } else if port.timed_out(tick_count) {
+                        debug!("Timed out in {port:?} on port {port_number}");
                         *port = PortStatus::Disconnected;
                     }
                 }
@@ -524,9 +564,6 @@ impl<CT: TransferContext> Controller<CT> {
             let transfer = self.set_address_transfer(port_number)?;
             self.async_queue.schedule_transfer(0, transfer).map_err(|(_, e)| e)?;
             self.ports[port_number] = PortStatus::WaitingForSetAddress { since: tick_count };
-        }
-        if any_port_connected {
-            handler.port_connected(self);
         }
         Ok(())
     }
@@ -724,6 +761,9 @@ impl<CT: TransferContext> Controller<CT> {
         }
     }
 
+    /// Whether any port holds a device that finished enumeration.
+    pub fn any_port_configured(&self) -> bool { self.ports.iter().any(PortStatus::is_configured) }
+
     /// Enable interrupts.
     pub fn enable_interrupts(&self) {
         unsafe {
@@ -758,4 +798,22 @@ unsafe impl<CT> Send for Controller<CT> {}
 
 impl PortStatus {
     fn is_configured(&self) -> bool { matches!(self, PortStatus::Configured { .. }) }
+
+    /// Whether the device has run past what this state allows it. Only the states that
+    /// wait on the device have a deadline; the reset hold is a minimum wait, kept in
+    /// update_ports.
+    fn timed_out(&self, tick_count: usize) -> bool {
+        let (since, timeout) = match self {
+            Self::WaitingForEnabled { since } => (since, PORT_ENABLE_TIMEOUT_MS),
+            Self::WaitingForSetAddress { since } => (since, SET_ADDRESS_TIMEOUT_MS),
+            Self::WaitingForSetConfiguration { since, .. } => (since, SET_CONFIGURATION_TIMEOUT_MS),
+            Self::WaitingForDeviceDescriptor { since, .. } => (since, DATA_STAGE_TIMEOUT_MS),
+            Self::WaitingForConfigDescriptor { since, .. } => (since, DATA_STAGE_TIMEOUT_MS),
+            Self::Disconnected
+            | Self::Debouncing { .. }
+            | Self::Resetting { .. }
+            | Self::Configured { .. } => return false,
+        };
+        tick_count.wrapping_sub(*since) >= timeout
+    }
 }
