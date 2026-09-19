@@ -139,8 +139,8 @@ description = "Parse and inspect KeyOS application manifests."
 [submodules.slint]
 path = "external/slint"
 repo = "git@github.com:Foundation-Devices/slint.git"
-ref = "v1.17.0-foundation2"
-source_hash = "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE="
+ref = "v1.17.0-foundation3"
+source_hash = "sha256-uf7tKpXHbETWI4ZQfT+JMsEUQS5h0fl931DYUMGjsPg="
 env_override = "SLINT_DIR"
 
 [targets]

@@ -498,7 +498,7 @@ mod tests {
             );
         }
         let slint = config.submodules.get("slint").unwrap();
-        assert_eq!(slint.source_hash, "sha256-+eriY9l5KFrJFVau27mScWvMemPFx6op5iSI5MvMWBE=");
+        assert_eq!(slint.source_hash, "sha256-uf7tKpXHbETWI4ZQfT+JMsEUQS5h0fl931DYUMGjsPg=");
         assert!(config
             .compile
             .iter()
