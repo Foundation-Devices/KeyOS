@@ -32,7 +32,6 @@ pub struct UsbDeviceServer {
     power_manager: PowerManagerApi,
     hw: UsbDevice,
     pending_address: Option<u8>,
-    host_attached: bool,
     is_configured: bool,
     should_be_enabled: bool,
     enabled: bool,
@@ -215,7 +214,6 @@ impl UsbDeviceServer {
             power_manager,
             hw,
             pending_address: None,
-            host_attached: false,
             connection_waiters: Default::default(),
             interfaces: Default::default(),
             capabilities,
@@ -234,7 +232,7 @@ impl UsbDeviceServer {
     }
 
     fn update_hw_enabled_state(&mut self) {
-        if self.should_be_enabled && self.host_attached && !self.config_descriptor.is_empty() {
+        if self.should_be_enabled && !self.config_descriptor.is_empty() {
             if !self.enabled {
                 self.power_manager.enable_peripheral(PeripheralId::Udphs).unwrap();
                 self.hw.set_enabled(true);
@@ -339,6 +337,28 @@ impl UsbDeviceServer {
         dma.control.set(control);
     }
 
+    /// Stop every endpoint DMA channel. Disabling the controller does not stop them
+    /// (SAMA5D2 datasheet section 41.6.9).
+    fn stop_dma_channels(&mut self) {
+        const STOP_POLL_LIMIT: usize = 1000;
+
+        let dma_endpoints: Vec<u8> =
+            self.endpoints.iter().filter(|(_, ep)| ep.use_dma).map(|(number, _)| *number).collect();
+        for &endpoint_number in &dma_endpoints {
+            self.hw.dma(endpoint_number as usize).control.set(DmaControl(0));
+        }
+        for _ in 0..STOP_POLL_LIMIT {
+            let running = dma_endpoints.iter().any(|&endpoint_number| {
+                let status = self.hw.dma(endpoint_number as usize).status.get();
+                status.enable() || status.active()
+            });
+            if !running {
+                return;
+            }
+        }
+        log::warn!("DMA channels did not stop");
+    }
+
     /// Max DMA chunk size for an endpoint: largest `max_packet_len`-aligned
     /// value that fits in the 16-bit DMA length register.
     fn max_dma_chunk(max_packet_len: u16) -> u32 {
@@ -367,6 +387,9 @@ impl UsbDeviceServer {
     }
 
     fn send_disconnected(&mut self) {
+        // Stop the DMA before handing the buffers back, or it keeps reading and writing
+        // memory their owners are about to unmap.
+        self.stop_dma_channels();
         for ep in self.endpoints.values_mut() {
             if let Some(mut read) = ep.ongoing_read.take() {
                 read.set_response(Err(UsbError::HostDisconnected));
@@ -1173,18 +1196,6 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
                 write.msg.set_response(Ok(total));
             }
         }
-    }
-}
-
-impl ScalarHandler<SetHostAttached> for UsbDeviceServer {
-    fn handle(
-        &mut self,
-        msg: SetHostAttached,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) {
-        self.host_attached = msg.0;
-        self.update_hw_enabled_state();
     }
 }
 

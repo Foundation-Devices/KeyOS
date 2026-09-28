@@ -50,8 +50,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     #[cfg(keyos)]
     NfcApi::default().set_enabled(false).expect("disable NFC");
     #[cfg(keyos)]
-    usb::host::api::UsbHost::default().set_enabled(false).expect("disable USB host");
-    #[cfg(keyos)]
     CameraApi::default().set_enabled(false);
 
     // Handle the app being hidden.
@@ -167,7 +165,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                             let start = Instant::now();
                             const TEST_FILE_NAME: &str = "regulatory_file.bin";
                             let fs = FileSystem::default();
-                            usb::host::api::UsbHost::default().set_enabled(true).expect("enable USB host");
                             while fs.open_dir("/", Location::Usb).is_err() {
                                 queue_with_ui(move |ui| {
                                     ui.global::<State>().set_usb_message("Insert USB drive".into())
@@ -271,7 +268,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 std::thread::spawn(|| {
                     const TEST_FILE_NAME: &str = "regulatory_file.bin";
                     let fs = FileSystem::default();
-                    usb::host::api::UsbHost::default().set_enabled(true).expect("enable USB host");
                     while fs.open_dir("/", Location::Usb).is_err() {
                         queue_with_ui(move |ui| {
                             ui.global::<State>().set_usb_message("Insert USB drive".into())
@@ -472,9 +468,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         TEST_END.store(true, Ordering::SeqCst);
         ui_cloned.global::<State>().set_is_emissions_test_running(false);
         if ui_cloned.global::<State>().get_usb_enabled() {
-            #[cfg(keyos)]
-            usb::host::api::UsbHost::default().set_enabled(false).expect("disable USB host");
-            log::debug!("disabling USB host");
             ui_cloned.global::<State>().set_usb_message("Idle".into());
         }
         if ui_cloned.global::<State>().get_camera_enabled() {

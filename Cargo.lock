@@ -4364,7 +4364,6 @@ dependencies = [
  "log 0.4.27",
  "security",
  "server",
- "usb",
  "xous-api-log",
 ]
 
@@ -8293,7 +8292,6 @@ dependencies = [
  "getrandom 0.2.10",
  "log 0.4.27",
  "server",
- "usb",
  "xous",
  "xous-api-log",
 ]
@@ -14704,6 +14702,8 @@ dependencies = [
  "atsama5d27",
  "ehci",
  "log 0.4.27",
+ "num-derive",
+ "num-traits",
  "power-manager",
  "rkyv",
  "server",

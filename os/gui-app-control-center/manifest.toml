@@ -28,5 +28,5 @@ template = ["gui-app"]
     "SubscribeUsbEnabled",
 ]
 "os/usbdev" = ["IsDeviceEmulationConnected"]
-"os/usb" = ["IsEnabled", "IsConnected"]
+"os/usb" = ["IsConnected"]
 "os/security" = ["GetAppSeed", "GetMasterKeyState"]

@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::time::{Duration, Instant};
-
-use power_manager::AttachedState;
 use server::{
     ArchiveEventSubscriptionHandler, BlockingScalarHandler, DeferredLendMut, DeferredLendMutHandler,
     MessageId as _, ScalarHandler,
@@ -14,7 +11,7 @@ use xous::{arch::irq::IrqNumber, keyos::PAGE_SIZE, MemoryRange};
 use xous_ticktimer::{Ticktimer, TicktimerCallback};
 
 use super::messages::*;
-use crate::{PowerManagerApi, PowerManagerExtApi};
+use crate::PowerManagerApi;
 
 #[derive(server::Server)]
 #[name = "os/usb"]
@@ -29,35 +26,8 @@ pub struct UsbHostServer {
     devices: Vec<Device>,
     statistics: Statistics,
     power_manager: PowerManagerApi,
-    power_manager_ext: PowerManagerExtApi,
     work_callback: Option<TicktimerCallback>,
     enabled: bool,
-    attached_state: AttachedState,
-    otg_watch: OtgWatch,
-    peer_host_role: PeerHostRole,
-}
-
-/// Tracks a port we are powering but that no device has turned up on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OtgWatch {
-    /// Not sourcing, or a device is enumerated.
-    Idle,
-    /// Sourcing an attached peer with nothing on the bus since this instant.
-    Waiting(Instant),
-    /// Gave up on it; the backoff does not repeat until something about the port changes.
-    BackedOff,
-}
-
-/// Whether the peer can be the USB host. We learn it by yielding the role: a computer
-/// takes it, a peripheral leaves the port empty.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PeerHostRole {
-    /// Nothing tried yet, so a self-powered device starts a probe.
-    Unknown,
-    /// Yielded, and OTG priority stays Never until the port says who took the role.
-    Offered,
-    /// The peer left the port empty, so we host it despite the self-powered bit.
-    Declined,
 }
 
 #[derive(Debug, Default, Clone, server::Permissions)]
@@ -152,12 +122,6 @@ impl server::Server for UsbHostServer {
 
 impl UsbHostServer {
     const BUFFER_POOL_SIZE: usize = 8;
-    /// Must outlast a whole enumeration attempt, or we stop sourcing VBUS to a device
-    /// that would have come up. The extra 100ms is TSIGATT, what a device is allowed for
-    /// signalling attach once VBUS is valid. One attempt is budgeted and not a retry, so
-    /// a device that starts over can meet the backoff partway through the second.
-    const DEVICE_CONNECTION_TIMEOUT: Duration =
-        Duration::from_millis((ehci::max_enumeration_ms(Self::WORK_PERIOD_MS) + 100) as u64);
     const QH_POOL_SIZE: usize = 16;
     const QTD_POOL_SIZE: usize = 128;
     pub const WORK_PERIOD_MS: usize = 100;
@@ -242,12 +206,8 @@ impl UsbHostServer {
             devices: Vec::new(),
             statistics: Default::default(),
             power_manager,
-            power_manager_ext: Default::default(),
             work_callback: None,
             enabled: false,
-            attached_state: AttachedState::None,
-            otg_watch: OtgWatch::Idle,
-            peer_host_role: PeerHostRole::Unknown,
         }
     }
 
@@ -268,39 +228,11 @@ impl UsbHostServer {
                 devices: &mut self.devices,
                 next_device_handle: &mut self.next_device_handle,
                 event_subscribers: &mut self.event_subscribers,
-                power_manager_ext: &self.power_manager_ext,
-                peer_host_role: &mut self.peer_host_role,
             },
         ) {
             log::warn!("Error during ehci work(): {e:?}");
         }
-        self.update_otg_backoff();
         self.work_callback.as_ref().unwrap().request(Self::WORK_PERIOD_MS, DoWork::ID, 0);
-    }
-
-    /// Stop sourcing VBUS once we have supplied an attached peer for
-    /// DEVICE_CONNECTION_TIMEOUT without a device enumerating on it. A host role probe
-    /// is exempt, because an empty bus is the answer it is waiting for.
-    fn update_otg_backoff(&mut self) {
-        if self.attached_state != AttachedState::Source
-            || self.peer_host_role == PeerHostRole::Offered
-            || self.ehci.any_port_configured()
-        {
-            self.otg_watch = OtgWatch::Idle;
-            return;
-        }
-        match self.otg_watch {
-            OtgWatch::Idle => self.otg_watch = OtgWatch::Waiting(Instant::now()),
-            OtgWatch::Waiting(since) if since.elapsed() >= Self::DEVICE_CONNECTION_TIMEOUT => {
-                log::info!(
-                    "No device after {:?} of host-mode activation, backing off OTG",
-                    Self::DEVICE_CONNECTION_TIMEOUT
-                );
-                self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
-                self.otg_watch = OtgWatch::BackedOff;
-            }
-            OtgWatch::Waiting(_) | OtgWatch::BackedOff => {}
-        }
     }
 
     fn enable(&mut self) -> Result<(), UsbError> {
@@ -324,13 +256,9 @@ impl UsbHostServer {
             devices: &mut self.devices,
             next_device_handle: &mut self.next_device_handle,
             event_subscribers: &mut self.event_subscribers,
-            power_manager_ext: &self.power_manager_ext,
-            peer_host_role: &mut self.peer_host_role,
         })?;
         self.power_manager.disable_peripheral(atsama5d27::pmc::PeripheralId::Uhphs)?;
         self.enabled = false;
-        // A watch left running here fires the moment we are enabled again.
-        self.otg_watch = OtgWatch::Idle;
         Ok(())
     }
 }
@@ -449,8 +377,6 @@ struct EhciEventHandler<'a> {
     next_device_handle: &'a mut usize,
     event_subscribers: &'a mut Vec<server::ArchiveEventSubscriber<UsbEvent>>,
     devices: &'a mut Vec<Device>,
-    power_manager_ext: &'a PowerManagerExtApi,
-    peer_host_role: &'a mut PeerHostRole,
 }
 
 impl server::ScalarHandler<DoWork> for UsbHostServer {
@@ -472,20 +398,6 @@ impl<'a> ehci::EventHandler<EhciMessageContext> for EhciEventHandler<'a> {
         address: u8,
         descriptors: ehci::descriptors::DescriptorSet,
     ) {
-        const SELF_POWERED_BIT: u8 = 1 << 6; // D6: self-powered
-
-        let is_self_powered =
-            descriptors.configurations().any(|config| (config.attributes & SELF_POWERED_BIT) != 0);
-
-        // A laptop declares itself self-powered, but so does a mains-powered drive we are
-        // happy to host, and only the port controller can tell the two apart.
-        if is_self_powered && *self.peer_host_role == PeerHostRole::Unknown {
-            log::info!("Device is self-powered, offering it the host role: {descriptors:?}");
-            self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Never).ok();
-            *self.peer_host_role = PeerHostRole::Offered;
-            return;
-        }
-
         log::info!("Device connected and configured: {descriptors:?}");
         let handle = *self.next_device_handle;
         *self.next_device_handle += 1;
@@ -579,46 +491,25 @@ impl ScalarHandler<SetEnabled> for UsbHostServer {
     }
 }
 
-impl ScalarHandler<PortRole> for UsbHostServer {
+impl ScalarHandler<ResetHostController> for UsbHostServer {
     fn handle(
         &mut self,
-        PortRole(role): PortRole,
+        _msg: ResetHostController,
         _sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
-        self.attached_state = role;
-
-        if role != AttachedState::None {
-            if self.peer_host_role == PeerHostRole::Offered {
-                log::info!("Port came back as {role:?}, ending the host role probe");
-                self.peer_host_role = PeerHostRole::Unknown;
-            }
+        if !self.enabled {
             return;
         }
-
-        if self.peer_host_role == PeerHostRole::Offered {
-            // Rd against Rd reads the same as an empty port, so a peer that leaves it
-            // empty for the whole detach debounce has no host role to take.
-            log::info!("The peer declined the host role, taking it back");
-            self.peer_host_role = PeerHostRole::Declined;
-        } else {
-            log::info!("Port is empty, allowing host mode again");
-            self.peer_host_role = PeerHostRole::Unknown;
+        if let Err(e) = self.disable() {
+            log::warn!("Error disabling the ehci host for a reset: {e:?}");
         }
-        self.power_manager_ext.set_otg_priority(power_manager::OtgPriority::Automatic).ok();
+        if let Err(e) = self.enable() {
+            log::warn!("Error re-enabling the ehci host after a reset: {e:?}");
+        }
     }
 }
 
-impl server::BlockingScalarHandler<IsEnabled> for UsbHostServer {
-    fn handle(
-        &mut self,
-        _msg: IsEnabled,
-        _sender: xous::PID,
-        _context: &mut server::ServerContext<Self>,
-    ) -> bool {
-        self.enabled
-    }
-}
 impl server::BlockingScalarHandler<IsConnected> for UsbHostServer {
     fn handle(
         &mut self,

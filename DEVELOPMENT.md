@@ -202,17 +202,12 @@ Compile everything necessary for the system, and flash it to the device:
 
 Once the flashing process has started, make sure not to disconnect Passport Prime from the USB port until the process is complete.
 
-### Non-System Apps
+### Apps, System Services and the Kernel
 
-Non-system apps like `gui-app-authenticator` are built as part of `just build-all`. You can find their binaries at `keyOS/target/armv7a-unknown-xous-elf/release/keyos/apps/<app-name>/app.elf`.
+Apps like `gui-app-authenticator`, system services like `gui-server`, and the kernel all ship inside `app.bin`, which `just build-all` builds into `keyos/target/armv7a-unknown-xous-elf/release/images/app.bin` and packs into `boot.img`. Installing any of them is the same operation: rebuild, enter [SAM-BA mode](#Full-System-Reprogram-with-SAM-BA), and write the system partition.
 
-To install them on hardware, connect your Passport Prime to your computer via USB, and ensure USB is enabled on the device. Then copy your `app.elf` to `/media/<username>/PRIME/keyos/apps/<app-name>/app.elf`. Eject the device from your computer, and hold the power button down for 10 seconds to reboot and load the new version of the app.
-
-### System Services and Kernel
-
-System services or apps like `gui-server` and `gui-app-qr-scanner`, as well as the system kernel, are built as part of `just build-all` into `keyos/target/armv7a-unknown-xous-elf/release/images/app.bin`.
-
-To install them on hardware, connect your Passport Prime to your computer via USB, and ensure USB is enabled on the device. Then copy `app.bin` to `/media/<username>/PRIME/app.bin`. Eject the device from your computer, and hold the power button down for 10 seconds to reboot and load the updated firmware.
+    just build-all
+    just flash --system
 
 ### Recovering a Bricked Device
 

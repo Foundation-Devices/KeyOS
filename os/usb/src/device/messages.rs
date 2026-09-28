@@ -57,7 +57,4 @@ impl FromScalar<1> for TxCompleteInterrupt {
 }
 
 #[derive(Debug, server::Message, Clone)]
-pub struct SetHostAttached(pub bool);
-
-#[derive(Debug, server::Message, Clone)]
 pub struct SetDeviceEmulationEnabled(pub bool);

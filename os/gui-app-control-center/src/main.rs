@@ -325,7 +325,9 @@ fn check_battery_critical(state: StoredValue<AppState>) {
 
 #[cfg(all(keyos, feature = "recovery-os"))]
 fn update_hw_state(state: &AppState) {
-    state.slint_state().set_is_usb_enabled(state.usb_host.is_enabled().unwrap_or(false));
+    // USB cannot be turned off in recovery: there is no setting, and the toggle has no
+    // handler here.
+    state.slint_state().set_is_usb_enabled(true);
     state.slint_state().set_is_usb_in_use(state.usb_host.is_connected().unwrap_or(false));
 }
 

@@ -32,14 +32,6 @@ pub struct PowerManagerServerExt {
     last_status: Option<Status>,
 }
 
-/// Open-circuit voltage at which we call the cell flat.
-/// Above the datasheet's 15% point: the display already reads 0% there, and by 3600 mV the gauge
-/// is under the 5% the bootloader wants to start at. Stopping here costs around half an hour of
-/// active use and buys roughly six extra weeks before a flat pack clears SECURAM.
-const BATTERY_CRITICAL_OCV_MV: i32 = 3700;
-/// Pack impedance under a sustained load, above the datasheet's 180 mOhm measured at 2 kHz.
-/// It grows as the cell ages, so underestimating it trips early, the safe direction.
-const BATTERY_IMPEDANCE_MOHM: i32 = 300;
 /// How long a subscriber gets to shut down before we cut power ourselves.
 const SHUTDOWN_FAILSAFE_MS: usize = 5000;
 
@@ -162,27 +154,11 @@ impl PowerManagerServerExt {
         panic!("Shutdown syscall did not shut down");
     }
 
-    /// Shut down once the cell reaches its reserve, measured as open-circuit voltage.
-    /// We can't use SoC, because it is not reliable: it drifts badly across partial charges.
-    fn check_battery_critical(&mut self, state_of_charge: u8) {
+    /// Notify subscribers to shut down, and cut power ourselves if they don't in time.
+    fn on_battery_critical(&mut self) {
         if self.battery_critical {
             return;
         }
-        // A failed read comes back as 0, which trips the cutoff. Losing the gauge has to stop the
-        // device: we can no longer tell when the pack is empty, and running it flat clears SECURAM.
-        let voltage_mv = self.fuel_gauge.voltage().unwrap_or_default();
-        let current_ma = self.fuel_gauge.charge_current().unwrap_or_default();
-        // Positive current means we are charging, so we are not in danger of dipping below the reserve.
-        if current_ma > 0 {
-            return;
-        }
-        let open_circuit_mv = voltage_mv as i32 - current_ma as i32 * BATTERY_IMPEDANCE_MOHM / 1000;
-        // The gauge stops interrupting at 0%, so this is the last check we get.
-        if open_circuit_mv >= BATTERY_CRITICAL_OCV_MV && state_of_charge > 0 {
-            return;
-        }
-
-        log::warn!("Battery critical at {open_circuit_mv} mV open-circuit, gauge at {state_of_charge}%");
         self.battery_critical = true;
         self.battery_critical_subscribers.send_nowait(&BatteryCritical);
         if self.battery_critical_subscribers.is_empty() {
@@ -225,6 +201,11 @@ impl ScalarHandler<SetOtgPriority> for PowerManagerServerExt {
         _context: &mut server::ServerContext<Self>,
     ) {
         log::debug!("Setting OTG priority to {otg_priority:?} by PID {sender}");
+        if otg_priority == OtgPriority::Never {
+            // Stop sourcing before the chip presents Rd, or the peer enables its own supply
+            // into ours.
+            self.set_usb_boost(false);
+        }
         if let Err(e) = self.port_controller.set_mode_select(otg_priority.into()) {
             log::error!("Error setting OTG priority: {e:?}");
         }
@@ -318,13 +299,35 @@ const STRATEGIC_BATTERY_RESERVE_PCT: u8 = 15;
 /// Map the raw battery SoC to the charge value shown to the user.
 /// Values at or below the reserve floor are clamped to 0. Above it they
 /// scale linearly so that 100% raw still appears as 100% displayed.
-fn reported_soc(raw: u8) -> u8 {
+fn adjust_fuel_gauge_soc(raw: u8) -> u8 {
     if raw <= STRATEGIC_BATTERY_RESERVE_PCT {
         0
     } else {
         ((raw - STRATEGIC_BATTERY_RESERVE_PCT) as u16 * 100 / (100 - STRATEGIC_BATTERY_RESERVE_PCT as u16))
             as u8
     }
+}
+
+/// Map the open-circuit voltage to the charge shown to the user, covering only the bottom few
+/// percent, where the gauge's drift can cost a third of the pack. Returns `None` above that range,
+/// or while charging.
+fn voltage_based_soc(voltage_mv: i16, current_ma: i16) -> Option<u8> {
+    /// Open-circuit voltage below which the display reads at most the entry's index.
+    /// 0% sits above the datasheet's 15% point, because by 3600 mV the gauge is under the 5% the
+    /// bootloader wants to start at. Stopping there costs around half an hour of active use and
+    /// buys roughly six extra weeks before a flat pack clears SECURAM.
+    const LOW_BATTERY_OCV_MV: [i32; 4] = [3700, 3704, 3709, 3713];
+    /// Pack impedance under a sustained load, above the datasheet's 180 mOhm measured at 2 kHz.
+    /// It grows as the cell ages, so underestimating it reads low, the safe direction.
+    /// The curve is flat here, about 4 mV per percent, while each 100 mOhm of error moves the
+    /// estimate by about 26 mV with the screen on, so expect the percentage to jump with the load.
+    const BATTERY_IMPEDANCE_MOHM: i32 = 300;
+
+    if current_ma > 0 {
+        return None;
+    }
+    let open_circuit_mv = voltage_mv as i32 - current_ma as i32 * BATTERY_IMPEDANCE_MOHM / 1000;
+    LOW_BATTERY_OCV_MV.iter().position(|&mv| open_circuit_mv < mv).map(|percent| percent as u8)
 }
 
 impl PowerManagerServerExt {
@@ -402,19 +405,26 @@ impl PowerManagerServerExt {
             self.set_usb_boost(is_source);
         }
 
+        // Failed reads come back as 0 and read as 0%. Losing the gauge has to stop the device:
+        // we can no longer tell when the pack is empty, and running it flat clears SECURAM.
         let raw_soc = self.fuel_gauge.state_of_charge().unwrap_or_default();
-        let status = Status {
-            charge_status: self.charge_status(),
-            battery_percent: reported_soc(raw_soc),
-            attached_state,
-        };
+        let voltage_mv = self.fuel_gauge.voltage().unwrap_or_default();
+        let current_ma = self.fuel_gauge.charge_current().unwrap_or_default();
+        let gauge_percent = adjust_fuel_gauge_soc(raw_soc);
+        let voltage_based_percent = voltage_based_soc(voltage_mv, current_ma).unwrap_or(100);
+        let battery_percent = gauge_percent.min(voltage_based_percent);
+        let status = Status { charge_status: self.charge_status(), battery_percent, attached_state };
 
         if self.last_status != Some(status) {
             self.last_status.replace(status);
             self.status_update_subscribers.retain(|subscriber| subscriber.send(&status).is_ok())
         }
 
-        self.check_battery_critical(raw_soc);
+        // Positive current means we are charging, so we are not in danger of dipping below the reserve.
+        if battery_percent == 0 && current_ma <= 0 {
+            log::warn!("Battery critical at {voltage_mv} mV, {current_ma} mA, gauge at {raw_soc}%");
+            self.on_battery_critical();
+        }
 
         status
     }

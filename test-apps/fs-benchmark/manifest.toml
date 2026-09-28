@@ -15,4 +15,3 @@ template = ["fs-generic"]
     "GetAirlockWriteAccess",
 ]
 "os/security" = ["Login"]
-"os/usb" = ["SetEnabled"]

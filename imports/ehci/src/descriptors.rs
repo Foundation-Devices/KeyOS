@@ -98,6 +98,7 @@ pub struct EndpointDescriptor {
     pub interval: u8,
 }
 
+const CONFIG_DESCRIPTOR_ATTRIBUTES_SELF_POWERED_MASK: u8 = 1 << 6;
 const ENDPOINT_DESCRIPTOR_DIRECTION_MASK: u8 = 1 << 7;
 const ENDPOINT_DESCRIPTOR_NUMBER_MASK: u8 = 0xf;
 const ENDPOINT_DESCRIPTOR_ATTRIBUTES_TYPE_MASK: u8 = 0x3;
@@ -162,6 +163,12 @@ impl DescriptorSet {
     /// Iterate over configurations
     pub fn configurations(&self) -> ConfigIterator<'_> {
         ConfigIterator { max_num: self.device().num_configurations, offset: 0, ds: self }
+    }
+
+    /// Whether any configuration declares its own power supply.
+    pub fn is_self_powered(&self) -> bool {
+        self.configurations()
+            .any(|config| config.attributes & CONFIG_DESCRIPTOR_ATTRIBUTES_SELF_POWERED_MASK != 0)
     }
 
     /// Get the original bytes of the descriptor set

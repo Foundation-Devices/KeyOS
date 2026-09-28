@@ -6,7 +6,7 @@ pub mod device;
 #[cfg(keyos)]
 pub mod host;
 #[cfg(keyos)]
-pub mod subscription;
+pub mod port;
 
 #[cfg(keyos)]
 use std::sync::{LazyLock, Mutex};
@@ -35,7 +35,7 @@ fn main() {
     {
         std::thread::spawn(|| server::listen(device::implementation::UsbDeviceServer::new()));
 
-        std::thread::spawn(|| server::listen(subscription::SubscriptionServer::default()));
+        std::thread::spawn(|| server::listen(port::PortServer::default()));
 
         server::listen(host::implementation::UsbHostServer::new())
     }

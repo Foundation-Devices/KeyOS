@@ -28,4 +28,4 @@ template = ["gui-app", "fs-generic"]
     "GetLastError",
 ]
 "os/security" = ["Lockout"]
-"os/usb" = ["IsEnabled", "SetEnabled"]
+"os/usb" = ["ResetHostController"]

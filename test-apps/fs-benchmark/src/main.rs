@@ -12,8 +12,6 @@ use server::xous::{self, MemoryFlags};
 
 fs::use_api!();
 security::use_api!();
-#[cfg(keyos)]
-usb::use_host_api!();
 
 const TEST_FILE_NAME: &str = "big.bin";
 const COPY1_FILE_NAME: &str = "big_copy1.bin";
@@ -51,8 +49,6 @@ fn main() {
     for location in test_locations {
         #[cfg(keyos)]
         if location == Location::Usb {
-            let usb_host = UsbHost::default();
-            usb_host.set_enabled(true).unwrap();
             while fs.open_dir("/", location).is_err() {
                 log::info!("Waiting for Usb drive insertion");
                 thread::sleep(Duration::from_secs(2));

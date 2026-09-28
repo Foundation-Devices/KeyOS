@@ -761,9 +761,6 @@ impl<CT: TransferContext> Controller<CT> {
         }
     }
 
-    /// Whether any port holds a device that finished enumeration.
-    pub fn any_port_configured(&self) -> bool { self.ports.iter().any(PortStatus::is_configured) }
-
     /// Enable interrupts.
     pub fn enable_interrupts(&self) {
         unsafe {

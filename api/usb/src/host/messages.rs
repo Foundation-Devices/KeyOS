@@ -104,18 +104,15 @@ pub struct ControlTransfer {
     pub read_len: usize,
 }
 
+/// Take the controller down and back up, so whatever is on the bus enumerates afresh.
 #[derive(Debug, server::Message, Clone)]
-pub struct SetEnabled(pub bool);
+pub struct ResetHostController;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum UsbEvent {
     Connect { handle: usize, descriptors: descriptors::DescriptorSet },
     Disconnect { handle: usize },
 }
-
-#[derive(Debug, server::Message)]
-#[response(bool)]
-pub struct IsEnabled;
 
 #[derive(Debug, server::Message)]
 #[response(bool)]

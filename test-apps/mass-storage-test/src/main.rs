@@ -15,9 +15,6 @@ pub fn main() {
     log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    #[cfg(keyos)]
-    usb::host::api::UsbHost::default().set_enabled(true).unwrap();
-
     let mut fs = FileSystem::default();
 
     loop {

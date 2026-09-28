@@ -12,7 +12,6 @@ getrandom = { workspace = true }
 log = { workspace = true }
 log-server = { workspace = true }
 server = { workspace = true }
-usb = { workspace = true }
 xous = { workspace = true }
 
 [lints.rust]

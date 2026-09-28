@@ -39,8 +39,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
 
     #[cfg(keyos)]
     ui.global::<Callbacks>().on_reset_usb_drive(move || {
-        UsbHost::default().set_enabled(false).ok();
-        UsbHost::default().set_enabled(true).ok();
+        UsbHost::default().reset_host_controller().ok();
     });
 
     #[cfg(keyos)]
@@ -203,18 +202,15 @@ fn fs_event_handler(event: fs::FileSystemEvent, ui: AppWindow) {
         }
     }
 
-    let is_usb_enabled = UsbHost::default().is_enabled().unwrap_or(false);
-    let is_usb_available = is_usb_enabled && is_connected;
-
     // Don't schedule a new task if the popup is already opened
     if HAS_POPUP_OPENED.load(Ordering::Relaxed) {
         return;
     }
 
     slint_keyos_platform::spawn_local(async move {
-        ui.global::<RecoveryGlobal>().set_is_usb_drive_connected(is_usb_available);
+        ui.global::<RecoveryGlobal>().set_is_usb_drive_connected(is_connected);
 
-        if is_usb_available {
+        if is_connected {
             select_file(&ui);
         }
     })

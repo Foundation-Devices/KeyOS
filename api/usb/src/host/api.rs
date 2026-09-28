@@ -5,10 +5,9 @@ pub use ehci::{descriptors, EndpointDirection};
 use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 use xous::MemoryRange;
 
-use super::messages::SetEnabled;
 pub use super::messages::UsbEvent;
 use super::messages::{
-    BulkIn, BulkOut, Claim, ControlTransfer, IsConnected, IsEnabled, OpenEndpoint, Subscribe,
+    BulkIn, BulkOut, Claim, ControlTransfer, IsConnected, OpenEndpoint, ResetHostController, Subscribe,
 };
 use crate::error::UsbError;
 
@@ -71,19 +70,12 @@ impl<P: CheckedPermissions> UsbHost<P> {
         Ok(ConnectedUsbDevice { conn: self.0.clone(), handle })
     }
 
-    pub fn set_enabled(&self, enabled: bool) -> Result<(), UsbError>
+    pub fn reset_host_controller(&self) -> Result<(), UsbError>
     where
-        P: MessageAllowed<SetEnabled>,
+        P: MessageAllowed<ResetHostController>,
     {
-        self.0.send_scalar_nowait(SetEnabled(enabled))?;
+        self.0.send_scalar_nowait(ResetHostController)?;
         Ok(())
-    }
-
-    pub fn is_enabled(&self) -> Result<bool, UsbError>
-    where
-        P: MessageAllowed<IsEnabled>,
-    {
-        Ok(self.0.try_send_blocking_scalar(IsEnabled)?)
     }
 
     pub fn is_connected(&self) -> Result<bool, UsbError>

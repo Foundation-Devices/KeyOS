@@ -9,11 +9,11 @@ en = "USB Server"
 
 [servers."os/usb"]
 DoWork = { id = 0, type = "scalar" }
+SetEnabled = { id = 6, type = "scalar" }
 SubscriberDisconnected = { id = 64, type = "scalar" }
-PortRole = { id = 65, type = "scalar" }
 
 [servers."os/usb-internal"]
-DetachDebounced = { id = 0, type = "scalar" }
+StateTimedOut = { id = 0, type = "scalar" }
 
 [servers."os/usbdev"]
 SetDeviceEmulationEnabled = { id = 99, type = "scalar" }
@@ -21,7 +21,6 @@ EndOfReset = { id = 100, type = "scalar" }
 DmaInterrupt = { id = 101, type = "scalar" }
 RxCompleteInterrupt = { id = 102, type = "move" }
 TxCompleteInterrupt = { id = 103, type = "scalar" }
-SetHostAttached = { id = 104, type = "scalar" }
 
 [permissions]
 "os/power-manager" = ["SetPeripheralEnabled"]

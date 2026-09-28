@@ -25,9 +25,9 @@ const INTERFACE_SUBCLASS: u8 = 0x06; // SCSI passthrough
 const INTERFACE_PROTOCOL: u8 = 0x50; // Bulk-only
 const INTERFACE_PRIORITY: u8 = usb::device::interface_priorities::MASS_STORAGE;
 
-#[cfg(feature = "production")]
+#[cfg(not(feature = "raw-partitions-on-usb"))]
 const EXPOSED_LOCATIONS: [Location; 1] = [Location::Airlock];
-#[cfg(not(feature = "production"))]
+#[cfg(feature = "raw-partitions-on-usb")]
 const EXPOSED_LOCATIONS: [Location; 3] = [Location::Airlock, Location::System, Location::EncryptedRoot];
 
 static MAX_LUN: AtomicU8 = AtomicU8::new(0);
