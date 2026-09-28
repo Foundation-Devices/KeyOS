@@ -39,7 +39,7 @@ const BOOT_ASSETS_DIR: &str = "blassets";
 
 const APP_IMAGE: &str = "app.bin";
 const RECOVERY_IMAGE: &str = "recovery.bin";
-const KEYOS_VERSION: &str = "1.4.0";
+const KEYOS_VERSION: &str = "1.4.1";
 
 /// Logging output services.
 const LOGGING_SERVICE_SERIAL: &str = "log-serial";
