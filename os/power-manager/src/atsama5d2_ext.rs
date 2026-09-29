@@ -30,6 +30,7 @@ pub struct PowerManagerServerExt {
     battery_critical: bool,
     shutdown_failsafe: Option<TicktimerCallback>,
     last_status: Option<Status>,
+    last_open_circuit_mv: i32,
 }
 
 /// How long a subscriber gets to shut down before we cut power ourselves.
@@ -115,6 +116,7 @@ impl PowerManagerServerExt {
             battery_critical: false,
             shutdown_failsafe: None,
             last_status: None,
+            last_open_circuit_mv: i32::MAX,
         })
     }
 
@@ -308,29 +310,36 @@ fn adjust_fuel_gauge_soc(raw: u8) -> u8 {
     }
 }
 
-/// Map the open-circuit voltage to the charge shown to the user, covering only the bottom few
-/// percent, where the gauge's drift can cost a third of the pack. Returns `None` above that range,
-/// or while charging.
-fn voltage_based_soc(voltage_mv: i16, current_ma: i16) -> Option<u8> {
-    /// Open-circuit voltage below which the display reads at most the entry's index.
-    /// 0% sits above the datasheet's 15% point, because by 3600 mV the gauge is under the 5% the
-    /// bootloader wants to start at. Stopping there costs around half an hour of active use and
-    /// buys roughly six extra weeks before a flat pack clears SECURAM.
-    const LOW_BATTERY_OCV_MV: [i32; 4] = [3700, 3704, 3709, 3713];
-    /// Pack impedance under a sustained load, above the datasheet's 180 mOhm measured at 2 kHz.
-    /// It grows as the cell ages, so underestimating it reads low, the safe direction.
-    /// The curve is flat here, about 4 mV per percent, while each 100 mOhm of error moves the
-    /// estimate by about 26 mV with the screen on, so expect the percentage to jump with the load.
-    const BATTERY_IMPEDANCE_MOHM: i32 = 300;
-
-    if current_ma > 0 {
-        return None;
-    }
-    let open_circuit_mv = voltage_mv as i32 - current_ma as i32 * BATTERY_IMPEDANCE_MOHM / 1000;
-    LOW_BATTERY_OCV_MV.iter().position(|&mv| open_circuit_mv < mv).map(|percent| percent as u8)
-}
-
 impl PowerManagerServerExt {
+    /// Map the open-circuit voltage to the charge shown to the user, covering only the bottom few
+    /// percent, where the gauge's drift can cost a third of the pack. Returns `None` above that
+    /// range, or while charging. The last estimate follows the reading with an artificial backlash,
+    /// trailing up to `HYSTERESIS_MV` below it.
+    fn voltage_based_soc(&mut self, voltage_mv: i16, current_ma: i16) -> Option<u8> {
+        /// Open-circuit voltage below which the display reads at most the entry's index.
+        /// 0% sits above the datasheet's 15% point, because by 3600 mV the gauge is under the 5% the
+        /// bootloader wants to start at. Stopping there costs around half an hour of active use and
+        /// buys roughly six extra weeks before a flat pack clears SECURAM.
+        const LOW_BATTERY_OCV_MV: [i32; 4] = [3700, 3704, 3709, 3713];
+        /// Pack impedance under a sustained load, above the datasheet's 180 mOhm measured at 2 kHz.
+        /// It grows as the cell ages, so underestimating it reads low, the safe direction.
+        /// The curve is flat here, about 4 mV per percent, while each 100 mOhm of error moves the
+        /// estimate by about 26 mV with the screen on, so expect the percentage to jump with the load.
+        const BATTERY_IMPEDANCE_MOHM: i32 = 300;
+        /// The estimate wanders over about 12 mV at a steady load, so a smaller rise is noise.
+        const HYSTERESIS_MV: i32 = 12;
+
+        if current_ma > 0 {
+            // Charging makes the last estimate stale, and clamping i32::MAX takes the next reading as is.
+            self.last_open_circuit_mv = i32::MAX;
+            return None;
+        }
+        let open_circuit_mv = voltage_mv as i32 - current_ma as i32 * BATTERY_IMPEDANCE_MOHM / 1000;
+        self.last_open_circuit_mv =
+            self.last_open_circuit_mv.clamp(open_circuit_mv - HYSTERESIS_MV, open_circuit_mv);
+        LOW_BATTERY_OCV_MV.iter().position(|&mv| self.last_open_circuit_mv < mv).map(|percent| percent as u8)
+    }
+
     fn charge_status(&mut self) -> ChargeStatus {
         let Ok(raw_status) = self.charger.status() else {
             return ChargeStatus::Fault;
@@ -411,7 +420,7 @@ impl PowerManagerServerExt {
         let voltage_mv = self.fuel_gauge.voltage().unwrap_or_default();
         let current_ma = self.fuel_gauge.charge_current().unwrap_or_default();
         let gauge_percent = adjust_fuel_gauge_soc(raw_soc);
-        let voltage_based_percent = voltage_based_soc(voltage_mv, current_ma).unwrap_or(100);
+        let voltage_based_percent = self.voltage_based_soc(voltage_mv, current_ma).unwrap_or(100);
         let battery_percent = gauge_percent.min(voltage_based_percent);
         let status = Status { charge_status: self.charge_status(), battery_percent, attached_state };
 
