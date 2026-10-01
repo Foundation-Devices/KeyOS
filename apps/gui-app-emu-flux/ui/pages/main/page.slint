@@ -23,6 +23,9 @@ import {
     IconButton,
     BasePage,
     TimerLoader,
+    PageBody,
+    ButtonSection,
+    WrappedIcon,
 } from "@ui/widgets.slint";
 import { UIColors } from "@ui/palettes/ui-colors.slint";
 import { Navigate, Animate } from "../../gen/navigate.slint";
@@ -235,6 +238,56 @@ component AppTile inherits VerticalLayout {
     ]
 }
 
+component EmptyState inherits PageBody {
+    in property <string> title;
+    in property <string> content;
+    in property <string> action-label;
+    callback action();
+
+    vertical-stretch: 1;
+    p-x: Size.sz4;
+    padding-top: Size.sz7;
+    padding-bottom: Size.sz4;
+
+    VerticalLayout {
+        spacing: Size.sz10;
+
+        HorizontalLayout {
+            alignment: center;
+
+            WrappedIcon {
+                inner-icon: "plus";
+            }
+        }
+
+        VerticalLayout {
+            spacing: Size.sz5;
+
+            HeadingMd {
+                text: root.title;
+                horizontal-alignment: center;
+            }
+
+            TextMd {
+                text: root.content;
+                horizontal-alignment: center;
+                color: Palette.content-secondary;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    ButtonSection {
+        Button {
+            label: root.action-label;
+            importance: primary;
+            clicked => {
+                root.action();
+            }
+        }
+    }
+}
+
 export component MainPage inherits BasePage {
     in property <MainProps> props;
 
@@ -375,7 +428,25 @@ export component MainPage inherits BasePage {
             vertical-stretch: 1;
             alignment: stretch;
 
-            HorizontalLayout {
+            if Global.all-apps.length == 0: EmptyState {
+                title: TR2.lookup(TrId.MainEmptyTitle);
+                content: TR2.lookup(TrId.MainEmptyContent);
+                action-label: TR2.lookup(TrId.MainEmptyGoToSettings);
+                action => {
+                    Callbacks.go-to-settings();
+                }
+            }
+
+            if Global.all-apps.length > 0 && Global.apps.length == 0: EmptyState {
+                title: TR2.lookup(TrId.MainDeselectedAllTitle);
+                content: TR2.lookup(TrId.MainDeselectedAllContent);
+                action-label: TR2.lookup(TrId.MainDeselectedAllGoToSettings);
+                action => {
+                    Navigate.settings({ });
+                }
+            }
+
+            if Global.apps.length > 0: HorizontalLayout {
                 vertical-stretch: 1;
                 alignment: center;
                 padding: Size.sz4;

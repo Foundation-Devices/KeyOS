@@ -4,8 +4,8 @@
 appId = "0x6775692d6170702d656d752d666c7578"
 extends = "../../api/gui-app-emu-flux"
 publisher = "Foundation"
-description = "Legacy mode."
-minKeyosVersion = "1.4.0-beta1"
+description = "Legacy Mode brings supported open source apps to KeyOS."
+minKeyosVersion = "1.4.0"
 
 [appName]
 en = "Legacy"
@@ -17,6 +17,6 @@ AppDisconnected = { id = 4, type = "scalar" }
 template = ["gui-app", "navigable", "fs-generic"]
 "os/app-manager" = ["LaunchAppBlocking", "GetAppName", "ListApps", "SubscribeAppEvents"]
 "os/security" = ["GetAppSeed"]
-"os/gui-server" = ["GetPendingNavRequest", "SwitchToLauncher"]
+"os/gui-server" = ["GetPendingNavRequest", "SwitchToLauncher", "NavigateTo"]
 "os/haptics" = ["Vibrate"]
 "os/legacy-hid" = ["WriteHidApdu", "SetLegacyMode", "SubscribeIncomingApdu"]

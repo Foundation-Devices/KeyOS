@@ -3,9 +3,7 @@
 
 export enum EnterPassphraseState {
     Idle,
-    Confirm,
     Clear,
-    NewAccount,
 }
 
 export global EnterPassphrase {
@@ -23,14 +21,6 @@ export global EnterPassphrase {
     callback reapply(string);
     // Switch view locally without notifying Envoy (for Default/Passphrase toggle)
     callback switch-view(int);
-
-    public function try-passphrase() {
-        self.try(self.passphrase);
-    }
-
-    public function confirm-passphrase() {
-        self.confirm(self.passphrase);
-    }
 
     public function reapply-passphrase() {
         self.reapply(self.passphrase);

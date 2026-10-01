@@ -46,7 +46,11 @@
         "settings.backupManualMainModal",
         "onboarding.backupManualVerify",
         "onboarding.recoverWords.fillerText",
-        "keycardBackup.manual.modalBewareHeader"
+        "keycardBackup.manual.modalBewareHeader",
+        "wallet.PassphraseModal",
+        "wallet.enterPassphrase",
+        "wallet.confirmPassphrase",
+        "wallet.passphraseDetails"
       ]
     },
     {

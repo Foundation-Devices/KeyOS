@@ -83,6 +83,7 @@ macro_rules! flux_app {
                 flux_io_seph_recv,
                 flux_syscall_buffer,
             ));
+            $crate::runtime::declare_derivation_roots(__flux_app_gen::DERIVATION_ROOTS);
 
             // Back the app's NVM region with the emulator's persistent store, so upstream's
             // storage_init() defaults apply on first run and later Settings choices survive a
@@ -144,6 +145,24 @@ fn hooks() -> &'static RuntimeHooks {
 
 pub(crate) fn syscall_buffer(id: u32, arg: u32, data: &mut [u8]) -> usize {
     (hooks().syscall_buffer)(id, arg, data)
+}
+
+/// Tell the emulator which BIP32 roots this app may derive under, taken from its upstream
+/// `PATH_APP_LOAD_PARAMS` by build.rs. The emulator refuses every derivation until it has them,
+/// so this must run before the app's entry point.
+pub fn declare_derivation_roots(roots: &[&[u32]]) {
+    let mut buf: Vec<u8> = roots
+        .iter()
+        .flat_map(|root| {
+            std::iter::once(root.len() as u32).chain(root.iter().copied()).flat_map(u32::to_be_bytes)
+        })
+        .collect();
+
+    if syscall_buffer(gui_app_emu_flux::SYSCALL_DECLARE_DERIVATION_ROOTS_ID, roots.len() as u32, &mut buf)
+        != 0
+    {
+        log::error!("Derivation roots rejected by the emulator; key derivation will be refused");
+    }
 }
 
 fn send_seph(data: &[u8]) { (hooks().io_seph_send)(data); }

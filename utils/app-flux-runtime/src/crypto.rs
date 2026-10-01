@@ -36,6 +36,15 @@ const CX_ECCINFO_xGTn: u32 = 2;
 // --- Subtraction carry ---
 const CX_CARRY: u32 = 0xFFFFFF21;
 
+/// SDK `EXCEPTION_SECURITY` (errors.h).
+const EXCEPTION_SECURITY: u32 = 0x3;
+
+extern "C" {
+    /// The SDK's `THROW`, the only way a `void` derive syscall can report a failure the app turns
+    /// into a status word. Runs no destructors, so drop what you own before calling it.
+    fn os_longjmp(exception: u32) -> !;
+}
+
 // --- AES mode flags (from lcx_common.h) ---
 const CX_AES_ENCRYPT: u32 = 2 << 1;
 const CX_AES_CHAIN_CBC: u32 = 1 << 6;
@@ -1243,42 +1252,45 @@ pub unsafe extern "C" fn os_perso_derive_node_bip32(
     path_len: u32,
     private_key: *mut u8,
     chain: *mut u8,
-) -> u32 {
-    if path.is_null() || private_key.is_null() {
-        return CX_INVALID_PARAMETER;
-    }
-
+) {
     let path_len = path_len as usize;
-    if path_len == 0 || path_len > 10 {
-        log::warn!("os_perso_derive_node_bip32: invalid path_len={}", path_len);
-        return CX_INVALID_PARAMETER;
-    }
+    assert!(
+        !path.is_null() && !private_key.is_null() && (1..=10).contains(&path_len),
+        "os_perso_derive_node_bip32: invalid arguments (path_len={path_len})"
+    );
 
     // Build a buffer containing the path (big-endian u32 elements)
     // Buffer layout: [path_element_0 (4 bytes BE), path_element_1 (4 bytes BE), ...]
     // Output will be: [private_key (32 bytes), chain_code (32 bytes)]
-    let mut buf = vec![0u8; 64.max(path_len * 4)];
-    for i in 0..path_len {
-        let element = *path.add(i);
-        buf[i * 4..i * 4 + 4].copy_from_slice(&element.to_be_bytes());
-    }
+    let result = {
+        let mut buf = vec![0u8; 64.max(path_len * 4)];
+        for i in 0..path_len {
+            let element = *path.add(i);
+            buf[i * 4..i * 4 + 4].copy_from_slice(&element.to_be_bytes());
+        }
 
-    // Send via IPC to FluxServer which has the app seed
-    let result = syscall_buffer(syscall_id::SYSCALL_OS_PERSO_DERIVE_NODE_BIP32_ID, path_len as u32, &mut buf);
+        // Send via IPC to FluxServer which has the app seed
+        let result =
+            syscall_buffer(syscall_id::SYSCALL_OS_PERSO_DERIVE_NODE_BIP32_ID, path_len as u32, &mut buf);
 
+        // Read output: private_key (32 bytes) + chain_code (32 bytes)
+        if result == 0 {
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, 32);
+            if !chain.is_null() {
+                core::ptr::copy_nonoverlapping(buf[32..].as_ptr(), chain, 32);
+            }
+        }
+        result
+    };
+
+    // A host reaches this with in-root paths that still cannot be derived, so it must answer with a
+    // status word rather than take the app down.
     if result != 0 {
-        log::warn!("os_perso_derive_node_bip32: IPC failed (result={})", result);
-        return CX_INTERNAL_ERROR;
-    }
-
-    // Read output: private_key (32 bytes) + chain_code (32 bytes)
-    core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, 32);
-    if !chain.is_null() {
-        core::ptr::copy_nonoverlapping(buf[32..].as_ptr(), chain, 32);
+        log::warn!("os_perso_derive_node_bip32: derivation failed (result={result})");
+        os_longjmp(EXCEPTION_SECURITY);
     }
 
     log::debug!("os_perso_derive_node_bip32: derived key for path_len={}", path_len);
-    CX_OK
 }
 
 /// os_perso_derive_node_with_seed_key(unsigned int mode, cx_curve_t curve,
@@ -1299,31 +1311,19 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
     chain: *mut u8,
     _seed_key: *const u8,
     _seed_key_len: u32,
-) -> u32 {
+) {
     if curve == CX_CURVE_SECP256K1 {
         return os_perso_derive_node_bip32(curve, path, path_len, private_key, chain);
     }
 
-    if curve != CX_CURVE_ED25519 {
-        log::warn!("os_perso_derive_node_with_seed_key: unsupported curve=0x{:02x}", curve);
-        return CX_INVALID_PARAMETER;
-    }
-
-    if path.is_null() || private_key.is_null() {
-        return CX_INVALID_PARAMETER;
-    }
-
     let path_len_usize = path_len as usize;
-    if path_len_usize == 0 || path_len_usize > 10 {
-        log::warn!("os_perso_derive_node_with_seed_key: invalid path_len={}", path_len);
-        return CX_INVALID_PARAMETER;
-    }
-
-    let mut buf = vec![0u8; 64.max(path_len_usize * 4)];
-    for i in 0..path_len_usize {
-        let element = *path.add(i);
-        buf[i * 4..i * 4 + 4].copy_from_slice(&element.to_be_bytes());
-    }
+    assert!(
+        curve == CX_CURVE_ED25519
+            && !path.is_null()
+            && !private_key.is_null()
+            && (1..=10).contains(&path_len_usize),
+        "os_perso_derive_node_with_seed_key: invalid arguments (curve=0x{curve:02x}, path_len={path_len})"
+    );
 
     // Encode mode + curve + path_len into the arg parameter:
     //   bits [31:24] = mode, bits [23:16] = curve, bits [15:0] = path_len
@@ -1336,20 +1336,32 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
         path_len_usize
     );
 
-    let result = syscall_buffer(syscall_id::SYSCALL_OS_PERSO_DERIVE_NODE_WITH_SEED_KEY_ID, arg, &mut buf);
+    let result = {
+        let mut buf = vec![0u8; 64.max(path_len_usize * 4)];
+        for i in 0..path_len_usize {
+            let element = *path.add(i);
+            buf[i * 4..i * 4 + 4].copy_from_slice(&element.to_be_bytes());
+        }
 
+        let result = syscall_buffer(syscall_id::SYSCALL_OS_PERSO_DERIVE_NODE_WITH_SEED_KEY_ID, arg, &mut buf);
+
+        if result == 0 {
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, 32);
+            if !chain.is_null() {
+                core::ptr::copy_nonoverlapping(buf[32..].as_ptr(), chain, 32);
+            }
+        }
+        result
+    };
+
+    // Also reached by a non-hardened SLIP-10 index under 44'/501', which the app's own check lets
+    // through, so this too answers with a status word.
     if result != 0 {
-        log::warn!("os_perso_derive_node_with_seed_key: IPC failed (result={})", result);
-        return CX_INTERNAL_ERROR;
-    }
-
-    core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, 32);
-    if !chain.is_null() {
-        core::ptr::copy_nonoverlapping(buf[32..].as_ptr(), chain, 32);
+        log::warn!("os_perso_derive_node_with_seed_key: derivation failed (result={result})");
+        os_longjmp(EXCEPTION_SECURITY);
     }
 
     log::debug!("os_perso_derive_node_with_seed_key: derived key successfully");
-    CX_OK
 }
 
 // ============================================================================

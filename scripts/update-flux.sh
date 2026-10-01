@@ -174,8 +174,8 @@ sed -i "s/(\"MAJOR_VERSION\", \"[0-9]*\")/(\"MAJOR_VERSION\", \"$m\")/" "$build_
 sed -i "s/(\"MINOR_VERSION\", \"[0-9]*\")/(\"MINOR_VERSION\", \"$n\")/" "$build_rs"
 sed -i "s/(\"PATCH_VERSION\", \"[0-9]*\")/(\"PATCH_VERSION\", \"$p\")/" "$build_rs"
 sed -i 's/"\\"[0-9][0-9.]*\\""/"\\"'"$new_ver"'\\""/' "$build_rs"
-# The crate version tracks the upstream app version.
-sed -i "0,/^version = \"[^\"]*\"/s//version = \"$new_ver\"/" "$manifest"
+# The crate version is <wrapper>+<upstream>: only the build metadata tracks upstream.
+sed -i "0,/^version = \"\([^\"+]*\)+[^\"]*\"/s//version = \"\1+$new_ver\"/" "$manifest"
 
 echo
 echo "updated $build_rs and $manifest to $new_ver."
@@ -183,6 +183,7 @@ echo "  app : $newest_tag @ $app_oid"
 echo "  sdk : $new_sdk @ $sdk_oid"
 echo "next steps:"
 echo "  - review : git diff apps/app-flux-$app"
+echo "  - version: bump the wrapper part of <wrapper>+$new_ver in $manifest"
 echo "  - format : just fmt   (a longer tag can push a pin past the line limit)"
 echo "  - build  : just build   (clones the new source and updates Cargo.lock; the"
 echo "             source patches in patch_app and the skipped-file lists may need"

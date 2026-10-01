@@ -12,14 +12,12 @@ import {
     MenuSectionLayout,
     MenuItemLayout,
     ItemTextPreview,
-    HLine,
-    Input,
     NavHeader,
     TitledInput,
 } from "@ui/widgets.slint";
-import { Importance, Palette, Size } from "@ui/theme.slint";
+import { ApplyPassphrase } from "@ui/pages.slint";
+import { Importance, Palette } from "@ui/theme.slint";
 import { TR2, TrId } from "../../gen/tr.slint";
-import { Utils } from "@ui/utils.slint";
 
 import { Navigate } from "../../gen/navigate.slint";
 import {
@@ -27,133 +25,77 @@ import {
     EnterPassphraseState,
 } from "../../enter-passphrase.slint";
 import { CreateAccount } from "../../create-account.slint";
+import { Settings } from "../../settings.slint";
 
-component IdlePage inherits BasePage {
-    VerticalLayout {
-        NavHeader {
-            title: TR2.lookup(TrId.EnterPassphraseTitle);
-            clicked => {
-                EnterPassphrase.clear-state();
-                Navigate.backward();
-            }
-        }
-
-        PageBody {
-            ContentSection {
-                spacing: Size.sz12;
-                padding-top: Size.sz4;
-
-                TextSm {
-                    text: TR2.lookup(TrId.EnterPassphraseContent);
-                    color: Palette.content-tertiary;
-                    horizontal-alignment: TextHorizontalAlignment.center;
-                }
-
-                Input {
-                    placeholder: TR2.lookup(TrId.EnterPassphraseFillerText);
-                    check-character-limit: false;
-                    text: EnterPassphrase.passphrase;
-
-                    edited(text) => {
-                        EnterPassphrase.passphrase = text;
-                    }
-                }
-            }
-
-            ButtonSection {
-                Button {
-                    label: TR2.lookup(TrId.CommonButtonApply);
-                    clicked => {
-                        EnterPassphrase.try-passphrase();
-                        EnterPassphrase.state = EnterPassphraseState.Confirm;
-                    }
-                }
-            }
-        }
-    }
-}
-
-component ConfirmPage inherits BasePage {
+component ApplyPage inherits Rectangle {
     property <string> new-label;
-    property <bool> label-error: EnterPassphrase.no-accounts;
+    property <string> label-message;
+    property <bool> label-valid: new-label != "" && label-message == "";
 
-    VerticalLayout {
-        NavHeader {
-            title: TR2.lookup(TrId.PassphraseDetailsTitle);
-            clicked => {
-                EnterPassphrase.state = EnterPassphraseState.Idle;
+    ApplyPassphrase {
+        strings: {
+            warning-header: TR2.lookup(TrId.PassphraseModalHeader),
+            warning-content: TR2.lookup(TrId.PassphraseModalContent),
+            warning-dismiss: TR2.lookup(TrId.CommonButtonDontShowAgain),
+            warning-confirm: TR2.lookup(TrId.CommonButtonConfirm),
+            enter-title: TR2.lookup(TrId.EnterPassphraseTitle),
+            enter-content: TR2.lookup(TrId.EnterPassphraseContent),
+            enter-filler: TR2.lookup(TrId.EnterPassphraseFillerText),
+            enter-apply: TR2.lookup(TrId.CommonButtonApply),
+            details-title: TR2.lookup(TrId.PassphraseDetailsTitle),
+            details-header: TR2.lookup(TrId.PassphraseDetailsDetails),
+            details-passphrase: TR2.lookup(TrId.ConfirmPassphrasePassphrase),
+            details-fingerprint: TR2.lookup(TrId.ConfirmPassphraseFingerprint),
+            details-content: TR2.lookup(TrId.ConfirmPassphraseContent),
+            details-confirm: TR2.lookup(TrId.CommonButtonConfirm),
+        };
+        warning-enabled: Settings.show-passphrase-warning;
+        passphrase <=> EnterPassphrase.passphrase;
+        fingerprint: EnterPassphrase.fingerprint;
+        fingerprint-loading: EnterPassphrase.fingerprint-loading;
+        confirm-enabled: !EnterPassphrase.no-accounts || label-valid;
+
+        warning-toggled => {
+            Settings.set-show-passphrase-warning(!Settings.show-passphrase-warning);
+        }
+
+        try(passphrase) => {
+            new-label = "";
+            label-message = "";
+            EnterPassphrase.try(passphrase);
+        }
+
+        confirm(passphrase) => {
+            EnterPassphrase.slider-index = 1;
+            if (new-label != "") {
+                EnterPassphrase.create-initial-account(new-label);
+            } else {
+                EnterPassphrase.confirm(passphrase);
             }
         }
 
-        PageBody {
-            ContentSection {
-                MenuSection {
-                    title: TR2.lookup(TrId.PassphraseDetailsDetails);
-                    MenuSectionLayout {
-                        MenuItemLayout {
-                            first: true;
-                            label: TR2.lookup(TrId.ConfirmPassphrasePassphrase);
-                            ItemTextPreview {
-                                text: EnterPassphrase.passphrase;
-                            }
-                        }
+        back => {
+            EnterPassphrase.clear-state();
+            Navigate.backward();
+        }
 
-                        HLine { }
+        if EnterPassphrase.no-accounts: TitledInput {
+            title: TR2.lookup(TrId.ConfirmPassphraseLabelAccount0);
+            placeholder: TR2.lookup(TrId.CreateAccountLabelFillerText);
+            text <=> root.new-label;
+            message: root.label-message;
+            has-notice: !root.label-valid;
+            caps-mode: sentences;
 
-                        MenuItemLayout {
-                            last: true;
-                            label: TR2.lookup(TrId.ConfirmPassphraseFingerprint);
-                            ItemTextPreview {
-                                text: EnterPassphrase.fingerprint;
-                            }
-                        }
-                    }
-                }
-
-                TextSm {
-                    text: TR2.lookup(TrId.ConfirmPassphraseContent);
-                    horizontal-alignment: TextHorizontalAlignment.center;
-                    color: Palette.content-tertiary;
-                }
-
-                if EnterPassphrase.no-accounts: TitledInput {
-                    title: TR2.lookup(TrId.ConfirmPassphraseLabelAccount0);
-                    placeholder: TR2.lookup(TrId.CreateAccountLabelFillerText);
-                    has-notice: true;
-                    caps-mode: sentences;
-
-                    edited(text) => {
-                        new-label = text;
-                        self.message = CreateAccount.validate-new-label(text);
-                        self.has-notice = self.message != "";
-                        label-error = self.has-notice;
-                    }
-                }
-
-                if EnterPassphrase.no-accounts: TextSm {
-                    text: TR2.lookup(TrId.ConfirmPassphraseLabelExplainer);
-                    horizontal-alignment: TextHorizontalAlignment.center;
-                    color: Palette.content-tertiary;
-                }
+            edited(text) => {
+                root.label-message = CreateAccount.validate-new-label(text);
             }
+        }
 
-            ButtonSection {
-                Button {
-                    enabled: !label-error && !EnterPassphrase.fingerprint-loading;
-                    label: TR2.lookup(TrId.CommonButtonConfirm);
-                    importance: Importance.primary;
-
-                    clicked => {
-                        EnterPassphrase.slider-index = 1;
-                        if (new-label != "") {
-                            EnterPassphrase.create-initial-account(new-label);
-                            new-label = "";
-                        } else {
-                            EnterPassphrase.confirm-passphrase();
-                        }
-                    }
-                }
-            }
+        if EnterPassphrase.no-accounts: TextSm {
+            text: TR2.lookup(TrId.ConfirmPassphraseLabelExplainer);
+            horizontal-alignment: TextHorizontalAlignment.center;
+            color: Palette.content-tertiary;
         }
     }
 }
@@ -209,7 +151,6 @@ component ClearPage inherits BasePage {
 }
 
 export component EnterPassphrasePage inherits Rectangle {
-    if EnterPassphrase.state == EnterPassphraseState.Idle: IdlePage { }
-    if EnterPassphrase.state == EnterPassphraseState.Confirm: ConfirmPage { }
+    if EnterPassphrase.state != EnterPassphraseState.Clear: ApplyPage { }
     if EnterPassphrase.state == EnterPassphraseState.Clear: ClearPage { }
 }

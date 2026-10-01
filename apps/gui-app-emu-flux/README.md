@@ -53,9 +53,13 @@ are framed back to the host. The identity reverts when the emulator is hidden.
   `FileBacked` (`app-flux-runtime/src/nvm.rs`), granted by the `flux-app`
   permission template. Options such as Ethereum's blind-signing opt-in survive a
   relaunch.
-- **Version.** Each child reports its build version (`FLUX_APP_VERSION`, stamped
-  from the app's git tag) at startup, so the emulator answers the host's
-  `GET_APP_AND_VERSION` probe with the real value.
+- **Version.** A child answers the host's `GET_APP_AND_VERSION` probe with its
+  upstream version, read from `APPVERSION_M/N/P` in the upstream Makefile. Its
+  crate version, which KeyOS shows and signs, is `<wrapper>+<upstream>` (e.g.
+  `1.1.0+1.22.3`): bump the wrapper part on every release of the child, and the
+  build metadata when re-pinning upstream. Each released app is tagged on its own
+  (`legacy-mode-v1.1.0`, `legacy-eth-v1.1.0+1.22.3`), since a child can ship
+  without the emulator.
 
 ## Related crates
 

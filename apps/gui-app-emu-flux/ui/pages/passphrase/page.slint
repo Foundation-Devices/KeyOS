@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ApplyPassphrase } from "@ui/pages.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Callbacks, Global } from "../../globals.slint";
+import { PassphraseProps } from "./props.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+
+export component PassphrasePage inherits Rectangle {
+    in property <PassphraseProps> props;
+
+    entry := ApplyPassphrase {
+        strings: {
+            warning-header: TR2.lookup(TrId.WalletPassphraseModalHeader),
+            warning-content: TR2.lookup(TrId.WalletPassphraseModalContent),
+            warning-dismiss: TR2.lookup(TrId.CommonButtonDontShowAgain),
+            warning-confirm: TR2.lookup(TrId.CommonButtonConfirm),
+            enter-title: TR2.lookup(TrId.WalletEnterPassphraseTitle),
+            enter-content: TR2.lookup(TrId.WalletEnterPassphraseContent),
+            enter-filler: TR2.lookup(TrId.WalletEnterPassphraseFillerText),
+            enter-apply: TR2.lookup(TrId.CommonButtonApply),
+            details-title: TR2.lookup(TrId.WalletPassphraseDetailsTitle),
+            details-header: TR2.lookup(TrId.WalletPassphraseDetailsDetails),
+            details-passphrase: TR2.lookup(TrId.WalletConfirmPassphrasePassphrase),
+            details-fingerprint: TR2.lookup(TrId.WalletConfirmPassphraseFingerprint),
+            details-content: TR2.lookup(TrId.ConfirmPassphraseContent),
+            details-confirm: TR2.lookup(TrId.CommonButtonConfirm),
+        };
+        warning-enabled: Global.show-passphrase-warning;
+
+        warning-toggled => {
+            Callbacks.set-show-passphrase-warning(!Global.show-passphrase-warning);
+        }
+
+        try(passphrase) => {
+            self.fingerprint = Callbacks.passphrase-fingerprint(passphrase);
+        }
+
+        confirm(passphrase) => {
+            if (Callbacks.apply-passphrase(passphrase)) {
+                Navigate.backward();
+            }
+        }
+
+        back => {
+            Navigate.backward();
+        }
+    }
+}

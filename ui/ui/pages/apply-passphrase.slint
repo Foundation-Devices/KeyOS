@@ -1,0 +1,244 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Importance, Palette, Size } from "../theme.slint";
+import { NavHeader } from "../widgets/app-header.slint";
+import {
+    BasePage,
+    ButtonSection,
+    ContentSection,
+    Modal,
+    PageBody,
+} from "../widgets/base-page.slint";
+import { Button } from "../widgets/button.slint";
+import { Checkbox } from "../widgets/checkbox.slint";
+import { Input } from "../widgets/input.slint";
+import {
+    HLine,
+    ItemTextPreview,
+    MenuItemLayout,
+    MenuSection,
+    MenuSectionLayout,
+} from "../widgets/settings-menu.slint";
+import { TextSm } from "../widgets/txt.slint";
+
+/// Localized strings for the apply-passphrase flow. Passed in because the wallet
+/// and Legacy key them under different catalog paths.
+export struct ApplyPassphraseStrings {
+    warning-header: string,
+    warning-content: string,
+    warning-dismiss: string,
+    warning-confirm: string,
+    enter-title: string,
+    enter-content: string,
+    enter-filler: string,
+    enter-apply: string,
+    details-title: string,
+    details-header: string,
+    details-passphrase: string,
+    details-fingerprint: string,
+    details-content: string,
+    details-confirm: string,
+}
+
+enum Step {
+    Warning,
+    Enter,
+    Confirm,
+}
+
+/// Applying a BIP-39 passphrase: the one-time warning modal, the passphrase
+/// entry screen, and the details screen that commits it. Shared by the wallet
+/// and Legacy, which differ in how the fingerprint is derived and in what they
+/// add to the details screen (the wallet labels its first account there, via
+/// `@children`).
+export component ApplyPassphrase inherits Rectangle {
+    in property <ApplyPassphraseStrings> strings;
+    /// Whether to open on the warning modal. Read once, at init, so ticking
+    /// "don't show again" does not dismiss the modal being read.
+    in property <bool> warning-enabled;
+    /// Filled by the host in response to `try`.
+    in property <string> fingerprint;
+    in property <bool> fingerprint-loading;
+    in property <bool> confirm-enabled: true;
+    in-out property <string> passphrase;
+
+    /// "Don't show again" was tapped; hosts persist the inverted `warning-enabled`.
+    callback warning-toggled();
+    /// The entry screen was submitted: derive `fingerprint` for this passphrase.
+    callback try(passphrase: string);
+    /// The details screen was confirmed: apply this passphrase.
+    callback confirm(passphrase: string);
+    /// The flow was left without applying anything.
+    callback back();
+
+    private property <Step> step: Step.Enter;
+
+    init => {
+        step = warning-enabled ? Step.Warning : Step.Enter;
+    }
+
+    if step != Step.Confirm: BasePage {
+        VerticalLayout {
+            NavHeader {
+                title: strings.enter-title;
+                clicked => {
+                    root.passphrase = "";
+                    back();
+                }
+            }
+
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz12;
+                    padding-top: Size.sz4;
+
+                    TextSm {
+                        text: strings.enter-content;
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                    }
+
+                    Input {
+                        placeholder: strings.enter-filler;
+                        check-character-limit: false;
+                        text: root.passphrase;
+
+                        edited(text) => {
+                            root.passphrase = text;
+                        }
+                    }
+                }
+
+                ButtonSection {
+                    Button {
+                        label: strings.enter-apply;
+                        clicked => {
+                            root.try(root.passphrase);
+                            step = Step.Confirm;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // `visible` rather than `if`: Slint forbids @children inside a conditional element.
+    BasePage {
+        visible: step == Step.Confirm;
+
+        VerticalLayout {
+            NavHeader {
+                title: strings.details-title;
+                clicked => {
+                    step = Step.Enter;
+                }
+            }
+
+            PageBody {
+                ContentSection {
+                    MenuSection {
+                        title: strings.details-header;
+                        MenuSectionLayout {
+                            MenuItemLayout {
+                                first: true;
+                                label: strings.details-passphrase;
+                                ItemTextPreview {
+                                    text: root.passphrase;
+                                }
+                            }
+
+                            HLine { }
+
+                            MenuItemLayout {
+                                last: true;
+                                label: strings.details-fingerprint;
+                                ItemTextPreview {
+                                    text: root.fingerprint;
+                                }
+                            }
+                        }
+                    }
+
+                    TextSm {
+                        text: strings.details-content;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        color: Palette.content-tertiary;
+                    }
+
+                    @children
+                }
+
+                ButtonSection {
+                    Button {
+                        enabled: root.confirm-enabled && !root.fingerprint-loading;
+                        label: strings.details-confirm;
+                        importance: Importance.primary;
+
+                        clicked => {
+                            root.confirm(root.passphrase);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if step == Step.Warning: Modal {
+        icon: "info";
+        icon-color: Palette.content-brand;
+        title: strings.warning-header;
+        text: strings.warning-content;
+        button-spacing: Size.sz2;
+
+        // Slightly shorter than the typical row height to keep this checkbox row visually distinct from the Confirm button below.
+        Rectangle {
+            height: Size.sz15 - 2px;
+
+            VerticalLayout {
+                alignment: center;
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Size.sz4;
+
+                    Checkbox {
+                        checked: !root.warning-enabled;
+                    }
+
+                    TextSm {
+                        text: strings.warning-dismiss;
+                        color: Palette.content-secondary;
+                    }
+                }
+            }
+
+            TouchArea {
+                clicked => {
+                    warning-toggled();
+                }
+            }
+        }
+
+        // Outer Rectangle + sibling TouchArea give the Confirm button a 10 px hit-area extension above and below.
+        Rectangle {
+            height: Size.sz15 + 20px;
+
+            VerticalLayout {
+                alignment: center;
+
+                Button {
+                    label: strings.warning-confirm;
+                    importance: Importance.primary;
+                    force-pressed: confirm-touch.pressed;
+                }
+            }
+
+            confirm-touch := TouchArea {
+                clicked => {
+                    step = Step.Enter;
+                }
+            }
+        }
+    }
+}

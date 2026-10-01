@@ -659,9 +659,15 @@
     "coin": {
       "emulatedSecureContainer": "Emulated App in Secure Container"
     },
+    "confirmPassphrase": {
+      "content": "Your passphrase is erased when the Legacy Mode app is closed. You can also clear it from the app settings at any time."
+    },
     "createSeed": {
       "content": "This seed was derived from your Passport Prime Master Key, so it's automatically protected by your existing backup. Manual backup is optional.\n\nThe new seed can be retrieved at any time in the Legacy Mode settings. ",
       "header": "New Seed Created"
+    },
+    "description": {
+      "content": "Legacy Mode brings supported open source apps to KeyOS."
     },
     "intro": {
       "content": "Legacy Mode lets you manage assets beyond Bitcoin, directly on Passport Prime. Create a new seed or import one from an existing wallet to get started.",
@@ -671,7 +677,17 @@
       "loadFromVault": "Load from Vault"
     },
     "main": {
+      "emptyGoToSettings": "Go to Settings",
       "title": "Legacy Mode"
+    },
+    "mainDeselectedAll": {
+      "content": "Activate an installed app from Legacy Settings.",
+      "goToSettings": "Go to Legacy Settings",
+      "title": "No Legacy Apps Active"
+    },
+    "mainEmpty": {
+      "content": "Install a Legacy App from Settings > Apps.",
+      "title": "No Legacy Apps Installed"
     },
     "recoverWords": {
       "title": "Seed Words"
@@ -687,6 +703,9 @@
     },
     "settings": {
       "appSelection": "App Selection",
+      "appSelectionNoAppsInstalled": "No Legacy Apps installed ",
+      "applyPassphrase": "Apply Passphrase",
+      "clearPassphrase": "Clear Passphrase",
       "removeSeed": "Remove current Seed",
       "seedManagement": "Seed Management",
       "title": "Legacy Settings",
@@ -2120,7 +2139,7 @@
   },
   "wallet": {
     "PassphraseModal": {
-      "content": "A passphrase acts as a second layer of security to protect your Bitcoin.\n\nTo access Bitcoin protected by a passphrase, you must reenter the exact same characters.\n\nIt is crucial to back up your passphrase to avoid loss of funds.",
+      "content": "A passphrase acts as a second layer of security to protect your funds.\n\nTo access funds protected by a passphrase, you must reenter the exact same characters.\n\nIt is crucial to back up your passphrase to avoid loss of funds.",
       "header": "Using a Passphrase"
     },
     "accountArchive": {

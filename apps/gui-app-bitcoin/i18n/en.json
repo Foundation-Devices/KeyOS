@@ -1,5 +1,5 @@
 {
-  "PassphraseModal.content": "A passphrase acts as a second layer of security to protect your Bitcoin.\n\nTo access Bitcoin protected by a passphrase, you must reenter the exact same characters.\n\nIt is crucial to back up your passphrase to avoid loss of funds.",
+  "PassphraseModal.content": "A passphrase acts as a second layer of security to protect your funds.\n\nTo access funds protected by a passphrase, you must reenter the exact same characters.\n\nIt is crucial to back up your passphrase to avoid loss of funds.",
   "PassphraseModal.header": "Using a Passphrase",
   "accountArchive.noArchivedAccounts": "No archived accounts",
   "accountArchive.title": "Archive",

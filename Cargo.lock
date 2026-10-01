@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-ethereum"
-version = "1.22.3"
+version = "1.1.0+1.22.5"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "app-flux-solana"
-version = "1.15.2"
+version = "1.1.0+1.15.2"
 dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
@@ -5068,7 +5068,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-emu-flux-server"
-version = "1.4.0"
+version = "1.1.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -5077,6 +5077,7 @@ dependencies = [
  "armv7",
  "atsama5d27",
  "bip39",
+ "bitcoin 0.32.7",
  "crc32fast",
  "flate2",
  "fs",

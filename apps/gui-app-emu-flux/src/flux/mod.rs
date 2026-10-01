@@ -4,7 +4,7 @@
 #[cfg(keyos)]
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     io::Read,
     sync::{LazyLock, RwLock},
     time::{Duration, Instant},
@@ -23,6 +23,7 @@ use gui_app_emu_flux::{
     keys,
     messages::{RecvSeph, SendSeph, SyscallBuffer},
     syscall_id::*,
+    SYSCALL_DECLARE_DERIVATION_ROOTS_ID,
 };
 
 pub mod display;
@@ -118,6 +119,70 @@ fn get_app_seed() -> Result<Zeroizing<Vec<u8>>, keys::KeyError> {
     Ok(seed)
 }
 
+/// The BIP32 roots each running child declared at startup, with the app id that declared them
+/// so a reused PID cannot inherit another app's. Every child derives from one shared Legacy
+/// wallet, so without this bound an app answers requests for the accounts of every other coin
+/// on that wallet (SFT-8141); the roots are each upstream app's own `PATH_APP_LOAD_PARAMS`,
+/// which its OS enforces the same way.
+static DERIVATION_ROOTS: LazyLock<RwLock<HashMap<xous::PID, (xous::AppId, Vec<Vec<u32>>)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Record what `sender` may derive under. Returns whether the declaration was stored.
+fn declare_derivation_roots(sender: xous::PID, roots: Vec<Vec<u32>>) -> bool {
+    let Ok(Some(app_id)) = xous::get_app_id(sender) else {
+        log::warn!("Derivation roots refused: no app id for PID {sender:?}");
+        return false;
+    };
+    let Ok(mut policy) = DERIVATION_ROOTS.write() else {
+        return false;
+    };
+    log::debug!("App {app_id} declared derivation roots {roots:08X?}");
+    policy.insert(sender, (app_id, roots));
+    true
+}
+
+/// Whether `path` extends one of the roots `sender` declared.
+fn derivation_allowed(sender: xous::PID, path: &[u32]) -> bool {
+    let Ok(Some(app_id)) = xous::get_app_id(sender) else {
+        log::warn!("Derivation denied: no app id for PID {sender:?}");
+        return false;
+    };
+    let Ok(policy) = DERIVATION_ROOTS.read() else {
+        return false;
+    };
+    let Some((_, roots)) = policy.get(&sender).filter(|(declared_by, _)| *declared_by == app_id) else {
+        log::warn!("Derivation denied: app {app_id} never declared its roots");
+        return false;
+    };
+    let allowed = roots.iter().any(|root| path.starts_with(root));
+    if !allowed {
+        log::warn!("Derivation denied for app {app_id}: {path:08X?} extends no declared root");
+    }
+    allowed
+}
+
+/// Drop what `pid` declared, so a PID reused by the next child starts undeclared rather than
+/// inheriting the dead one's roots.
+pub fn forget_child(pid: xous::PID) {
+    if let Ok(mut policy) = DERIVATION_ROOTS.write() {
+        policy.remove(&pid);
+    }
+}
+
+/// Whether the app now at `pid` has declared what it may derive. A child that has not is either
+/// still starting or predates the declaration, and a child of the latter kind answers a refused
+/// derivation with its uninitialized key buffer, so the emulator keeps host commands away from
+/// both. The stored app id is checked like `derivation_allowed` does, so a PID reused by another
+/// app is undeclared here even if the entry outlived its owner.
+pub fn child_declared(pid: xous::PID) -> bool {
+    let Ok(Some(app_id)) = xous::get_app_id(pid) else {
+        return false;
+    };
+    DERIVATION_ROOTS
+        .read()
+        .is_ok_and(|policy| policy.get(&pid).is_some_and(|(declared_by, _)| *declared_by == app_id))
+}
+
 /// Drop any input queued for a Flux child that has gone away: the SEPH events it never
 /// drained, plus their queued and pending-response channels. Without this the next child
 /// to launch would pick up the dead child's stale commands.
@@ -138,18 +203,18 @@ pub fn clear_fifos() {
 /// the in-process FIFO that running Flux child apps drain via `RecvSeph`. Also
 /// stashes the channel id for the next outgoing `Rapdu`.
 ///
-/// `child_running` is the caller's authoritative "is one of ours on screen?" state (the
-/// emulator's running-children map). Returns a ready-made "not supported" reply when no
-/// child is running, which the caller writes straight back to the host. Otherwise the child
-/// handles the APDU, including GET_APP_AND_VERSION, which it now answers itself.
+/// `child_ready` is the caller's authoritative "is one of ours on screen, and has it declared
+/// what it may derive?" state. Returns a ready-made "not supported" reply when none is, which the
+/// caller writes straight back to the host. Otherwise the child handles the APDU, including
+/// GET_APP_AND_VERSION, which it now answers itself.
 #[cfg(keyos)]
-pub fn push_incoming_apdu(channel_id: u16, apdu: &[u8], child_running: bool) -> Option<Vec<u8>> {
+pub fn push_incoming_apdu(channel_id: u16, apdu: &[u8], child_ready: bool) -> Option<Vec<u8>> {
     LAST_CHANNEL_ID.store(channel_id as u32, Ordering::Relaxed);
 
-    // No child is running: reject app commands with "not supported" rather than
-    // queue them for the next child to pick up as stale input.
-    if !child_running {
-        log::debug!("No Flux child running, rejecting APDU {:02x?}", &apdu[..apdu.len().min(2)]);
+    // No child is running, or the one that is has not declared: reject app commands with "not
+    // supported" rather than queue them for the next child to pick up as stale input.
+    if !child_ready {
+        log::debug!("No ready Flux child, rejecting APDU {:02x?}", &apdu[..apdu.len().min(2)]);
         return Some(vec![0x6d, 0x00]);
     }
 
@@ -459,7 +524,7 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
     fn handle(
         &mut self,
         mut msg: SyscallBuffer,
-        _sender: xous::PID,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <SyscallBuffer as LendMut>::Response {
         let buf = msg.buf.as_slice_mut::<u8>();
@@ -485,6 +550,32 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                 4 // Output length
             }
 
+            // --- Derivation policy ---
+            // The child declares its upstream PATH_APP_LOAD_PARAMS once at startup: buf holds
+            // one [len][element...] group per root (big-endian u32), arg the root count.
+            SYSCALL_DECLARE_DERIVATION_ROOTS_ID => {
+                let mut elements = buf
+                    .chunks_exact(4)
+                    .map(|element| u32::from_be_bytes(element.try_into().unwrap_or_default()));
+                let roots = (0..arg)
+                    .map(|_| {
+                        // An empty root is a prefix of every path, so it would allow everything.
+                        let len = elements
+                            .next()
+                            .filter(|len| (1..=MAX_BIP32_PATH_LEN).contains(&(*len as usize)))?;
+                        (0..len).map(|_| elements.next()).collect::<Option<Vec<_>>>()
+                    })
+                    .collect::<Option<Vec<_>>>();
+
+                match roots.map(|roots| declare_derivation_roots(sender, roots)) {
+                    Some(true) => 0,
+                    _ => {
+                        log::warn!("Derivation roots from PID {sender:?} not stored");
+                        usize::MAX
+                    }
+                }
+            }
+
             // --- BIP32 key derivation ---
             // os_perso_derive_node_bip32: buf contains path (array of u32), arg contains path_len
             // Output: private_key (32 bytes) + chain_code (32 bytes) written to buf
@@ -507,6 +598,10 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                 }
 
                 log::debug!("BIP32 derivation path: {:08X?}", path);
+
+                if !derivation_allowed(sender, &path) {
+                    return usize::MAX;
+                }
 
                 let app_seed = match get_app_seed() {
                     Ok(seed) => seed,
@@ -566,6 +661,10 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                     curve,
                     path
                 );
+
+                if !derivation_allowed(sender, &path) {
+                    return usize::MAX;
+                }
 
                 let app_seed = match get_app_seed() {
                     Ok(seed) => seed,
@@ -985,10 +1084,20 @@ impl BlockingArchiveHandler<RecvSeph> for FluxServer {
     fn handle(
         &mut self,
         msg: RecvSeph,
-        _sender: xous::PID,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <RecvSeph as BlockingArchive>::Response {
         let mut fifo = SEPH_FIFO.write().unwrap();
+        // Only a child that declared what it may derive takes a host command. Leave it queued
+        // for one that has rather than let a child predating the declaration answer it out of
+        // its uninitialized key buffer; the child's other SEPH traffic still flows, so an
+        // undeclared one keeps running, it just never speaks to the host.
+        let command_next =
+            fifo.front().is_some_and(|pkt| pkt.first().copied() == Some(SephTag::CapduEvent.into()));
+        if command_next && !child_declared(sender) {
+            return None;
+        }
+
         if let Some(pkt) = fifo.pop_front() {
             if pkt.len() <= msg.0 {
                 log::trace!(

@@ -15,8 +15,6 @@ import {
     Shadow,
     Shield,
     TextSm,
-    Modal,
-    Checkbox,
     SegmentedControl,
     PageBody,
     Shimmer,
@@ -40,7 +38,6 @@ import { AccountView, Callbacks, Network } from "../callbacks.slint";
 import { CreateAccount } from "../create-account.slint";
 import { Navigate } from "../gen/navigate.slint";
 import { VerifyAddress } from "../verify-address.slint";
-import { Settings } from "../settings.slint";
 import { EnterPassphrase } from "../enter-passphrase.slint";
 import { SignMessage } from "../sign-message.slint";
 import { CasaHealth } from "../casa-health.slint";
@@ -310,7 +307,6 @@ component SkeletonAccountCard inherits Rectangle {
 
 component AccountsPage inherits BasePage {
     property <bool> menu-open: false;
-    property <bool> passphrase-modal-open: false;
     property <string> selected: "";
     property <bool> has-passphrase: EnterPassphrase.passphrase != "";
     property <bool> passphrase-icon-visible: has-passphrase && EnterPassphrase.slider-index == 1;
@@ -425,12 +421,7 @@ component AccountsPage inherits BasePage {
             icon: has-passphrase ? "shield-x" : "shield-plus";
             clicked => {
                 menu-open = false;
-
-                if (!Settings.show-passphrase-warning || has-passphrase) {
-                    Navigate.enter-passphrase({ });
-                } else {
-                    passphrase-modal-open = true;
-                }
+                Navigate.enter-passphrase({ });
             }
         }
 
@@ -464,65 +455,6 @@ component AccountsPage inherits BasePage {
 
         touched-off => {
             menu-open = false;
-        }
-    }
-
-    if passphrase-modal-open: Modal {
-        icon: "info";
-        icon-color: Palette.content-brand;
-        title: TR2.lookup(TrId.PassphraseModalHeader);
-        text: TR2.lookup(TrId.PassphraseModalContent);
-        button-spacing: Size.sz2;
-
-        // Slightly shorter than the typical row height to keep this checkbox row visually distinct from the Confirm button below.
-        Rectangle {
-            height: Size.sz15 - 2px;
-
-            VerticalLayout {
-                alignment: center;
-
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Size.sz4;
-
-                    Checkbox {
-                        checked: !Settings.show-passphrase-warning;
-                    }
-
-                    TextSm {
-                        text: TR2.lookup(TrId.CommonButtonDontShowAgain);
-                        color: Palette.content-secondary;
-                    }
-                }
-            }
-
-            TouchArea {
-                clicked => {
-                    Settings.set-show-passphrase-warning(!Settings.show-passphrase-warning);
-                }
-            }
-        }
-
-        // Outer Rectangle + sibling TouchArea give the Confirm button a 10 px hit-area extension above and below.
-        Rectangle {
-            height: Size.sz15 + 20px;
-
-            VerticalLayout {
-                alignment: center;
-
-                Button {
-                    label: TR2.lookup(TrId.CommonButtonConfirm);
-                    importance: Importance.primary;
-                    force-pressed: confirm-touch.pressed;
-                }
-            }
-
-            confirm-touch := TouchArea {
-                clicked => {
-                    passphrase-modal-open = false;
-                    Navigate.enter-passphrase({ });
-                }
-            }
         }
     }
 }

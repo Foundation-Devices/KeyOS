@@ -3,7 +3,7 @@
 
 [package]
 name = "gui-app-emu-flux-server"
-version = "1.4.0"
+version = "1.1.0"
 edition = "2021"
 publish = false
 build = "build.rs"
@@ -14,6 +14,7 @@ anyhow = { workspace = true }
 app-manager = { workspace = true }
 app-manifest = { path = "../../os/app-manifest" }
 bip39 = "2.2"
+bitcoin = "0.32"
 crc32fast = "1.4"
 flate2 = "1.1"
 fs = { workspace = true }

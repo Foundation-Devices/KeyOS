@@ -5,10 +5,14 @@ mod flux;
 
 use std::{cell::RefCell, collections::HashMap, collections::HashSet, rc::Rc};
 
+use bitcoin::{bip32::Xpriv, secp256k1::Secp256k1, Network};
 use slint_keyos_platform::{
-    app,
+    app, async_archive,
     file_backed::JsonBacked,
-    gui_server_api::navigation::lockscreen::VerifyPinOptions,
+    gui_server_api::{
+        msg::NavigateTo,
+        navigation::{lockscreen::VerifyPinOptions, SETTINGS_APP_ID},
+    },
     navigation::verify_pin,
     slint::{ComponentHandle as _, Model as _, ModelRc, VecModel},
     spawn,
@@ -39,6 +43,9 @@ struct FluxSettings {
     disabled_apps: HashSet<String>,
     #[serde(default)]
     seed_config: Option<SeedConfig>,
+    /// Stored inverted so the default (warning shown) needs no `Default` impl.
+    #[serde(default)]
+    passphrase_warning_dismissed: bool,
 }
 
 app_manager::use_api!();
@@ -65,61 +72,58 @@ fn fetch_flux_entries(app_manager_api: &AppManagerApi) -> Vec<app_manager::Insta
     entries
 }
 
-/// The 64-byte BIP39 seed for the device AppSeed, or `None` if it is unavailable.
+/// The mnemonic behind `config`, or `None` when the security API fails or the stored
+/// entropy is corrupt.
 ///
-/// The AppSeed is treated as BIP39 entropy, matching how `resolve_mnemonic` turns it into
-/// the words and SeedQR shown under View Seed. Handing the raw AppSeed to BIP32 instead
-/// would derive a wallet that those words cannot reproduce, making the displayed backup
-/// useless.
-fn derived_bip39_seed(security_api: &Security) -> Option<Vec<u8>> {
-    // `AppSeed` scrubs itself on drop, so this key material doesn't linger on the emulator
-    // stack after the derivation returns.
-    let app_seed = match security_api.app_seed() {
-        Ok(seed) => seed,
-        Err(e) => {
-            log::error!("Failed to retrieve AppSeed from security API: {e:?}");
-            return None;
-        }
-    };
-    match bip39::Mnemonic::from_entropy(app_seed.as_bytes()) {
-        Ok(mnemonic) => Some(mnemonic.to_seed("").to_vec()),
-        Err(e) => {
-            log::error!("Failed to build a mnemonic from the AppSeed: {e:?}");
-            None
-        }
+/// The AppSeed is treated as BIP39 entropy, matching the words and SeedQR shown under View
+/// Seed. Handing the raw AppSeed to BIP32 instead would derive a wallet that those words
+/// cannot reproduce, making the displayed backup useless.
+fn mnemonic_for(config: &SeedConfig, security_api: &Security) -> Option<bip39::Mnemonic> {
+    match config {
+        // `AppSeed` scrubs itself on drop, so this key material doesn't linger on the
+        // emulator stack after the derivation returns.
+        SeedConfig::DerivedFromAppSeed => bip39::Mnemonic::from_entropy(
+            security_api
+                .app_seed()
+                .inspect_err(|e| log::error!("Failed to retrieve the AppSeed: {e:?}"))
+                .ok()?
+                .as_bytes(),
+        ),
+        SeedConfig::ManuallyEntered { entropy_hex } => bip39::Mnemonic::from_entropy(
+            &hex::decode(entropy_hex).inspect_err(|e| log::error!("Corrupt stored entropy: {e:?}")).ok()?,
+        ),
     }
+    .inspect_err(|e| log::error!("Failed to build a mnemonic from the seed entropy: {e:?}"))
+    .ok()
 }
 
-/// Apply a saved seed config: retrieve or decode the seed bytes and push them
-/// into the global APP_SEED so key derivation works immediately. Returns whether
-/// the seed was installed; false means the config is present but unusable (the
-/// security API failed or the stored entropy is corrupt).
-fn apply_seed_config(config: &SeedConfig, security_api: &Security) -> bool {
-    match config {
-        SeedConfig::DerivedFromAppSeed => match derived_bip39_seed(security_api) {
-            Some(seed) => {
-                crate::flux::set_app_seed(seed);
-                true
-            }
-            None => false,
-        },
-        SeedConfig::ManuallyEntered { entropy_hex } => match hex::decode(entropy_hex) {
-            Ok(entropy) => match bip39::Mnemonic::from_entropy(&entropy) {
-                Ok(mnemonic) => {
-                    crate::flux::set_app_seed(mnemonic.to_seed("").to_vec());
-                    true
-                }
-                Err(e) => {
-                    log::error!("Failed to reconstruct mnemonic from stored entropy: {e:?}");
-                    false
-                }
-            },
-            Err(e) => {
-                log::error!("Failed to decode stored entropy hex: {e:?}");
-                false
-            }
-        },
-    }
+fn resolve_mnemonic(settings: &FluxSettings, security_api: &Security) -> Option<bip39::Mnemonic> {
+    mnemonic_for(settings.seed_config.as_ref()?, security_api)
+}
+
+/// Install the 64-byte BIP39 seed for `config` under `passphrase` into APP_SEED so key
+/// derivation is ready. Returns whether the seed was installed; false means the config is
+/// present but unusable.
+fn apply_seed(config: &SeedConfig, security_api: &Security, passphrase: &str) -> bool {
+    let Some(mnemonic) = mnemonic_for(config, security_api) else {
+        return false;
+    };
+    crate::flux::set_app_seed(mnemonic.to_seed(passphrase).to_vec());
+    true
+}
+
+/// Uppercase BIP32 master fingerprint for the configured seed under `passphrase`, shown on the
+/// passphrase details screen so a typo is visible before it is applied. Empty when there is no
+/// usable seed.
+fn passphrase_fingerprint(settings: &FluxSettings, security_api: &Security, passphrase: &str) -> String {
+    resolve_mnemonic(settings, security_api)
+        .and_then(|mnemonic| {
+            Xpriv::new_master(Network::Bitcoin, &mnemonic.to_seed(passphrase))
+                .inspect_err(|e| log::error!("Failed to derive the passphrase fingerprint: {e:?}"))
+                .ok()
+        })
+        .map(|xpriv| xpriv.fingerprint(&Secp256k1::signing_only()).to_string().to_uppercase())
+        .unwrap_or_default()
 }
 
 fn display_frame_to_image(frame: crate::flux::display::Frame) -> slint::Image {
@@ -173,8 +177,15 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 let legacy_hid::messages::IncomingApdu { channel_id, data } = event;
                 // App-identification probes are answered here; app commands are
                 // forwarded to the child via the SEPH FIFO.
-                let child_running = !app_state_for_apdu.borrow().running.is_empty();
-                if let Some(reply) = crate::flux::push_incoming_apdu(channel_id, &data, child_running) {
+                // One undeclared child is enough to hold every command back: the SEPH FIFO is
+                // process-wide and RecvSeph hands a command to whichever child polls first, so a
+                // declared one running alongside cannot vouch for the others.
+                let child_ready = {
+                    let state = app_state_for_apdu.borrow();
+                    !state.running.is_empty()
+                        && state.running.keys().copied().all(crate::flux::child_declared)
+                };
+                if let Some(reply) = crate::flux::push_incoming_apdu(channel_id, &data, child_ready) {
                     if let Err(e) = legacy_hid_for_apdu.write_apdu(channel_id, reply) {
                         log::error!("Failed to write app-identification reply: {e:?}");
                     }
@@ -256,10 +267,8 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     // A present-but-unusable config (security API failure or corrupt entropy) counts
     // as not loaded, so the user is kept on setup rather than launching children that
     // cannot derive keys.
-    let seed_loaded = match &settings.seed_config {
-        Some(config) => apply_seed_config(config, &*security_api),
-        None => false,
-    };
+    let seed_loaded =
+        settings.seed_config.as_ref().is_some_and(|config| apply_seed(config, &security_api, ""));
 
     let settings = Rc::new(RefCell::new(settings));
 
@@ -267,6 +276,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     let seed_is_imported = matches!(&settings.borrow().seed_config, Some(SeedConfig::ManuallyEntered { .. }));
     ui.global::<Global>().set_seed_configured(seed_loaded);
     ui.global::<Global>().set_seed_is_imported(seed_is_imported);
+    ui.global::<Global>().set_show_passphrase_warning(!settings.borrow().passphrase_warning_dismissed);
 
     // If the seed loaded, skip the intro page.
     if seed_loaded {
@@ -314,6 +324,9 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 match event {
                     app_manager::AppEvent::AppCrashed { pid, exit_code, .. } => {
                         let removed = app_state.borrow_mut().running.remove(&pid).is_some();
+                        // Unconditional: a child the launcher never tracked still declared, and
+                        // its entry would outlive it into the next child on that PID.
+                        crate::flux::forget_child(pid);
                         if removed {
                             // Clear the framebuffer so the emulator menu replaces
                             // the child's last frame; FluxServer's Disconnected
@@ -410,15 +423,14 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         move || -> bool {
             // Leave seed_config unset if the seed is unavailable, so the intro page keeps
             // offering setup rather than stranding the user on an unusable launcher.
-            let Some(seed) = derived_bip39_seed(&security_api) else {
+            if !apply_seed(&SeedConfig::DerivedFromAppSeed, &security_api, "") {
                 return false;
-            };
+            }
             {
                 let mut s = settings.borrow_mut();
                 s.guard().seed_config = Some(SeedConfig::DerivedFromAppSeed);
             }
             log::info!("AppSeed derived and saved");
-            crate::flux::set_app_seed(seed);
             if let Some(ui) = weak_ui.upgrade() {
                 ui.global::<Global>().set_seed_configured(true);
                 ui.global::<Global>().set_seed_is_imported(false);
@@ -426,21 +438,6 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             true
         }
     });
-
-    // Helper: resolve the current seed config to a bip39::Mnemonic.
-    fn resolve_mnemonic(settings: &FluxSettings, security_api: &Security) -> Option<bip39::Mnemonic> {
-        match &settings.seed_config {
-            Some(SeedConfig::DerivedFromAppSeed) => {
-                let seed = security_api.app_seed().ok()?;
-                bip39::Mnemonic::from_entropy(seed.as_bytes()).ok()
-            }
-            Some(SeedConfig::ManuallyEntered { entropy_hex }) => {
-                let entropy = hex::decode(entropy_hex).ok()?;
-                bip39::Mnemonic::from_entropy(&entropy).ok()
-            }
-            None => None,
-        }
-    }
 
     // Returns the mnemonic words (12 or 24) for the currently configured seed.
     ui.global::<Callbacks>().on_get_seed_words({
@@ -550,6 +547,46 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         }
     });
 
+    // Re-derives APP_SEED for the configured seed under `passphrase`; an empty string restores
+    // the bare seed. The passphrase is never persisted, so closing Legacy Mode drops it.
+    ui.global::<Callbacks>().on_apply_passphrase({
+        let settings = settings.clone();
+        let security_api = security_api.clone();
+        let weak_ui = weak_ui.clone();
+        move |passphrase| -> bool {
+            let applied = settings
+                .borrow()
+                .seed_config
+                .as_ref()
+                .is_some_and(|config| apply_seed(config, &security_api, &passphrase));
+            if !applied {
+                return false;
+            }
+            log::info!("Passphrase {}", if passphrase.is_empty() { "cleared" } else { "applied" });
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.global::<Global>().set_passphrase_active(!passphrase.is_empty());
+            }
+            true
+        }
+    });
+
+    ui.global::<Callbacks>().on_passphrase_fingerprint({
+        let settings = settings.clone();
+        let security_api = security_api.clone();
+        move |passphrase| passphrase_fingerprint(&settings.borrow(), &security_api, &passphrase).into()
+    });
+
+    ui.global::<Callbacks>().on_set_show_passphrase_warning({
+        let settings = settings.clone();
+        let weak_ui = weak_ui.clone();
+        move |show| {
+            settings.borrow_mut().guard().passphrase_warning_dismissed = !show;
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.global::<Global>().set_show_passphrase_warning(show);
+            }
+        }
+    });
+
     // Clears the seed config from persistent storage; the caller navigates only
     // on a reported success.
     ui.global::<Callbacks>().on_remove_seed({
@@ -566,6 +603,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             crate::flux::clear_app_seed();
             if let Some(ui) = weak_ui.upgrade() {
                 ui.global::<Global>().set_seed_configured(false);
+                ui.global::<Global>().set_passphrase_active(false);
             }
             true
         }
@@ -581,6 +619,15 @@ fn app_main(cx: AppContext, ui: AppWindow) {
             log::error!("verify_pin failed: {e}");
             false
         })
+    });
+
+    // Async so the UI thread stays free to handle Hidden while Settings holds the request open.
+    ui.global::<Callbacks>().on_go_to_settings(|| {
+        spawn(async_archive::<gui_permissions::GuiPermissions, _>(NavigateTo {
+            app_id: SETTINGS_APP_ID,
+            args: b"/settings/apps".to_vec(),
+        }))
+        .detach();
     });
 
     let weak_theme_changed = ui.as_weak();

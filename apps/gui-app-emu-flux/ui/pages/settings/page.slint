@@ -11,7 +11,9 @@ import {
     BasePage,
     PageBody,
     MenuActionItem,
+    MenuItemLayout,
     ContentSection,
+    Icon,
 } from "@ui/widgets.slint";
 import { Navigate } from "../../gen/navigate.slint";
 import { Callbacks, Global } from "../../globals.slint";
@@ -49,6 +51,27 @@ export component SettingsPage inherits BasePage {
 
                             HLine { }
 
+                            if !Global.passphrase-active: MenuActionItem {
+                                label: TR2.lookup(TrId.SettingsApplyPassphrase);
+                                clicked => {
+                                    Navigate.passphrase({ });
+                                }
+                            }
+
+                            if Global.passphrase-active: MenuItemLayout {
+                                label: TR2.lookup(TrId.SettingsClearPassphrase);
+                                clicked => {
+                                    Callbacks.apply-passphrase("");
+                                }
+
+                                Icon {
+                                    name: "shield-x";
+                                    color: Palette.content-tertiary;
+                                }
+                            }
+
+                            HLine { }
+
                             MenuActionItem {
                                 last: true;
                                 label: TR2.lookup(TrId.SettingsRemoveSeed);
@@ -62,6 +85,12 @@ export component SettingsPage inherits BasePage {
                     MenuSection {
                         title: TR2.lookup(TrId.SettingsAppSelection);
                         MenuSectionLayout {
+                            if Global.all-apps.length == 0: MenuItemLayout {
+                                label: TR2.lookup(TrId.SettingsAppSelectionNoAppsInstalled);
+                                enabled: false;
+                                label-color: Palette.content-primary;
+                            }
+
                             for entry[index] in Global.all-apps: VerticalLayout {
                                 if (index > 0): HLine { }
                                 MenuBooleanItem {

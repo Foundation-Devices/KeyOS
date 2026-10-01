@@ -39,9 +39,17 @@ export global Callbacks {
     callback regenerate-seed-word-challenge(int) -> SeedWordChallenge;
     /// Clears the seed config from persistent storage and navigates to intro.
     callback remove-seed() -> bool;
+    /// Re-derives the seed under this passphrase; an empty string restores the bare seed.
+    /// Returns whether the seed was re-derived.
+    callback apply-passphrase(string) -> bool;
+    /// Uppercase BIP32 master fingerprint the passphrase would produce, for the details screen.
+    pure callback passphrase-fingerprint(string) -> string;
+    /// Persists the "don't show again" choice on the passphrase warning modal.
+    callback set-show-passphrase-warning(bool);
     /// Shows the lock-screen PIN modal with the given title; returns true once
     /// the PIN is verified, false on wrong PIN exhaustion or cancel.
     callback verify-pin(string) -> bool;
+    callback go-to-settings();
 }
 
 export global Global {
@@ -56,4 +64,8 @@ export global Global {
     /// master key. Gates the remove-seed flow: imported seeds are verified word by word
     /// before deletion; derived seeds are recoverable and deleted without a quiz.
     in property <bool> seed-is-imported: false;
+    /// True while a BIP39 passphrase sits on top of the configured seed. Held in RAM only, so
+    /// it is false again once Legacy Mode is closed.
+    in property <bool> passphrase-active: false;
+    in property <bool> show-passphrase-warning: true;
 }
