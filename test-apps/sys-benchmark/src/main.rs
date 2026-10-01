@@ -35,6 +35,8 @@ pub fn main() -> () {
 
     measure_syscall_speed();
 
+    measure_cache_flush();
+
     measure_context_switches();
 
     measure_message_ipc();
@@ -175,7 +177,7 @@ fn measure_syscall_speed() {
     measure(
         || {
             let mut range = xous::map_memory(None, None, 0x1000, MemoryFlags::W).unwrap();
-            for b in range.as_slice_mut::<u8>().iter_mut().skip(0x1000) {
+            for b in range.as_slice_mut::<u8>().iter_mut().step_by(0x1000) {
                 *b = 1;
             }
             xous::unmap_memory(range).unwrap();
@@ -186,7 +188,7 @@ fn measure_syscall_speed() {
     measure(
         || {
             let mut range = xous::map_memory(None, None, 128 * 0x1000, MemoryFlags::W).unwrap();
-            for b in range.as_slice_mut::<u8>().iter_mut().skip(0x1000) {
+            for b in range.as_slice_mut::<u8>().iter_mut().step_by(0x1000) {
                 *b = 1;
             }
             xous::unmap_memory(range).unwrap();
@@ -225,7 +227,7 @@ fn measure_syscall_speed() {
             let mut range =
                 xous::map_memory(None, None, 0x1000, xous::MemoryFlags::W | xous::MemoryFlags::POPULATE)
                     .unwrap();
-            for b in range.as_slice_mut::<u8>().iter_mut().skip(0x1000) {
+            for b in range.as_slice_mut::<u8>().iter_mut().step_by(0x1000) {
                 *b = 1;
             }
             xous::unmap_memory(range).unwrap();
@@ -242,7 +244,7 @@ fn measure_syscall_speed() {
                 xous::MemoryFlags::W | xous::MemoryFlags::POPULATE,
             )
             .unwrap();
-            for b in range.as_slice_mut::<u8>().iter_mut().skip(0x1000) {
+            for b in range.as_slice_mut::<u8>().iter_mut().step_by(0x1000) {
                 *b = 1;
             }
             xous::unmap_memory(range).unwrap();
@@ -250,6 +252,27 @@ fn measure_syscall_speed() {
         200,
         "map(128 pages) + populate + W + unmap ",
     );
+}
+
+fn measure_cache_flush() {
+    log::info!("== Cache flush ==");
+
+    let buffer = allocate(256 * 1024, MemoryFlags::W);
+    let cases = [(0, 32), (0, 4096), (0, 64 * 1024), (0, 256 * 1024), (16, 4096)];
+    for op in [
+        xous::CacheOperation::Clean,
+        xous::CacheOperation::Invalidate,
+        xous::CacheOperation::CleanAndInvalidate,
+    ] {
+        for (offset, len) in cases {
+            let range = buffer.subrange(offset, len).unwrap();
+            let reps = (128 * 1024 * 1024 / len).min(150_000);
+            let name = format!("flush_cache({op:?}, {len} bytes at +{offset})");
+            measure(|| xous::flush_cache(range, op).unwrap(), reps, &format!("{name:<52}"));
+        }
+    }
+
+    unmap_memory(buffer).unwrap();
 }
 
 #[derive(server::Server)]

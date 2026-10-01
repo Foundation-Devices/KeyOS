@@ -278,6 +278,7 @@ impl CryptoServer {
                 self.dma_aes_rx.execute(aligned_part).map_err(convert_dma_error)?;
             }
             self.dma_aes_rx.wait().map_err(convert_dma_error)?;
+            flush_cache(aligned_part, CacheOperation::Invalidate).ok();
         }
 
         if aligned_len != msg.len {

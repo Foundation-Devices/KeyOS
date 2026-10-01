@@ -281,8 +281,7 @@ impl ScalarHandler<FrameCaptured> for CameraServer {
         self.frame_in_dma = (self.frame_in_dma + 1) % 3;
         match self.hw_state {
             HwState::Enabled => {
-                // ISC only writes the centre; invalidating the margins would discard the
-                // zeroes filled into them before they reach DRAM.
+                // ISC only writes the centre.
                 xous::syscall::flush_cache(
                     Frame::new(self.bufs[newest_frame]).content(),
                     xous::CacheOperation::Invalidate,
@@ -294,6 +293,8 @@ impl ScalarHandler<FrameCaptured> for CameraServer {
                 log::debug!("Turning OFF (discarding last frame)");
                 for buf in &mut self.bufs {
                     buf.as_slice_mut::<u32>().fill(0);
+                    xous::syscall::flush_cache(*buf, xous::CacheOperation::CleanAndInvalidate)
+                        .expect("clean and invalidate cache");
                 }
                 self.disable_hw();
                 self.hw_state = HwState::Disabled;

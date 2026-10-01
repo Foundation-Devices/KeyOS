@@ -89,7 +89,6 @@ impl DmaBuf {
         }
     }
 
-    #[allow(dead_code)]
     pub fn range(&self) -> MemoryRange {
         match self {
             DmaBuf::Owned(b) => **b,
@@ -168,8 +167,10 @@ pub struct Pipeline<H: HardwareImpl> {
     /// Ops that arrived while the pipeline was at the back-pressure threshold. Drained in FIFO
     /// order once there is room.
     inbox: VecDeque<Operation>,
-    /// Reusable plaintext bounce buffers. Replenished from completed ops; allocates on miss.
-    pub pool: BufferPool,
+    /// Bounce buffers for plain reads, which the CPU copies out of.
+    pub cached_pool: BufferPool,
+    /// Bounce buffers the CPU only writes (plain writes) or never touches (ciphertext).
+    pub uncached_pool: BufferPool,
     next_seq: u64,
 }
 
@@ -181,7 +182,8 @@ impl<H: HardwareImpl> Pipeline<H> {
             sdmmc_running: None,
             crypt_running: None,
             inbox: VecDeque::new(),
-            pool: BufferPool::new(),
+            cached_pool: BufferPool::new(true),
+            uncached_pool: BufferPool::new(false),
             next_seq: 0,
         }
     }
@@ -385,13 +387,20 @@ impl<H: HardwareImpl> Pipeline<H> {
 
         match op {
             OperationType::PlainReadSdmmc { dma_buf, mut deferred } => {
+                let len = range.count * BLOCK_SIZE;
+                // Prefetch can refill lines while the DMA runs, and pool buffers still hold lines from their
+                // last copy.
+                xous::flush_cache(
+                    dma_buf.range().subrange(0, len).unwrap(),
+                    xous::CacheOperation::Invalidate,
+                )
+                .ok();
                 if let DmaBuf::Owned(buf) = dma_buf {
                     let mut dest = deferred.body().buf;
-                    let len_words = range.count * BLOCK_SIZE / core::mem::size_of::<u32>();
+                    let len_words = len / core::mem::size_of::<u32>();
                     dest.as_slice_mut::<u32>()[..len_words]
                         .copy_from_slice(&buf.as_slice::<u32>()[..len_words]);
-                    xous::flush_cache(*buf, xous::CacheOperation::Invalidate).ok();
-                    self.pool.release(buf);
+                    self.cached_pool.release(buf);
                 }
                 deferred.set_response(Ok(range.count));
             }
@@ -400,10 +409,10 @@ impl<H: HardwareImpl> Pipeline<H> {
                 self.ops.insert(seq, Operation { seq, range, op: follow });
             }
             OperationType::PlainWriteSdmmc { owned_buf } => {
-                self.pool.release(owned_buf);
+                self.uncached_pool.release(owned_buf);
             }
             OperationType::EncWriteSdmmc { ciphertext } => {
-                self.pool.release(ciphertext);
+                self.uncached_pool.release(ciphertext);
             }
             other => {
                 log::error!("SdmmcDone for non-SDMMC op");
@@ -441,8 +450,10 @@ impl<H: HardwareImpl> Pipeline<H> {
 
         match op {
             OperationType::EncReadCrypt { ciphertext, mut deferred, .. } => {
+                let plaintext = deferred.body().buf.subrange(0, range.count * BLOCK_SIZE).unwrap();
+                xous::flush_cache(plaintext, xous::CacheOperation::Invalidate).ok();
                 deferred.set_response(Ok(range.count));
-                self.pool.release(ciphertext);
+                self.uncached_pool.release(ciphertext);
             }
             OperationType::EncWriteCrypt { ciphertext, mut deferred, .. } => {
                 deferred.set_response(Ok(range.count));
@@ -490,29 +501,27 @@ fn crypt_sub_op(range_start: u32, range_count: usize, offset: usize) -> CryptSub
 /// `acquire` pops a free buffer or allocates a new one on miss; `release` returns the buffer
 /// for reuse rather than unmapping it.
 ///
-/// Cache invariant: pool buffers are always invalidated (no live cache lines) while in the
-/// pool. Any code path that touches a pool buffer with the CPU (e.g. memcpy) must restore the
-/// invariant before `release` — `Invalidate` after a CPU read, `CleanAndInvalidate` after a
-/// CPU write. This lets DMA readers/writers and consumers downstream skip per-op flushes.
+/// Cached buffers hold no dirty lines, so a DMA can write them as they are, but they must be
+/// invalidated between the DMA and a CPU read. Callers must not write them with the CPU. Uncached
+/// buffers need no maintenance, and the CPU writes them faster than cached ones, but reads them several
+/// times slower, so callers must not read them with the CPU.
 pub struct BufferPool {
     free: Vec<DropDeallocate>,
+    cached: bool,
 }
 
 impl BufferPool {
-    pub fn new() -> Self { Self { free: Vec::new() } }
+    pub fn new(cached: bool) -> Self { Self { free: Vec::new(), cached } }
 
     pub fn acquire(&mut self) -> Result<DropDeallocate, EmmcError> {
         if let Some(buf) = self.free.pop() {
             return Ok(buf);
         }
-        let range = xous::map_memory(
-            None,
-            None,
-            POOL_BUFFER_BYTES,
-            MemoryFlags::W | MemoryFlags::POPULATE | MemoryFlags::PLAINTEXT,
-        )
-        .map_err(EmmcError::from)?;
-        xous::flush_cache(range, xous::CacheOperation::Invalidate).ok();
+        let mut flags = MemoryFlags::W | MemoryFlags::POPULATE | MemoryFlags::PLAINTEXT;
+        if !self.cached {
+            flags |= MemoryFlags::NO_CACHE;
+        }
+        let range = xous::map_memory(None, None, POOL_BUFFER_BYTES, flags).map_err(EmmcError::from)?;
         Ok(DropDeallocate::new(range))
     }
 
@@ -642,7 +651,7 @@ mod tests {
 
     fn admit_plain_read(pipe: &mut Pipeline<MockHardware>, start: u32, count: usize) -> Returned {
         let buf = alloc_caller_buf(count);
-        let owned = pipe.pool.acquire().unwrap();
+        let owned = pipe.cached_pool.acquire().unwrap();
         let (deferred, returned) =
             MockLendMut::new(ReadBlocks { buf, block_index: start, block_count: count });
         pipe.admit(
@@ -655,13 +664,13 @@ mod tests {
     fn admit_plain_write(pipe: &mut Pipeline<MockHardware>, start: u32, count: usize) {
         // Plain writes set their deferred response in the handler before admit, so the pipeline
         // never sees the message — only the owned buffer.
-        let owned = pipe.pool.acquire().unwrap();
+        let owned = pipe.uncached_pool.acquire().unwrap();
         pipe.admit(OperationType::PlainWriteSdmmc { owned_buf: owned }, BlockRange { start, count });
     }
 
     fn admit_enc_read(pipe: &mut Pipeline<MockHardware>, start: u32, count: usize) -> Returned {
         let dest_buf = alloc_caller_buf(count);
-        let ciphertext = pipe.pool.acquire().unwrap();
+        let ciphertext = pipe.uncached_pool.acquire().unwrap();
         let (deferred, returned) =
             MockLendMut::new(ReadEncryptedBlocks { buf: dest_buf, block_index: start, block_count: count });
         pipe.admit(OperationType::EncReadSdmmc { ciphertext, deferred }, BlockRange { start, count });
@@ -670,7 +679,7 @@ mod tests {
 
     fn admit_enc_write(pipe: &mut Pipeline<MockHardware>, start: u32, count: usize) -> Returned {
         let buf = alloc_caller_buf(count);
-        let ciphertext = pipe.pool.acquire().unwrap();
+        let ciphertext = pipe.uncached_pool.acquire().unwrap();
         let (deferred, returned) =
             MockLendMut::new(WriteEncryptedBlocks { buf, block_index: start, block_count: count });
         pipe.admit(

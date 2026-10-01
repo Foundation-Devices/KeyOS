@@ -60,7 +60,7 @@ impl DeferredLendMutHandler<ReadBlocks> for EmmcServer {
             }
         };
         let dma_buf = if xous::keyos::is_address_encrypted(caller_phys) {
-            match self.pipeline.pool.acquire() {
+            match self.pipeline.cached_pool.acquire() {
                 Ok(b) => DmaBuf::Owned(b),
                 Err(e) => {
                     msg.set_response(Err(e));
@@ -69,7 +69,7 @@ impl DeferredLendMutHandler<ReadBlocks> for EmmcServer {
             }
         } else {
             let borrowed = caller_buf.subrange(0, block_count * BLOCK_SIZE).unwrap();
-            xous::flush_cache(borrowed, xous::CacheOperation::Invalidate).ok();
+            xous::flush_cache(borrowed, xous::CacheOperation::CleanAndInvalidate).ok();
             DmaBuf::Borrowed(borrowed)
         };
 
@@ -101,7 +101,7 @@ impl DeferredLendMutHandler<WriteBlocks> for EmmcServer {
         }
 
         let src = msg.body().buf.subrange(0, block_count * BLOCK_SIZE).unwrap();
-        let mut owned_buf = match self.pipeline.pool.acquire() {
+        let mut owned_buf = match self.pipeline.uncached_pool.acquire() {
             Ok(b) => b,
             Err(e) => {
                 msg.set_response(Err(e));
@@ -111,7 +111,6 @@ impl DeferredLendMutHandler<WriteBlocks> for EmmcServer {
         owned_buf.as_slice_mut::<u8>()[..block_count * BLOCK_SIZE]
             .copy_from_slice(&src.as_slice::<u8>()[..block_count * BLOCK_SIZE]);
 
-        xous::flush_cache(*owned_buf, xous::CacheOperation::CleanAndInvalidate).ok();
         msg.set_response(Ok(block_count));
         self.pipeline.admit(
             OperationType::PlainWriteSdmmc { owned_buf },
@@ -145,7 +144,7 @@ impl DeferredLendMutHandler<ReadEncryptedBlocks> for EmmcServer {
         }
 
         // ciphertext: plaintext-memory bounce buffer - SDMMC DMA reads into this.
-        let ciphertext = match self.pipeline.pool.acquire() {
+        let ciphertext = match self.pipeline.uncached_pool.acquire() {
             Ok(b) => b,
             Err(e) => {
                 msg.set_response(Err(e));
@@ -155,7 +154,7 @@ impl DeferredLendMutHandler<ReadEncryptedBlocks> for EmmcServer {
 
         xous::flush_cache(
             msg.body().buf.subrange(0, block_count * BLOCK_SIZE).unwrap(),
-            xous::CacheOperation::Invalidate,
+            xous::CacheOperation::CleanAndInvalidate,
         )
         .ok();
         self.pipeline.admit(
@@ -190,7 +189,7 @@ impl DeferredLendMutHandler<WriteEncryptedBlocks> for EmmcServer {
         }
 
         // ciphertext: plaintext-memory output buffer - crypto writes here, then SDMMC DMA reads it.
-        let ciphertext = match self.pipeline.pool.acquire() {
+        let ciphertext = match self.pipeline.uncached_pool.acquire() {
             Ok(b) => b,
             Err(e) => {
                 msg.set_response(Err(e));

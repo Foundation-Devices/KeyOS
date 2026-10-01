@@ -133,6 +133,51 @@ pub fn flush_cache_region_l2(phys_start: u32, phys_end: u32, op: CacheOperation)
     }
 }
 
+/// Cleans and/or invalidates `len` bytes at `virt_start` from both cache levels. `virt_start` must map
+/// to `phys_start`, and the region must not cross a page boundary. Neither end has to be aligned;
+/// Invalidate writes back the partial lines at either end instead of dropping them, and requires the
+/// rest to hold no dirty lines.
+/// The L2 part only reaches DRAM after [`sync_cache_l2`].
+pub fn flush_cache_region(virt_start: u32, phys_start: u32, len: u32, op: CacheOperation) {
+    if op != CacheOperation::Invalidate {
+        // Inner first, so L1's dirty lines are already in L2 when it writes back.
+        flush_cache_region_l1(virt_start, virt_start + len, op);
+        flush_cache_region_l2(phys_start, phys_start + len, op);
+        return;
+    }
+
+    let line = l1cache::L1_CACHE_BYTES;
+    let head = (virt_start.next_multiple_of(line) - virt_start).min(len);
+    let tail = (len - head) % line;
+    // Dropping a partial line would lose dirty bytes outside the region, so write it back.
+    let parts = [
+        (0, head, CacheOperation::CleanAndInvalidate),
+        (head, len - tail, CacheOperation::Invalidate),
+        (len - tail, len, CacheOperation::CleanAndInvalidate),
+    ];
+    // Outer first, or L1 could refill from the stale L2 copy in between. The catch is that a dirty L1 line
+    // evicted in between lands in L2 after L2 was already invalidated, to be written back over the
+    // peripheral's data later. So as in Linux and FreeBSD, this is only for after a peripheral write, and
+    // CleanAndInvalidate (inner first) is for before one.
+    for (start, end, op) in parts {
+        if start < end {
+            flush_cache_region_l2(phys_start + start, phys_start + end, op);
+        }
+    }
+    for (start, end, op) in parts {
+        if start < end {
+            flush_cache_region_l1(virt_start + start, virt_start + end, op);
+        }
+    }
+}
+
+/// Drains the L2 cache's buffers, so maintenance by address has reached DRAM.
+pub fn sync_cache_l2() {
+    if let Some(l2cc) = unsafe { (&mut *core::ptr::addr_of_mut!(L2CC_KERNEL)).as_mut() } {
+        l2cc.cache_sync()
+    }
+}
+
 pub fn disable_l2_cache() {
     if let Some(l2cc) = unsafe { (&mut *core::ptr::addr_of_mut!(L2CC_KERNEL)).as_mut() } {
         l2cc.set_enable(false);

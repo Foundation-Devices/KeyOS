@@ -320,7 +320,10 @@ impl UsbDeviceServer {
         self.connection_waiters.truncate(0);
     }
 
-    fn start_dma(&mut self, endpoint_number: u8, buf: *const u8, length: u16) {
+    /// Start a DMA between `endpoint_number` and `buf`, which must be physically contiguous and at most
+    /// 64KB. An OUT transfer's data needs invalidating once it completes, before it is read.
+    fn start_dma(&mut self, endpoint_number: u8, buf: xous::MemoryRange) {
+        xous::flush_cache(buf, xous::CacheOperation::CleanAndInvalidate).ok();
         // END_TR_EN is for OUT (read) transfers only (SAMA5D2 datasheet §41.6.10).
         // It lets the device end the DMA on a short packet. For IN (write) it has no effect.
         let is_out = self.endpoints[&endpoint_number].properties.ep_direction == EndpointDirection::Out;
@@ -331,9 +334,9 @@ impl UsbDeviceServer {
         control.set_end_of_transfer_interrupt(is_out);
         control.set_end_of_buffer_interrupt(true);
         control.set_burst_lock(true);
-        control.set_length(length);
+        control.set_length(u16::try_from(buf.len()).expect("UDPHS DMA over 64KB"));
         let dma = self.hw.dma(endpoint_number as usize);
-        dma.address.set(xous::virt_to_phys(buf as usize).unwrap() as u32);
+        dma.address.set(xous::virt_to_phys(buf.as_ptr() as usize).unwrap() as u32);
         dma.control.set(control);
     }
 
@@ -373,8 +376,8 @@ impl UsbDeviceServer {
         let remaining = wr.total - wr.offset;
         let max_chunk = Self::max_dma_chunk(ep.properties.max_packet_len);
         let chunk_len = remaining.min(max_chunk);
-        let buf_ptr = unsafe { wr.msg.body().buf.as_ptr().add(wr.offset as usize) };
-        self.start_dma(endpoint_number, buf_ptr, chunk_len as u16);
+        let chunk = wr.msg.body().buf.subrange(wr.offset as usize, chunk_len as usize).unwrap();
+        self.start_dma(endpoint_number, chunk);
         self.endpoints.get_mut(&endpoint_number).unwrap().ongoing_write.as_mut().unwrap().offset += chunk_len;
     }
 
@@ -754,8 +757,11 @@ impl DeferredLendMutHandler<ReadEndpoint> for UsbDeviceServer {
         log::trace!("Reading {} bytes on EP{}", msg.body().length, msg.body().endpoint);
         let use_dma = endpoint.use_dma;
         if use_dma {
-            xous::flush_cache(msg.body().buf, xous::CacheOperation::Invalidate).ok();
-            self.start_dma(endpoint_number, msg.body().buf.as_ptr(), msg.body().length);
+            let Some(target) = msg.body().buf.subrange(0, msg.body().length as usize) else {
+                msg.set_response(Err(UsbError::InvalidParameter));
+                return;
+            };
+            self.start_dma(endpoint_number, target);
         } else {
             // For FIFO mode, check if data is already buffered
             let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
@@ -805,6 +811,10 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
             msg.set_response(Err(UsbError::WrongDirection));
             return;
         }
+        if msg.body().length > msg.body().buf.len() {
+            msg.set_response(Err(UsbError::InvalidParameter));
+            return;
+        }
         let total = msg.body().length as u32;
         let zlp = msg.body().zlp;
         log::trace!("Writing {total} bytes on EP{endpoint_number}");
@@ -816,7 +826,6 @@ impl DeferredLendMutHandler<WriteEndpoint> for UsbDeviceServer {
             ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp: false, pending_zlp: true });
             self.send_fifo_packet(endpoint_number, &[]);
         } else if use_dma {
-            xous::flush_cache(msg.body().buf, xous::CacheOperation::Clean).ok();
             let ep = self.endpoints.get_mut(&endpoint_number).unwrap();
             ep.ongoing_write = Some(OngoingWrite { msg, offset: 0, total, zlp, pending_zlp: false });
             // Start first (or only) DMA chunk.
@@ -1172,7 +1181,11 @@ impl ScalarHandler<DmaInterrupt> for UsbDeviceServer {
         };
         // DMA read completion.
         if let Some(mut read) = ep.ongoing_read.take() {
-            read.set_response(Ok((read.body().length - msg.status.length()) as usize))
+            let received = (read.body().length - msg.status.length()) as usize;
+            if let Some(data) = read.body().buf.subrange(0, received) {
+                xous::flush_cache(data, xous::CacheOperation::Invalidate).ok();
+            }
+            read.set_response(Ok(received))
         }
         // DMA write completion — may need to continue with next chunk or send ZLP.
         let Some(ref wr) = ep.ongoing_write else {

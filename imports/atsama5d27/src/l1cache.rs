@@ -4,7 +4,7 @@ use core::arch::asm;
 
 const L1_CACHE_WAYS: u32 = 4;
 const L1_CACHE_SETS: u32 = 256;
-const L1_CACHE_BYTES: u32 = 32;
+pub const L1_CACHE_BYTES: u32 = 32;
 
 /// SCTLR: I - I-cache enable/disable
 /// * 0 = I-cache disabled

@@ -637,16 +637,27 @@ impl From<[u8; APP_ID_SIZE]> for AppId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CacheOperation {
     /// Flush cache entries into main memory, i.e. make sure writes are
-    /// visible by peripherals.
+    /// visible by peripherals. Keeps the lines, for when the CPU will use the
+    /// range again soon.
     Clean = 0,
     /// Remove cache entries, i.e. make sure writes by peripherals are
-    /// visible by the CPU. If the cache was dirty (there was data not yet
-    /// written to RAM), the writes will be lost
+    /// visible by the CPU. Dirty data in the whole cache lines of the range is
+    /// lost. The partial lines at either end are written back instead, so
+    /// writes outside the range survive.
+    ///
+    /// Use it once a peripheral has written the range, before the CPU reads
+    /// it, as prefetch can refill the lines while the peripheral works. Not
+    /// before the peripheral starts: a dirty line in the range can then be
+    /// evicted over its data while this runs, so use `CleanAndInvalidate`
+    /// there. The buffer must not share a cache line with anything the CPU
+    /// writes in between.
     Invalidate = 1,
     /// Both Clean and Invalidate, i.e. write to main memory, but also make
-    /// sure they are re-read from there the next time they are read.
-    /// Can be used as a micro-optimization to free up cache lines that will
-    /// surely not be used.
+    /// sure they are re-read from there the next time they are read. Frees up
+    /// the lines, for when the CPU won't use the range soon, which includes
+    /// before a peripheral writes it: the lines have to be invalidated after
+    /// that anyway. Not after one: it can leave lines prefetch refilled from a
+    /// stale copy while it ran, which `Invalidate` does not.
     CleanAndInvalidate = 2,
 }
 

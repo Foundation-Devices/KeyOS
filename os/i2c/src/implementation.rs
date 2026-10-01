@@ -11,13 +11,16 @@ use server::{
     ArchiveRequest, BlockingArchiveAsyncHandler, CheckedPermissions, MessageAllowed, ScalarHandler,
 };
 use xous::arch::irq::IrqNumber;
-use xous::MemoryRange;
+use xous::{DropDeallocate, MemoryFlags};
 use {
     atsama5d27::twi::Twi,
     server::{BlockingScalarHandler, Server, ServerContext},
     std::collections::HashMap,
     utralib::HW_TWIHS0_BASE,
-    xous::{keyos::MASTER_CLOCK_SPEED, PID},
+    xous::{
+        keyos::{MASTER_CLOCK_SPEED, PAGE_SIZE},
+        PID,
+    },
 };
 
 gpio::use_api!();
@@ -31,7 +34,7 @@ const TWI_BUS_SPEED_HZ: usize = 100_000;
 pub struct I2cServer {
     claimed_peripherals: HashMap<Peripheral, PID>,
     twi: Twi,
-    ongoing_transfer: Option<(Box<[u8]>, ArchiveRequest<SingleTransfer>)>,
+    ongoing_transfer: Option<(DropDeallocate, ArchiveRequest<SingleTransfer>)>,
     queue: VecDeque<ArchiveRequest<SingleTransfer>>,
     dma_rx: DmaTransfer,
 }
@@ -112,6 +115,18 @@ impl I2cServer {
                 // of this.
                 std::thread::sleep(Duration::from_millis(1));
             } else {
+                // Fresh pages rather than the heap, whose data would share cache lines with the transfer.
+                // They also hold no dirty lines, so the DMA needs no flush before it. Mapped up front, as
+                // the bus is held from the write until the DMA is armed.
+                let buffer = DropDeallocate::new(
+                    xous::map_memory(
+                        None,
+                        None,
+                        request.message.read_len.next_multiple_of(PAGE_SIZE),
+                        MemoryFlags::W | MemoryFlags::POPULATE,
+                    )
+                    .expect("map I2C DMA buffer"),
+                );
                 self.twi.setup_write_read(
                     address,
                     request.message.write_data.len(),
@@ -121,10 +136,7 @@ impl I2cServer {
                     request.response.respond(Err(convert_i2c_error(e))).ok();
                     continue;
                 };
-                let buffer: Box<[u8]> = std::iter::repeat(0).take(request.message.read_len).collect();
-                let buffer_range =
-                    unsafe { MemoryRange::new(buffer.as_ptr() as usize, buffer.len()).unwrap() };
-                xous::flush_cache(buffer_range, xous::CacheOperation::Clean).ok();
+                let buffer_range = buffer.subrange(0, request.message.read_len).unwrap();
                 unsafe {
                     self.dma_rx.execute(buffer_range).unwrap();
                 };
@@ -212,9 +224,9 @@ impl ScalarHandler<TransferCompleteMsg> for I2cServer {
             if rx_bytes != transfer.message.read_len {
                 log::warn!("Read less than requested: {rx_bytes}<{}", transfer.message.read_len);
             }
-            let buffer_range = unsafe { MemoryRange::new(buffer.as_ptr() as usize, buffer.len()).unwrap() };
+            let buffer_range = buffer.subrange(0, transfer.message.read_len).unwrap();
             xous::flush_cache(buffer_range, xous::CacheOperation::Invalidate).ok();
-            transfer.response.respond(Ok(buffer.into())).ok();
+            transfer.response.respond(Ok(buffer_range.as_slice::<u8>().to_vec())).ok();
         }
         self.run_queue();
     }

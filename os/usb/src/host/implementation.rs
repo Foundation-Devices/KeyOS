@@ -74,7 +74,12 @@ impl ehci::TransferContext for EhciMessageContext {
 impl EhciMessageContext {
     fn respond(self, r: Result<usize, UsbError>) {
         match self {
-            EhciMessageContext::BulkIn(mut s) => s.set_response(r),
+            EhciMessageContext::BulkIn(mut s) => {
+                if let Some(data) = r.ok().and_then(|len| s.body().buffer.subrange(0, len)) {
+                    xous::flush_cache(data, xous::CacheOperation::Invalidate).ok();
+                }
+                s.set_response(r)
+            }
             EhciMessageContext::BulkOut(mut s) => s.set_response(r),
             EhciMessageContext::Control(c) => {
                 let ControlContext { response, data, .. } = c;
@@ -263,30 +268,46 @@ impl UsbHostServer {
     }
 }
 
-impl DeferredLendMutHandler<BulkIn> for UsbHostServer {
-    fn handle(&mut self, mut msg: DeferredLendMut<BulkIn>, _context: &mut server::ServerContext<Self>) {
-        let Some(device) = self.devices.iter().find(|d| d.handle == msg.body().handle) else {
-            msg.set_response(Err(UsbError::NotFound));
-            return;
+impl UsbHostServer {
+    /// Check a bulk transfer's device and buffer, and ready the buffer for the controller. Returns the
+    /// device address and endpoint to schedule it on.
+    fn prepare_bulk(&mut self, context: &EhciMessageContext) -> Result<(u8, u8), UsbError> {
+        let (pid, handle, endpoint, buffer, length) = match context {
+            EhciMessageContext::BulkIn(m) => {
+                let b = m.body();
+                (m.pid(), b.handle, b.endpoint, b.buffer, b.length)
+            }
+            EhciMessageContext::BulkOut(m) => {
+                let b = m.body();
+                (m.pid(), b.handle, b.endpoint, b.buffer, b.length)
+            }
+            EhciMessageContext::Control(_) => return Err(UsbError::InvalidParameter),
         };
-        if !device.claimed.map(|pid| pid == msg.pid()).unwrap_or(false) {
-            msg.set_response(Err(UsbError::NotClaimed));
-            return;
+        let device = self.devices.iter().find(|d| d.handle == handle).ok_or(UsbError::NotFound)?;
+        if device.claimed != Some(pid) {
+            return Err(UsbError::NotClaimed);
         }
-        if msg.body().length > 0 {
-            let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
-                msg.set_response(Err(UsbError::InvalidParameter));
-                return;
-            };
-            xous::flush_cache(buffer, xous::CacheOperation::Invalidate).ok();
+        if length > buffer.len() {
+            return Err(UsbError::InvalidParameter);
         }
-
+        if let Some(data) = buffer.subrange(0, length) {
+            xous::flush_cache(data, xous::CacheOperation::CleanAndInvalidate).ok();
+        }
         self.statistics.transfers += 1;
+        Ok((device.address, endpoint))
+    }
+}
 
-        if let Err((ctx, err)) =
-            self.ehci.schedule_bulk_in(device.address, msg.body().endpoint, EhciMessageContext::BulkIn(msg))
-        {
-            ctx.respond(Err(err.into()));
+impl DeferredLendMutHandler<BulkIn> for UsbHostServer {
+    fn handle(&mut self, msg: DeferredLendMut<BulkIn>, _context: &mut server::ServerContext<Self>) {
+        let context = EhciMessageContext::BulkIn(msg);
+        match self.prepare_bulk(&context) {
+            Ok((address, endpoint)) => {
+                if let Err((context, err)) = self.ehci.schedule_bulk_in(address, endpoint, context) {
+                    context.respond(Err(err.into()));
+                }
+            }
+            Err(e) => context.respond(Err(e)),
         }
     }
 
@@ -294,29 +315,15 @@ impl DeferredLendMutHandler<BulkIn> for UsbHostServer {
 }
 
 impl DeferredLendMutHandler<BulkOut> for UsbHostServer {
-    fn handle(&mut self, mut msg: DeferredLendMut<BulkOut>, _context: &mut server::ServerContext<Self>) {
-        let Some(device) = self.devices.iter().find(|d| d.handle == msg.body().handle) else {
-            msg.set_response(Err(UsbError::NotFound));
-            return;
-        };
-        if !device.claimed.map(|pid| pid == msg.pid()).unwrap_or(false) {
-            msg.set_response(Err(UsbError::NotClaimed));
-            return;
-        }
-        if msg.body().length > 0 {
-            let Some(buffer) = msg.body().buffer.subrange(0, msg.body().length) else {
-                msg.set_response(Err(UsbError::InvalidParameter));
-                return;
-            };
-            xous::flush_cache(buffer, xous::CacheOperation::Clean).ok();
-        }
-
-        self.statistics.transfers += 1;
-
-        if let Err((ctx, err)) =
-            self.ehci.schedule_bulk_out(device.address, msg.body().endpoint, EhciMessageContext::BulkOut(msg))
-        {
-            ctx.respond(Err(err.into()));
+    fn handle(&mut self, msg: DeferredLendMut<BulkOut>, _context: &mut server::ServerContext<Self>) {
+        let context = EhciMessageContext::BulkOut(msg);
+        match self.prepare_bulk(&context) {
+            Ok((address, endpoint)) => {
+                if let Err((context, err)) = self.ehci.schedule_bulk_out(address, endpoint, context) {
+                    context.respond(Err(err.into()));
+                }
+            }
+            Err(e) => context.respond(Err(e)),
         }
     }
 

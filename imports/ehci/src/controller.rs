@@ -306,8 +306,9 @@ impl<CT: TransferContext> Controller<CT> {
     /// The address has to be a connected device, and the transfer must point to
     /// an endpoint that is already opened. (See [`Controller::open_endpoint`])
     ///
-    /// The buffer in the context should either be uncached, or invalidated before
-    /// calling this function.
+    /// The buffer in the context should either be uncached, or be cleaned and
+    /// invalidated before calling this function, and invalidated after the
+    /// transfer completes, before it is read.
     pub fn schedule_bulk_in(
         &mut self,
         address: u8,

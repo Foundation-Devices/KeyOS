@@ -490,42 +490,35 @@ impl MemoryMapping {
     }
 
     /// Flush L1 and L2 caches.
-    /// Start and size don't need to be aligned to anything.
+    /// Start and size don't need to be aligned to anything. Invalidate writes back the partial lines at
+    /// either end instead of dropping them, so it never loses writes outside `mem`.
     pub fn flush_cache(&self, mem: MemoryRange, op: CacheOperation) -> Result<(), Error> {
         if self.try_whole_cache_flush(mem.len(), op) {
             return Ok(());
         }
 
-        // Align the start address at the page boundary
-        let range_start = mem.as_ptr() as usize;
-        let aligned_range_start = range_start & !(PAGE_SIZE - 1);
-        let mut range_start_offset = range_start - aligned_range_start;
-
-        let range_end = mem.as_ptr() as usize + mem.len();
-
-        for page_start_virt in (aligned_range_start..range_end).step_by(PAGE_SIZE) {
-            // End doesn't need to be aligned
-            let page_end_virt = range_end.min(page_start_virt + PAGE_SIZE);
-            let page_start_phys = self.virt_to_phys(page_start_virt as *const usize)?;
-            let page_end_phys = page_start_phys + page_end_virt - page_start_virt;
-            crate::platform::atsama5d2::cache::flush_cache_region_l1(
-                (page_start_virt + range_start_offset) as u32,
-                page_end_virt as u32,
+        let end = mem.as_ptr() as usize + mem.len();
+        let mut region_start = mem.as_ptr() as usize;
+        while region_start < end {
+            let page_start = region_start & !(PAGE_SIZE - 1);
+            let region_end = end.min(page_start + PAGE_SIZE);
+            let phys = self.virt_to_phys(page_start as *const usize)? + (region_start - page_start);
+            crate::platform::atsama5d2::cache::flush_cache_region(
+                region_start as u32,
+                phys as u32,
+                (region_end - region_start) as u32,
                 op,
             );
-            crate::platform::atsama5d2::cache::flush_cache_region_l2(
-                (page_start_phys + range_start_offset) as u32,
-                page_end_phys as u32,
-                op,
-            );
-            range_start_offset = 0;
+            region_start = region_end;
         }
-
+        crate::platform::atsama5d2::cache::sync_cache_l2();
         Ok(())
     }
 
     /// Invalidate the cache for a single page of memory. Both virt and phys should be aligned.
     pub fn invalidate_page(&self, virt: *mut usize, phys: usize) {
+        // L1 first, unlike flush_cache_region's Invalidate, as the page can still be dirty: dropping L1's
+        // lines first leaves none to be evicted into L2 after its pass.
         crate::platform::atsama5d2::cache::flush_cache_region_l1(
             virt as u32,
             virt as u32 + PAGE_SIZE as u32,
@@ -536,6 +529,7 @@ impl MemoryMapping {
             phys as u32 + PAGE_SIZE as u32,
             CacheOperation::Invalidate,
         );
+        crate::platform::atsama5d2::cache::sync_cache_l2();
     }
 
     /// Start of the first run of `needed` free (unmapped) pages in `[from, end)`,
