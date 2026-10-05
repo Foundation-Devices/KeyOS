@@ -11,7 +11,10 @@ minKeyosVersion = "1.4.0"
 en = "Legacy"
 
 [servers."os/gui-app-emu-flux"]
-AppDisconnected = { id = 4, type = "scalar" }
+AppDisconnected = { id = 64, type = "scalar" }
+ClientDisconnected = { id = 67, type = "scalar" }
+LaunchChild = { id = 65, type = "blockingScalar" }
+Touch = { id = 66, type = "scalar" }
 
 [permissions]
 template = ["gui-app", "navigable", "fs-generic"]

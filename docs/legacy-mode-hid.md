@@ -159,49 +159,59 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    subgraph "gui-app-emu-flux process"
+    subgraph "legacy-hid process"
         subgraph "Thread: out_thread"
             EPOUT["HID EP OUT<br/>read_buf(64 B)"]
             REASM["Reassembler<br/>::feed()"]
             EPOUT --> REASM
         end
 
-        subgraph "SEPH bridge"
-            FIFO["SEPH_FIFO<br/>RwLock&lt;VecDeque&gt;"]
-            CID["LAST_CHANNEL_ID<br/>AtomicU32"]
-        end
-
-        subgraph "FluxServer main loop"
-            RECV["RecvSeph handler<br/>drains SEPH_FIFO"]
-            SEND["SendSeph::Rapdu<br/>handler"]
+        subgraph "LegacyHidServer main loop"
+            DELIVER["DeliverHidApdu<br/>handler"]
+            WRITE["WriteHidApdu<br/>handler"]
             FRAG["hid::fragment()<br/>→ Vec&lt;[u8; 64]&gt;"]
         end
 
-        REASM -- "CapduEvent<br/>(tag 0x16)" --> FIFO
-        REASM -- "store channel_id" --> CID
-        FIFO --> RECV
-        RECV --> APP["Flux App"]
-        APP --> SEND
-        CID -- "load channel_id" --> SEND
-        SEND --> FRAG
+        REASM -- "DeliverHidApdu" --> DELIVER
+        WRITE --> FRAG
     end
+
+    subgraph "gui-app-emu-flux process"
+        subgraph "FluxServer main loop"
+            INCOMING["IncomingApdu<br/>handler"]
+            EVENTS["events<br/>VecDeque"]
+            RECV["RecvSeph handler"]
+            CHANNELS["response_channels<br/>VecDeque"]
+            SEND["SendSeph::Rapdu<br/>handler"]
+        end
+    end
+
+    DELIVER -- "IncomingApdu<br/>(channel_id, data)" --> INCOMING
+    INCOMING -- "CapduEvent (tag 0x16)<br/>+ channel_id" --> EVENTS
+    EVENTS --> RECV
+    RECV --> APP["Flux App"]
+    RECV -- "channel_id" --> CHANNELS
+    APP --> SEND
+    CHANNELS --> SEND
+    SEND -- "WriteHidApdu<br/>(channel_id, data)" --> WRITE
 
     FRAG --> EPIN["HID EP IN<br/>write_buf(64 B)"]
     EPIN --> HOST["Host Wallet"]
     HOSTOUT["Host Wallet"] --> EPOUT
 
-    style FIFO fill:#ffd,stroke:#cc0
-    style CID fill:#ffd,stroke:#cc0
+    style EVENTS fill:#ffd,stroke:#cc0
+    style CHANNELS fill:#ffd,stroke:#cc0
 ```
 
 **Design details:**
 
-- **Channel ID persistence:** The `LAST_CHANNEL_ID` atomic stores the channel from
-  the most recent incoming APDU so that response packets are framed with the
-  matching channel ID.
+- **Response channel:** Each queued command carries the HID channel it arrived
+  on. When the child takes the command, its channel moves to `response_channels`,
+  so the `Rapdu` that answers it is framed with the same channel ID. A response
+  with no command pending uses the channel of the last command received.
 - **SEPH bridge:** APDUs enter the Flux app as `CapduEvent` (tag `0x16`) TLV packets
-  via the SEPH FIFO, exactly as they would on real hardware. Responses exit
-  as `Rapdu` (tag `0x53`) packets.
+  through FluxServer's event queue, exactly as they would on real hardware.
+  Responses exit as `Rapdu` (tag `0x53`) packets.
 - **Fixed IF 0:** Legacy HID registers with the lowest interface priority, so it is
   numbered 0 whenever it is enabled and host wallets see the Legacy-compatible
   layout they expect.

@@ -286,7 +286,15 @@ impl ArchiveHandler<DeliverHidApdu> for LegacyHidServer {
             return;
         }
         let event = IncomingApdu { channel_id, data };
-        self.subscribers.retain(|s| s.send(&event).is_ok());
+        // Waiting for room could deadlock a subscriber that writes back to this server. An APDU
+        // dropped on a full queue just times out on the host.
+        self.subscribers.retain(|s| match s.send_nowait(&event) {
+            Err(xous::Error::ServerQueueFull) => {
+                log::warn!("legacy-hid: dropping inbound APDU, subscriber {} is full", s.pid());
+                true
+            }
+            result => result.is_ok(),
+        });
     }
 }
 

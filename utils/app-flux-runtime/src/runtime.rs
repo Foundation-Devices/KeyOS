@@ -37,9 +37,10 @@ macro_rules! use_flux_runtime_api {
 /// Define a Flux child app's entry point. Expands to the runtime API and hooks
 /// ([`use_flux_runtime_api!`]), the build-time app module (`APP_VERSION` + the NVM region), the
 /// `#[no_mangle] os_registry_get_current_app_tag` the SDK's `get_version` calls (so the child
-/// answers the host's GET_APP_AND_VERSION probe itself), and a `main` that starts logging, installs
-/// the runtime hooks, restores NVM, then calls the C `$entry`. `$name` is the app name reported to
-/// the host; it matches the app's manifest `appName.en` (the one thing not derivable at build time).
+/// answers the host's GET_APP_AND_VERSION probe itself), and a `main` that starts logging, registers
+/// with the emulator, installs the runtime hooks, restores NVM, then calls the C `$entry`. `$name`
+/// is the app name reported to the host; it matches the app's manifest `appName.en` (the one thing
+/// not derivable at build time).
 #[macro_export]
 macro_rules! flux_app {
     ($name:expr,entry = $entry:ident) => {
@@ -78,12 +79,15 @@ macro_rules! flux_app {
             log_server::init_wait(env!("CARGO_CRATE_NAME")).unwrap();
             log::set_max_level(log::LevelFilter::Info);
             log::info!("{} v{} starting", $name, __flux_app_gen::APP_VERSION);
+            assert!(
+                flux_api().register_child(__flux_app_gen::DERIVATION_ROOTS),
+                "The Flux emulator refused this app's registration"
+            );
             $crate::runtime::init($crate::runtime::RuntimeHooks::new(
                 flux_io_seph_send,
                 flux_io_seph_recv,
                 flux_syscall_buffer,
             ));
-            $crate::runtime::declare_derivation_roots(__flux_app_gen::DERIVATION_ROOTS);
 
             // Back the app's NVM region with the emulator's persistent store, so upstream's
             // storage_init() defaults apply on first run and later Settings choices survive a
@@ -145,24 +149,6 @@ fn hooks() -> &'static RuntimeHooks {
 
 pub(crate) fn syscall_buffer(id: u32, arg: u32, data: &mut [u8]) -> usize {
     (hooks().syscall_buffer)(id, arg, data)
-}
-
-/// Tell the emulator which BIP32 roots this app may derive under, taken from its upstream
-/// `PATH_APP_LOAD_PARAMS` by build.rs. The emulator refuses every derivation until it has them,
-/// so this must run before the app's entry point.
-pub fn declare_derivation_roots(roots: &[&[u32]]) {
-    let mut buf: Vec<u8> = roots
-        .iter()
-        .flat_map(|root| {
-            std::iter::once(root.len() as u32).chain(root.iter().copied()).flat_map(u32::to_be_bytes)
-        })
-        .collect();
-
-    if syscall_buffer(gui_app_emu_flux::SYSCALL_DECLARE_DERIVATION_ROOTS_ID, roots.len() as u32, &mut buf)
-        != 0
-    {
-        log::error!("Derivation roots rejected by the emulator; key derivation will be refused");
-    }
 }
 
 fn send_seph(data: &[u8]) { (hooks().io_seph_send)(data); }

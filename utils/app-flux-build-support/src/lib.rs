@@ -345,7 +345,7 @@ pub fn generate_flux_app_module(out_dir: &str, app_path: &Path, archive: &Path, 
          /// GET_APP_AND_VERSION probe via `os_registry_get_current_app_tag`.\n\
          pub const APP_VERSION: &str = \"{version}\";\n\
          /// The BIP32 roots the app declares as PATH_APP_LOAD_PARAMS, which the runtime\n\
-         /// declares to the emulator so it can refuse a derivation outside them.\n\
+         /// registers with the emulator so it can refuse a derivation outside them.\n\
          pub const DERIVATION_ROOTS: &[&[u32]] = &[{roots}];\n\
          extern \"C\" {{\n    static mut {region}: u8;\n}}\n\
          /// Base of the app's NVM region; `init_nvm` reads and writes `NVM_LEN` bytes\n\

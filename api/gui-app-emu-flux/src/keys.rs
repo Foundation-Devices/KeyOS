@@ -72,16 +72,12 @@ pub struct DerivedKey {
 pub enum KeyError {
     /// The specified context ID was not found.
     ContextNotFound,
-    /// The key storage lock was poisoned.
-    LockPoisoned,
     /// Unsupported curve type.
     UnsupportedCurve,
     /// Invalid key data.
     InvalidKey,
     /// BIP32 derivation failed.
     DerivationFailed,
-    /// Seed not available.
-    SeedNotAvailable,
     /// Invalid derivation path.
     InvalidPath,
 }
@@ -121,13 +117,8 @@ pub fn init_private_key(curve: u8, raw_key: &[u8]) -> u32 {
     let mut private_key = [0u8; 32];
     private_key.copy_from_slice(raw_key);
 
-    if let Ok(mut contexts) = EC_CONTEXTS.write() {
-        contexts.insert(id, EcContext { curve, private_key, public_key: None });
-        log::debug!("Created EC private key context with id={} curve=0x{:02x}", id, curve);
-    } else {
-        log::error!("Failed to acquire EC contexts write lock");
-        return 0;
-    }
+    EC_CONTEXTS.write().unwrap().insert(id, EcContext { curve, private_key, public_key: None });
+    log::debug!("Created EC private key context with id={} curve=0x{:02x}", id, curve);
 
     id
 }
@@ -141,7 +132,7 @@ pub fn init_private_key(curve: u8, raw_key: &[u8]) -> u32 {
 /// # Returns
 /// `Ok(())` on success, or an error if the context was not found.
 pub fn generate_pair(ctx_id: u32, compressed: bool) -> Result<(), KeyError> {
-    let mut contexts = EC_CONTEXTS.write().map_err(|_| KeyError::LockPoisoned)?;
+    let mut contexts = EC_CONTEXTS.write().unwrap();
     let ctx = contexts.get_mut(&ctx_id).ok_or(KeyError::ContextNotFound)?;
 
     match ctx.curve {
@@ -181,7 +172,7 @@ pub fn generate_pair(ctx_id: u32, compressed: bool) -> Result<(), KeyError> {
 /// # Returns
 /// The public key bytes, or an error if not generated yet.
 pub fn get_public_key(ctx_id: u32) -> Result<Vec<u8>, KeyError> {
-    let contexts = EC_CONTEXTS.read().map_err(|_| KeyError::LockPoisoned)?;
+    let contexts = EC_CONTEXTS.read().unwrap();
     let ctx = contexts.get(&ctx_id).ok_or(KeyError::ContextNotFound)?;
 
     ctx.public_key.clone().ok_or(KeyError::InvalidKey)
@@ -195,7 +186,7 @@ pub fn get_public_key(ctx_id: u32) -> Result<Vec<u8>, KeyError> {
 /// # Returns
 /// The private key bytes (32 bytes).
 pub fn get_private_key(ctx_id: u32) -> Result<[u8; 32], KeyError> {
-    let contexts = EC_CONTEXTS.read().map_err(|_| KeyError::LockPoisoned)?;
+    let contexts = EC_CONTEXTS.read().unwrap();
     let ctx = contexts.get(&ctx_id).ok_or(KeyError::ContextNotFound)?;
 
     Ok(ctx.private_key)
@@ -206,7 +197,7 @@ pub fn get_private_key(ctx_id: u32) -> Result<[u8; 32], KeyError> {
 /// # Arguments
 /// * `ctx_id` - The context ID to destroy
 pub fn destroy_ec_context(ctx_id: u32) -> Result<(), KeyError> {
-    let mut contexts = EC_CONTEXTS.write().map_err(|_| KeyError::LockPoisoned)?;
+    let mut contexts = EC_CONTEXTS.write().unwrap();
     if contexts.remove(&ctx_id).is_some() {
         log::debug!("Destroyed EC context {}", ctx_id);
         Ok(())
@@ -243,20 +234,15 @@ pub fn init_public_key(curve: u8, raw_key: &[u8]) -> u32 {
 
     let id = NEXT_KEY_ID.fetch_add(1, Ordering::Relaxed);
 
-    if let Ok(mut contexts) = EC_CONTEXTS.write() {
-        contexts.insert(
-            id,
-            EcContext {
-                curve,
-                private_key: [0u8; 32], // No private key for public-only context
-                public_key: Some(raw_key.to_vec()),
-            },
-        );
-        log::debug!("Created EC public key context with id={}", id);
-    } else {
-        log::error!("Failed to acquire EC contexts write lock");
-        return 0;
-    }
+    EC_CONTEXTS.write().unwrap().insert(
+        id,
+        EcContext {
+            curve,
+            private_key: [0u8; 32], // No private key for public-only context
+            public_key: Some(raw_key.to_vec()),
+        },
+    );
+    log::debug!("Created EC public key context with id={}", id);
 
     id
 }
@@ -271,10 +257,7 @@ pub fn init_public_key(curve: u8, raw_key: &[u8]) -> u32 {
 /// # Returns
 /// `true` if the signature is valid, `false` otherwise.
 pub fn ecdsa_verify(pubkey_ctx_id: u32, hash: &[u8], signature: &[u8]) -> bool {
-    let contexts = match EC_CONTEXTS.read() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
+    let contexts = EC_CONTEXTS.read().unwrap();
 
     let ctx = match contexts.get(&pubkey_ctx_id) {
         Some(c) => c,
@@ -342,7 +325,7 @@ pub fn secp256k1_verify_der(pubkey: &[u8], digest32: &[u8], der_sig: &[u8]) -> b
 /// # Returns
 /// The DER-encoded signature, or an error.
 pub fn ecdsa_sign(privkey_ctx_id: u32, hash: &[u8]) -> Result<Vec<u8>, KeyError> {
-    let contexts = EC_CONTEXTS.read().map_err(|_| KeyError::LockPoisoned)?;
+    let contexts = EC_CONTEXTS.read().unwrap();
     let ctx = contexts.get(&privkey_ctx_id).ok_or(KeyError::ContextNotFound)?;
 
     let secp = Secp256k1::new();
@@ -366,7 +349,7 @@ pub fn ecdsa_sign(privkey_ctx_id: u32, hash: &[u8]) -> Result<Vec<u8>, KeyError>
 /// # Returns
 /// A tuple of (DER-encoded signature, info flags), or an error.
 pub fn ecdsa_sign_recoverable(privkey_ctx_id: u32, hash: &[u8]) -> Result<(Vec<u8>, u32), KeyError> {
-    let contexts = EC_CONTEXTS.read().map_err(|_| KeyError::LockPoisoned)?;
+    let contexts = EC_CONTEXTS.read().unwrap();
     let ctx = contexts.get(&privkey_ctx_id).ok_or(KeyError::ContextNotFound)?;
 
     let secp = Secp256k1::new();
@@ -484,16 +467,14 @@ pub fn derive_bip32(seed: &[u8], path: &[u32], curve: u8) -> Result<([u8; 32], [
 /// A unique context ID.
 pub fn store_derived_key(private_key: [u8; 32], chain_code: [u8; 32]) -> u32 {
     let id = NEXT_KEY_ID.fetch_add(1, Ordering::Relaxed);
-    if let Ok(mut keys) = DERIVED_KEYS.write() {
-        keys.insert(id, DerivedKey { chain_code, private_key });
-        log::debug!("Stored derived key with id={}", id);
-    }
+    DERIVED_KEYS.write().unwrap().insert(id, DerivedKey { chain_code, private_key });
+    log::debug!("Stored derived key with id={}", id);
     id
 }
 
 /// Get a derived key by context ID.
 pub fn get_derived_key(ctx_id: u32) -> Result<(Vec<u8>, Vec<u8>), KeyError> {
-    let keys = DERIVED_KEYS.read().map_err(|_| KeyError::LockPoisoned)?;
+    let keys = DERIVED_KEYS.read().unwrap();
     let key = keys.get(&ctx_id).ok_or(KeyError::ContextNotFound)?;
     Ok((key.private_key.to_vec(), key.chain_code.to_vec()))
 }

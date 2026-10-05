@@ -6,7 +6,7 @@ use std::time::Duration;
 use server::{CheckedConn, CheckedPermissions, MessageAllowed};
 use xous::DropDeallocate;
 
-use crate::messages::{RecvSeph, SendSeph, SyscallBuffer};
+use crate::messages::{RecvSeph, RegisterChild, SendSeph, SyscallBuffer};
 
 pub const SERVER_NAME: &str = "os/gui-app-emu-flux";
 const PAGE_SIZE: usize = 4096;
@@ -37,6 +37,19 @@ impl<P: CheckedPermissions> FluxApi<P> {
 
     pub fn try_new_with_timeout(timeout: Duration) -> Option<Self> {
         Some(Self { conn: CheckedConn::try_connect_with_timeout(timeout)? })
+    }
+
+    /// Register this child with the emulator, fixing the BIP32 roots it may derive under. Must
+    /// come before any other message. Returns whether the emulator accepted the roots.
+    pub fn register_child(&self, derivation_roots: &[&[u32]]) -> bool
+    where
+        P: MessageAllowed<RegisterChild>,
+    {
+        let derivation_roots = derivation_roots.iter().map(|root| root.to_vec()).collect();
+        match self.conn.try_send_blocking_archive(RegisterChild { derivation_roots }) {
+            Ok(accepted) => accepted,
+            Err(e) => exit_flux_host_gone("register_child", e),
+        }
     }
 
     pub fn io_seph_send(&self, data: &[u8])

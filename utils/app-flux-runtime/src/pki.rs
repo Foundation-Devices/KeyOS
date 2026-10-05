@@ -276,9 +276,7 @@ fn payload_digest(sign_algo: u8, payload: &[u8]) -> Result<[u8; 32], u32> {
 /// Parse, verify and store a certificate. On success the loaded state is
 /// replaced; on any failure it is cleared, like the OS does.
 fn load_certificate_impl(expected_key_usage: u8, cert: &[u8], roots: &[[u8; 65]]) -> Result<LoadedCert, u32> {
-    let Ok(mut loaded) = LOADED.write() else {
-        return Err(ERR_CRYPTO);
-    };
+    let mut loaded = LOADED.write().unwrap();
     // The previous certificate stops being valid now, but its key still
     // verifies a chained certificate (one not signed by the root CA).
     let previous = loaded.take();
@@ -364,9 +362,7 @@ pub unsafe extern "C" fn os_pki_load_certificate(
     if certificate.is_null() || certificate_len == 0 || certificate_len > MAX_CERTIFICATE_LEN {
         // A rejected load must not leave stale trust state; the OS clears its PKI
         // slot on entry, so mirror that on the path that bypasses the loader.
-        if let Ok(mut loaded) = LOADED.write() {
-            *loaded = None;
-        }
+        *LOADED.write().unwrap() = None;
         return ERR_TAG_MALFORMED;
     }
     let cert = core::slice::from_raw_parts(certificate, certificate_len);
@@ -401,9 +397,7 @@ pub unsafe extern "C" fn os_pki_get_info(
     trusted_name_len: *mut usize,
     public_key: *mut CxEcfp384PublicKey,
 ) -> u32 {
-    let Ok(loaded) = LOADED.read() else {
-        return ERR_CRYPTO;
-    };
+    let loaded = LOADED.read().unwrap();
     let Some(cert) = loaded.as_ref() else {
         return ERR_NO_CERTIFICATE;
     };
@@ -430,9 +424,7 @@ pub unsafe extern "C" fn os_pki_verify(
     if descriptor_hash.is_null() || descriptor_hash_len != 32 || signature.is_null() || signature_len == 0 {
         return false;
     }
-    let Ok(loaded) = LOADED.read() else {
-        return false;
-    };
+    let loaded = LOADED.read().unwrap();
     let Some(cert) = loaded.as_ref() else {
         log::warn!("os_pki_verify: no certificate loaded");
         return false;

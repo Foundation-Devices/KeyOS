@@ -24,8 +24,8 @@ pub struct IncomingApdu {
     pub data: Vec<u8>,
 }
 
-/// Subscribe to the inbound APDU stream. The GUI app subscribes here on
-/// startup and feeds events into its `SEPH_FIFO`.
+/// Subscribe to the inbound APDU stream. The Flux emulator's server subscribes
+/// here on startup and queues each command for its children.
 #[derive(Debug, Clone, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[event(IncomingApdu)]
 pub struct SubscribeIncomingApdu;

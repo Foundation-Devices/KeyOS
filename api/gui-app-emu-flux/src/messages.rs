@@ -11,6 +11,14 @@ pub struct SendSeph(pub Vec<u8>);
 #[response(Option<Vec<u8>>)]
 pub struct RecvSeph(pub usize);
 
+/// Fix the BIP32 roots the sending child may derive under, answering whether they were accepted.
+/// The emulator ignores the child's other messages until then, and refuses another registration.
+#[derive(Debug, server::Message, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[response(bool)]
+pub struct RegisterChild {
+    pub derivation_roots: Vec<Vec<u32>>,
+}
+
 /// Syscall with buffer for memory-based operations.
 ///
 /// This is a LendMut message that allows the caller to pass a buffer

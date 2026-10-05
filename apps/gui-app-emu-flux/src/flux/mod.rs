@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#[cfg(keyos)]
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     io::Read,
     sync::{LazyLock, RwLock},
     time::{Duration, Instant},
@@ -12,7 +10,8 @@ use std::{
 
 use flate2::read::GzDecoder;
 use server::{
-    BlockingArchive, BlockingArchiveHandler, LendMut, LendMutHandler, MessageId as _, ScalarHandler, Server,
+    BlockingArchive, BlockingArchiveHandler, BlockingScalar, BlockingScalarHandler, CheckedConn, LendMut,
+    LendMutHandler, MessageId as _, ScalarHandler, Server, WithAllPermissions,
 };
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -21,9 +20,8 @@ legacy_hid::use_api!();
 
 use gui_app_emu_flux::{
     keys,
-    messages::{RecvSeph, SendSeph, SyscallBuffer},
+    messages::{RecvSeph, RegisterChild, SendSeph, SyscallBuffer},
     syscall_id::*,
-    SYSCALL_DECLARE_DERIVATION_ROOTS_ID,
 };
 
 pub mod display;
@@ -35,23 +33,6 @@ use display::{draw_image, draw_image_rle, draw_rect};
 /// hostile `arg`, which on the 32-bit target could otherwise overflow `len * 4`.
 const MAX_BIP32_PATH_LEN: usize = 16;
 
-static SEPH_FIFO: LazyLock<RwLock<VecDeque<Vec<u8>>>> = LazyLock::new(|| RwLock::new(VecDeque::new()));
-/// Last channel ID seen from the host, used as a fallback when CHANNEL_FIFO is
-/// empty. Written by the inbound-APDU subscriber.
-#[cfg(keyos)]
-static LAST_CHANNEL_ID: AtomicU32 = AtomicU32::new(0x0101);
-/// HID channel for each CapduEvent still queued in SEPH_FIFO (not yet pulled by
-/// the child), in enqueue order and kept in step with those CapduEvents. When the
-/// child pulls a command its channel moves to CHANNEL_FIFO; when an oversized
-/// command is dropped its channel is popped from here, so a drop only discards
-/// that command's own channel instead of an earlier in-flight one.
-#[cfg(keyos)]
-static QUEUED_CHANNELS: LazyLock<RwLock<VecDeque<u16>>> = LazyLock::new(|| RwLock::new(VecDeque::new()));
-/// HID channel for each command delivered to the child and still awaiting its
-/// Rapdu, in delivery order, so a response is framed on the channel of the command
-/// it answers rather than the most recent one seen.
-#[cfg(keyos)]
-static CHANNEL_FIFO: LazyLock<RwLock<VecDeque<u16>>> = LazyLock::new(|| RwLock::new(VecDeque::new()));
 /// Cap on unanswered host commands queued for the child. The child answers one
 /// at a time, so this sits well above any legitimate depth; it stops a flooding
 /// host from growing the FIFO until the session runs out of memory.
@@ -89,176 +70,37 @@ static APP_SEED: LazyLock<RwLock<StoredSeed>> = LazyLock::new(|| RwLock::new(def
 /// Set the app seed for key derivation.
 /// Accepts 32 bytes (derived AppSeed) or 64 bytes (BIP39 seed from a manual mnemonic entry).
 pub fn set_app_seed(seed: Vec<u8>) {
-    if let Ok(mut app_seed) = APP_SEED.write() {
-        log::debug!("App seed updated ({} bytes)", seed.len());
-        // Dropping the previous `StoredSeed` scrubs the old bytes it held.
-        *app_seed = StoredSeed(seed);
-    }
+    log::debug!("App seed updated ({} bytes)", seed.len());
+    // Dropping the previous `StoredSeed` scrubs the old bytes it held.
+    *APP_SEED.write().unwrap() = StoredSeed(seed);
 }
 
 /// Clear the app seed. Key derivation then fails until a seed is set again, so a
 /// deleted seed cannot keep signing in the same session.
 pub fn clear_app_seed() {
-    if let Ok(mut app_seed) = APP_SEED.write() {
-        // Dropping the previous `StoredSeed` scrubs its bytes; no manual zeroize needed.
-        *app_seed = StoredSeed::default();
-        log::debug!("App seed cleared");
-    }
+    // Dropping the previous `StoredSeed` scrubs its bytes; no manual zeroize needed.
+    *APP_SEED.write().unwrap() = StoredSeed::default();
+    log::debug!("App seed cleared");
 }
 
-/// A `Zeroizing` copy of the current app seed. Every derivation clones the seed
+/// A `Zeroizing` copy of the current app seed, if one is set. Every derivation clones the seed
 /// out of `APP_SEED`; wrapping the clone scrubs each per-call copy on drop, so a
 /// signing session can't leave recoverable 64-byte seed copies on the heap.
-fn get_app_seed() -> Result<Zeroizing<Vec<u8>>, keys::KeyError> {
-    let seed =
-        Zeroizing::new(APP_SEED.read().map(|s| s.0.clone()).map_err(|_| keys::KeyError::LockPoisoned)?);
+fn get_app_seed() -> Option<Zeroizing<Vec<u8>>> {
+    let seed = Zeroizing::new(APP_SEED.read().unwrap().0.clone());
     if seed.is_empty() {
         log::error!("App seed requested before configuration");
-        return Err(keys::KeyError::SeedNotAvailable);
+        return None;
     }
-    Ok(seed)
+    Some(seed)
 }
 
-/// The BIP32 roots each running child declared at startup, with the app id that declared them
-/// so a reused PID cannot inherit another app's. Every child derives from one shared Legacy
-/// wallet, so without this bound an app answers requests for the accounts of every other coin
-/// on that wallet (SFT-8141); the roots are each upstream app's own `PATH_APP_LOAD_PARAMS`,
-/// which its OS enforces the same way.
-static DERIVATION_ROOTS: LazyLock<RwLock<HashMap<xous::PID, (xous::AppId, Vec<Vec<u32>>)>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
-
-/// Record what `sender` may derive under. Returns whether the declaration was stored.
-fn declare_derivation_roots(sender: xous::PID, roots: Vec<Vec<u32>>) -> bool {
-    let Ok(Some(app_id)) = xous::get_app_id(sender) else {
-        log::warn!("Derivation roots refused: no app id for PID {sender:?}");
-        return false;
-    };
-    let Ok(mut policy) = DERIVATION_ROOTS.write() else {
-        return false;
-    };
-    log::debug!("App {app_id} declared derivation roots {roots:08X?}");
-    policy.insert(sender, (app_id, roots));
-    true
-}
-
-/// Whether `path` extends one of the roots `sender` declared.
-fn derivation_allowed(sender: xous::PID, path: &[u32]) -> bool {
-    let Ok(Some(app_id)) = xous::get_app_id(sender) else {
-        log::warn!("Derivation denied: no app id for PID {sender:?}");
-        return false;
-    };
-    let Ok(policy) = DERIVATION_ROOTS.read() else {
-        return false;
-    };
-    let Some((_, roots)) = policy.get(&sender).filter(|(declared_by, _)| *declared_by == app_id) else {
-        log::warn!("Derivation denied: app {app_id} never declared its roots");
-        return false;
-    };
-    let allowed = roots.iter().any(|root| path.starts_with(root));
-    if !allowed {
-        log::warn!("Derivation denied for app {app_id}: {path:08X?} extends no declared root");
-    }
-    allowed
-}
-
-/// Drop what `pid` declared, so a PID reused by the next child starts undeclared rather than
-/// inheriting the dead one's roots.
-pub fn forget_child(pid: xous::PID) {
-    if let Ok(mut policy) = DERIVATION_ROOTS.write() {
-        policy.remove(&pid);
-    }
-}
-
-/// Whether the app now at `pid` has declared what it may derive. A child that has not is either
-/// still starting or predates the declaration, and a child of the latter kind answers a refused
-/// derivation with its uninitialized key buffer, so the emulator keeps host commands away from
-/// both. The stored app id is checked like `derivation_allowed` does, so a PID reused by another
-/// app is undeclared here even if the entry outlived its owner.
-pub fn child_declared(pid: xous::PID) -> bool {
-    let Ok(Some(app_id)) = xous::get_app_id(pid) else {
-        return false;
-    };
-    DERIVATION_ROOTS
-        .read()
-        .is_ok_and(|policy| policy.get(&pid).is_some_and(|(declared_by, _)| *declared_by == app_id))
-}
-
-/// Drop any input queued for a Flux child that has gone away: the SEPH events it never
-/// drained, plus their queued and pending-response channels. Without this the next child
-/// to launch would pick up the dead child's stale commands.
-#[cfg(keyos)]
-pub fn clear_fifos() {
-    if let Ok(mut fifo) = SEPH_FIFO.write() {
-        fifo.clear();
-    }
-    if let Ok(mut channels) = QUEUED_CHANNELS.write() {
-        channels.clear();
-    }
-    if let Ok(mut channels) = CHANNEL_FIFO.write() {
-        channels.clear();
-    }
-}
-
-/// Wrap a reassembled inbound HID APDU as a SEPH `CapduEvent` and push it into
-/// the in-process FIFO that running Flux child apps drain via `RecvSeph`. Also
-/// stashes the channel id for the next outgoing `Rapdu`.
-///
-/// `child_ready` is the caller's authoritative "is one of ours on screen, and has it declared
-/// what it may derive?" state. Returns a ready-made "not supported" reply when none is, which the
-/// caller writes straight back to the host. Otherwise the child handles the APDU, including
-/// GET_APP_AND_VERSION, which it now answers itself.
-#[cfg(keyos)]
-pub fn push_incoming_apdu(channel_id: u16, apdu: &[u8], child_ready: bool) -> Option<Vec<u8>> {
-    LAST_CHANNEL_ID.store(channel_id as u32, Ordering::Relaxed);
-
-    // No child is running, or the one that is has not declared: reject app commands with "not
-    // supported" rather than queue them for the next child to pick up as stale input.
-    if !child_ready {
-        log::debug!("No ready Flux child, rejecting APDU {:02x?}", &apdu[..apdu.len().min(2)]);
-        return Some(vec![0x6d, 0x00]);
-    }
-
-    // Bound the in-flight command depth so a host flooding faster than the child
-    // drains can't grow the FIFOs until they exhaust memory. Count both queued
-    // commands and those already delivered but not yet answered (CHANNEL_FIFO): a
-    // child that drains without replying would otherwise leave the queued side
-    // below the cap while CHANNEL_FIFO grows unbounded. A poisoned lock counts as full.
-    let queued = QUEUED_CHANNELS.read().map(|c| c.len()).unwrap_or(usize::MAX);
-    let pending = CHANNEL_FIFO.read().map(|c| c.len()).unwrap_or(usize::MAX);
-    if queued.saturating_add(pending) >= MAX_QUEUED_APDUS {
-        log::warn!("Flux command queue full; rejecting APDU {:02x?} as busy", &apdu[..apdu.len().min(2)]);
-        return Some(vec![0x6d, 0x00]);
-    }
-
-    let apdu_len = apdu.len() as u16;
-    let mut pkt = vec![SephTag::CapduEvent.into()];
-    pkt.extend_from_slice(&apdu_len.to_be_bytes());
-    pkt.extend_from_slice(apdu);
-    match SEPH_FIFO.write() {
-        Ok(mut fifo) => {
-            fifo.push_back(pkt);
-            log::debug!("CapduEvent pushed to SEPH_FIFO (depth={})", fifo.len());
-            // Remember this command's channel so its response frames correctly
-            // even if another command arrives before the child replies. It rides
-            // in QUEUED_CHANNELS alongside the CapduEvent until the child pulls it.
-            if let Ok(mut channels) = QUEUED_CHANNELS.write() {
-                channels.push_back(channel_id);
-            }
-        }
-        Err(e) => log::error!("Failed to write CapduEvent to SEPH_FIFO: {e:?}"),
-    }
-    None
-}
-
-/// The HID channel for the next outgoing response: the oldest delivered command
-/// still awaiting its Rapdu, or the last channel seen if none is pending.
-#[cfg(keyos)]
-fn next_response_channel() -> u16 {
-    CHANNEL_FIFO
-        .write()
-        .ok()
-        .and_then(|mut channels| channels.pop_front())
-        .unwrap_or_else(|| LAST_CHANNEL_ID.load(Ordering::Relaxed) as u16)
+/// A SEPH packet: the tag, the payload's big-endian length, then the payload.
+fn seph_packet(tag: SephTag, payload: &[u8]) -> Vec<u8> {
+    let mut packet = vec![tag.into()];
+    packet.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    packet.extend_from_slice(payload);
+    packet
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -469,10 +311,66 @@ const TICKER_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug, server::Message)]
 struct AppDisconnected(xous::CID);
 
+/// Kernel-delivered when a client disconnects or exits; the scalar payload is unused because the
+/// message's sender is the departed pid.
+#[derive(Debug, server::Message)]
+struct ClientDisconnected(xous::CID);
+
+/// Launch a Flux child, or find the one already running, answering its PID.
+#[derive(Debug, server::Message)]
+#[response(Result<xous::PID, app_manager::AppManagerError>)]
+pub struct LaunchChild(pub xous::AppId);
+
+/// Queue a touch on the display for the children. A release dragged off the display keeps its
+/// negative coordinates, which the children take as cancelling the press.
+#[derive(Debug, server::Message)]
+pub struct Touch {
+    pub x: i16,
+    pub y: i16,
+    pub pressed: bool,
+}
+
+impl server::AsScalar<3> for Touch {
+    fn as_scalar(&self) -> [u32; 3] { [self.x as u32, self.y as u32, self.pressed.into()] }
+}
+
+impl server::FromScalar<3> for Touch {
+    fn from_scalar([x, y, pressed]: [u32; 3]) -> Self {
+        Self { x: x as i16, y: y as i16, pressed: pressed != 0 }
+    }
+}
+
+/// The emulator's connection to its own server, which the kernel never permission-checks.
+#[derive(Default, Clone)]
+pub struct FluxServerPermissions;
+
+impl server::CheckedPermissions for FluxServerPermissions {
+    const NAME: &str = gui_app_emu_flux::SERVER_NAME;
+}
+
+pub type FluxConn = CheckedConn<WithAllPermissions<FluxServerPermissions>>;
+
 #[derive(server::Server)]
 #[name = "os/gui-app-emu-flux"]
 pub struct FluxServer {
     last_ticker: Instant,
+    app_manager: crate::AppManagerApi,
+    /// SEPH events for the children, oldest first, each host command with the HID channel its
+    /// response goes out on.
+    events: VecDeque<(Vec<u8>, Option<u16>)>,
+    /// The channel of each command delivered and not yet answered, oldest first.
+    response_channels: VecDeque<u16>,
+    /// The channel of the last host command, for a response with none pending.
+    #[cfg(keyos)]
+    last_channel_id: u16,
+    /// The BIP32 roots each child registered, by PID. Every child derives from one shared Legacy
+    /// wallet, so without this bound an app answers requests for the accounts of every other coin
+    /// on that wallet (SFT-8141); the roots are each upstream app's own `PATH_APP_LOAD_PARAMS`,
+    /// which its OS enforces the same way. A child gets nothing from the emulator before it
+    /// registers and can register only once, so its roots are fixed before it handles any input.
+    /// An empty entry belongs to a process that dropped its connection while alive: it counts as
+    /// unregistered and can't register again.
+    derivation_roots: BTreeMap<xous::PID, Vec<Vec<u32>>>,
     #[cfg(keyos)]
     legacy_hid: LegacyHidApi,
 }
@@ -483,8 +381,47 @@ impl Default for FluxServer {
 
         Self {
             last_ticker: Instant::now(),
+            app_manager: crate::AppManagerApi::default(),
+            events: VecDeque::new(),
+            response_channels: VecDeque::new(),
+            #[cfg(keyos)]
+            last_channel_id: 0x0101,
+            derivation_roots: BTreeMap::new(),
             #[cfg(keyos)]
             legacy_hid: LegacyHidApi::default(),
+        }
+    }
+}
+
+impl FluxServer {
+    /// Whether `pid` registered and still holds its roots.
+    fn is_registered(&self, pid: xous::PID) -> bool {
+        self.derivation_roots.get(&pid).is_some_and(|roots| !roots.is_empty())
+    }
+
+    /// Whether `path` extends one of the roots `sender` registered.
+    fn derivation_allowed(&self, sender: xous::PID, path: &[u32]) -> bool {
+        let allowed = self
+            .derivation_roots
+            .get(&sender)
+            .is_some_and(|roots| roots.iter().any(|root| path.starts_with(root)));
+        if !allowed {
+            log::warn!("Derivation denied for PID {sender:?}: {path:08X?} extends no registered root");
+        }
+        allowed
+    }
+
+    /// Queue an event for the children.
+    fn push_event(&mut self, tag: SephTag, payload: &[u8]) {
+        self.events.push_back((seph_packet(tag, payload), None));
+    }
+
+    /// Send `data` to the host on the channel of the command it answers.
+    #[cfg(keyos)]
+    fn respond(&mut self, data: Vec<u8>) {
+        let channel_id = self.response_channels.pop_front().unwrap_or(self.last_channel_id);
+        if let Err(e) = self.legacy_hid.write_apdu(channel_id, data) {
+            log::error!("Response on channel 0x{channel_id:04x} failed: {e:?}");
         }
     }
 }
@@ -497,6 +434,41 @@ impl Server for FluxServer {
             AppDisconnected::ID,
         )
         .expect("Failed to register disconnected handler");
+        xous::register_server_event_handler(
+            xous::ServerEvent::Disconnected,
+            context.sid(),
+            ClientDisconnected::ID,
+        )
+        .expect("Failed to register client disconnected handler");
+        #[cfg(keyos)]
+        CheckedConn::<legacy_hid_permissions::LegacyHidPermissions>::default()
+            .subscribe_archive_infallible(legacy_hid::messages::SubscribeIncomingApdu, context);
+    }
+}
+
+impl ScalarHandler<ClientDisconnected> for FluxServer {
+    fn handle(
+        &mut self,
+        _msg: ClientDisconnected,
+        pid: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        // A process still alive here only dropped its connection. Its roots are emptied rather
+        // than removed, or it could register wider ones on a new connection.
+        // XXX: A PID a new child took before this is handled looks alive too, and that child is
+        // refused registration. Only children launched outside the emulator hit this, as
+        // LaunchChild removes the roots at launch. A disconnect the kernel drops on a full queue
+        // leaves the dead child's queued input for the next one, and its roots for an outside
+        // child to use without registering.
+        if matches!(xous::get_app_id(pid), Ok(Some(_))) {
+            if let Some(roots) = self.derivation_roots.get_mut(&pid) {
+                roots.clear();
+            }
+        } else if self.derivation_roots.remove(&pid).is_some() {
+            // The dead child won't drain its input, and the next one mustn't pick it up.
+            self.events.clear();
+            self.response_channels.clear();
+        }
     }
 }
 
@@ -509,6 +481,93 @@ impl ScalarHandler<AppDisconnected> for FluxServer {
     ) {
         log::info!("Flux app disconnected, resetting display");
         display::reset();
+    }
+}
+
+impl BlockingScalarHandler<LaunchChild> for FluxServer {
+    fn handle(
+        &mut self,
+        LaunchChild(app_id): LaunchChild,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> <LaunchChild as BlockingScalar>::Response {
+        // A running child keeps its roots, so any child the launch below returns is new, even one
+        // launched elsewhere.
+        if let Ok(Some(pid)) = xous::app_id_to_pid(&app_id) {
+            return Ok(pid);
+        }
+        let pid = self.app_manager.launch_app_blocking(&app_id)?;
+        // In case the ClientDisconnected handler kept the roots of a dead child on this PID.
+        self.derivation_roots.remove(&pid);
+        Ok(pid)
+    }
+}
+
+impl BlockingArchiveHandler<RegisterChild> for FluxServer {
+    fn handle(
+        &mut self,
+        msg: RegisterChild,
+        sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) -> <RegisterChild as BlockingArchive>::Response {
+        let roots = msg.derivation_roots;
+        // An empty root is a prefix of every path, so it would allow everything, and no roots at
+        // all would leave the child unregistered.
+        if roots.is_empty() || roots.iter().any(|root| !(1..=MAX_BIP32_PATH_LEN).contains(&root.len())) {
+            log::warn!("Registration from PID {sender:?} refused: malformed roots {roots:08X?}");
+            return false;
+        }
+        if self.derivation_roots.contains_key(&sender) {
+            log::warn!("Registration from PID {sender:?} refused: already registered");
+            return false;
+        }
+        log::debug!("PID {sender:?} registered derivation roots {roots:08X?}");
+        self.derivation_roots.insert(sender, roots);
+        true
+    }
+}
+
+impl ScalarHandler<Touch> for FluxServer {
+    fn handle(
+        &mut self,
+        Touch { x, y, pressed }: Touch,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        let [x_hi, x_lo] = x.to_be_bytes();
+        let [y_hi, y_lo] = y.to_be_bytes();
+        self.push_event(SephTag::FingerEvent, &[pressed.into(), x_hi, x_lo, y_hi, y_lo]);
+    }
+}
+
+#[cfg(keyos)]
+impl server::ArchiveEventHandler<legacy_hid::messages::IncomingApdu> for FluxServer {
+    fn handle(
+        &mut self,
+        msg: server::Owned<legacy_hid::messages::IncomingApdu>,
+        _sender: xous::PID,
+        _context: &mut server::ServerContext<Self>,
+    ) {
+        let Ok(legacy_hid::messages::IncomingApdu { channel_id, data }) = msg.deserialize() else {
+            return;
+        };
+        self.last_channel_id = channel_id;
+
+        // Delivered but unanswered commands count too, or a child that drains without replying
+        // could grow the queue without bound.
+        let in_flight = self.events.iter().filter(|(_, channel)| channel.is_some()).count()
+            + self.response_channels.len();
+        let child_running = self.derivation_roots.values().any(|roots| !roots.is_empty());
+        // Answered "not supported" rather than queued: with no child running it would be stale
+        // input for the next one.
+        if !child_running || in_flight >= MAX_QUEUED_APDUS {
+            log::debug!("Rejecting APDU {:02x?}: no child running or queue full", &data[..data.len().min(2)]);
+            if let Err(e) = self.legacy_hid.write_apdu(channel_id, vec![0x6d, 0x00]) {
+                log::error!("Rejection on channel 0x{channel_id:04x} failed: {e:?}");
+            }
+            return;
+        }
+        self.events.push_back((seph_packet(SephTag::CapduEvent, &data), Some(channel_id)));
     }
 }
 
@@ -527,6 +586,11 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <SyscallBuffer as LendMut>::Response {
+        if !self.is_registered(sender) {
+            log::warn!("SyscallBuffer from unregistered PID {sender:?} refused");
+            return usize::MAX;
+        }
+
         let buf = msg.buf.as_slice_mut::<u8>();
         let syscall_id = msg.syscall_id;
         let arg = msg.arg;
@@ -548,32 +612,6 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                 let crc = hasher.finalize();
                 buf[..4].copy_from_slice(&crc.to_le_bytes());
                 4 // Output length
-            }
-
-            // --- Derivation policy ---
-            // The child declares its upstream PATH_APP_LOAD_PARAMS once at startup: buf holds
-            // one [len][element...] group per root (big-endian u32), arg the root count.
-            SYSCALL_DECLARE_DERIVATION_ROOTS_ID => {
-                let mut elements = buf
-                    .chunks_exact(4)
-                    .map(|element| u32::from_be_bytes(element.try_into().unwrap_or_default()));
-                let roots = (0..arg)
-                    .map(|_| {
-                        // An empty root is a prefix of every path, so it would allow everything.
-                        let len = elements
-                            .next()
-                            .filter(|len| (1..=MAX_BIP32_PATH_LEN).contains(&(*len as usize)))?;
-                        (0..len).map(|_| elements.next()).collect::<Option<Vec<_>>>()
-                    })
-                    .collect::<Option<Vec<_>>>();
-
-                match roots.map(|roots| declare_derivation_roots(sender, roots)) {
-                    Some(true) => 0,
-                    _ => {
-                        log::warn!("Derivation roots from PID {sender:?} not stored");
-                        usize::MAX
-                    }
-                }
             }
 
             // --- BIP32 key derivation ---
@@ -599,16 +637,12 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
 
                 log::debug!("BIP32 derivation path: {:08X?}", path);
 
-                if !derivation_allowed(sender, &path) {
+                if !self.derivation_allowed(sender, &path) {
                     return usize::MAX;
                 }
 
-                let app_seed = match get_app_seed() {
-                    Ok(seed) => seed,
-                    Err(e) => {
-                        log::warn!("BIP32 derivation unavailable: {:?}", e);
-                        return usize::MAX;
-                    }
+                let Some(app_seed) = get_app_seed() else {
+                    return usize::MAX;
                 };
                 match keys::derive_bip32(&app_seed, &path, keys::curves::CX_CURVE_SECP256K1) {
                     Ok((mut private_key, mut chain_code)) => {
@@ -662,16 +696,12 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                     path
                 );
 
-                if !derivation_allowed(sender, &path) {
+                if !self.derivation_allowed(sender, &path) {
                     return usize::MAX;
                 }
 
-                let app_seed = match get_app_seed() {
-                    Ok(seed) => seed,
-                    Err(e) => {
-                        log::warn!("derive_node_with_seed_key: seed unavailable: {:?}", e);
-                        return usize::MAX;
-                    }
+                let Some(app_seed) = get_app_seed() else {
+                    return usize::MAX;
                 };
                 let result = match mode {
                     1 => {
@@ -716,9 +746,14 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
     fn handle(
         &mut self,
         msg: server::Owned<SendSeph>,
-        _sender: xous::PID,
+        sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) {
+        if !self.is_registered(sender) {
+            log::debug!("SendSeph from unregistered PID {sender:?} dropped");
+            return;
+        }
+
         let Ok(msg) = msg.deserialize() else { return };
         let Some(pkt) = SephPacket::parse(msg.0.as_slice()) else {
             return;
@@ -726,21 +761,8 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
         log::trace!("SendSeph: tag={:?} ({} bytes payload)", pkt.tag, pkt.data.len());
         match pkt.tag {
             SephTag::GeneralStatus => {
-                if pkt.data == [0x00, 0x00] {
-                    // SDK signals "ready for next event". Push a TickerEvent only if
-                    // the FIFO is empty AND enough time has elapsed since the last tick
-                    // (100ms, matching real hardware). This prevents a tight
-                    // busy-loop that starves other KeyOS processes.
-                    if let Ok(fifo) = SEPH_FIFO.read() {
-                        if fifo.is_empty() && self.last_ticker.elapsed() >= TICKER_INTERVAL {
-                            drop(fifo);
-                            if let Ok(mut fifo) = SEPH_FIFO.write() {
-                                fifo.push_back(vec![SephTag::TickerEvent.into(), 0, 0]);
-                                self.last_ticker = Instant::now();
-                            }
-                        }
-                    }
-                } else {
+                // [0, 0] is the SDK's "ready for next event", which RecvSeph answers with a tick.
+                if pkt.data != [0x00, 0x00] {
                     log::error!("Unexpected General Status ({} bytes)", pkt.data.len());
                     log::trace!("General Status: {pkt:02x?}");
                 }
@@ -748,15 +770,13 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
             SephTag::ScreenDisplayStatus | SephTag::DbgScreenDisplayStatus | SephTag::BaglDrawRect => {
                 log::trace!("Screen Display Status: {:02x?}", pkt.data);
                 if pkt.tag != SephTag::BaglDrawRect {
-                    let mut fifo = SEPH_FIFO.write().unwrap();
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
+                    self.push_event(SephTag::DisplayProcessedEvent, &[]);
                 }
             }
             SephTag::ScreenDisplayRawStatus | SephTag::BaglDrawBitmap => {
                 log::trace!("Screen Display Raw Status: {:02x?}", pkt.data);
                 if pkt.tag != SephTag::BaglDrawBitmap {
-                    let mut fifo = SEPH_FIFO.write().unwrap();
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
+                    self.push_event(SephTag::DisplayProcessedEvent, &[]);
                 }
             }
             SephTag::PrintcStatus | SephTag::PrintfStatus => {
@@ -765,13 +785,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
             SephTag::Rapdu => {
                 log::trace!("Rapdu ({} bytes): {:02x?}", pkt.data.len(), pkt.data);
                 #[cfg(keyos)]
-                {
-                    let channel_id = next_response_channel();
-                    log::debug!("Rapdu: forwarding via legacy-hid channel_id=0x{channel_id:04x}");
-                    if let Err(e) = self.legacy_hid.write_apdu(channel_id, pkt.data.to_vec()) {
-                        log::error!("Rapdu: legacy-hid write failed: {e:?}");
-                    }
-                }
+                self.respond(pkt.data.to_vec());
             }
             SephTag::UsbConfig => {
                 log::trace!("UsbConfig: {:02x?}", pkt.data);
@@ -800,10 +814,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                                 );
                                 return;
                             };
-                            let channel_id = next_response_channel();
-                            if let Err(e) = self.legacy_hid.write_apdu(channel_id, payload.to_vec()) {
-                                log::error!("UsbEpPrepare(HID): legacy-hid write failed: {e:?}");
-                            }
+                            self.respond(payload.to_vec());
                         }
                     }
                     0x83 => log::trace!("UsbEpPrepare(WebUSB): ignored — WebUSB not enabled"),
@@ -820,16 +831,12 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                     return;
                 };
                 draw_rect(area.x0, area.y0, area.width, area.height, (area.color as u32) * 0x555555);
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglRefresh => {
                 log::trace!("NbglRefresh");
                 display::refresh();
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglDrawLine => {
                 log::trace!("NbglDrawLine: {:02x?}", pkt.data);
@@ -841,9 +848,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                 let line_color = (pkt.data.last().copied().unwrap_or_default() as u32) * 0x555555;
                 // Fill the area with lineColor (dotStartIdx ignored — solid line).
                 draw_rect(area.x0, area.y0, area.width, area.height, line_color);
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglDrawImage => {
                 log::trace!("NbglDrawImage: {:02x?}", pkt.data);
@@ -885,9 +890,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                 let transformation = pkt.data[10 + buffer_size];
                 let color_map = pkt.data[10 + buffer_size + 1];
                 draw_image(area, bpp, transformation, buffer, color_map);
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglDrawImageFile => {
                 // Payload: area(10) + color_map(1) + image_file_header(8) + compressed/raw data
@@ -1003,9 +1006,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                         log::warn!("NbglDrawImageFile: unsupported compression={compression}");
                     }
                 }
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglDrawImageRle => {
                 if pkt.data.len() < 12 {
@@ -1038,9 +1039,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                     rle_data.len()
                 );
                 draw_image_rle(area, bpp, fore_color, rle_data, nb_skipped_bytes);
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             SephTag::NbglDrawText => {
                 // Packet: [area:10B BE][fontId:1B][fontColor:1B][textLen:2B BE][text:N bytes]
@@ -1068,9 +1067,7 @@ impl server::ArchiveHandler<SendSeph> for FluxServer {
                     area.height
                 );
                 display::draw_text_native(area, font_id, font_color, &text);
-                if let Ok(mut fifo) = SEPH_FIFO.write() {
-                    fifo.push_back(vec![SephTag::DisplayProcessedEvent.into(), 0, 0]);
-                }
+                self.push_event(SephTag::DisplayProcessedEvent, &[]);
             }
             _ => {
                 log::warn!("Unmanaged SEPH pkt: tag={:?}", pkt.tag);
@@ -1087,60 +1084,25 @@ impl BlockingArchiveHandler<RecvSeph> for FluxServer {
         sender: xous::PID,
         _context: &mut server::ServerContext<Self>,
     ) -> <RecvSeph as BlockingArchive>::Response {
-        let mut fifo = SEPH_FIFO.write().unwrap();
-        // Only a child that declared what it may derive takes a host command. Leave it queued
-        // for one that has rather than let a child predating the declaration answer it out of
-        // its uninitialized key buffer; the child's other SEPH traffic still flows, so an
-        // undeclared one keeps running, it just never speaks to the host.
-        let command_next =
-            fifo.front().is_some_and(|pkt| pkt.first().copied() == Some(SephTag::CapduEvent.into()));
-        if command_next && !child_declared(sender) {
+        if !self.is_registered(sender) {
             return None;
         }
 
-        if let Some(pkt) = fifo.pop_front() {
-            if pkt.len() <= msg.0 {
-                log::trace!(
-                    "RecvSeph: delivering {} bytes: {:02x?} (fifo_remaining={})",
-                    pkt.len(),
-                    pkt,
-                    fifo.len()
-                );
-                // A delivered CapduEvent's channel moves from the queued list to the
-                // pending-response list, so its Rapdu frames on this command's channel
-                // and a later dropped command can't disturb it.
-                #[cfg(keyos)]
-                if pkt.first().copied() == Some(SephTag::CapduEvent.into()) {
-                    if let (Ok(mut queued), Ok(mut pending)) = (QUEUED_CHANNELS.write(), CHANNEL_FIFO.write())
-                    {
-                        if let Some(channel) = queued.pop_front() {
-                            pending.push_back(channel);
-                        }
-                    }
-                }
-                return Some(pkt);
+        let (packet, channel) = match self.events.pop_front() {
+            Some(event) => event,
+            // At most every TICKER_INTERVAL, or a child polling an empty queue busy-loops.
+            None if self.last_ticker.elapsed() >= TICKER_INTERVAL => {
+                self.last_ticker = Instant::now();
+                (seph_packet(SephTag::TickerEvent, &[]), None)
             }
-            log::warn!("RecvSeph: packet too large ({} > maxlen={}), dropping", pkt.len(), msg.0);
-            // A dropped CapduEvent never reaches the child, so no Rapdu will consume
-            // its channel; pop this command's own queued channel (at the front of
-            // QUEUED_CHANNELS, in step with SEPH_FIFO) rather than the front of the
-            // pending-response list, which may belong to an earlier in-flight command.
-            #[cfg(keyos)]
-            if pkt.first().copied() == Some(SephTag::CapduEvent.into()) {
-                if let Ok(mut channels) = QUEUED_CHANNELS.write() {
-                    channels.pop_front();
-                }
-            }
-        } else if self.last_ticker.elapsed() >= TICKER_INTERVAL {
-            // FIFO empty and ticker interval elapsed — synthesize a TickerEvent.
-            // This runs during polling so the app doesn't have to wait for
-            // the next GeneralStatus to get a tick.
-            self.last_ticker = Instant::now();
-            let pkt = vec![SephTag::TickerEvent.into(), 0, 0];
-            if pkt.len() <= msg.0 {
-                return Some(pkt);
-            }
+            None => return None,
+        };
+        if packet.len() > msg.0 {
+            log::warn!("RecvSeph: packet too large ({} > maxlen={}), dropping", packet.len(), msg.0);
+            return None;
         }
-        None
+        log::trace!("RecvSeph: delivering {} bytes: {packet:02x?}", packet.len());
+        self.response_channels.extend(channel);
+        Some(packet)
     }
 }

@@ -12,7 +12,7 @@ use std::sync::{LazyLock, OnceLock, RwLock};
 
 use ab_glyph::{Font, FontRef, ScaleFont};
 
-use super::{NbglArea, SephTag, SEPH_FIFO};
+use super::NbglArea;
 
 pub const DISPLAY_WIDTH: usize = 480;
 pub const DISPLAY_HEIGHT: usize = 600;
@@ -56,10 +56,7 @@ pub fn init(cb: impl Fn(Frame) + Send + Sync + 'static) {
 
 /// Fill a rectangle in the framebuffer. `color` is `0x00RRGGBB`.
 pub fn draw_rect(x0: u16, y0: u16, width: u16, height: u16, color: u32) {
-    let Ok(mut buf) = DISPLAY_BUFFER.write() else {
-        log::warn!("draw_rect: could not acquire write lock");
-        return;
-    };
+    let mut buf = DISPLAY_BUFFER.write().unwrap();
 
     let pixel = color_to_pixel(color);
     let x_start = (x0 as usize).min(DISPLAY_WIDTH);
@@ -111,10 +108,7 @@ pub(crate) fn draw_image(area: NbglArea, bpp: u8, transformation: u8, buffer: &[
     }
 
     // Apply transformation and blit with column-first transpose.
-    let Ok(mut buf) = DISPLAY_BUFFER.write() else {
-        log::warn!("draw_image: could not acquire write lock");
-        return;
-    };
+    let mut buf = DISPLAY_BUFFER.write().unwrap();
 
     let x0 = area.x0 as usize;
     let y0 = area.y0 as usize;
@@ -188,11 +182,7 @@ pub fn refresh() {
         return;
     };
 
-    let is_dark = IS_DARK_MODE.load(Ordering::Relaxed);
-    let Some(frame) = snapshot_frame("display::refresh", is_dark) else {
-        return;
-    };
-    cb(frame);
+    cb(snapshot_frame(IS_DARK_MODE.load(Ordering::Relaxed)));
 }
 
 /// Register a callback invoked after `reset()` clears the display.
@@ -205,52 +195,19 @@ pub fn on_reset(cb: impl Fn() + Send + Sync + 'static) {
     }
 }
 
-/// Clear the framebuffer and notify the reset callback.
+/// Clear the framebuffer to the background color (white in light mode, #212121 in dark mode)
+/// and notify the reset callback.
 ///
 /// Called from the server thread when the Flux app process disconnects.
 pub fn reset() {
-    clear();
+    let background = if IS_DARK_MODE.load(Ordering::Relaxed) { DARK_BACKGROUND } else { WHITE };
+    DISPLAY_BUFFER.write().unwrap().fill(background);
 
     if let Some(refresh_cb) = REFRESH_CALLBACK.get() {
-        if let Some(frame) = snapshot_frame("display::reset", false) {
-            refresh_cb(frame);
-        }
+        refresh_cb(snapshot_frame(false));
     }
     if let Some(reset_cb) = RESET_CALLBACK.get() {
         reset_cb();
-    }
-}
-
-/// Fill buffer with the background color: white in light mode, #212121 in dark mode.
-pub fn clear() {
-    if let Ok(mut buf) = DISPLAY_BUFFER.write() {
-        let is_dark = IS_DARK_MODE.load(Ordering::Relaxed);
-        if is_dark {
-            buf.fill(DARK_BACKGROUND);
-        } else {
-            buf.fill(WHITE);
-        }
-    }
-}
-
-/// Build a SEPH FingerEvent TLV and push it to `SEPH_FIFO`.
-///
-/// Format: `[0x0c, 0x00, 0x05, state, x_hi, x_lo, y_hi, y_lo]`
-/// State: 1 = pressed, 0 = released.
-pub fn push_touch_event(x: i16, y: i16, state: u8) {
-    let x_bytes = x.to_be_bytes();
-    let y_bytes = y.to_be_bytes();
-    let pkt =
-        vec![SephTag::FingerEvent.into(), 0x00, 0x05, state, x_bytes[0], x_bytes[1], y_bytes[0], y_bytes[1]];
-
-    if let Ok(mut fifo) = SEPH_FIFO.write() {
-        log::trace!(
-            "push_touch_event: x={x}, y={y}, state={state}, pkt={pkt:02x?}, fifo_len={}",
-            fifo.len() + 1
-        );
-        fifo.push_back(pkt);
-    } else {
-        log::error!("push_touch_event: failed to acquire SEPH_FIFO write lock");
     }
 }
 
@@ -281,15 +238,12 @@ fn invert_pixel(pixel: Pixel) -> Pixel {
     }
 }
 
-fn snapshot_frame(context: &str, invert: bool) -> Option<Frame> {
-    let Ok(buf) = DISPLAY_BUFFER.read() else {
-        log::warn!("{context}: could not acquire read lock");
-        return None;
-    };
+fn snapshot_frame(invert: bool) -> Frame {
+    let buf = DISPLAY_BUFFER.read().unwrap();
     if invert {
-        Some(buf.iter().copied().map(invert_pixel).collect())
+        buf.iter().copied().map(invert_pixel).collect()
     } else {
-        Some(buf.clone())
+        buf.clone()
     }
 }
 
@@ -449,10 +403,7 @@ pub(crate) fn draw_image_rle(area: NbglArea, bpp: u8, fore_color: u8, buffer: &[
     let skip = nb_skipped_bytes as usize;
 
     // Transpose column-first → row-major and blit.
-    let Ok(mut buf) = DISPLAY_BUFFER.write() else {
-        log::warn!("draw_image_rle: could not acquire write lock");
-        return;
-    };
+    let mut buf = DISPLAY_BUFFER.write().unwrap();
 
     let mut pixel_idx = skip;
     // Column-first order: col goes from (width-1) down to 0,
@@ -626,9 +577,7 @@ pub(crate) fn draw_text_native(area: NbglArea, font_id: u8, font_color: u8, text
     let scaled = font.as_scaled(px_size);
     let ascent = scaled.ascent();
 
-    let Ok(mut buf) = DISPLAY_BUFFER.write() else {
-        return;
-    };
+    let mut buf = DISPLAY_BUFFER.write().unwrap();
 
     let mut cursor_x = area.x0 as f32;
     let baseline_y = area.y0 as f32 + ascent;

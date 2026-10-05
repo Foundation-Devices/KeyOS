@@ -10,7 +10,7 @@
 // Allow unused constants and functions that are part of the SDK API surface.
 #![allow(dead_code, non_upper_case_globals)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{LazyLock, RwLock};
 
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
@@ -49,50 +49,20 @@ extern "C" {
 const CX_AES_ENCRYPT: u32 = 2 << 1;
 const CX_AES_CHAIN_CBC: u32 = 1 << 6;
 
-struct PtrMap {
-    name: &'static str,
-    map: RwLock<HashMap<usize, u32>>,
-}
+struct PtrMap(RwLock<BTreeMap<usize, u32>>);
 
 impl PtrMap {
-    fn new(name: &'static str) -> Self { Self { name, map: RwLock::new(HashMap::new()) } }
+    const fn new() -> Self { Self(RwLock::new(BTreeMap::new())) }
 
-    fn get(&self, ptr: usize) -> Result<Option<u32>, u32> {
-        match self.map.read() {
-            Ok(map) => Ok(map.get(&ptr).copied()),
-            Err(e) => {
-                let name = self.name;
-                log::error!("{name}: context map read lock poisoned: {e:?}");
-                Err(CX_INTERNAL_ERROR)
-            }
-        }
-    }
+    fn get(&self, ptr: usize) -> Option<u32> { self.0.read().unwrap().get(&ptr).copied() }
 
-    fn insert(&self, ptr: usize, ctx_id: u32) -> Result<Option<u32>, u32> {
-        match self.map.write() {
-            Ok(mut map) => Ok(map.insert(ptr, ctx_id)),
-            Err(e) => {
-                let name = self.name;
-                log::error!("{name}: context map write lock poisoned: {e:?}");
-                Err(CX_INTERNAL_ERROR)
-            }
-        }
-    }
+    fn insert(&self, ptr: usize, ctx_id: u32) -> Option<u32> { self.0.write().unwrap().insert(ptr, ctx_id) }
 
-    fn remove(&self, ptr: usize) -> Result<Option<u32>, u32> {
-        match self.map.write() {
-            Ok(mut map) => Ok(map.remove(&ptr)),
-            Err(e) => {
-                let name = self.name;
-                log::error!("{name}: context map write lock poisoned: {e:?}");
-                Err(CX_INTERNAL_ERROR)
-            }
-        }
-    }
+    fn remove(&self, ptr: usize) -> Option<u32> { self.0.write().unwrap().remove(&ptr) }
 }
 
 /// Mapping from C EC key pointer address to our internal context ID.
-static KEY_PTR_MAP: LazyLock<PtrMap> = LazyLock::new(|| PtrMap::new("KEY_PTR_MAP"));
+static KEY_PTR_MAP: PtrMap = PtrMap::new();
 
 /// ABI-correct layout of `cx_ecfp_256_private_key_t` (C struct with `-fshort-enums`).
 /// Uses `#[repr(C)]` so the compiler inserts correct padding for the target:
@@ -138,27 +108,18 @@ const CX_FLAG_NO_REINIT: u32 = 0x0010;
 /// Mapping from C hash context pointer address to our internal context ID.
 /// The C code passes us a pointer to its own cx_hash_t struct; we use the
 /// pointer value (as usize) as a key to look up our Rust hash context.
-static HASH_PTR_MAP: LazyLock<PtrMap> = LazyLock::new(|| PtrMap::new("HASH_PTR_MAP"));
+static HASH_PTR_MAP: PtrMap = PtrMap::new();
 
 /// Mapping from C HMAC context pointer address to our internal context ID.
-static HMAC_PTR_MAP: LazyLock<PtrMap> = LazyLock::new(|| PtrMap::new("HMAC_PTR_MAP"));
+static HMAC_PTR_MAP: PtrMap = PtrMap::new();
 
 // ============================================================================
 // Hash Functions
 // ============================================================================
 
-fn install_hash_ctx(hash: *mut u8, ctx_id: u32) -> u32 {
-    match HASH_PTR_MAP.insert(hash as usize, ctx_id) {
-        Ok(previous) => {
-            if let Some(previous) = previous {
-                let _ = crate::hash::hash_destroy(previous);
-            }
-            CX_OK
-        }
-        Err(err) => {
-            let _ = crate::hash::hash_destroy(ctx_id);
-            err
-        }
+fn install_hash_ctx(hash: *mut u8, ctx_id: u32) {
+    if let Some(previous) = HASH_PTR_MAP.insert(hash as usize, ctx_id) {
+        let _ = crate::hash::hash_destroy(previous);
     }
 }
 
@@ -173,7 +134,8 @@ pub unsafe extern "C" fn cx_keccak_init_no_throw(hash: *mut u8, size: u32) -> u3
 
     let ctx_id = crate::hash::keccak_init();
     log::debug!("cx_keccak_init_no_throw: hash={:p}, size={}, ctx_id={}", hash, size, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_sha3_init_no_throw(cx_sha3_t *hash, size_t size)
@@ -189,7 +151,8 @@ pub unsafe extern "C" fn cx_sha3_init_no_throw(hash: *mut u8, size: u32) -> u32 
 
     let ctx_id = crate::hash::sha3_256_init();
     log::debug!("cx_sha3_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_ripemd160_init_no_throw(cx_ripemd160_t *hash)
@@ -201,7 +164,8 @@ pub unsafe extern "C" fn cx_ripemd160_init_no_throw(hash: *mut u8) -> u32 {
 
     let ctx_id = crate::hash::ripemd160_init();
     log::debug!("cx_ripemd160_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_sha224_init_no_throw(cx_sha256_t *hash)
@@ -213,7 +177,8 @@ pub unsafe extern "C" fn cx_sha224_init_no_throw(hash: *mut u8) -> u32 {
 
     let ctx_id = crate::hash::sha224_init();
     log::debug!("cx_sha224_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_sha256_init_no_throw(cx_sha256_t *hash)
@@ -225,7 +190,8 @@ pub unsafe extern "C" fn cx_sha256_init_no_throw(hash: *mut u8) -> u32 {
 
     let ctx_id = crate::hash::sha256_init();
     log::debug!("cx_sha256_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_sha512_init_no_throw(cx_sha512_t *hash)
@@ -237,7 +203,8 @@ pub unsafe extern "C" fn cx_sha512_init_no_throw(hash: *mut u8) -> u32 {
 
     let ctx_id = crate::hash::sha512_init();
     log::debug!("cx_sha512_init_no_throw: hash={:p}, ctx_id={}", hash, ctx_id);
-    install_hash_ctx(hash, ctx_id)
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
 }
 
 /// cx_hash_no_throw(cx_hash_t *hash, uint32_t mode,
@@ -257,13 +224,9 @@ pub unsafe extern "C" fn cx_hash_no_throw(
         return CX_INVALID_PARAMETER;
     }
 
-    let ctx_id = match HASH_PTR_MAP.get(hash_ctx as usize) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            log::warn!("cx_hash_no_throw: unknown hash context {:p}", hash_ctx);
-            return CX_INVALID_PARAMETER;
-        }
-        Err(err) => return err,
+    let Some(ctx_id) = HASH_PTR_MAP.get(hash_ctx as usize) else {
+        log::warn!("cx_hash_no_throw: unknown hash context {:p}", hash_ctx);
+        return CX_INVALID_PARAMETER;
     };
 
     // Update with input data if any
@@ -288,7 +251,7 @@ pub unsafe extern "C" fn cx_hash_no_throw(
             Ok((_, expected_len)) => expected_len,
             Err(e) => {
                 log::warn!("cx_hash_no_throw: hash_info failed: {:?}", e);
-                let _ = HASH_PTR_MAP.remove(hash_ctx as usize);
+                HASH_PTR_MAP.remove(hash_ctx as usize);
                 return CX_INTERNAL_ERROR;
             }
         };
@@ -301,13 +264,13 @@ pub unsafe extern "C" fn cx_hash_no_throw(
             Ok(digest) => {
                 core::ptr::copy_nonoverlapping(digest.as_ptr(), out, digest.len());
                 if mode & CX_FLAG_NO_REINIT != 0 {
-                    let _ = HASH_PTR_MAP.remove(hash_ctx as usize);
+                    HASH_PTR_MAP.remove(hash_ctx as usize);
                 }
                 log::debug!("cx_hash_no_throw: finalized ctx_id={}, digest_len={}", ctx_id, digest.len());
             }
             Err(e) => {
                 log::warn!("cx_hash_no_throw: finalize failed: {:?}", e);
-                let _ = HASH_PTR_MAP.remove(hash_ctx as usize);
+                HASH_PTR_MAP.remove(hash_ctx as usize);
                 return CX_INTERNAL_ERROR;
             }
         }
@@ -353,9 +316,8 @@ pub unsafe extern "C" fn cx_hash_get_size(ctx: *const u8) -> u32 {
     if ctx.is_null() {
         return 0;
     }
-    let ctx_id = match HASH_PTR_MAP.get(ctx as usize) {
-        Ok(Some(id)) => id,
-        Ok(None) | Err(_) => return 0,
+    let Some(ctx_id) = HASH_PTR_MAP.get(ctx as usize) else {
+        return 0;
     };
     match crate::hash::hash_info(ctx_id) {
         Ok((_, size)) => size as u32,
@@ -458,13 +420,8 @@ pub unsafe extern "C" fn cx_hmac_sha256_init_no_throw(
         if key_len > 0 && !key.is_null() { core::slice::from_raw_parts(key, key_len as usize) } else { &[] };
 
     let ctx_id = crate::hmac::hmac_sha256_init(key_data);
-    if let Err(err) = HMAC_PTR_MAP.insert(hmac_ctx as usize, ctx_id).map(|old_ctx| {
-        if let Some(old_ctx) = old_ctx {
-            let _ = crate::hmac::hmac_destroy(old_ctx);
-        }
-    }) {
-        let _ = crate::hmac::hmac_destroy(ctx_id);
-        return err;
+    if let Some(old_ctx) = HMAC_PTR_MAP.insert(hmac_ctx as usize, ctx_id) {
+        let _ = crate::hmac::hmac_destroy(old_ctx);
     }
 
     log::debug!("cx_hmac_sha256_init_no_throw: ctx={:p}, key_len={}, ctx_id={}", hmac_ctx, key_len, ctx_id);
@@ -486,13 +443,8 @@ pub unsafe extern "C" fn cx_hmac_sha512_init_no_throw(
         if key_len > 0 && !key.is_null() { core::slice::from_raw_parts(key, key_len as usize) } else { &[] };
 
     let ctx_id = crate::hmac::hmac_sha512_init(key_data);
-    if let Err(err) = HMAC_PTR_MAP.insert(hmac_ctx as usize, ctx_id).map(|old_ctx| {
-        if let Some(old_ctx) = old_ctx {
-            let _ = crate::hmac::hmac_destroy(old_ctx);
-        }
-    }) {
-        let _ = crate::hmac::hmac_destroy(ctx_id);
-        return err;
+    if let Some(old_ctx) = HMAC_PTR_MAP.insert(hmac_ctx as usize, ctx_id) {
+        let _ = crate::hmac::hmac_destroy(old_ctx);
     }
 
     log::debug!("cx_hmac_sha512_init_no_throw: ctx={:p}, key_len={}, ctx_id={}", hmac_ctx, key_len, ctx_id);
@@ -514,13 +466,9 @@ pub unsafe extern "C" fn cx_hmac_no_throw(
         return CX_INVALID_PARAMETER;
     }
 
-    let ctx_id = match HMAC_PTR_MAP.get(hmac_ctx as usize) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            log::warn!("cx_hmac_no_throw: unknown HMAC context {:p}", hmac_ctx);
-            return CX_INVALID_PARAMETER;
-        }
-        Err(err) => return err,
+    let Some(ctx_id) = HMAC_PTR_MAP.get(hmac_ctx as usize) else {
+        log::warn!("cx_hmac_no_throw: unknown HMAC context {:p}", hmac_ctx);
+        return CX_INVALID_PARAMETER;
     };
 
     // Update with input data if any
@@ -538,14 +486,14 @@ pub unsafe extern "C" fn cx_hmac_no_throw(
     // Finalize if CX_LAST flag is set
     if mode & CX_FLAG_LAST != 0 {
         if mac.is_null() {
-            let _ = HMAC_PTR_MAP.remove(hmac_ctx as usize);
+            HMAC_PTR_MAP.remove(hmac_ctx as usize);
             let _ = crate::hmac::hmac_destroy(ctx_id);
             return CX_INVALID_PARAMETER;
         }
 
         match crate::hmac::hmac_final(ctx_id) {
             Ok(result) => {
-                let _ = HMAC_PTR_MAP.remove(hmac_ctx as usize);
+                HMAC_PTR_MAP.remove(hmac_ctx as usize);
                 if (mac_len as usize) < result.len() {
                     log::warn!("cx_hmac_no_throw: output buffer too small: {} < {}", mac_len, result.len());
                     return CX_INVALID_PARAMETER_SIZE;
@@ -554,7 +502,7 @@ pub unsafe extern "C" fn cx_hmac_no_throw(
             }
             Err(e) => {
                 log::warn!("cx_hmac_no_throw: finalize failed: {:?}", e);
-                let _ = HMAC_PTR_MAP.remove(hmac_ctx as usize);
+                HMAC_PTR_MAP.remove(hmac_ctx as usize);
                 return CX_INTERNAL_ERROR;
             }
         }
@@ -731,27 +679,17 @@ pub unsafe extern "C" fn cx_ecfp_init_private_key_no_throw(
         let raw = core::slice::from_raw_parts(rawkey, 32);
         let ctx_id = keys::init_private_key(curve as u8, raw);
         if ctx_id > 0 {
-            match KEY_PTR_MAP.insert(pvkey as usize, ctx_id) {
-                Ok(Some(old_ctx)) => {
-                    let _ = keys::destroy_ec_context(old_ctx);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    let _ = keys::destroy_ec_context(ctx_id);
-                    return err;
-                }
+            if let Some(old_ctx) = KEY_PTR_MAP.insert(pvkey as usize, ctx_id) {
+                let _ = keys::destroy_ec_context(old_ctx);
             }
         } else {
-            let _ = KEY_PTR_MAP
-                .remove(pvkey as usize)
-                .map(|old_ctx| old_ctx.map(|old_ctx| keys::destroy_ec_context(old_ctx)));
+            if let Some(old_ctx) = KEY_PTR_MAP.remove(pvkey as usize) {
+                let _ = keys::destroy_ec_context(old_ctx);
+            }
             return CX_INVALID_PARAMETER;
         }
-    } else if let Err(err) = KEY_PTR_MAP
-        .remove(pvkey as usize)
-        .map(|old_ctx| old_ctx.map(|old_ctx| keys::destroy_ec_context(old_ctx)))
-    {
-        return err;
+    } else if let Some(old_ctx) = KEY_PTR_MAP.remove(pvkey as usize) {
+        let _ = keys::destroy_ec_context(old_ctx);
     }
 
     log::debug!(
@@ -854,15 +792,8 @@ pub unsafe extern "C" fn cx_ecfp_generate_pair_no_throw(
             core::ptr::copy_nonoverlapping(pk.as_ptr(), pub_key.w.as_mut_ptr(), pk.len());
 
             // Store mapping for later use in sign/verify
-            match KEY_PTR_MAP.insert(privkey as usize, ctx_id) {
-                Ok(Some(old_ctx)) => {
-                    let _ = keys::destroy_ec_context(old_ctx);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    let _ = keys::destroy_ec_context(ctx_id);
-                    return err;
-                }
+            if let Some(old_ctx) = KEY_PTR_MAP.insert(privkey as usize, ctx_id) {
+                let _ = keys::destroy_ec_context(old_ctx);
             }
 
             log::debug!("cx_ecfp_generate_pair_no_throw: pubkey_len={}, privkey={:p}", pk.len(), privkey);
@@ -928,26 +859,14 @@ pub unsafe extern "C" fn cx_ecdsa_sign_no_throw(
 
     // Get or create EC context
     let ctx_id = match KEY_PTR_MAP.get(pvkey as usize) {
-        Ok(ctx_id) => ctx_id,
-        Err(err) => return err,
-    };
-
-    let ctx_id = match ctx_id {
         Some(id) => id,
         None => {
             let id = keys::init_private_key(curve as u8, d);
             if id == 0 {
                 return CX_INTERNAL_ERROR;
             }
-            match KEY_PTR_MAP.insert(pvkey as usize, id) {
-                Ok(Some(old_ctx)) => {
-                    let _ = keys::destroy_ec_context(old_ctx);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    let _ = keys::destroy_ec_context(id);
-                    return err;
-                }
+            if let Some(old_ctx) = KEY_PTR_MAP.insert(pvkey as usize, id) {
+                let _ = keys::destroy_ec_context(old_ctx);
             }
             id
         }
@@ -1008,25 +927,14 @@ pub unsafe extern "C" fn cx_ecdsa_sign_rs_no_throw(
     let d = &priv_key.d;
 
     let ctx_id = match KEY_PTR_MAP.get(pvkey as usize) {
-        Ok(ctx_id) => ctx_id,
-        Err(err) => return err,
-    };
-    let ctx_id = match ctx_id {
         Some(id) => id,
         None => {
             let id = keys::init_private_key(curve as u8, d);
             if id == 0 {
                 return CX_INTERNAL_ERROR;
             }
-            match KEY_PTR_MAP.insert(pvkey as usize, id) {
-                Ok(Some(old_ctx)) => {
-                    let _ = keys::destroy_ec_context(old_ctx);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    let _ = keys::destroy_ec_context(id);
-                    return err;
-                }
+            if let Some(old_ctx) = KEY_PTR_MAP.insert(pvkey as usize, id) {
+                let _ = keys::destroy_ec_context(old_ctx);
             }
             id
         }

@@ -9,3 +9,4 @@
 SendSeph = { id = 1, type = "archive" }
 RecvSeph = { id = 2, type = "blockingArchive" }
 SyscallBuffer = { id = 3, type = "lendMut" }
+RegisterChild = { id = 4, type = "blockingArchive" }

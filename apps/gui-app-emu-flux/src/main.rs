@@ -21,7 +21,7 @@ use slint_keyos_platform::{
 use slint_keyos_platform::{gui_server_api::InputMessage, spawn_local, subscribe_archive};
 use xous::PID;
 
-use crate::flux::FluxServer;
+use crate::flux::{FluxConn, FluxServer, LaunchChild, Touch};
 
 /// How the Legacy Mode seed was configured.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -147,53 +147,18 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     // Wait for encrypted user filesystem (mounted after PIN unlock)
     cx.fs.wait_for_filesystem(fs::Location::AppData);
 
-    let _conn = server::listen_and_connect(FluxServer::default(), xous::current_pid().unwrap());
+    let flux_conn: FluxConn =
+        server::listen_and_connect(FluxServer::default(), xous::current_pid().unwrap()).into();
 
-    // Client into the legacy-hid server for outbound APDUs and the Legacy USB
-    // identity toggle. Held by the Slint event loop; FluxServer keeps its
-    // own copy for the `Rapdu` write path.
+    // Client into the legacy-hid server for the Legacy USB identity toggle; FluxServer keeps
+    // its own for host commands and responses.
     #[cfg(keyos)]
     let legacy_hid = Rc::new(LegacyHidApi::default());
 
     // One authoritative place for the installable Flux apps and the running children. The
     // Legacy USB identity is switched directly from the emulator window's Visible/Hidden
-    // events below; the inbound-APDU pump reads `running` as its "is one of ours on screen?"
-    // gate.
+    // events below.
     let app_state = Rc::new(RefCell::new(AppState { possible: Vec::new(), running: HashMap::new() }));
-
-    // Pump inbound HID APDUs from legacy-hid into the in-process SEPH_FIFO,
-    // mirroring the behaviour of the old in-process out_thread. We also stash
-    // the channel id so the `Rapdu` handler can frame outgoing replies on the
-    // same HID channel.
-    #[cfg(keyos)]
-    {
-        let legacy_hid_for_apdu = legacy_hid.clone();
-        let app_state_for_apdu = app_state.clone();
-        spawn_local(async move {
-            let mut sub = subscribe_archive::<legacy_hid_permissions::LegacyHidPermissions, _>(
-                legacy_hid::messages::SubscribeIncomingApdu,
-            );
-            while let Some(event) = sub.next().await {
-                let legacy_hid::messages::IncomingApdu { channel_id, data } = event;
-                // App-identification probes are answered here; app commands are
-                // forwarded to the child via the SEPH FIFO.
-                // One undeclared child is enough to hold every command back: the SEPH FIFO is
-                // process-wide and RecvSeph hands a command to whichever child polls first, so a
-                // declared one running alongside cannot vouch for the others.
-                let child_ready = {
-                    let state = app_state_for_apdu.borrow();
-                    !state.running.is_empty()
-                        && state.running.keys().copied().all(crate::flux::child_declared)
-                };
-                if let Some(reply) = crate::flux::push_incoming_apdu(channel_id, &data, child_ready) {
-                    if let Err(e) = legacy_hid_for_apdu.write_apdu(channel_id, reply) {
-                        log::error!("Failed to write app-identification reply: {e:?}");
-                    }
-                }
-            }
-        })
-        .detach();
-    }
 
     // Push the current dark mode state immediately so background threads see the
     // correct value from the very first refresh() call.
@@ -223,10 +188,10 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         .detach();
     });
 
-    ui.global::<Callbacks>().on_display_touched(|x, y, pressed| {
+    let flux_conn_touch = flux_conn.clone();
+    ui.global::<Callbacks>().on_display_touched(move |x, y, pressed| {
         log::trace!("on_display_touched: x={x}, y={y}, pressed={pressed}");
-        let state = if pressed { 1u8 } else { 0u8 };
-        crate::flux::display::push_touch_event(x as i16, y as i16, state);
+        flux_conn_touch.send_scalar(Touch { x: x as i16, y: y as i16, pressed });
     });
 
     let haptics_api = Rc::new(HapticsApi::default());
@@ -324,17 +289,11 @@ fn app_main(cx: AppContext, ui: AppWindow) {
                 match event {
                     app_manager::AppEvent::AppCrashed { pid, exit_code, .. } => {
                         let removed = app_state.borrow_mut().running.remove(&pid).is_some();
-                        // Unconditional: a child the launcher never tracked still declared, and
-                        // its entry would outlive it into the next child on that PID.
-                        crate::flux::forget_child(pid);
                         if removed {
                             // Clear the framebuffer so the emulator menu replaces
                             // the child's last frame; FluxServer's Disconnected
                             // hook isn't reliable on every exit path.
                             crate::flux::display::reset();
-                            // The dead child won't drain its queued APDUs; drop them so the
-                            // next child doesn't inherit its stale input.
-                            crate::flux::clear_fifos();
                             // Surface a non-zero exit in the crash panel rather than
                             // silently dropping the user back to the launcher.
                             if exit_code != 0 {
@@ -675,6 +634,7 @@ fn app_main(cx: AppContext, ui: AppWindow) {
     let haptics_api_clone = haptics_api.clone();
     let app_manager_api_clone = app_manager_api.clone();
     let app_state_clone = app_state.clone();
+    let flux_conn_clone = flux_conn.clone();
     ui.global::<Callbacks>().on_app_clicked(move |id| -> bool {
         haptics_api_clone.click();
 
@@ -684,21 +644,11 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         };
         log::info!("App clicked with id={id}");
 
-        // The Flux child is already running (e.g. the emulator reopened while the
-        // child stayed alive); keep the emulator UI as its GUI and track it like a
-        // fresh launch so the AppCrashed subscriber recognizes it as one of ours.
-        if let Ok(Some(pid)) = xous::app_id_to_pid(&app_id) {
-            if let Some(name) = app_manager_api_clone.app_name_by_pid(pid, tr::get_locale()) {
-                app_state_clone.borrow_mut().running.insert(pid, name);
-            }
-            return true;
-        }
-
-        // Launch the app via app-manager
-        match app_manager_api_clone.launch_app_blocking(&app_id) {
+        // Through FluxServer, so nothing the child sends is handled before its PID is cleared.
+        match flux_conn_clone.send_blocking_scalar(LaunchChild(app_id)) {
             Ok(pid) => {
-                // Track the new Flux child (PID -> name) so on_pid_to_title can
-                // label it and the AppCrashed subscriber recognizes it as ours.
+                // Track the child (PID -> name) so on_pid_to_title can label it and the
+                // AppCrashed subscriber recognizes it as ours.
                 if let Some(name) = app_manager_api_clone.app_name_by_pid(pid, tr::get_locale()) {
                     app_state_clone.borrow_mut().running.insert(pid, name);
                 }
