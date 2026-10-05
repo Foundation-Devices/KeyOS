@@ -30,6 +30,7 @@ mod symbolicate;
 mod system_disk;
 mod tags;
 mod tests;
+mod update_builder;
 mod utils;
 mod xous_arguments;
 
@@ -299,6 +300,16 @@ enum Commands {
         #[command(flatten)]
         build_args: BuildArgs,
     },
+    /// build an unsigned update tar from two signed firmware trees.
+    BuildUpdate(update_builder::Args),
+    /// export the exact system tree from a boot image for update generation.
+    ExportUpdateTree {
+        /// boot image containing the signed system partition.
+        image: PathBuf,
+        /// new directory to write the keyos tree into.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Generate a release tarball from a manifest file.
     GenerateRelease { manifest_file: PathBuf, output_path: PathBuf },
     /// Build the patch bodies a release manifest references.
@@ -313,6 +324,9 @@ enum Commands {
         /// Where the patches are written, at the paths the manifest gives.
         #[arg(long)]
         out: PathBuf,
+        /// encoder strategy: normal or forward.
+        #[arg(long, default_value = "normal")]
+        strategy: update_image::patch::Strategy,
     },
     /// Check crates against both targets (armv7a-unknown-xous-elf and host)
     Check {
@@ -512,11 +526,50 @@ fn main() {
             let built = Builder::new(build_args).build(SigningMode::Developer);
             built.run(&gdb);
         }
+        Commands::BuildUpdate(args) => {
+            if let Err(err) = update_builder::run(args) {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+        }
+        Commands::ExportUpdateTree { image, out } => {
+            fn export<T: fatfs::ReadWriteSeek>(
+                dir: fatfs::Dir<'_, T>,
+                out: &std::path::Path,
+            ) -> anyhow::Result<()> {
+                std::fs::create_dir_all(out)?;
+                for entry in dir.iter() {
+                    let entry = entry?;
+                    let name = entry.file_name();
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+                    let dest = out.join(&name);
+                    if entry.is_dir() {
+                        export(entry.to_dir(), &dest)?;
+                    } else {
+                        std::io::copy(&mut entry.to_file(), &mut std::fs::File::create(&dest)?)?;
+                    }
+                }
+                Ok(())
+            }
+            let result = (|| -> anyhow::Result<()> {
+                anyhow::ensure!(!out.exists(), "output {} already exists", out.display());
+                let mut image = std::fs::File::open(image)?;
+                let fs = fatfs_image::open_partition(&mut image, 1)?;
+                export(fs.root_dir().open_dir("keyos")?, &out.join("keyos"))?;
+                Ok(())
+            })();
+            if let Err(err) = result {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+        }
         Commands::GenerateRelease { manifest_file, output_path } => {
             release_generator::generate_release(&manifest_file, &output_path).unwrap();
         }
-        Commands::BuildPatches { manifest_file, base, new, out } => {
-            release_generator::build_patches(&manifest_file, &base, &new, &out).unwrap();
+        Commands::BuildPatches { manifest_file, base, new, out, strategy } => {
+            release_generator::build_patches(&manifest_file, &base, &new, &out, strategy).unwrap();
         }
         Commands::Check { crates } => {
             check_crates(crates);

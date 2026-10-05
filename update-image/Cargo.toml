@@ -11,8 +11,9 @@ bzip2 = { workspace = true, optional = true }
 qbsdiff = { workspace = true, default-features = false, features = ["zstd"] }
 serde = { version = "1.0.210", features = ["derive"] }
 sha2 = { workspace = true, optional = true }
+zstd = { version = "0.13", optional = true }
 
 [features]
 default = []
 # Build patches as well as apply them. Pulls in libzstd, so host only.
-build = ["dep:bzip2", "dep:sha2", "qbsdiff/bzip2", "qbsdiff/zstd-encode"]
+build = ["dep:bzip2", "dep:sha2", "dep:zstd", "qbsdiff/bzip2", "qbsdiff/zstd-encode"]

@@ -707,6 +707,7 @@ mod tests {
             new_content,
             Version::parse(new_version).unwrap(),
             update_image::patch::Format::Zstd,
+            update_image::patch::Strategy::Normal,
             &mut updiff,
         )
         .unwrap();

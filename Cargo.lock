@@ -14561,6 +14561,7 @@ dependencies = [
  "qbsdiff",
  "serde",
  "sha2",
+ "zstd",
 ]
 
 [[package]]
@@ -16421,6 +16422,7 @@ dependencies = [
  "chrono",
  "clap 4.5.41",
  "colored 2.2.0",
+ "cosign2",
  "crc 1.8.1",
  "dom_query",
  "fatfs",

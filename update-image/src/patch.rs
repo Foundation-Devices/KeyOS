@@ -9,6 +9,30 @@ use sha2::Digest;
 #[cfg(feature = "build")]
 use crate::{Header, Version};
 
+#[cfg(feature = "build")]
+mod forward;
+
+/// host encoder strategy, independent of the device patch format.
+#[cfg(feature = "build")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strategy {
+    Normal,
+    Forward,
+}
+
+#[cfg(feature = "build")]
+impl std::str::FromStr for Strategy {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "normal" => Ok(Self::Normal),
+            "forward" => Ok(Self::Forward),
+            _ => Err("expected normal or forward"),
+        }
+    }
+}
+
 /// Minimum exact-match length. Shorter matches fragment the patch into more
 /// control records, and 48 measures smaller on real firmware than either
 /// direction from it (SFT-7121).
@@ -51,7 +75,7 @@ impl Format {
     }
 }
 
-/// Write a patch turning `old` into `new`, header first.
+/// write a patch turning `old` into `new` using the selected encoder, header first.
 #[cfg(feature = "build")]
 pub fn build<W: Write>(
     old: &[u8],
@@ -59,8 +83,12 @@ pub fn build<W: Write>(
     new: &[u8],
     new_version: Version,
     format: Format,
+    strategy: Strategy,
     mut out: W,
 ) -> io::Result<()> {
+    if strategy == Strategy::Forward && format != Format::Zstd {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "forward requires zstd"));
+    }
     let header = Header {
         old_version,
         old_file_size: old.len() as u64,
@@ -70,6 +98,10 @@ pub fn build<W: Write>(
         new_file_hash: sha2::Sha256::digest(new).into(),
     };
     header.write_to(&mut out)?;
+
+    if strategy == Strategy::Forward {
+        return out.write_all(&forward::build(old, new)?);
+    }
 
     let bsdiff = qbsdiff::Bsdiff::new(old, new).small_match(SMALL_MATCH);
     match format {
@@ -122,6 +154,7 @@ mod tests {
             &new,
             Version::parse("v1.4.0").unwrap(),
             format,
+            Strategy::Normal,
             &mut patch,
         )
         .unwrap();

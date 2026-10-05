@@ -4,7 +4,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use update_image::patch::Format;
+use update_image::patch::{Format, Strategy};
 use update_image::{Header, ReleaseManifest, Version};
 
 /// Newest source version that gets a [`Format::LegacyBzip2`] patch, because it
@@ -20,6 +20,7 @@ pub fn build_patches(
     base: &Path,
     new: &Path,
     out: &Path,
+    strategy: Strategy,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let manifest = read_manifest(manifest_path)?;
 
@@ -34,8 +35,7 @@ pub fn build_patches(
 
         let old_version = Version::parse(base_version)?;
         let new_version = Version::parse(new_version)?;
-        let triple = (old_version.major, old_version.minor, old_version.patch);
-        let format = if triple <= LAST_LEGACY_UPDATE_VERSION { Format::LegacyBzip2 } else { Format::Zstd };
+        let format = patch_format(old_version);
 
         let old = read_file(&base.join(patch_file))?;
         let new = read_file(&new.join(patch_file))?;
@@ -46,13 +46,22 @@ pub fn build_patches(
             .map_err(|e| format!("failed to create \"{}\": {e}", parent.display()))?;
         let mut patch = std::fs::File::create(&patch_path)
             .map_err(|e| format!("failed to create \"{}\": {e}", patch_path.display()))?;
-        update_image::patch::build(&old, old_version, &new, new_version, format, &mut patch)
+        println!("[INFO] building {} ({strategy:?})", patch_path.display());
+        update_image::patch::build(&old, old_version, &new, new_version, format, strategy, &mut patch)
             .map_err(|e| format!("failed to build \"{}\": {e}", patch_path.display()))?;
 
         let size = patch.metadata().map(|m| m.len()).unwrap_or(0);
         println!("[INFO] {} ({format:?}, {size} bytes)", patch_path.display());
     }
     Ok(())
+}
+
+pub fn patch_format(version: Version) -> Format {
+    if (version.major, version.minor, version.patch) <= LAST_LEGACY_UPDATE_VERSION {
+        Format::LegacyBzip2
+    } else {
+        Format::Zstd
+    }
 }
 
 fn read_file(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {

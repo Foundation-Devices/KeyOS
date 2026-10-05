@@ -65,6 +65,8 @@ compile_error!("qbsdiff needs at least one of the bzip2 and zstd features");
 
 #[cfg(feature = "encode")]
 pub use bsdiff::{Bsdiff, ParallelScheme};
+#[cfg(feature = "encode")]
+pub use utils::Control;
 pub use bspatch::{Bspatch, Codec};
 
 #[cfg(feature = "encode")]

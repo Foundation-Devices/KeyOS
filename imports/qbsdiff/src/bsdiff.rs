@@ -304,6 +304,13 @@ impl<'s, 't> Bsdiff<'s, 't> {
     ///
     /// The size of patch file would be returned if no error occurs.
     pub fn compare<P: Write>(&self, patch: P) -> Result<u64> {
+        self.with_controls(|controls| {
+            pack(self.source, self.target, controls, patch, self.compressor, self.buffer_size)
+        })
+    }
+
+    /// use the matcher controls without encoding a patch.
+    pub fn with_controls<R>(&self, consume: impl FnOnce(&mut dyn Iterator<Item = Control>) -> R) -> R {
         // Determine parallel chunk size.
         use ParallelScheme::*;
         let mut chunk = match self.parallel_scheme {
@@ -318,7 +325,7 @@ impl<'s, 't> Bsdiff<'s, 't> {
         suffix_array.enable_buckets();
         if chunk >= self.target.len() {
             // Single thread is fine.
-            let diff = SaDiff::new(
+            let mut diff = SaDiff::new(
                 self.source,
                 self.target,
                 &suffix_array,
@@ -326,7 +333,7 @@ impl<'s, 't> Bsdiff<'s, 't> {
                 self.mismatch_count,
                 self.long_suffix,
             );
-            pack(self.source, self.target, diff, patch, self.compressor, self.buffer_size)
+            consume(&mut diff)
         } else {
             // Go parallel.
             let par_diff = ParSaDiff::new(
@@ -338,8 +345,7 @@ impl<'s, 't> Bsdiff<'s, 't> {
                 self.mismatch_count,
                 self.long_suffix,
             );
-            let ctrls = par_diff.compute();
-            pack(self.source, self.target, ctrls.into_iter(), patch, self.compressor, self.buffer_size)
+            consume(&mut par_diff.compute().into_iter())
         }
     }
 }
