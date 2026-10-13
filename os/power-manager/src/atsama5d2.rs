@@ -76,6 +76,9 @@ impl PowerManagerServer {
         log::debug!("Initializing RSTC");
         let rstc_addr = rstc_mem.as_ptr() as u32;
         let rstc = Rstc::with_alt_base_addr(rstc_addr);
+        // `General` means VDDBU rose along with VDDCORE, so the backup domain lost power and
+        // SECURAM and the RTC came up cleared. `Wkup` means only VDDCORE was cycled.
+        log::info!("Last reset cause: {:?}", rstc.reset_cause());
 
         log::debug!("Power manager initialized");
 

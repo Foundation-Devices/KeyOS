@@ -31,6 +31,8 @@ pub struct PowerManagerServerExt {
     shutdown_failsafe: Option<TicktimerCallback>,
     last_status: Option<Status>,
     last_open_circuit_mv: i32,
+    /// The OPA_MODE we last wrote, kept here because the charger clears its own copy on a boost fault.
+    boost_requested: bool,
 }
 
 /// How long a subscriber gets to shut down before we cut power ourselves.
@@ -117,6 +119,7 @@ impl PowerManagerServerExt {
             shutdown_failsafe: None,
             last_status: None,
             last_open_circuit_mv: i32::MAX,
+            boost_requested: false,
         })
     }
 
@@ -131,7 +134,9 @@ impl PowerManagerServerExt {
         ctrl.set_opa_mode(enabled);
         if let Err(e) = self.charger.set_control(ctrl) {
             log::error!("Error setting control register: {e:?}");
+            return;
         }
+        self.boost_requested = enabled;
     }
 
     fn set_fuel_gauge_hibernate(&mut self) -> bool {
@@ -341,8 +346,12 @@ impl PowerManagerServerExt {
     }
 
     fn charge_status(&mut self) -> ChargeStatus {
-        let Ok(raw_status) = self.charger.status() else {
-            return ChargeStatus::Fault;
+        let raw_status = match self.charger.status() {
+            Ok(raw_status) => raw_status,
+            Err(e) => {
+                log::error!("Error reading charger status: {e:?}");
+                return ChargeStatus::Fault;
+            }
         };
         match raw_status.stat() {
             0 => {
@@ -354,23 +363,37 @@ impl PowerManagerServerExt {
             }
             1 => ChargeStatus::Charging,
             2 => ChargeStatus::ChargeDone,
+            // A boost fault clears the boost bit, so go by whether we asked for boost.
+            _ if self.boost_requested => {
+                // Later reads may carry live charge-mode codes, so only the first one names the boost fault.
+                if !matches!(self.last_status, Some(Status { charge_status: ChargeStatus::Fault, .. })) {
+                    if let Some(fault) = raw_status.boost_fault() {
+                        log::warn!(
+                            "Charger reported a boost fault: {fault:?} (status {:#04x})",
+                            raw_status.0
+                        );
+                    }
+                }
+
+                ChargeStatus::Fault
+            }
             _ => {
                 if let Some(fault) = raw_status.charge_fault() {
-                    // Normal and SleepMode aren't faults
-                    if matches!(fault, bq24157::ChargeFault::Normal | bq24157::ChargeFault::SleepMode) {
-                        // Normal state, no fault
+                    // SleepMode and BadAdaptor are what a weak or missing VBUS reads as.
+                    if matches!(
+                        fault,
+                        bq24157::ChargeFault::Normal
+                            | bq24157::ChargeFault::SleepMode
+                            | bq24157::ChargeFault::BadAdaptor
+                    ) {
                         return ChargeStatus::Idle;
                     }
 
-                    // Ignores NoBattery fault, the actual fault should come later.
-                    // Ignores BadAdaptor as this fault can often happen when the charger is disconnected
-                    if !matches!(fault, bq24157::ChargeFault::NoBattery | bq24157::ChargeFault::BadAdaptor) {
-                        log::warn!("Charger reported a fault: {fault:?}");
+                    log::warn!("Charger reported a fault: {fault:?}");
 
-                        self.last_reported_charge_fault = Some(fault);
-                        self.num_faults = self.num_faults.saturating_add(1);
-                        self.reset_charger();
-                    }
+                    self.last_reported_charge_fault = Some(fault);
+                    self.num_faults = self.num_faults.saturating_add(1);
+                    self.reset_charger();
                 }
 
                 ChargeStatus::Fault
@@ -410,6 +433,8 @@ impl PowerManagerServerExt {
         let was_source =
             matches!(&self.last_status, Some(last) if last.attached_state == AttachedState::Source);
         let is_source = attached_state == AttachedState::Source;
+        // Read the charger before switching boost, so its fault bits match the mode we decode them in.
+        let charge_status = self.charge_status();
         if is_source != was_source {
             self.set_usb_boost(is_source);
         }
@@ -422,7 +447,7 @@ impl PowerManagerServerExt {
         let gauge_percent = adjust_fuel_gauge_soc(raw_soc);
         let voltage_based_percent = self.voltage_based_soc(voltage_mv, current_ma).unwrap_or(100);
         let battery_percent = gauge_percent.min(voltage_based_percent);
-        let status = Status { charge_status: self.charge_status(), battery_percent, attached_state };
+        let status = Status { charge_status, battery_percent, attached_state };
 
         if self.last_status != Some(status) {
             self.last_status.replace(status);
