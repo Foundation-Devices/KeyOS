@@ -965,14 +965,14 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
     let window_start = now_secs.saturating_sub(GRAPH_WINDOW_SECS);
 
     let mut state = state.borrow_mut();
+    let (aged_out, mut prices) = price_history_window(&state.persistent.prices, window_start);
     // Only take the guard when a point actually ages out, or the once-a-minute redraw would
     // rewrite the whole series to flash for as long as the launcher runs.
-    if state.persistent.prices.iter().any(|point| point.timestamp < window_start) {
+    if aged_out > 0 {
         let mut persistent = state.persistent.guard();
-        persistent.prices.retain(|point| point.timestamp >= window_start);
+        persistent.prices.drain(..aged_out);
     }
     let ui = state.ui();
-    let mut prices = state.persistent.prices.clone();
 
     #[cfg(not(target_os = "xous"))]
     if prices.is_empty() {
@@ -1107,6 +1107,25 @@ fn refresh_bitcoin_status(state: StoredValue<AppState>) {
 
     state.last_draw_time_secs = now_secs;
     state.prices_dirty = false;
+}
+
+/// Returns how many leading samples have aged out of the window, and the samples to draw.
+/// The last sample before the window is kept while a later one exists, and drawn at
+/// `window_start` with the interpolated price so the line reaches the left edge.
+fn price_history_window(history: &[PricePoint], window_start: u64) -> (usize, Vec<PricePoint>) {
+    let in_window = history.partition_point(|point| point.timestamp < window_start);
+    let aged_out = if in_window < history.len() { in_window.saturating_sub(1) } else { in_window };
+    let mut prices = history[aged_out..].to_vec();
+    if let [first, next, ..] = prices.as_mut_slice() {
+        if first.timestamp < window_start {
+            let fraction =
+                (window_start - first.timestamp) as f64 / (next.timestamp - first.timestamp) as f64;
+            first.price =
+                (first.price as f64 + (next.price as f64 - first.price as f64) * fraction).round() as u32;
+            first.timestamp = window_start;
+        }
+    }
+    (aged_out, prices)
 }
 
 #[cfg(not(target_os = "xous"))]
@@ -1767,6 +1786,18 @@ mod tests {
         let sample = nearest_sample_at_x(&samples, 60.0).expect("sample");
         assert_eq!(sample.timestamp, 200);
         assert!((sample.y - 20.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn price_window_starts_at_window_edge() {
+        let history: Vec<_> = (0..5)
+            .map(|index| PricePoint { price: 1_000 * index, timestamp: 300 * index as u64, is_pad: false })
+            .collect();
+        let (aged_out, prices) = price_history_window(&history, 420);
+        assert_eq!(aged_out, 1);
+        assert_eq!(prices[0], PricePoint { price: 1_400, timestamp: 420, is_pad: false });
+        assert_eq!(prices[1..], history[2..]);
+        assert_eq!(price_history_window(&history, 1_500), (5, Vec::new()));
     }
 
     // --- Universal QR sort tests ---
