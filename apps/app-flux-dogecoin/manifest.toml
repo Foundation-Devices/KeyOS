@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0xf002776b30fb8730c88ce6db2dc53752"
+publisher = "Foundation"
+description = "Dogecoin app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "Dogecoin"
+
+[permissions]
+template = ["flux-app"]

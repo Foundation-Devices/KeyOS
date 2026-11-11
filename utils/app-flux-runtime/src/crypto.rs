@@ -25,8 +25,12 @@ use crate::runtime::syscall_buffer;
 
 // --- SDK cx_curve_t values (from ox_ec.h) ---
 const CX_CURVE_SECP256K1: u32 = 0x21;
+const CX_CURVE_SECP256R1: u32 = 0x22;
 const CX_CURVE_ED25519: u32 = 0x71;
 const CX_CURVE_Curve25519: u32 = 0x72;
+
+// --- SDK derivation modes (from os_seed.h) ---
+const HDW_NORMAL: u32 = 0;
 
 // --- SDK ECDSA flags ---
 const CX_RND_RFC6979: u32 = 2 << 9;
@@ -134,6 +138,61 @@ pub unsafe extern "C" fn cx_keccak_init_no_throw(hash: *mut u8, size: u32) -> u3
 
     let ctx_id = crate::hash::keccak_init();
     log::debug!("cx_keccak_init_no_throw: hash={:p}, size={}, ctx_id={}", hash, size, ctx_id);
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
+}
+
+/// cx_blake2b_init_no_throw(cx_blake2b_t *hash, size_t out_len)
+///
+/// Initialize a BLAKE2b hash context. `out_len` is the output size in bits.
+#[no_mangle]
+pub unsafe extern "C" fn cx_blake2b_init_no_throw(hash: *mut u8, out_len: u32) -> u32 {
+    if hash.is_null() || out_len % 8 != 0 {
+        return CX_INVALID_PARAMETER;
+    }
+
+    let Some(ctx_id) = crate::hash::blake2b_init(out_len as usize / 8) else {
+        return CX_INVALID_PARAMETER;
+    };
+    log::debug!("cx_blake2b_init_no_throw: hash={:p}, out_len={}, ctx_id={}", hash, out_len, ctx_id);
+    install_hash_ctx(hash, ctx_id);
+    CX_OK
+}
+
+/// cx_blake2b_init2_no_throw(cx_blake2b_t *hash, size_t out_len, uint8_t *salt, size_t salt_len,
+///     uint8_t *perso, size_t perso_len)
+///
+/// Initialize a BLAKE2b hash context with a salt and personalization, either of which can be absent.
+/// `out_len` is the output size in bits.
+#[no_mangle]
+pub unsafe extern "C" fn cx_blake2b_init2_no_throw(
+    hash: *mut u8,
+    out_len: u32,
+    salt: *const u8,
+    salt_len: u32,
+    perso: *const u8,
+    perso_len: u32,
+) -> u32 {
+    if hash.is_null()
+        || out_len % 8 != 0
+        || (salt.is_null() && salt_len != 0)
+        || (perso.is_null() && perso_len != 0)
+    {
+        return CX_INVALID_PARAMETER;
+    }
+
+    let bytes = |ptr: *const u8, len: u32| match len {
+        0 => &[][..],
+        _ => core::slice::from_raw_parts(ptr, len as usize),
+    };
+    let Some(ctx_id) = crate::hash::blake2b_init_with_params(
+        out_len as usize / 8,
+        bytes(salt, salt_len),
+        bytes(perso, perso_len),
+    ) else {
+        return CX_INVALID_PARAMETER;
+    };
+    log::debug!("cx_blake2b_init2_no_throw: hash={:p}, out_len={}, ctx_id={}", hash, out_len, ctx_id);
     install_hash_ctx(hash, ctx_id);
     CX_OK
 }
@@ -753,7 +812,7 @@ pub unsafe extern "C" fn cx_ecfp_generate_pair_no_throw(
         return CX_INVALID_PARAMETER;
     }
 
-    if curve != CX_CURVE_SECP256K1 && curve != CX_CURVE_ED25519 {
+    if ![CX_CURVE_SECP256K1, CX_CURVE_SECP256R1, CX_CURVE_ED25519].contains(&curve) {
         log::warn!("cx_ecfp_generate_pair_no_throw: unsupported curve 0x{:02x}", curve);
         return CX_INVALID_PARAMETER;
     }
@@ -852,7 +911,7 @@ pub unsafe extern "C" fn cx_ecdsa_sign_no_throw(
     let priv_key = &*pvkey;
     let curve = priv_key.curve as u32;
     let d_len = priv_key.d_len;
-    if curve != CX_CURVE_SECP256K1 || d_len != 32 {
+    if ![CX_CURVE_SECP256K1, CX_CURVE_SECP256R1].contains(&curve) || d_len != 32 {
         return CX_INVALID_PARAMETER;
     }
     let d = &priv_key.d;
@@ -921,7 +980,7 @@ pub unsafe extern "C" fn cx_ecdsa_sign_rs_no_throw(
     let priv_key = &*pvkey;
     let curve = priv_key.curve as u32;
     let d_len = priv_key.d_len;
-    if curve != CX_CURVE_SECP256K1 || d_len != 32 {
+    if ![CX_CURVE_SECP256K1, CX_CURVE_SECP256R1].contains(&curve) || d_len != 32 {
         return CX_INVALID_PARAMETER;
     }
     let d = &priv_key.d;
@@ -1155,12 +1214,26 @@ pub unsafe extern "C" fn cx_swap_buffer64(buf: *mut u64, len: u32) {
 /// This goes through IPC since the seed is not available in the app process.
 #[no_mangle]
 pub unsafe extern "C" fn os_perso_derive_node_bip32(
-    _curve: u32,
+    curve: u32,
     path: *const u32,
     path_len: u32,
     private_key: *mut u8,
     chain: *mut u8,
 ) {
+    // Its syscall derives secp256k1 only; the seed-key one carries the curve for the others.
+    if curve != CX_CURVE_SECP256K1 {
+        return os_perso_derive_node_with_seed_key(
+            HDW_NORMAL,
+            curve,
+            path,
+            path_len,
+            private_key,
+            chain,
+            core::ptr::null(),
+            0,
+        );
+    }
+
     let path_len = path_len as usize;
     assert!(
         !path.is_null() && !private_key.is_null() && (1..=10).contains(&path_len),
@@ -1207,7 +1280,8 @@ pub unsafe extern "C" fn os_perso_derive_node_bip32(
 ///     const uint8_t *seed_key, size_t seed_key_len)
 ///
 /// Derives a key with mode-dependent algorithm:
-/// - mode 0 (HDW_NORMAL): BIP32 derivation (secp256k1)
+/// - mode 0 (HDW_NORMAL): BIP32 derivation (secp256k1, NIST P-256), or BIP32-Ed25519 on Ed25519, whose
+///   64-byte key (kL || kR) needs a 64-byte `private_key` buffer, as the SDK provides
 /// - mode 1 (HDW_ED25519_SLIP10): SLIP-10 derivation (Ed25519)
 #[no_mangle]
 pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
@@ -1226,7 +1300,7 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
 
     let path_len_usize = path_len as usize;
     assert!(
-        curve == CX_CURVE_ED25519
+        [CX_CURVE_ED25519, CX_CURVE_SECP256R1].contains(&curve)
             && !path.is_null()
             && !private_key.is_null()
             && (1..=10).contains(&path_len_usize),
@@ -1244,8 +1318,9 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
         path_len_usize
     );
 
+    let key_len = if mode == HDW_NORMAL && curve == CX_CURVE_ED25519 { 64 } else { 32 };
     let result = {
-        let mut buf = vec![0u8; 64.max(path_len_usize * 4)];
+        let mut buf = vec![0u8; (key_len + 32).max(path_len_usize * 4)];
         for i in 0..path_len_usize {
             let element = *path.add(i);
             buf[i * 4..i * 4 + 4].copy_from_slice(&element.to_be_bytes());
@@ -1254,9 +1329,9 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
         let result = syscall_buffer(syscall_id::SYSCALL_OS_PERSO_DERIVE_NODE_WITH_SEED_KEY_ID, arg, &mut buf);
 
         if result == 0 {
-            core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, 32);
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), private_key, key_len);
             if !chain.is_null() {
-                core::ptr::copy_nonoverlapping(buf[32..].as_ptr(), chain, 32);
+                core::ptr::copy_nonoverlapping(buf[key_len..].as_ptr(), chain, 32);
             }
         }
         result
@@ -1272,6 +1347,25 @@ pub unsafe extern "C" fn os_perso_derive_node_with_seed_key(
     log::debug!("os_perso_derive_node_with_seed_key: derived key successfully");
 }
 
+/// os_perso_get_master_key_identifier(uint8_t *identifier, size_t identifier_length)
+///
+/// The master key's BIP32 identifier, which the emulator computes since it holds the seed.
+#[no_mangle]
+pub unsafe extern "C" fn os_perso_get_master_key_identifier(
+    identifier: *mut u8,
+    identifier_length: u32,
+) -> u32 {
+    let mut buf = [0u8; 20];
+    if identifier.is_null() || (identifier_length as usize) < buf.len() {
+        return CX_INVALID_PARAMETER;
+    }
+    if syscall_buffer(gui_app_emu_flux::SYSCALL_OS_PERSO_GET_MASTER_KEY_IDENTIFIER_ID, 0, &mut buf) != 0 {
+        return CX_INTERNAL_ERROR;
+    }
+    core::ptr::copy_nonoverlapping(buf.as_ptr(), identifier, buf.len());
+    CX_OK
+}
+
 // ============================================================================
 // EC Domain Information
 // ============================================================================
@@ -1285,7 +1379,7 @@ pub unsafe extern "C" fn cx_ecdomain_size(curve: u32, length: *mut u32) -> u32 {
         return CX_INVALID_PARAMETER;
     }
     match curve {
-        CX_CURVE_SECP256K1 | CX_CURVE_ED25519 | CX_CURVE_Curve25519 => {
+        CX_CURVE_SECP256K1 | CX_CURVE_SECP256R1 | CX_CURVE_ED25519 | CX_CURVE_Curve25519 => {
             *length = 32;
             CX_OK
         }
@@ -2124,6 +2218,128 @@ mod tests {
             0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7, 0xe3, 0x6c, 0x9d, 0xa7,
         ];
         assert_eq!(hash_oneshot(CX_SHA224, b"abc", 28), expected);
+    }
+
+    #[test]
+    fn cx_blake2b_hashes_in_parts_at_the_requested_size() {
+        unsafe fn digest(out_bits: u32, parts: &[&[u8]], out: &mut [u8]) {
+            let mut ctx = [0u8; 16];
+            assert_eq!(cx_blake2b_init_no_throw(ctx.as_mut_ptr(), out_bits), CX_OK);
+            for part in parts {
+                let status = cx_hash_no_throw(
+                    ctx.as_mut_ptr(),
+                    0,
+                    part.as_ptr(),
+                    part.len() as u32,
+                    core::ptr::null_mut(),
+                    0,
+                );
+                assert_eq!(status, CX_OK);
+            }
+            let status = cx_hash_no_throw(
+                ctx.as_mut_ptr(),
+                CX_FLAG_LAST | CX_FLAG_NO_REINIT,
+                core::ptr::null(),
+                0,
+                out.as_mut_ptr(),
+                out.len() as u32,
+            );
+            assert_eq!(status, CX_OK);
+        }
+
+        let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+
+        let mut out = [0u8; 32];
+        unsafe { digest(256, &[b"abc"], &mut out) };
+        assert_eq!(hex(&out), "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319");
+
+        // How the Polkadot app computes an SS58 checksum.
+        let mut out = [0u8; 64];
+        unsafe { digest(512, &[b"SS58PRE", b"abc"], &mut out) };
+        assert_eq!(
+            hex(&out),
+            "a31794e5975b032775e088093ee9bfb1255b43b81574dbee7859dd1f52c9ebed\
+             cde4a486f2404ab6e66936f74c81570d5b091bdb6eadb982b00c3987e47af331"
+        );
+
+        let mut ctx = [0u8; 16];
+        assert_eq!(unsafe { cx_blake2b_init_no_throw(ctx.as_mut_ptr(), 12) }, CX_INVALID_PARAMETER);
+        assert_eq!(unsafe { cx_blake2b_init_no_throw(ctx.as_mut_ptr(), 1024) }, CX_INVALID_PARAMETER);
+    }
+
+    #[test]
+    fn cx_blake2b_init2_takes_a_salt_and_personalization() {
+        unsafe fn digest(salt: &[u8], perso: &[u8], parts: &[&[u8]]) -> String {
+            let (mut ctx, mut out) = ([0u8; 16], [0u8; 32]);
+            let pointer = |bytes: &[u8]| if bytes.is_empty() { core::ptr::null() } else { bytes.as_ptr() };
+            let status = cx_blake2b_init2_no_throw(
+                ctx.as_mut_ptr(),
+                256,
+                pointer(salt),
+                salt.len() as u32,
+                pointer(perso),
+                perso.len() as u32,
+            );
+            assert_eq!(status, CX_OK);
+            for part in parts {
+                let status = cx_hash_no_throw(
+                    ctx.as_mut_ptr(),
+                    0,
+                    part.as_ptr(),
+                    part.len() as u32,
+                    core::ptr::null_mut(),
+                    0,
+                );
+                assert_eq!(status, CX_OK);
+            }
+            let status = cx_hash_no_throw(
+                ctx.as_mut_ptr(),
+                CX_FLAG_LAST | CX_FLAG_NO_REINIT,
+                core::ptr::null(),
+                0,
+                out.as_mut_ptr(),
+                out.len() as u32,
+            );
+            assert_eq!(status, CX_OK);
+            out.iter().map(|b| format!("{b:02x}")).collect()
+        }
+
+        // Vectors from Python's hashlib.blake2b, the second personalization being Zcash's.
+        let long = [0x61u8; 300];
+        unsafe {
+            assert_eq!(
+                digest(&[], &[], &[b"abc"]),
+                "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319"
+            );
+            assert_eq!(
+                digest(&[], b"ZcashPrevoutHash", &[b"a", b"bc"]),
+                "8382ae6e7b437cb42fc0746376450b7730e3b4e4da7f1d40fbd71d26797f2377"
+            );
+            assert_eq!(
+                digest(b"saltsaltsaltsalt", b"ZcashPrevoutHash", &[b"abc"]),
+                "34effebeb734c6f152bebcd680d34b2f2eb920a78f7574215a55e0853202fc7f"
+            );
+            assert_eq!(
+                digest(&[], b"ZcashPrevoutHash", &[&long[..128], &long[128..]]),
+                "b808c549707d280000cefd989a3b5d2357ef31a4e6ed0375662fc4fc08efdc9e"
+            );
+        }
+
+        let mut ctx = [0u8; 16];
+        let too_long = [0u8; 17];
+        let status = unsafe {
+            cx_blake2b_init2_no_throw(ctx.as_mut_ptr(), 256, too_long.as_ptr(), 17, core::ptr::null(), 0)
+        };
+        assert_eq!(status, CX_INVALID_PARAMETER);
+    }
+
+    #[test]
+    fn cx_ecdomain_size_covers_the_curves_keys_are_derived_on() {
+        for curve in [CX_CURVE_SECP256K1, CX_CURVE_SECP256R1, CX_CURVE_ED25519] {
+            let mut length = 0;
+            assert_eq!(unsafe { cx_ecdomain_parameters_length(curve, &mut length) }, CX_OK);
+            assert_eq!(length, 32);
+        }
     }
 
     #[test]

@@ -21,8 +21,15 @@ target_excludes := '--exclude atsama5d27 ' + \
     '--exclude usb-debug'
 
 # Apps that link the external C SDK; they do not link on the host.
-flux_excludes := '--exclude app-flux-ethereum ' + \
-    '--exclude app-flux-solana'
+flux_excludes := '--exclude app-flux-cosmos ' + \
+    '--exclude app-flux-dogecoin ' + \
+    '--exclude app-flux-ethereum ' + \
+    '--exclude app-flux-monero ' + \
+    '--exclude app-flux-polkadot ' + \
+    '--exclude app-flux-solana ' + \
+    '--exclude app-flux-tezos ' + \
+    '--exclude app-flux-xrp ' + \
+    '--exclude app-flux-zcash'
 
 check_excludes := target_excludes + ' ' + flux_excludes
 

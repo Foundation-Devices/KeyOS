@@ -3,12 +3,6 @@
 
 //! Shared Flux SDK stub helpers.
 
-pub fn keyos_trace(id: u32) {
-    log::trace!("TRACE({})", id);
-    server::xous::yield_slice();
-    server::xous::yield_slice();
-}
-
 #[macro_export]
 macro_rules! define_sdk_io_stubs {
     () => {
@@ -23,16 +17,5 @@ macro_rules! define_sdk_io_stubs {
 
         #[no_mangle]
         pub extern "C" fn os_io_handle_ux_event_reject_apdu() -> u32 { 0 }
-    };
-}
-
-#[macro_export]
-macro_rules! define_keyos_trace_stub {
-    () => {
-        // Debug trace function callable from C code.
-        // We yield after each log to ensure the IPC message is delivered
-        // before the process can crash, making traces visible even on fast crashes.
-        #[no_mangle]
-        pub extern "C" fn keyos_trace(id: u32) { $crate::stubs::keyos_trace(id) }
     };
 }

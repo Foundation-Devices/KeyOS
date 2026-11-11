@@ -13,11 +13,13 @@ name = "update_syscall_ids"
 path = "bin/update_syscall_ids.rs"
 
 [dependencies]
+curve25519-dalek = { workspace = true }
 ed25519-dalek = { version = "2", default-features = false }
 hmac = "0.12"
 log = { workspace = true }
 ngwallet = { workspace = true }
 nom = "7.1"
+p256 = "0.13"
 rkyv = { workspace = true }
 secp256k1 = { version = "0.29", features = ["recovery"] }
 server = { workspace = true }

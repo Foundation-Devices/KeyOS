@@ -123,7 +123,6 @@ pub struct LedgerSdkOptions {
     pub patch_sdk: fn(&Path),
     pub ensure_nbgl_font_data: bool,
     pub ensure_nbgl_draw_text_override: bool,
-    pub extra_source_fixes: Option<fn(&Path)>,
 }
 
 impl Default for LedgerSdkOptions {
@@ -132,7 +131,6 @@ impl Default for LedgerSdkOptions {
             patch_sdk: patch_sdk_common,
             ensure_nbgl_font_data: false,
             ensure_nbgl_draw_text_override: false,
-            extra_source_fixes: None,
         }
     }
 }
@@ -224,28 +222,11 @@ pub fn prepare_ledger_app(
     app_path
 }
 
-/// The app's version, read from `APPVERSION_M/N/P` in its upstream Makefile (the
-/// same source the app's own Settings page shows). Errs when those fields are
-/// absent, so a broken clone fails the build instead of reporting a wrong version.
-fn flux_app_version(app_path: &Path) -> Result<String, String> {
-    let makefile =
-        fs::read_to_string(app_path.join("Makefile")).map_err(|e| format!("Makefile unreadable: {e}"))?;
-    let field = |key: &str| {
-        makefile.lines().find_map(|line| {
-            let (name, value) = line.split_once('=')?;
-            (name.trim() == key).then(|| value.trim().to_owned())
-        })
-    };
-    match (field("APPVERSION_M"), field("APPVERSION_N"), field("APPVERSION_P")) {
-        (Some(m), Some(n), Some(p)) => Ok(format!("{m}.{n}.{p}")),
-        _ => Err("Makefile has no APPVERSION_M/N/P".to_owned()),
-    }
-}
-
-/// The BIP32 roots the app declares as `PATH_APP_LOAD_PARAMS`, as the upstream OS would read
-/// them at install time. Asked of make rather than parsed out of the makefiles, so the chain
-/// variant's `makefile_conf` include and any conditionals apply.
-fn flux_derivation_roots(out_dir: &str, app_path: &Path) -> Vec<Vec<u32>> {
+/// `var` as the app's make evaluates it, so included makefiles (a chain variant's
+/// `makefile_conf`, a Zondax `Makefile.version`) and conditionals apply.
+fn make_value(out_dir: &str, app_path: &Path, var: &str) -> String {
+    // Makefiles print their own `$(info ...)` lines to stdout; the marker picks out ours.
+    const MARKER: &str = "__flux_value=";
     let toolchain = ArmToolchain::detect(out_dir);
     let out = Command::new("make")
         .current_dir(app_path)
@@ -254,17 +235,43 @@ fn flux_derivation_roots(out_dir: &str, app_path: &Path) -> Vec<Vec<u32>> {
         .arg(format!("SHELL={}", toolchain.bash))
         .arg(format!("GCCPATH={}", toolchain.gccpath))
         .arg(format!("CC={}", toolchain.cc))
-        .arg("--eval=__roots: ; @echo $(PATH_APP_LOAD_PARAMS)")
-        .arg("__roots")
+        .arg(format!("--eval=__flux_value: ; @echo '{MARKER}'$({var})"))
+        .arg("__flux_value")
         .output()
-        .unwrap_or_else(|e| panic!("Failed to read PATH_APP_LOAD_PARAMS in {}: {e}", app_path.display()));
+        .unwrap_or_else(|e| panic!("Failed to read {var} in {}: {e}", app_path.display()));
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix(MARKER))
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
 
-    let roots: Vec<Vec<u32>> = String::from_utf8_lossy(&out.stdout)
+/// The app's version, `APPVERSION` in its upstream makefiles (the same source the app's own
+/// Settings page shows). Errs when it is empty, so a broken clone fails the build instead of
+/// reporting a wrong version.
+fn flux_app_version(out_dir: &str, app_path: &Path) -> Result<String, String> {
+    let version = make_value(out_dir, app_path, "APPVERSION");
+    let version = version.trim_matches('"');
+    if version.is_empty() {
+        return Err("make has no APPVERSION".to_owned());
+    }
+    Ok(version.to_owned())
+}
+
+/// The BIP32 roots the app declares as `PATH_APP_LOAD_PARAMS`, as the upstream OS would read
+/// them at install time.
+fn flux_derivation_roots(out_dir: &str, app_path: &Path) -> Vec<Vec<u32>> {
+    let roots: Vec<Vec<u32>> = make_value(out_dir, app_path, "PATH_APP_LOAD_PARAMS")
         .split_whitespace()
         .map(|root| {
             root.trim_matches('"')
                 .split('/')
                 .map(|element| {
+                    // Any index matches a `*`; Ledger's OS encodes it as 0x7FFFFFFF, as the emulator does.
+                    if element == "*" {
+                        return 0x7FFF_FFFF;
+                    }
                     let (index, hardened) =
                         element.strip_suffix('\'').map_or((element, 0), |index| (index, 0x8000_0000));
                     match index.parse::<u32>() {
@@ -331,7 +338,7 @@ fn sole_nvm_region(archive: &Path, nm_bin: &str) -> (String, usize) {
 /// archive so the mirrored size can't drift from the C struct). Bundling both keeps a single
 /// build-time source of app metadata.
 pub fn generate_flux_app_module(out_dir: &str, app_path: &Path, archive: &Path, nm_bin: &str) {
-    let version = flux_app_version(app_path)
+    let version = flux_app_version(out_dir, app_path)
         .unwrap_or_else(|reason| panic!("flux app version undeterminable: {reason}"));
     let (region, len) = sole_nvm_region(archive, nm_bin);
     let roots = flux_derivation_roots(out_dir, app_path)
@@ -525,9 +532,6 @@ pub fn prepare_ledger_sdk(
     }
     if nbgl_restored || options.ensure_nbgl_draw_text_override {
         let _ = ensure_nbgl_draw_text_override(&sdk_path);
-    }
-    if let Some(extra_source_fixes) = options.extra_source_fixes {
-        extra_source_fixes(&sdk_path);
     }
 
     if hosted {
@@ -774,7 +778,8 @@ pub fn base_arm_cflags(toolchain: &ArmToolchain, sdk_path: &Path, appname: &str)
     .into_iter()
     .map(str::to_string)
     .collect();
-    cflags.push(format!("-DAPPNAME=\\\"{appname}\\\""));
+    // Single quotes keep a name with a space ("Tezos Wallet") one word in make's recipe shell.
+    cflags.push(format!("-DAPPNAME='\"{appname}\"'"));
     cflags.extend(arm_include_flags(toolchain));
     for include in [
         sdk_path.join("lib_nbgl/include/fonts"),
@@ -1231,6 +1236,56 @@ pub fn replace_in_file(path: &Path, from: &str, to: &str) {
     }
     let patched = content.replacen(from, to, 1);
     fs::write(path, patched).unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
+}
+
+/// Turn a makefile's own `CFLAGS += ...` lines into `override CFLAGS += ...`: the build passes
+/// CFLAGS on make's command line, which otherwise drops them and the includes and defines they
+/// carry.
+pub fn keep_app_cflags(makefile: &Path) {
+    let content =
+        fs::read_to_string(makefile).unwrap_or_else(|e| panic!("Failed to read {}: {e}", makefile.display()));
+    let patched: String = content
+        .split_inclusive('\n')
+        .map(|line| {
+            let code = line.trim_start();
+            let appends_cflags =
+                code.strip_prefix("CFLAGS").is_some_and(|rest| rest.trim_start().starts_with("+="));
+            if appends_cflags {
+                format!("{}override {code}", &line[..line.len() - code.len()])
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect();
+    fs::write(makefile, patched).unwrap_or_else(|e| panic!("Failed to write {}: {e}", makefile.display()));
+}
+
+/// The patches every Zondax (`ledger-zxlib`) app needs on KeyOS, given its repository root.
+pub fn patch_zondax_app(repo_path: &Path) {
+    keep_app_cflags(&repo_path.join("app/Makefile"));
+
+    // The canaries check a symbol the upstream linker script places; the KeyOS link has none.
+    let platform = repo_path.join("deps/ledger-zxlib/makefiles/Makefile.platform");
+    for canary in ["HAVE_BOLOS_APP_STACK_CANARY", "HAVE_ZONDAX_CANARY"] {
+        replace_in_file(
+            &platform,
+            &format!("DEFINES       += {canary}"),
+            &format!("# DEFINES       += {canary} (disabled on KeyOS)"),
+        );
+    }
+
+    // NVM is RAM on KeyOS: `const` would put it in .rodata, where the first write faults.
+    replace_in_file(
+        &repo_path.join("deps/ledger-zxlib/include/zxmacros_ledger.h"),
+        "#define NV_CONST const",
+        "#define NV_CONST /* not const on KeyOS */",
+    );
+
+    // The 16 KiB transaction buffer sits in NVM for its size alone. As an `N_` region it would be
+    // persisted with every chunk written, so it moves to RAM under a non-NVM name.
+    let tx_c = repo_path.join("app/src/common/tx.c");
+    replace_in_file(&tx_c, "storage_t NV_CONST N_appdata_impl", "storage_t G_appdata_impl");
+    replace_in_file(&tx_c, "PIC(&N_appdata_impl)", "PIC(&G_appdata_impl)");
 }
 
 pub fn use_host_system_string_h(sdk_path: &Path) {

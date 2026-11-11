@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x77f56f003cf0eabef10cc2037563b804"
+publisher = "Foundation"
+description = "Polkadot app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "Polkadot"
+
+[permissions]
+template = ["flux-app"]

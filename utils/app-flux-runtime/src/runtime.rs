@@ -262,8 +262,10 @@ pub extern "C" fn nvm_write(dst: *mut core::ffi::c_void, src: *const core::ffi::
     crate::nvm::nvm_write_persist(dst, src, len);
 }
 
+/// `BOLOS_TRUE`, also `BOLOS_UX_OK`, which is what apps compare this with. KeyOS only runs them on an
+/// unlocked device.
 #[no_mangle]
-pub extern "C" fn os_global_pin_is_validated() -> u32 { 1 }
+pub extern "C" fn os_global_pin_is_validated() -> u32 { 0xAA }
 
 #[no_mangle]
 pub extern "C" fn os_lib_end() {
@@ -495,6 +497,35 @@ pub extern "C" fn os_flags() -> u32 { 0 }
 
 #[no_mangle]
 pub extern "C" fn os_perso_is_pin_set() -> u32 { 1 }
+
+/// Ledger's linker script puts this word at the bottom of the app stack, and apps compare it
+/// against the SDK's magic to catch an overflow. KeyOS guards stacks itself, so here it is a plain
+/// word already holding that magic.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+pub static mut app_stack_canary: u32 = 0xDEAD_0031;
+
+/// The newest upstream OS any Flux app targets (the `flex_1.7.0_*` releases), as a device that runs
+/// them all would report.
+const EMULATED_OS_VERSION: &[u8] = b"1.7.0";
+
+/// # Safety
+/// `version` must be valid for writes of `max_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn os_version(version: *mut u8, max_len: u32) -> u32 {
+    let len = EMULATED_OS_VERSION.len().min(max_len as usize);
+    // SAFETY: len <= max_len bytes, which the caller guarantees `version` holds.
+    unsafe { core::ptr::copy_nonoverlapping(EMULATED_OS_VERSION.as_ptr(), version, len) };
+    len as u32
+}
+
+/// # Safety
+/// `version` must be valid for writes of `max_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn os_seph_version(version: *mut u8, max_len: u32) -> u32 {
+    // SAFETY: forwarded under the same contract.
+    unsafe { os_version(version, max_len) }
+}
 
 /// `bolos_tag_e` selectors for `os_registry_get_current_app_tag`, from the SDK's `os_app.h`.
 const BOLOS_TAG_APPNAME: u32 = 0x01;

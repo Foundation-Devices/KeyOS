@@ -300,6 +300,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-flux-cosmos"
+version = "1.1.1+2.39.4"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-dogecoin"
+version = "1.1.1+2.4.12"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
 name = "app-flux-ethereum"
 version = "1.1.1+1.23.0"
 dependencies = [
@@ -314,10 +340,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-flux-monero"
+version = "1.1.1+2.2.1"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-polkadot"
+version = "1.1.1+100.0.30"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
 name = "app-flux-runtime"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "blake2",
  "crc32fast",
  "curve25519-dalek",
  "file-backed",
@@ -342,6 +395,45 @@ dependencies = [
  "app-flux-build-support",
  "app-flux-runtime",
  "cc",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-tezos"
+version = "1.1.1+3.2.5"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-xrp"
+version = "1.1.1+2.8.2"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
+ "fs",
+ "gui-app-emu-flux",
+ "log 0.4.27",
+ "server",
+ "xous-api-log",
+]
+
+[[package]]
+name = "app-flux-zcash"
+version = "1.1.1+2.5.0"
+dependencies = [
+ "app-flux-build-support",
+ "app-flux-runtime",
  "fs",
  "gui-app-emu-flux",
  "log 0.4.27",
@@ -5052,12 +5144,14 @@ dependencies = [
 name = "gui-app-emu-flux"
 version = "0.1.0"
 dependencies = [
+ "curve25519-dalek",
  "ed25519-dalek",
  "hex",
  "hmac",
  "log 0.4.27",
  "ngwallet",
  "nom 7.1.3",
+ "p256",
  "rkyv",
  "secp256k1 0.29.1",
  "server",
@@ -5068,7 +5162,7 @@ dependencies = [
 
 [[package]]
 name = "gui-app-emu-flux-server"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ab_glyph",
  "anyhow",

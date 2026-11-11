@@ -104,6 +104,12 @@ pub fn init_private_key(curve: u8, raw_key: &[u8]) -> u32 {
                 return 0;
             }
         }
+        curves::CX_CURVE_SECP256R1 => {
+            if p256::SecretKey::from_slice(raw_key).is_err() {
+                log::warn!("Invalid secp256r1 private key");
+                return 0;
+            }
+        }
         curves::CX_CURVE_ED25519 => {
             // Any 32-byte value is a valid Ed25519 private key seed
         }
@@ -147,6 +153,12 @@ pub fn generate_pair(ctx_id: u32, compressed: bool) -> Result<(), KeyError> {
                 public_key.serialize_uncompressed().to_vec()
             };
             ctx.public_key = Some(pubkey_bytes);
+        }
+        curves::CX_CURVE_SECP256R1 => {
+            use p256::elliptic_curve::sec1::ToEncodedPoint;
+            let secret_key =
+                p256::SecretKey::from_slice(&ctx.private_key).map_err(|_| KeyError::InvalidKey)?;
+            ctx.public_key = Some(secret_key.public_key().to_encoded_point(compressed).as_bytes().to_vec());
         }
         curves::CX_CURVE_ED25519 => {
             let pubkey = ed25519_generate_pubkey(&ctx.private_key);
@@ -352,6 +364,22 @@ pub fn ecdsa_sign_recoverable(privkey_ctx_id: u32, hash: &[u8]) -> Result<(Vec<u
     let contexts = EC_CONTEXTS.read().unwrap();
     let ctx = contexts.get(&privkey_ctx_id).ok_or(KeyError::ContextNotFound)?;
 
+    if ctx.curve == curves::CX_CURVE_SECP256R1 {
+        // RFC 6979 with SHA-256, the nonce the SDK's CX_RND_RFC6979 derives for this curve.
+        let signing_key =
+            p256::ecdsa::SigningKey::from_slice(&ctx.private_key).map_err(|_| KeyError::InvalidKey)?;
+        let (signature, recovery_id): (p256::ecdsa::Signature, _) =
+            signing_key.sign_prehash_recoverable(hash).map_err(|_| KeyError::InvalidKey)?;
+        let mut info = 0;
+        if recovery_id.is_y_odd() {
+            info |= ecdsa_info::CX_ECCINFO_PARITY_ODD;
+        }
+        if recovery_id.is_x_reduced() {
+            info |= ecdsa_info::CX_ECCINFO_xGTn;
+        }
+        return Ok((signature.to_der().as_bytes().to_vec(), info));
+    }
+
     let secp = Secp256k1::new();
     let secret_key = SecretKey::from_slice(&ctx.private_key).map_err(|_| KeyError::InvalidKey)?;
     let message = secp256k1::Message::from_digest_slice(hash).map_err(|_| KeyError::InvalidKey)?;
@@ -383,21 +411,8 @@ pub fn ecdsa_sign_recoverable(privkey_ctx_id: u32, hash: &[u8]) -> Result<(Vec<u
     Ok((der, info))
 }
 
-/// Derive a BIP32 key from a seed.
-///
-/// # Arguments
-/// * `seed` - The master seed (64 bytes typically, or 32-byte app seed)
-/// * `path` - The BIP32 derivation path components (each u32 in path array)
-/// * `curve` - The target curve (must be CX_CURVE_SECP256K1)
-///
-/// # Returns
-/// A tuple of (private_key, chain_code) or an error.
-pub fn derive_bip32(seed: &[u8], path: &[u32], curve: u8) -> Result<([u8; 32], [u8; 32]), KeyError> {
-    if curve != curves::CX_CURVE_SECP256K1 {
-        log::warn!("BIP32 derivation only supports secp256k1, got curve: 0x{:02x}", curve);
-        return Err(KeyError::UnsupportedCurve);
-    }
-
+/// The secp256k1 BIP32 master key for `seed`.
+fn master_xpriv(seed: &[u8]) -> Result<Xpriv, KeyError> {
     // For app_seed which is 32 bytes, we need to extend it to 64 bytes
     // by using SHA-512 or padding. ngwallet expects a 64-byte seed.
     let extended_seed: Vec<u8> = if seed.len() == 32 {
@@ -415,12 +430,35 @@ pub fn derive_bip32(seed: &[u8], path: &[u32], curve: u8) -> Result<([u8; 32], [
         return Err(KeyError::InvalidKey);
     };
 
-    // Create master key from seed
-    let xpriv =
-        Xpriv::new_master(ngwallet::bdk_wallet::bitcoin::Network::Bitcoin, &extended_seed).map_err(|e| {
-            log::warn!("Failed to create master key: {:?}", e);
-            KeyError::DerivationFailed
-        })?;
+    Xpriv::new_master(ngwallet::bdk_wallet::bitcoin::Network::Bitcoin, &extended_seed).map_err(|e| {
+        log::warn!("Failed to create master key: {:?}", e);
+        KeyError::DerivationFailed
+    })
+}
+
+/// The master key's BIP32 identifier: HASH160 of its compressed secp256k1 public key, what
+/// `os_perso_get_master_key_identifier` returns (a master fingerprint is its first 4 bytes).
+pub fn master_key_identifier(seed: &[u8]) -> Result<[u8; 20], KeyError> {
+    use ngwallet::bdk_wallet::bitcoin::hashes::Hash;
+    Ok(master_xpriv(seed)?.identifier(&Secp256k1::new()).to_byte_array())
+}
+
+/// Derive a BIP32 key from a seed.
+///
+/// # Arguments
+/// * `seed` - The master seed (64 bytes typically, or 32-byte app seed)
+/// * `path` - The BIP32 derivation path components (each u32 in path array)
+/// * `curve` - The target curve (must be CX_CURVE_SECP256K1)
+///
+/// # Returns
+/// A tuple of (private_key, chain_code) or an error.
+pub fn derive_bip32(seed: &[u8], path: &[u32], curve: u8) -> Result<([u8; 32], [u8; 32]), KeyError> {
+    if curve != curves::CX_CURVE_SECP256K1 {
+        log::warn!("BIP32 derivation only supports secp256k1, got curve: 0x{:02x}", curve);
+        return Err(KeyError::UnsupportedCurve);
+    }
+
+    let xpriv = master_xpriv(seed)?;
 
     // Build derivation path
     let path_str = format!(
@@ -525,6 +563,119 @@ pub fn derive_slip10_ed25519(seed: &[u8], path: &[u32]) -> Result<([u8; 32], [u8
     }
 
     Ok((key, chain_code))
+}
+
+fn hmac_sha512(key: &[u8], parts: &[&[u8]]) -> [u8; 64] {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key).expect("HMAC accepts keys of any length");
+    parts.iter().for_each(|part| mac.update(part));
+    mac.finalize().into_bytes().into()
+}
+
+/// `acc += addend` on little-endian integers, mod 2^(8 * acc.len()).
+fn add_le(acc: &mut [u8], addend: &[u8]) {
+    let mut carry = 0u16;
+    for (a, b) in acc.iter_mut().zip(addend) {
+        let sum = u16::from(*a) + u16::from(*b) + carry;
+        *a = sum as u8;
+        carry = sum >> 8;
+    }
+}
+
+/// Derive a key the way Ledger's OS does for `HDW_NORMAL` on Ed25519: BIP32-Ed25519
+/// (Khovratovich-Law) children under Ledger's root, as Speculos implements it. Returns the
+/// 64-byte extended key kL || kR and the chain code; apps use kL as the Ed25519 private key.
+pub fn derive_bip32_ed25519(seed: &[u8], path: &[u32]) -> Result<([u8; 64], [u8; 32]), KeyError> {
+    use hmac::{Hmac, Mac};
+    const SEED_KEY: &[u8] = b"ed25519 seed";
+
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SEED_KEY).expect("HMAC accepts keys of any length");
+    mac.update(&[0x01]);
+    mac.update(seed);
+    let mut chain_code: [u8; 32] = mac.finalize().into_bytes().into();
+
+    // Re-hash until kL's third-highest bit is clear, then clamp it as an Ed25519 scalar.
+    let mut key = hmac_sha512(SEED_KEY, &[seed]);
+    while key[31] & 0x20 != 0 {
+        key = hmac_sha512(SEED_KEY, &[&key]);
+    }
+    key[0] &= 0xF8;
+    key[31] = (key[31] & 0x7F) | 0x40;
+
+    for &index in path {
+        let index_le = index.to_le_bytes();
+        let (z, next_chain) = if index & 0x8000_0000 != 0 {
+            (
+                hmac_sha512(&chain_code, &[&[0x00], &key, &index_le]),
+                hmac_sha512(&chain_code, &[&[0x01], &key, &index_le]),
+            )
+        } else {
+            // A soft child hashes the parent's point A = kL * G instead of its private key.
+            let kl: [u8; 32] = key[..32].try_into().expect("kL is the first 32 bytes of the key");
+            let point =
+                curve25519_dalek::EdwardsPoint::mul_base(&curve25519_dalek::Scalar::from_bytes_mod_order(kl));
+            let point = point.compress().to_bytes();
+            (
+                hmac_sha512(&chain_code, &[&[0x02], &point, &index_le]),
+                hmac_sha512(&chain_code, &[&[0x03], &point, &index_le]),
+            )
+        };
+
+        // kL += 8 * Z[0..28] and kR += Z[32..64], both mod 2^256.
+        let mut zl_times_8 = [0u8; 32];
+        for i in 0..28 {
+            zl_times_8[i] |= z[i] << 3;
+            zl_times_8[i + 1] = z[i] >> 5;
+        }
+        let (kl, kr) = key.split_at_mut(32);
+        add_le(kl, &zl_times_8);
+        add_le(kr, &z[32..]);
+        chain_code.copy_from_slice(&next_chain[32..]);
+    }
+    Ok((key, chain_code))
+}
+
+/// Derive a SLIP-10 NIST P-256 key, as Ledger's OS does for `HDW_NORMAL` on secp256r1: a key
+/// that falls outside the curve order is re-derived as SLIP-10 specifies, at the root and at
+/// every child.
+pub fn derive_bip32_p256(seed: &[u8], path: &[u32]) -> Result<([u8; 32], [u8; 32]), KeyError> {
+    use p256::{
+        elliptic_curve::{
+            ff::{Field, PrimeField},
+            sec1::ToEncodedPoint,
+        },
+        FieldBytes, ProjectivePoint, Scalar,
+    };
+    const SEED_KEY: &[u8] = b"Nist256p1 seed";
+    let in_range = |bytes: &[u8]| Option::<Scalar>::from(Scalar::from_repr(*FieldBytes::from_slice(bytes)));
+
+    let mut i = hmac_sha512(SEED_KEY, &[seed]);
+    let mut key = loop {
+        match in_range(&i[..32]) {
+            Some(key) if !bool::from(key.is_zero()) => break key,
+            _ => i = hmac_sha512(SEED_KEY, &[&i]),
+        }
+    };
+    let mut chain_code: [u8; 32] = i[32..].try_into().expect("the right half of HMAC-SHA512 is 32 bytes");
+
+    for &index in path {
+        let mut data = if index & 0x8000_0000 != 0 {
+            [&[0x00][..], &key.to_repr()].concat()
+        } else {
+            (ProjectivePoint::GENERATOR * key).to_affine().to_encoded_point(true).as_bytes().to_vec()
+        };
+        loop {
+            let i = hmac_sha512(&chain_code, &[&data, &index.to_be_bytes()]);
+            let child = in_range(&i[..32]).map(|il| il + key).filter(|child| !bool::from(child.is_zero()));
+            if let Some(child) = child {
+                key = child;
+                chain_code.copy_from_slice(&i[32..]);
+                break;
+            }
+            data = [&[0x01][..], &i[32..]].concat();
+        }
+    }
+    Ok((key.to_repr().into(), chain_code))
 }
 
 /// Generate an Ed25519 public key in SDK format from a private key seed.
@@ -769,5 +920,120 @@ mod tests {
         let expected = signing_key.verifying_key().to_bytes();
 
         assert_eq!(raw_pubkey, expected);
+    }
+
+    #[test]
+    fn bip32_ed25519_matches_ledger_derivation() {
+        // polkadot-js's hdLedger vectors (util-crypto/src/hd/ledger/index.spec.ts), which give kL
+        // for m/44'/<coin>'/<account>'/0'/<address>'. The seeds are the BIP39 seeds of its MNE_0,
+        // of MNE_1, and of MNE_1 with the password "testing".
+        let cases: [(&str, [u32; 5], &str); 3] = [
+            (
+                "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4",
+                [44, 354, 0, 0, 0],
+                "e8c68348586d53e4e8d1a864b0e4e17c75e4eb06e0c63c1432bef2ba29e69d41",
+            ),
+            (
+                "4f21e298f7c560dc71e6381dd0425557b39be87ccdeb992c8fb1ba9c9f526714ad6b3ae0dea6407997d628d964f21d9c55aba0427270f540b7c2be414078e841",
+                [44, 434, 5, 0, 7],
+                "f06730efb1e6ea59ac752a7c3620fade3909062fb88597856cc3af72045fa65a",
+            ),
+            (
+                "33f70ec814fc719dd158367fde81a6188090763e853676a79337b4b6f2cec5f7ee592d4a02a5019c6dcff9d9778dc18be3e557db9cbfe465780db54ee086f177",
+                [44, 354, 0, 0, 0],
+                "3890e8db837eba3f8f25215c753e1091062298ce671a51441e7ef89a7adc4f48",
+            ),
+        ];
+        for (seed, path, kl) in cases {
+            let path = path.map(|index| index | 0x8000_0000);
+            let (key, _) = derive_bip32_ed25519(&hex::decode(seed).unwrap(), &path).unwrap();
+            assert_eq!(hex::encode(&key[..32]), kl);
+        }
+
+        // bip_utils's Khovratovich-Law vectors (tests/bip/bip32/test_bip32_ed25519_kholaw.py), whose
+        // master key is Ledger's and whose paths mix soft and hardened children.
+        let cases: [(&str, &[u32], &str, &str); 2] = [
+            (
+                "000102030405060708090a0b0c0d0e0f",
+                &[0x8000_0000, 1, 0x8000_0002, 2, 1_000_000_000],
+                "70e17ad2d629acb9500cdb899fce121e74402e73ab8afc8947865b98c22e725f\
+                 cfb410fa2dabd9b1ee9975fb0964e16a0371ad4f35c285b830ffd214dcf050fd",
+                "c17727ab677b6d8060485e7d1fdf96ac5b9ef287fb91beacf6db019dcada5af3",
+            ),
+            (
+                "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542",
+                &[0],
+                "c0118293fc269db1b5df4b5904deb8ef6eb2c0cd184c198a4317464224ab4052\
+                 8db4861a969864cc3915e901b2103c5c15d45176504e27c945fdbccada2d2c39",
+                "0c583578e39679489d895162d015375913db9cccf585c946b5d663b381497176",
+            ),
+        ];
+        for (seed, path, key, chain) in cases {
+            let (derived_key, chain_code) = derive_bip32_ed25519(&hex::decode(seed).unwrap(), path).unwrap();
+            assert_eq!(
+                (hex::encode(derived_key), hex::encode(chain_code)),
+                (key.to_owned(), chain.to_owned())
+            );
+        }
+    }
+
+    #[test]
+    fn p256_matches_slip10_vectors() {
+        const H: u32 = 0x8000_0000;
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        // SLIP-0010 test vector 1 for nist256p1, then its child derivation retry.
+        let cases: [(&[u32], &str, &str, &str); 2] = [
+            (
+                &[H, 1, H | 2, 2, 1_000_000_000],
+                "21c4f269ef0a5fd1badf47eeacebeeaa3de22eb8e5b0adcd0f27dd99d34d0119",
+                "b9b7b82d326bb9cb5b5b121066feea4eb93d5241103c9e7a18aad40f1dde8059",
+                "02216cd26d31147f72427a453c443ed2cde8a1e53c9cc44e5ddf739725413fe3f4",
+            ),
+            (
+                &[H | 28578, 33941],
+                "092154eed4af83e078ff9b84322015aefe5769e31270f62c3f66c33888335f3a",
+                "9e87fe95031f14736774cd82f25fd885065cb7c358c1edf813c72af535e83071",
+                "0235bfee614c0d5b2cae260000bb1d0d84b270099ad790022c1ae0b2e782efe120",
+            ),
+        ];
+        for (path, private, chain, public) in cases {
+            let (key, chain_code) = derive_bip32_p256(&seed, path).unwrap();
+            assert_eq!((hex::encode(key), hex::encode(chain_code)), (private.to_owned(), chain.to_owned()));
+
+            let ctx = init_private_key(curves::CX_CURVE_SECP256R1, &key);
+            generate_pair(ctx, true).unwrap();
+            assert_eq!(hex::encode(get_public_key(ctx).unwrap()), public);
+        }
+
+        // SLIP-0010's seed retry for nist256p1: the first master key is out of range.
+        let seed = hex::decode("a7305bc8df8d0951f0cb224c0e95d7707cbdf2c6ce7e8d481fec69c7ff5e9446").unwrap();
+        let (key, chain_code) = derive_bip32_p256(&seed, &[]).unwrap();
+        assert_eq!(hex::encode(key), "3b8c18469a4634517d6d0b65448f8e6c62091b45540a1743c5846be55d47d88f");
+        assert_eq!(
+            hex::encode(chain_code),
+            "7762f9729fed06121fd13f326884c82f59aa95c57ac492ce8c9654e60efd130c"
+        );
+    }
+
+    #[test]
+    fn p256_signs_with_rfc6979() {
+        use sha2::{Digest, Sha256};
+        // RFC 6979 A.2.5, P-256 with SHA-256 over "sample".
+        let key = hex::decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721").unwrap();
+        let ctx = init_private_key(curves::CX_CURVE_SECP256R1, &key);
+        let (der, _) = ecdsa_sign_recoverable(ctx, &Sha256::digest(b"sample")).unwrap();
+        let signature = p256::ecdsa::Signature::from_der(&der).unwrap();
+        assert_eq!(
+            hex::encode(signature.to_bytes()),
+            "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716\
+             f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
+        );
+    }
+
+    #[test]
+    fn master_key_identifier_starts_with_the_master_fingerprint() {
+        // The BIP39 seed of "abandon ... about", whose master fingerprint BIP84's vectors show.
+        let seed = hex::decode("5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4").unwrap();
+        assert_eq!(hex::encode(&master_key_identifier(&seed).unwrap()[..4]), "73c5da0a");
     }
 }

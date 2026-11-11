@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x04c4f26ff3e6398c1e521057c4c0a596"
+publisher = "Foundation"
+description = "Monero app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "Monero"
+
+[permissions]
+template = ["flux-app"]

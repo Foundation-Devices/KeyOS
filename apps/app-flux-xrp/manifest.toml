@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0xc9242e3ee839b037d757198cd2b30098"
+publisher = "Foundation"
+description = "XRP app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "XRP"
+
+[permissions]
+template = ["flux-app"]

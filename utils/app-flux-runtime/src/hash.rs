@@ -3,7 +3,7 @@
 
 //! Hash context management for Flux syscall emulation.
 //!
-//! Provides Keccak-256, SHA3-256, SHA-224, SHA-256, SHA-512, and RIPEMD-160 hash context
+//! Provides Keccak-256, SHA3-256, SHA-224, SHA-256, SHA-512, RIPEMD-160, and BLAKE2b hash context
 //! management with init, update, and finalize operations to support Flux SDK app syscalls.
 
 use std::{
@@ -14,6 +14,10 @@ use std::{
     },
 };
 
+use blake2::{
+    digest::core_api::{Buffer, UpdateCore, VariableOutputCore},
+    Blake2bVar, Blake2bVarCore,
+};
 use ripemd::Ripemd160;
 use sha2::{Digest as Sha2Digest, Sha224, Sha256, Sha512};
 use sha3::{Keccak256, Sha3_256};
@@ -63,6 +67,25 @@ pub enum HashContext {
     Sha256(Sha256),
     Sha512(Sha512),
     Ripemd160(Ripemd160),
+    Blake2b(Blake2bVar),
+    Blake2bParams(Box<Blake2bParamsState>),
+}
+
+/// BLAKE2b with a salt or personalization, which `Blake2bVar` has no way to take.
+#[derive(Clone)]
+pub struct Blake2bParamsState {
+    /// The state before any input, to go back to on a reset.
+    initial: Blake2bVarCore,
+    core: Blake2bVarCore,
+    buffer: Buffer<Blake2bVarCore>,
+    size: usize,
+}
+
+impl Blake2bParamsState {
+    fn reset(&mut self) {
+        self.core = self.initial.clone();
+        self.buffer = Default::default();
+    }
 }
 
 impl HashContext {
@@ -75,6 +98,8 @@ impl HashContext {
             HashContext::Sha256(_) => sizes::SHA256_SIZE,
             HashContext::Sha512(_) => sizes::SHA512_SIZE,
             HashContext::Ripemd160(_) => sizes::RIPEMD160_SIZE,
+            HashContext::Blake2b(ctx) => blake2::digest::VariableOutput::output_size(ctx),
+            HashContext::Blake2bParams(ctx) => ctx.size,
         }
     }
 
@@ -87,6 +112,11 @@ impl HashContext {
             HashContext::Sha256(ctx) => *ctx = Sha256::new(),
             HashContext::Sha512(ctx) => *ctx = Sha512::new(),
             HashContext::Ripemd160(ctx) => *ctx = Ripemd160::new(),
+            HashContext::Blake2b(ctx) => {
+                use blake2::digest::VariableOutput;
+                *ctx = Blake2bVar::new(ctx.output_size()).expect("the size was valid at init");
+            }
+            HashContext::Blake2bParams(ctx) => ctx.reset(),
         }
     }
 }
@@ -168,6 +198,36 @@ pub fn sha512_init() -> u32 {
     id
 }
 
+/// Initialize a new BLAKE2b hash context with an output of `size` bytes, or `None` for a size
+/// BLAKE2b does not allow.
+///
+/// Returns a unique context ID that can be used for subsequent update/finalize calls.
+pub fn blake2b_init(size: usize) -> Option<u32> {
+    let hasher = blake2::digest::VariableOutput::new(size).ok()?;
+    let id = NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut contexts = HASH_CONTEXTS.write().unwrap();
+    contexts.insert(id, HashContext::Blake2b(hasher));
+    log::debug!("Created BLAKE2b context with id={}", id);
+    Some(id)
+}
+
+/// Initialize a new BLAKE2b hash context with an output of `size` bytes and the given salt and
+/// personalization, of at most 16 bytes each, or `None` for parameters BLAKE2b does not allow.
+///
+/// Returns a unique context ID that can be used for subsequent update/finalize calls.
+pub fn blake2b_init_with_params(size: usize, salt: &[u8], personalization: &[u8]) -> Option<u32> {
+    if !(1..=sizes::SHA512_SIZE).contains(&size) || salt.len() > 16 || personalization.len() > 16 {
+        return None;
+    }
+    let core = Blake2bVarCore::new_with_params(salt, personalization, 0, size);
+    let state = Blake2bParamsState { initial: core.clone(), core, buffer: Default::default(), size };
+    let id = NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut contexts = HASH_CONTEXTS.write().unwrap();
+    contexts.insert(id, HashContext::Blake2bParams(Box::new(state)));
+    log::debug!("Created parameterized BLAKE2b context with id={}", id);
+    Some(id)
+}
+
 /// Update a hash context with additional data.
 ///
 /// # Arguments
@@ -187,6 +247,11 @@ pub fn hash_update(ctx_id: u32, data: &[u8]) -> Result<(), HashError> {
         HashContext::Sha256(hasher) => hasher.update(data),
         HashContext::Sha512(hasher) => hasher.update(data),
         HashContext::Ripemd160(hasher) => hasher.update(data),
+        HashContext::Blake2b(hasher) => blake2::digest::Update::update(hasher, data),
+        HashContext::Blake2bParams(state) => {
+            let Blake2bParamsState { core, buffer, .. } = &mut **state;
+            buffer.digest_blocks(data, |blocks| core.update_blocks(blocks));
+        }
     }
 
     log::debug!("Updated hash context {} with {} bytes", ctx_id, data.len());
@@ -253,6 +318,25 @@ pub fn hash_final(ctx_id: u32, flags: u32) -> Result<Vec<u8>, HashError> {
                     *hasher = Ripemd160::new();
                 }
                 digest.to_vec()
+            }
+            HashContext::Blake2b(hasher) => {
+                use blake2::digest::VariableOutput;
+                let mut digest = vec![0u8; hasher.output_size()];
+                hasher.clone().finalize_variable(&mut digest).expect("the buffer is the output size");
+                if !no_reinit {
+                    *hasher = Blake2bVar::new(digest.len()).expect("the size was valid at init");
+                }
+                digest
+            }
+            HashContext::Blake2bParams(state) => {
+                let mut finishing = state.clone();
+                let mut out = Default::default();
+                let Blake2bParamsState { core, buffer, .. } = &mut *finishing;
+                core.finalize_variable_core(buffer, &mut out);
+                if !no_reinit {
+                    state.reset();
+                }
+                out[..state.size].to_vec()
             }
         }
     };
@@ -338,6 +422,8 @@ pub fn hash_info(ctx_id: u32) -> Result<(u8, usize), HashError> {
         HashContext::Sha256(_) => (algo::CX_SHA256, sizes::SHA256_SIZE),
         HashContext::Sha512(_) => (algo::CX_SHA512, sizes::SHA512_SIZE),
         HashContext::Ripemd160(_) => (algo::CX_RIPEMD160, sizes::RIPEMD160_SIZE),
+        HashContext::Blake2b(ctx) => (algo::CX_BLAKE2B, blake2::digest::VariableOutput::output_size(ctx)),
+        HashContext::Blake2bParams(ctx) => (algo::CX_BLAKE2B, ctx.size),
     };
 
     Ok((algo, size))

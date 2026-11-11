@@ -22,6 +22,7 @@ use gui_app_emu_flux::{
     keys,
     messages::{RecvSeph, RegisterChild, SendSeph, SyscallBuffer},
     syscall_id::*,
+    SYSCALL_OS_PERSO_GET_MASTER_KEY_IDENTIFIER_ID,
 };
 
 pub mod display;
@@ -393,6 +394,13 @@ impl Default for FluxServer {
     }
 }
 
+/// Whether `path` extends `root`. As on the upstream OS, a root element of 0x7FFFFFFF (a `*` in
+/// PATH_APP_LOAD_PARAMS) matches any index.
+fn path_extends_root(path: &[u32], root: &[u32]) -> bool {
+    path.len() >= root.len()
+        && root.iter().zip(path).all(|(allowed, index)| *allowed == 0x7FFF_FFFF || allowed == index)
+}
+
 impl FluxServer {
     /// Whether `pid` registered and still holds its roots.
     fn is_registered(&self, pid: xous::PID) -> bool {
@@ -404,7 +412,7 @@ impl FluxServer {
         let allowed = self
             .derivation_roots
             .get(&sender)
-            .is_some_and(|roots| roots.iter().any(|root| path.starts_with(root)));
+            .is_some_and(|roots| roots.iter().any(|root| path_extends_root(path, root)));
         if !allowed {
             log::warn!("Derivation denied for PID {sender:?}: {path:08X?} extends no registered root");
         }
@@ -614,6 +622,21 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                 4 // Output length
             }
 
+            // The master key's identifier, which apps may read whatever roots they registered, as
+            // upstream allows.
+            SYSCALL_OS_PERSO_GET_MASTER_KEY_IDENTIFIER_ID => {
+                match get_app_seed().and_then(|seed| keys::master_key_identifier(&seed).ok()) {
+                    Some(identifier) if buf.len() >= identifier.len() => {
+                        buf[..identifier.len()].copy_from_slice(&identifier);
+                        0
+                    }
+                    _ => {
+                        log::warn!("Master key identifier unavailable");
+                        usize::MAX
+                    }
+                }
+            }
+
             // --- BIP32 key derivation ---
             // os_perso_derive_node_bip32: buf contains path (array of u32), arg contains path_len
             // Output: private_key (32 bytes) + chain_code (32 bytes) written to buf
@@ -667,7 +690,7 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
             //   arg bits [23:16] = curve
             //   arg bits [15:0]  = path_len
             // Buffer input: path elements (4 bytes each, BE)
-            // Buffer output: private_key (32) + chain_code (32)
+            // Buffer output: private_key (32, or 64 for BIP32-Ed25519) + chain_code (32)
             SYSCALL_OS_PERSO_DERIVE_NODE_WITH_SEED_KEY_ID => {
                 let mode = (arg >> 24) & 0xFF;
                 let curve = ((arg >> 16) & 0xFF) as u8;
@@ -703,35 +726,43 @@ impl LendMutHandler<SyscallBuffer> for FluxServer {
                 let Some(app_seed) = get_app_seed() else {
                     return usize::MAX;
                 };
-                let result = match mode {
-                    1 => {
-                        // HDW_ED25519_SLIP10: use SLIP-10 derivation
-                        keys::derive_slip10_ed25519(&app_seed, &path)
+                // The key is written first, 32 bytes or BIP32-Ed25519's 64, then the chain code.
+                let mut write_key = |key: &mut [u8], chain_code: &mut [u8; 32]| {
+                    let fits = buf.len() >= key.len() + 32;
+                    if fits {
+                        buf[..key.len()].copy_from_slice(key);
+                        buf[key.len()..key.len() + 32].copy_from_slice(chain_code);
                     }
-                    0 => {
-                        // HDW_NORMAL: use BIP32 derivation
-                        keys::derive_bip32(&app_seed, &path, curve)
+                    // Scrub the per-address secret copies from the server's stack.
+                    key.zeroize();
+                    chain_code.zeroize();
+                    if fits {
+                        0
+                    } else {
+                        log::warn!("derive_node_with_seed_key: buffer too small for the derived key");
+                        usize::MAX
                     }
+                };
+                let result = match (mode, curve) {
+                    // HDW_ED25519_SLIP10
+                    (1, _) => keys::derive_slip10_ed25519(&app_seed, &path)
+                        .map(|(mut k, mut c)| write_key(&mut k, &mut c)),
+                    // HDW_NORMAL
+                    (0, keys::curves::CX_CURVE_ED25519) => keys::derive_bip32_ed25519(&app_seed, &path)
+                        .map(|(mut k, mut c)| write_key(&mut k, &mut c)),
+                    (0, keys::curves::CX_CURVE_SECP256R1) => keys::derive_bip32_p256(&app_seed, &path)
+                        .map(|(mut k, mut c)| write_key(&mut k, &mut c)),
+                    (0, _) => keys::derive_bip32(&app_seed, &path, curve)
+                        .map(|(mut k, mut c)| write_key(&mut k, &mut c)),
                     _ => {
                         log::warn!("derive_node_with_seed_key: unsupported mode {}", mode);
                         Err(keys::KeyError::DerivationFailed)
                     }
                 };
-
-                match result {
-                    Ok((mut private_key, mut chain_code)) => {
-                        buf[..32].copy_from_slice(&private_key);
-                        buf[32..64].copy_from_slice(&chain_code);
-                        // Scrub the per-address secret copies from the server's stack.
-                        private_key.zeroize();
-                        chain_code.zeroize();
-                        0 // Success
-                    }
-                    Err(e) => {
-                        log::warn!("derive_node_with_seed_key failed: {:?}", e);
-                        usize::MAX
-                    }
-                }
+                result.unwrap_or_else(|e| {
+                    log::warn!("derive_node_with_seed_key failed: {:?}", e);
+                    usize::MAX
+                })
             }
 
             syscall => {

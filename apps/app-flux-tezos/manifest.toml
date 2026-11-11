@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0xa6a054bf47371532f70bab8567664876"
+publisher = "Foundation"
+description = "Tezos app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "Tezos"
+
+[permissions]
+template = ["flux-app"]

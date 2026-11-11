@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 aes = "0.8"
+blake2 = "0.10"
 crc32fast = "1.4"
 curve25519-dalek = { workspace = true }
 file-backed = { workspace = true }

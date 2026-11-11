@@ -131,7 +131,25 @@ component AppTile inherits VerticalLayout {
 
     private property <bool> is-pressed: false;
 
-    function icon(n: string) -> string {
+    // The system image carries the icons of the coins that predate its release, so newer ones ship
+    // inside this app.
+    function icon(n: string) -> image {
+        if (n == "Cosmos") {
+            return @image-url("../../images/cosmos.svg");
+        }
+        if (n == "Polkadot") {
+            return @image-url("../../images/polkadot.svg");
+        }
+        if (n == "Tezos") {
+            return @image-url("../../images/tezos.svg");
+        }
+        if (n == "Zcash") {
+            return @image-url("../../images/zcash.svg");
+        }
+        return Images.icon(system-icon(n), Size.sz14);
+    }
+
+    function system-icon(n: string) -> string {
         if (n == "Ethereum") {
             return "ethereum";
         } else if (n == "Monero") {
@@ -146,8 +164,6 @@ component AppTile inherits VerticalLayout {
             return "dogecoin";
         } else if (n == "Tether") {
             return "tether";
-        } else if (n == "Zcash") {
-            return "chain";
         } else {
             return "chain";
         }
@@ -203,10 +219,11 @@ component AppTile inherits VerticalLayout {
                         height: 96px;
                     }
 
-                    Icon {
-                        name: icon(name);
-                        size: Size.sz14;
-                        color: Palette.white;
+                    Image {
+                        source: icon(name);
+                        colorize: Palette.white;
+                        width: Size.sz14;
+                        height: Size.sz14;
                     }
                 }
             }

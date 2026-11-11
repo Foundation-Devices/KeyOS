@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+appId = "0x8c0b659225290a5ca1f41c39752eb375"
+publisher = "Foundation"
+description = "Cosmos app running in Legacy Mode."
+minKeyosVersion = "1.4.0"
+
+[appName]
+en = "Cosmos"
+
+[permissions]
+template = ["flux-app"]

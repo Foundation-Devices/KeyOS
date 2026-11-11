@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "app-flux-polkadot"
+version = "1.1.1+100.0.30"
+edition = "2021"
+
+[dependencies]
+app-flux-runtime = { workspace = true }
+fs = { workspace = true }
+gui-app-emu-flux = { workspace = true }
+log = { workspace = true }
+log-server = { workspace = true }
+server = { workspace = true }
+
+[build-dependencies]
+app-flux-build-support = { workspace = true }
