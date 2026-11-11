@@ -68,13 +68,6 @@ pub extern "C" fn eth_plugin_prepare_query_contract_ui(_query: *mut c_void) {}
 
 #[cfg(not(keyos))]
 mod hosted_stubs {
-    use core::ffi::c_void;
-
     #[no_mangle]
     pub static mut G_io_tx_buffer: [u8; 512] = [0; 512];
-
-    #[no_mangle]
-    pub extern "C" fn get_network_icon_from_chain_id(_chain_id: *const u64) -> *const c_void {
-        core::ptr::null()
-    }
 }

@@ -19,10 +19,10 @@ use app_flux_build_support::{
 const APP_ICON: &str = "icons/flex_app_chain_1.gif";
 const APP_SOURCE: LedgerAppSource = LedgerAppSource {
     name: "app-ethereum",
-    pin: GitPin { tag: "flex_1.6.1_1.22.5_sdk_v26.6.2", commit: "96b5d733321c050efd7feede4bf1bc3bd98ecb74" },
+    pin: GitPin { tag: "1.23.0", commit: "e7cae3db4bb51e8e06646f577bad687f5fabaf67" },
 };
 
-const SDK_PIN: GitPin = GitPin { tag: "v26.6.2", commit: "22d1131a03fcd89c5d2e660de886c8b0417b0789" };
+const SDK_PIN: GitPin = GitPin { tag: "v27.1.1", commit: "66b3776fa288d1baf4427b346ba86a78c80ee9a1" };
 
 /// Clone and patch the SDK. Returns the SDK path.
 fn prepare_sdk(out_dir: &str, _manifest_dir: &str, hosted: bool) -> PathBuf {
@@ -78,16 +78,16 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
 
     let mut skip_files = BASE_HOSTED_SKIP_FILES.to_vec();
     skip_files.extend_from_slice(&[
-        "eth_plugin_handler.c", // references ethPluginSharedRW_t removed by patch
         // eth_swap_utils.c included; HAVE_SWAP defined for type/enum access
-        "network_icons.c", // needs generated net_icons.gen.h (dynamic networks not needed)
-        "network_icons.h", // header for network_icons.c
+        "eth_plugin_handler.c", // references ethPluginSharedRW_t removed by patch
     ]);
     let skip_paths = base_hosted_skip_paths(&sdk_path);
 
     let mut source_dirs = base_hosted_source_dirs(&sdk_path, &app_path);
     source_dirs.push(app_path.join("src/nbgl"));
+    source_dirs.push(app_path.join("src/utils"));
     source_dirs.push(app_path.join("ethereum-plugin-sdk/src"));
+    source_dirs.push(sdk_path.join("lib_tlv/use_cases"));
     let features_dir = app_path.join("src/features");
     if let Ok(entries) = fs::read_dir(&features_dir) {
         for entry in entries.flatten() {
@@ -99,6 +99,11 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
 
     let mut c_files = collect_c_files(&source_dirs, &skip_files, &skip_paths, &[]);
     append_generated_glyphs_c(&mut c_files, &app_path);
+    // Upstream's unit-test stub stands in for the generated network icon table.
+    let mocks = app_path.join("tests/unit/mocks");
+    fs::copy(mocks.join("net_icons.gen.h"), app_path.join("build/flex/gen_src/net_icons.gen.h"))
+        .expect("copy the net_icons.gen.h mock");
+    c_files.push(mocks.join("net_icons_stub.c"));
 
     let mut build = base_hosted_cc_build();
     build.files(&c_files);
@@ -110,21 +115,25 @@ fn build_hosted(out_dir: &str, manifest_dir: &str, crate_name: &str) {
         ("APPNAME", "\"Ethereum\""),
         ("APP_TICKER", "\"ETH\""),
         ("APP_CHAIN_ID", "1"),
+        ("APP_COIN_TYPE", "60"),
+        // Upstream takes it from the year of the pinned commit.
+        ("COPYRIGHT_YEAR", "\"2026\""),
         ("ICONGLYPH", "C_chain_1_64px"),
         ("ICONBITMAP", "C_chain_1_64px_bitmap"),
         ("ICONHOME", "C_chain_1_64px"),
         ("APPVERSION_M", "1"),
-        ("APPVERSION_N", "22"),
-        ("APPVERSION_P", "5"),
-        ("APPVERSION", "\"1.22.5\""),
+        ("APPVERSION_N", "23"),
+        ("APPVERSION_P", "0"),
+        ("APPVERSION", "\"1.23.0\""),
         ("MAJOR_VERSION", "1"),
-        ("MINOR_VERSION", "22"),
-        ("PATCH_VERSION", "5"),
+        ("MINOR_VERSION", "23"),
+        ("PATCH_VERSION", "0"),
     ];
     apply_hosted_value_defines(&mut build, value_defines);
 
     apply_common_hosted_includes(&mut build, &sdk_path, &app_path);
     build.include(app_path.join("ethereum-plugin-sdk/src"));
+    build.include(sdk_path.join("lib_tlv/use_cases"));
     // Upstream's `APP_SOURCE_PATH += src` puts every source dir on the include path.
     for dir in collect_c_dirs(&app_path.join("src")) {
         build.include(dir);
@@ -246,16 +255,20 @@ fn patch_app(app_path: &Path) {
         "extern internalStorage_t N_storage_real;",
     );
 
-    // 5-6. time_format.h/c — custom time_t and gmtime_r (ARM only; hosted uses system libc)
+    // 5-6. utils/time_format.h/c — custom time_t and gmtime_r (ARM only; hosted uses system libc)
     if !hosted {
-        replace_in_file(&app_path.join("src/time_format.h"), "#include <time.h>", "// #include <time.h>");
         replace_in_file(
-            &app_path.join("src/time_format.h"),
+            &app_path.join("src/utils/time_format.h"),
+            "#include <time.h>",
+            "// #include <time.h>",
+        );
+        replace_in_file(
+            &app_path.join("src/utils/time_format.h"),
             "#include <stddef.h>\n\nbool",
             "#include <stddef.h>\n\ntypedef long long time_t;\n\nbool",
         );
         replace_in_file(
-            &app_path.join("src/time_format.c"),
+            &app_path.join("src/utils/time_format.c"),
             "#include \"time_format.h\"\n\nstatic bool get_time_struct",
             "#include \"time_format.h\"\n\n\
              struct tm {\n  int\ttm_sec;\n  int\ttm_min;\n  int\ttm_hour;\n  int\ttm_mday;\n\
@@ -308,9 +321,9 @@ fn patch_app(app_path: &Path) {
         "// #include <ctype.h>\n\nstatic int isalpha(int c) {\n    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');\n}\n\nstatic int islower(int c) {\n    return c >= 'a' && c <= 'z';\n}\n\nstatic int isdigit(int c) {\n    return c >= '0' && c <= '9';\n}",
     );
 
-    // utils.c
+    // utils/utils.c
     replace_in_file(
-        &app_path.join("src/utils.c"),
+        &app_path.join("src/utils/utils.c"),
         "#include <ctype.h>\n",
         "// #include <ctype.h>\n\nstatic int isprint(int c) {\n    return c >= 32 && c <= 126;\n}\n",
     );
@@ -338,5 +351,17 @@ fn patch_app(app_path: &Path) {
         &app_path.join("makefile_conf/features.mk"),
         "    DEFINES\t+= HAVE_TRANSACTION_CHECKS",
         "    # DEFINES\t+= HAVE_TRANSACTION_CHECKS (disabled on KeyOS)",
+    );
+
+    // The address book needs sys_address_book_hmac, which KeyOS lacks, and NBGL APIs the v25 engine lacks.
+    replace_in_file(
+        &app_path.join("Makefile"),
+        "ENABLE_ADDRESS_BOOK = 1\n",
+        "# ENABLE_ADDRESS_BOOK = 1 (disabled on KeyOS)\n",
+    );
+    replace_in_file(
+        &app_path.join("src/nbgl/ui_approve_tx.c"),
+        "        (*ext_out)->aliasSubName = alias_sub_name;\n",
+        "        (void) alias_sub_name;  // no aliasSubName in the v25 NBGL engine\n",
     );
 }

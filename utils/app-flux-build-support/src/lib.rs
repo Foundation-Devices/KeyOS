@@ -1306,7 +1306,9 @@ pub fn patch_sdk_common(sdk_path: &Path) {
              size_t strlcat(char *dest, const char *src, size_t len);\n\
              int strcmp(const char *p1, const char *p2);\n\
              int strncmp(const char *p1, const char *p2, size_t len);\n\
-             char *strchr(const char *s, int c);\n",
+             char *strchr(const char *s, int c);\n\
+             int strcasecmp(const char *p1, const char *p2);\n\
+             char *strstr(const char *haystack, const char *needle);\n",
         );
     }
 

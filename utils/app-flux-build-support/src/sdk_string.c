@@ -214,6 +214,33 @@ char *strchr(const char *s, int c)
 	return (char *)s;
 }
 
+int strcasecmp(const char *p1, const char *p2)
+{
+	unsigned char c1, c2;
+
+	do {
+		c1 = *p1++;
+		c2 = *p2++;
+		if (c1 >= 'A' && c1 <= 'Z')
+			c1 += 'a' - 'A';
+		if (c2 >= 'A' && c2 <= 'Z')
+			c2 += 'a' - 'A';
+	} while (c1 == c2 && c1 != '\0');
+
+	return c1 - c2;
+}
+
+char *strstr(const char *haystack, const char *needle)
+{
+	size_t len = strlen(needle);
+
+	for (; strncmp(haystack, needle, len) != 0; ++haystack)
+		if (*haystack == '\0')
+			return NULL;
+
+	return (char *)haystack;
+}
+
 int sprintf(char *str, const char *format, ...)
 {
     va_list ap;
