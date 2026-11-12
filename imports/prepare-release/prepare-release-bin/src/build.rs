@@ -4,7 +4,7 @@
 use semver::Version;
 use std::{env, fs, io::Write, path::PathBuf, process::Command};
 
-const FOUNDATION_SIDELOAD_APP_COUNT: usize = 3;
+const FOUNDATION_SIDELOAD_APP_COUNT: usize = 10;
 
 /// Paths to the firmware files
 #[derive(Debug, Clone)]

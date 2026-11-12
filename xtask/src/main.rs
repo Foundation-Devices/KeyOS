@@ -141,8 +141,18 @@ const DEV_APPS: &[&str] = &[
 /// Their bundles are signed with the build's own key, which the firmware trusts as
 /// Foundation, so the device treats them like built-ins while they install and remove like
 /// sideloads.
-pub const FOUNDATION_SIDELOAD_APPS: &[&str] =
-    &["gui-app-emu-flux-server", "app-flux-ethereum", "app-flux-solana"];
+pub const FOUNDATION_SIDELOAD_APPS: &[&str] = &[
+    "gui-app-emu-flux-server",
+    "app-flux-cosmos",
+    "app-flux-dogecoin",
+    "app-flux-ethereum",
+    "app-flux-monero",
+    "app-flux-polkadot",
+    "app-flux-solana",
+    "app-flux-tezos",
+    "app-flux-xrp",
+    "app-flux-zcash",
+];
 
 fn foundation_sideload_artifact_name(crate_name: &str) -> &str {
     match crate_name {

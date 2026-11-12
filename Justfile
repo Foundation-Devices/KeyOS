@@ -285,6 +285,19 @@ build-repro VERSION:
 prepare-release VERSION SECRETS_DIR *args:
   cargo run --bin prepare-release -- {{VERSION}} {{SECRETS_DIR}} {{args}}
 
+# Prepare ten unsigned standalone Legacy bundles, including Solana, for released KeyOS 1.4.1.
+# Usage: just prepare-legacy-apps legacy-mode-v1.1.1 --keyos-version 1.4.1 --releases-repo ~/foundation/KeyOS-Releases-private
+# Builds no firmware or bootloader and carries no prior signed app. Review, commit, and push the new worktree in GitKraken.
+# Pass --push on the initial invocation only to commit, push, and open the PR automatically.
+prepare-legacy-apps NAME *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if python3 -c 'import tomllib' >/dev/null 2>&1; then
+        exec python3 scripts/prepare-legacy-apps.py {{NAME}} {{args}}
+    fi
+    command -v nix >/dev/null || { echo "Python 3.11+ or Nix is required" >&2; exit 1; }
+    exec nix develop .#build --command python3 scripts/prepare-legacy-apps.py {{NAME}} {{args}}
+
 clean:
     cargo clean
     cargo clean --manifest-path ui2/Cargo.toml
