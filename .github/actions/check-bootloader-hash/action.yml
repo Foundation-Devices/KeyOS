@@ -11,10 +11,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Record runner environment
-      shell: bash
-      run: bash "${{ github.action_path }}/../../../scripts/ci-runner-diagnostics.sh"
-
     - name: Build and verify the bootloader
       shell: bash
       env:
