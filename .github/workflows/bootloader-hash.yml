@@ -6,6 +6,7 @@ name: Bootloader hash
 on:
   merge_group:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: bootloader-hash-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.run_id }}
