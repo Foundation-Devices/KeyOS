@@ -22,6 +22,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Record runner environment
+        run: bash scripts/ci-runner-diagnostics.sh
       - uses: ./.github/actions/setup-nix-rust
         with:
           rust-cache-key: bootloader-hash
