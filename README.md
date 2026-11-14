@@ -332,3 +332,4 @@ This repository contains code and assets under multiple licenses, including
 copyleft and permissive licenses. Consult the SPDX/REUSE metadata for the files
 you use, modify, or distribute; do not assume that one license applies to the
 entire repository.
+
