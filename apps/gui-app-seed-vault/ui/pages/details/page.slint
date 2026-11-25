@@ -217,6 +217,19 @@ export component DetailsPage inherits BasePage {
                         enabled: props.version != EditPageVersion.archive;
                         input-type: InputType.password;
                         locked: seed.seed-type == SeedViewType.password-generated;
+                        action-icon: "scan-qr";
+                        action-icon-only: true;
+                        // locked prevents generated-password edits; archive disables
+                        // editing too. Neither should block an explicit saved export.
+                        action-enabled: !has-changes && !password-error && seed.password.password != "";
+
+                        action-clicked => {
+                            // Export the saved selection, never the editable text or
+                            // an implicit eye reveal. Recheck even for direct callbacks.
+                            if (!has-changes && !password-error && seed.password.password != "") {
+                                CB.reveal-password-qr(seed.index);
+                            }
+                        }
 
                         edited(text) => {
                             new-password = text;

@@ -15,6 +15,7 @@ use {
 
 mod callbacks;
 pub mod error;
+mod password_qr;
 mod seed;
 pub mod state;
 
@@ -45,6 +46,11 @@ fn app_main(cx: AppContext, ui: AppWindow) {
         let gui_api = cx.gui.clone();
         let ui = ui.clone_strong();
         move |input| {
+            // Hidden is delivered on app switching and by the GUI lock flow.
+            // Clear before resume: Slint timers do not run while an app is hidden.
+            if password_qr::clears_on_input(input.msg) {
+                password_qr::clear(&ui.global::<Callbacks>());
+            }
             if input.msg != InputMessage::NavigationFocused {
                 return;
             }

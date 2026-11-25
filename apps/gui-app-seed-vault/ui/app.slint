@@ -6,10 +6,41 @@ import { Images, Utils, CurrentTheme } from "@ui/theme.slint";
 import { SeedCallbacks } from "@ui/pages.slint";
 import { Callbacks } from "./callbacks.slint";
 import { TR } from "@ui/i18n/i18n.slint";
-import { BaseWindow } from "@ui/widgets.slint";
+import { BaseWindow, BasePage, AppHeader, Button, ButtonSection, QrPages } from "@ui/widgets.slint";
+import { Palette, Size } from "@ui/theme.slint";
+import { TR2, TrId } from "./gen/tr.slint";
 
 export component AppWindow inherits BaseWindow {
     Router { }
+
+    // Keep the secret image in one place. The overlay blocks navigation beneath
+    // it; dismissal/timeout and native visibility/navigation events drop it.
+    Timer {
+        interval: 30s;
+        running: Callbacks.password-qr-open;
+        triggered => { Callbacks.clear-password-qr(); }
+    }
+
+    if Callbacks.password-qr-open: BasePage {
+        background: Palette.background-primary;
+        FocusScope {
+            init => { self.focus(); }
+        }
+        TouchArea { }
+        VerticalLayout {
+            AppHeader { title: TR2.lookup(TrId.CreateItemPassword); }
+            QrPages {
+                model: [{ code: Callbacks.password-qr-image }];
+            }
+            ButtonSection {
+                padding: Size.sz6;
+                Button {
+                    label: TR2.lookup(TrId.CommonButtonDone);
+                    clicked => { Callbacks.clear-password-qr(); }
+                }
+            }
+        }
+    }
 }
 
 export * from "gen/exports.slint";

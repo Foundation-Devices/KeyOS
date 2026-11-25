@@ -39,6 +39,11 @@ export global Callbacks {
     callback get-seed-details(int) -> SeedView;
     callback set-pending-imported-seed(string, string);
     callback clear-pending-import();
+    callback reveal-password-qr(int);
+    callback clear-password-qr();
+
+    in-out property <bool> password-qr-open: false;
+    in-out property <image> password-qr-image;
 
     in-out property <[SeedView]> entries: [];
     in-out property <int> sort-mode: 0;
