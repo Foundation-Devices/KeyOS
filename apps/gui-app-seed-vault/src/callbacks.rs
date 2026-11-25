@@ -27,6 +27,23 @@ pub fn init_callbacks(state: StoredValue<AppState>) {
     let ui = state.borrow().ui();
     let callbacks = ui.global::<Callbacks>();
 
+    callbacks.on_reveal_password_qr(move |index| {
+        let app_state = state.borrow();
+        let ui = app_state.ui();
+        let callbacks = ui.global::<Callbacks>();
+        crate::password_qr::clear(&callbacks);
+        // Look up the selected stored entry, never a draft or a derived seed.
+        // Invalid indices/types and oversized payloads fail closed, without logging.
+        if let Some(image) = app_state.get_password_qr(index) {
+            callbacks.set_password_qr_image(image);
+            callbacks.set_password_qr_open(true);
+        }
+    });
+
+    callbacks.on_clear_password_qr(move || {
+        crate::password_qr::clear(&state.borrow().ui().global::<Callbacks>());
+    });
+
     callbacks.on_validate_new_label({
         move |label: SharedString| {
             let app_state = state.borrow();

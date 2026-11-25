@@ -348,6 +348,13 @@ impl AppState {
         )
     }
 
+    pub fn get_password_qr(&self, index: i32) -> Option<Image> {
+        let index = usize::try_from(index).ok()?;
+        let entry = self.seed_table.get(index).ok()?;
+        let bytes = crate::password_qr::payload(&entry.seed)?;
+        Some(self.render_bw_qr_code(bytes.to_vec()))
+    }
+
     pub fn get_standard_seed_qr(&self, index: i32) -> Result<Image, VaultError> {
         let mnemonic = self.get_entry_mnemonic(index)?;
         let seed = SecuritySeed::from_mnemonic(&mnemonic);

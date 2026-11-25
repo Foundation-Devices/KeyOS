@@ -236,6 +236,17 @@ export component DetailsPage inherits BasePage {
             }
 
             ButtonSection {
+                if CB.is-password(seed.seed-type): Button {
+                    icon: "scan-qr";
+                    label: TR2.lookup(TrId.CreateItemPassword);
+                    importance: Importance.secondary;
+                    // Export the stored selection only; save edits before revealing.
+                    enabled: !has-changes && !password-error;
+                    clicked => {
+                        CB.reveal-password-qr(seed.index);
+                    }
+                }
+
                 if CB.supports-qr(seed.seed-type): Button {
                     icon: "scan-qr";
                     label: CB.is-nostr(seed.seed-type) ? TR2.lookup(TrId.ItemDetailsNostrKeyViewKey) : TR2.lookup(TrId.ItemDetailsSeedViewSeed);
