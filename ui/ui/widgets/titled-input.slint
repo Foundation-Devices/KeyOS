@@ -28,6 +28,10 @@ export component TitledInput inherits VerticalLayout {
     in property <bool> accept-button-enabled: !has-error && !has-notice;
     in property <bool> check-character-limit: true;
     in property <int> character-limit: 100;
+    in property <string> action-label;
+    in property <string> action-icon;
+    in property <bool> action-icon-only: false;
+    in property <bool> action-enabled: root.enabled && !root.has-disabled && !root.locked;
 
     out property <bool> has-focus: input.has-focus;
 
@@ -36,6 +40,7 @@ export component TitledInput inherits VerticalLayout {
 
     callback edited(string);
     callback accepted(string);
+    callback action-clicked();
 
     HorizontalLayout {
         padding-left: Size.sz4;
@@ -68,6 +73,14 @@ export component TitledInput inherits VerticalLayout {
         accept-button-enabled: root.accept-button-enabled;
         check-character-limit: root.check-character-limit;
         character-limit: root.character-limit;
+        action-label: root.action-label;
+        action-icon: root.action-icon;
+        action-icon-only: root.action-icon-only;
+        action-enabled: root.action-enabled;
+
+        action-clicked => {
+            root.action-clicked();
+        }
 
         edited(text) => {
             parent.edited(text);

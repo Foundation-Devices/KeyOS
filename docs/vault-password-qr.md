@@ -1,9 +1,12 @@
 # Plain-text password QR
 
 In the existing Vault, open a generated or imported password's Details. Save any
-edits first. Tap **Password** with the QR icon to explicitly reveal a static QR;
-opening an entry alone never reveals it. The existing masked password input and
-its reveal control are unchanged. Archived passwords support the same QR action.
+edits first. Tap the **QR icon beside the eye in the password field** to explicitly
+reveal a static QR; opening an entry alone never reveals it. The QR works while
+the text stays masked; the eye remains a separate text-reveal control. Generated
+(non-editable), imported and archived passwords support the same QR action. There
+is no separate Password QR button at the bottom. Empty passwords and unsaved edits
+disable the icon.
 
 The payload is only the selected stored password's exact UTF-8 bytes: no account,
 label, seed, URL wrapper, trimming, or Unicode normalization. Password text that
@@ -32,10 +35,13 @@ Storage, derivation, backup, and the master key are unchanged.
 Dummy-only unit tests cover exact payload bytes for both password types,
 punctuation/Unicode, byte-capacity boundaries, shared rendering, non-password
 type rejection, and which native lifecycle events invalidate a reveal. They do
-not prove physical-camera decoding, Firefox behavior, device lock timing, or the
-rendered UI lifecycle. ARM/host compilation and tests
-require the repository's supported build environment; no device or live simulator
-validation is implied by source inspection or unit tests.
+not start Vault or read real passwords. Source-contract regressions also check
+the field's guarded QR wiring, absence of a bottom duplicate, separate 48px icon
+target definitions, and opt-in shared-input defaults. These source checks do not
+prove rendered positioning or touch dispatch, physical-camera decoding, Firefox
+behavior, device lock timing, or the rendered UI lifecycle. ARM/host compilation
+and tests require the repository's supported build environment; no device or live
+simulator validation is implied by source inspection or unit tests.
 
 The existing manifest requests `os/security.GetSeed`, which is Foundation-only.
 This change does not alter permissions, app identity, firmware policy or signing.
